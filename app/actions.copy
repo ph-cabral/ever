@@ -18,7 +18,7 @@ export async function getManguerasAction() {
 
 export async function addMangueraAction(formData: FormData) {
   const codigo = (formData.get("codigo") as string).toUpperCase().trim();
-  const metros = parseFloat(formData.get("metros") as string);
+  const metros = parseInt(formData.get("metros") as string);
   const ubicacion = (formData.get("ubicacion") as string).toUpperCase().trim();
 
   if (!codigo || isNaN(metros) || metros <= 0) {
@@ -26,7 +26,11 @@ export async function addMangueraAction(formData: FormData) {
   }
 
   await prisma.manguera.create({
-    data: { codigo, metros, ubicacion: ubicacion || null },
+    data: {
+      codigo,
+      metros,
+      ubicacion: ubicacion || null,
+    },
   });
 
   revalidatePath("/");
@@ -41,32 +45,38 @@ export async function cortarMangueraAction(
     throw new Error("Datos inválidos");
   }
 
-  const rollo = await prisma.manguera.findUnique({ where: { id } });
-  if (!rollo) throw new Error("Rollo no encontrado");
-
-  const persona = await prisma.personal.findUnique({ where: { id: personalId } });
-  if (!persona) throw new Error("Personal no encontrado");
-
-  const cortado = Math.abs(metrosUsados);
-  if (cortado > rollo.metros) throw new Error("No hay suficientes metros");
-
-  const nuevosMetros = rollo.metros - cortado;
-
-  await prisma.corte.create({
-    data: {
-      codigo: rollo.codigo,
-      metros: cortado,
-      personalId: persona.id,
-    },
+  const rollo = await prisma.manguera.findUnique({
+    where: { id },
   });
 
+  if (!rollo) throw new Error("Rollo no encontrado");
+
+  const nuevosMetros = rollo.metros + metrosUsados;
+
   if (nuevosMetros <= 0) {
+    // Registrar corte antes de eliminar
+    await prisma.corte.create({
+      data: {
+        metros: Math.abs(metrosUsados),
+        personalId,
+        mangueraId: id,
+      },
+    });
     await prisma.manguera.delete({ where: { id } });
   } else {
-    await prisma.manguera.update({
-      where: { id },
-      data: { metros: nuevosMetros },
-    });
+    await prisma.$transaction([
+      prisma.corte.create({
+        data: {
+          metros: Math.abs(metrosUsados),
+          personalId,
+          mangueraId: id,
+        },
+      }),
+      prisma.manguera.update({
+        where: { id },
+        data: { metros: nuevosMetros },
+      }),
+    ]);
   }
 
   revalidatePath("/");
@@ -76,8 +86,17 @@ export async function addPersonalAction(formData: FormData) {
   const nombre = (formData.get("nombre") as string).toUpperCase().trim();
   const dni = (formData.get("dni") as string)?.trim() || null;
 
-  if (!nombre) throw new Error("El nombre es obligatorio");
+  if (!nombre) {
+    throw new Error("El nombre es obligatorio");
+  }
 
-  await prisma.personal.create({ data: { nombre, dni } });
+  await prisma.personal.create({
+    data: {
+      nombre,
+      dni,
+    },
+  });
+
   revalidatePath("/");
 }
+

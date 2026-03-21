@@ -1,58 +1,48 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
   previewFeatures = ["multiSchema"]
-
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
   schemas  = ["fabrica"]
-
 }
 
 model personal {
   id        Int      @id @default(autoincrement())
   nombre    String
-  dni       String?  @unique  // Opcional: identificación del operario
+  dni       String?  @unique
   activo    Boolean  @default(true)
-  cortes    corte[]  // Relación: un personal hace muchos cortes
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  corte     corte[]
 
   @@schema("fabrica")
 }
 
 model manguera {
-  id          Int      @id @default(autoincrement())
-  codigo      String     // ej: "AG-001" (Agua 1/2")
-  metros      float      @default(0)  // metros disponibles
-  ubicacion   String?  @default("") // ej: "Estante 3, Depósito A"
-  cortes      corte[]  // Relación: una manguera tiene muchos cortes históricos
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        Int      @id @default(autoincrement())
+  codigo    String
+  metros    Float    @default(0)
+  ubicacion String?  @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([codigo])
   @@schema("fabrica")
-
 }
 
 model corte {
   id          Int      @id @default(autoincrement())
-  metros      float      // Cuántos metros se cortaron/sacaron
+  metros      Float
   fecha       DateTime @default(now())
-  observacion String?  // Opcional: "Para cliente X", "Urgente", etc.
-  
-  // Relaciones
+  observacion String?
   personalId  Int
+  codigo      String
   personal    personal @relation(fields: [personalId], references: [id])
-  
-  mangueraId  Int
-  manguera    manguera @relation(fields: [mangueraId], references: [id])
 
   @@index([fecha])
   @@index([personalId])
-  @@index([mangueraId])
   @@schema("fabrica")
 }
-

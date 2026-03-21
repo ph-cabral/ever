@@ -1,0 +1,6 @@
+-- AlterTable
+ALTER TABLE "fabrica"."corte" ALTER COLUMN "metros" SET DATA TYPE DOUBLE PRECISION;
+
+-- AlterTable
+ALTER TABLE "fabrica"."manguera" ALTER COLUMN "metros" SET DEFAULT 0,
+ALTER COLUMN "metros" SET DATA TYPE DOUBLE PRECISION;

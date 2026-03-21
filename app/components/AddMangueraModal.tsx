@@ -55,7 +55,7 @@ export function AddMangueraModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!codigo || !metro || parseInt(metro) <= 0) return;
+    if (!codigo || !metro || parseFloat(metro) <= 0) return;
 
     setLoading(true);
 

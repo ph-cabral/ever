@@ -5,7 +5,6 @@ import { MangueraTable } from "./components/MangueraTable";
 import { AddMangueraModal } from "./components/AddMangueraModal";
 import { AddPersonalModal } from "./components/AddPersonalModal";
 import { SelectPersonal } from "./components/SelectPersonal";
-import ReportesModal from "./components/ReportesModal";
 
 type Manguera = {
   id: number;
@@ -28,7 +27,6 @@ export function ManguerasClient({
 }) {
   const [modalAbierto, setModalAbierto] = useState(false);
   const [modalPersonal, setModalPersonal] = useState(false);
-  const [modalReportes, setModalReportes] = useState(false);
   const [personalSeleccionado, setPersonalSeleccionado] = useState<number | "">(
     "",
   );
@@ -39,6 +37,7 @@ export function ManguerasClient({
         <h1 className="text-2xl font-bold">Control de Mangueras</h1>
 
         <div className="flex flex-row lg:flex-row gap-4 items-start lg:items-center w-full lg:w-auto">
+          {/* Select + botón "+" juntos */}
           <div className="flex items-center gap-1">
             <SelectPersonal
               personal={personal}
@@ -60,13 +59,6 @@ export function ManguerasClient({
           >
             + Agregar Manguera
           </button>
-
-          <button
-            onClick={() => setModalReportes(true)}
-            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors whitespace-nowrap"
-          >
-            📊 Reportes
-          </button>
         </div>
       </div>
 
@@ -87,11 +79,6 @@ export function ManguerasClient({
         onClose={() => setModalPersonal(false)}
       />
 
-      <ReportesModal
-        isOpen={modalReportes}
-        onClose={() => setModalReportes(false)}
-      />
-
       <MangueraTable
         mangueras={mangueras}
         personal={personal}
@@ -100,3 +87,4 @@ export function ManguerasClient({
     </main>
   );
 }
+
