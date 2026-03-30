@@ -1,4 +1,3 @@
-
 services:
   mangueras-app:
     build:
@@ -8,20 +7,17 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://n8n:3v3rW3ar@n8n_sql:5432/n8n?schema=fabrica
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
-      NODE_ENV: production
+      NODE_ENV: development
       TZ: America/Argentina/Buenos_Aires
-
-      # Si tenés variables de NextAuth u otras:
-      # NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
     ports:
       - "3001:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
     networks:
-      - ai-net  # Usa la red existente del otro compose
-    # Si querés exponer directo: ports: - "3000:3000"
-    # Si usás Nginx del otro compose, no expongas puerto (solo interno)
+      - ai-net
 
 networks:
   ai-net:
-    external: true  # Importante: usa la red ya creada por el otro compose
-
+    external: true
