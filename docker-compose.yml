@@ -9,6 +9,7 @@ services:
       DATABASE_URL: postgresql://n8n:3v3rW3ar@n8n_sql:5432/n8n?schema=fabrica
       NODE_ENV: development
       TZ: America/Argentina/Buenos_Aires
+      INDICADORES_API_URL: http://indicadores-api:8001
     ports:
       - "3001:3000"
     volumes:
@@ -18,6 +19,19 @@ services:
     networks:
       - ai-net
 
+
+  indicadores-api:
+    build: ./indicadores-api
+    container_name: indicadores_api
+    ports:
+      - "8001:8001"
+    volumes:
+      - /tmp/krb5cc_1000:/tmp/krb5cc_1000:ro
+    env_file:
+      - ./indicadores-api/.env
+    restart: unless-stopped
+    networks:
+      - ai-net
 networks:
   ai-net:
     external: true

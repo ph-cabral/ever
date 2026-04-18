@@ -6,7 +6,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["fabrica"]
+  schemas  = ["everwear", "fabrica", "preparado"]
 }
 
 model personal {
@@ -45,4 +45,49 @@ model corte {
   @@index([fecha])
   @@index([personalId])
   @@schema("fabrica")
+}
+
+model picking_eventos {
+  id             Int       @id @default(autoincrement())
+  codigo         String    @db.VarChar(100)
+  cantidad       Int
+  picker_nombre  String    @db.VarChar(50)
+  estado         String    @default("pendiente") @db.VarChar(20)
+  respuesta_nota String?
+  respondido_en  DateTime?
+  creado_en      DateTime  @default(now())
+
+  @@schema("preparado")
+}
+
+model picking_push_subs {
+  id        Int      @id @default(autoincrement())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  activo    Boolean  @default(true)
+  creado_en DateTime @default(now())
+
+  @@schema("preparado")
+}
+
+model everwear_personal {
+  id     Int     @id @default(autoincrement())
+  nombre String  @db.VarChar(100)
+  area   String  @db.VarChar(50)
+  activo Boolean @default(true)
+
+  @@map("personal")
+  @@schema("everwear")
+}
+
+model chat_mensajes {
+  id            Int       @id @default(autoincrement())
+  picker_nombre String    @db.VarChar(100)
+  mensaje       String
+  respuesta     String?
+  respondido    Boolean?  @default(false)
+  creado_en     DateTime? @default(now()) @db.Timestamp(6)
+
+  @@schema("preparado")
 }

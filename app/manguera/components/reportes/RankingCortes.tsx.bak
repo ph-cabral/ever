@@ -78,7 +78,7 @@ export default function RankingCortes() {
             onChange={(e) => handleHasta(e.target.value)}
             disabled={!desde}
             min={desde}
-            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-300"
+            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed"
           />
         </div>
 

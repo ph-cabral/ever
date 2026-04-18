@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+pyodbc
+pandas
+numpy
+python-dotenv
+
