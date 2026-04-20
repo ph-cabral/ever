@@ -30,13 +30,7 @@ export default function PickingPage() {
   const [respuesta, setRespuesta] = useState("");
   const respuestaRef = useRef<HTMLInputElement>(null);
 
-  // const responderChat = async (id: number) => {
-  //   if (!respuesta.trim()) return;
-  //   console.log("Responder:", { id, respuesta });
-  //   setChatMensajes((prev) => prev.filter((m) => m.id !== id));
-  //   setMensajeSeleccionado(null);
-  //   setRespuesta("");
-  // };
+
   const responderChat = async (id: number) => {
     if (!respuesta.trim()) return;
     await fetch(`/api/chat/${id}/responder`, {
@@ -62,12 +56,6 @@ export default function PickingPage() {
       setEventos(data);
     }
   };
-
-  // useEffect(() => {
-  //   fetchEventos();
-  //   const interval = setInterval(fetchEventos, 3000);
-  //   return () => clearInterval(interval);
-  // }, []);
 
   useEffect(() => {
     fetchEventos();
@@ -180,7 +168,7 @@ export default function PickingPage() {
             💬 Consultas ({chatMensajes.length})
           </h2>
 
-          {/* Área mensajes: flex-1 + overflow-y-auto + min-h-0 = scroll funcional */}
+          {/* Área mensajes: flex-1 + overflow-y-auto +q   min-h-0 = scroll funcional */}
           <div className="flex-1 overflow-y-auto flex flex-col gap-2 min-h-0 scrollbar-hide">
             {chatMensajes.length === 0 && (
               <p className="text-gray-500 text-sm">Sin consultas</p>

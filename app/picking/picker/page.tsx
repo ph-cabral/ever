@@ -18,18 +18,6 @@ export default function PickerPage() {
   const [enviandoChat, setEnviandoChat] = useState(false);
   const chatRef = useRef<HTMLTextAreaElement>(null);
 
-  // const enviarChat = async () => {
-  //   if (!mensajeChat.trim() || !pickerNombre) return;
-  //   setEnviandoChat(true);
-  //   // TODO: POST /api/chat/mensajes
-  //   console.log("Enviar:", {
-  //     picker_nombre: pickerNombre,
-  //     mensaje: mensajeChat,
-  //   });
-  //   setMensajeChat("");
-  //   setChatAbierto(false);
-  //   setEnviandoChat(false);
-  // };
 
   const enviarChat = async () => {
     if (!mensajeChat.trim() || !pickerNombre) return;

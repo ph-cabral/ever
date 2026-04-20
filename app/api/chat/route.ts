@@ -32,3 +32,22 @@ export async function POST(req: Request) {
   }
 }
 
+
+// PATCH - responder mensaje
+export async function PATCH(req: Request) {
+  try {
+    const { id, respuesta } = await req.json();
+    if (!id || !respuesta) {
+      return NextResponse.json({ error: "Faltan campos" }, { status: 400 });
+    }
+    const actualizado = await prisma.chat_mensajes.update({
+      where: { id },
+      data: { respuesta, respondido: true },
+    });
+    return NextResponse.json(actualizado);
+  } catch (error) {
+    console.error("[chat PATCH]", error);
+    return NextResponse.json({ error: "Error al responder" }, { status: 500 });
+  }
+}
+
