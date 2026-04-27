@@ -90,12 +90,12 @@ export default function PickerPage() {
 
   function handleCodigoChange(e: React.ChangeEvent<HTMLInputElement>) {
     setCodigo(e.target.value);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      if (e.target.value.trim() !== "") {
-        cantidadRef.current?.focus();
-      }
-    }, 300);
+    // if (debounceRef.current) clearTimeout(debounceRef.current);
+    // debounceRef.current = setTimeout(() => {
+    //   if (e.target.value.trim() !== "") {
+    //     cantidadRef.current?.focus();
+    //   }
+    // }, 300);
   }
 
   // Pantalla ingreso nombre
