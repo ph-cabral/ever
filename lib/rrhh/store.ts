@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { ParsedFile, DetectedFileType, ParsedRow } from "./Parsexlsx";
+import type { ParsedFile, DetectedFileType } from "./parseXlsx";
 
 export type RrhhData = Partial<Record<DetectedFileType, ParsedFile>>;
 
@@ -31,19 +31,28 @@ export function useRrhhData() {
   const [data, setData] = useState<RrhhData>({});
   const [hydrated, setHydrated] = useState(false);
 
-  // Hidratar desde localStorage al montar (evita mismatch SSR)
   useEffect(() => {
     setData(loadFromStorage());
     setHydrated(true);
   }, []);
 
-  // Persistir en cada cambio (después de hidratar)
   useEffect(() => {
     if (hydrated) saveToStorage(data);
   }, [data, hydrated]);
 
   const setFile = useCallback((type: DetectedFileType, file: ParsedFile) => {
+    if (type === "desconocido") return;
     setData((prev) => ({ ...prev, [type]: file }));
+  }, []);
+
+  const setFiles = useCallback((files: ParsedFile[]) => {
+    setData((prev) => {
+      const next = { ...prev };
+      files.forEach((f) => {
+        if (f.type !== "desconocido") next[f.type] = f;
+      });
+      return next;
+    });
   }, []);
 
   const removeFile = useCallback((type: DetectedFileType) => {
@@ -59,6 +68,5 @@ export function useRrhhData() {
     if (typeof window !== "undefined") localStorage.removeItem(STORAGE_KEY);
   }, []);
 
-  return { data, setFile, removeFile, clearAll, hydrated };
+  return { data, setFile, setFiles, removeFile, clearAll, hydrated };
 }
-

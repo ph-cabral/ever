@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -12,53 +12,43 @@ import {
   Target,
   FolderOpen,
   Clock,
+  Trash2,
 } from "lucide-react";
-import FileDropZone from "@/rrhh/components/FileDropZone";
-import {
-  joinSueldosConEmpleados,
-  groupBySum,
-  groupByCount,
-  splitByEstado,
-} from "@/lib/rrhh/join";
+import FileDropZone from "@/app/rrhh/components/FileDropZone";
 import { useRrhhData } from "@/lib/rrhh/store";
-import {
-  joinSueldosConEmpleados,
-  groupBySum,
-  groupByCount,
-  splitByEstado,
-} from "@/lib/rrhh/join";
-import { parseXlsxFile } from "@/lib/rrhh/Parsexlsx";
+import type { ParsedFile, DetectedFileType } from "@/lib/rrhh/parseXlsx";
 
 // ── Tabs config ───────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: "resumen",       label: "Resumen",        icon: LayoutDashboard },
-  { id: "headcount",     label: "Headcount",       icon: Users },
-  { id: "rotacion",      label: "Rotación",        icon: RefreshCw },
-  { id: "ausentismo",    label: "Ausentismo",      icon: CalendarX },
-  { id: "nomina",        label: "Nómina",          icon: DollarSign },
-  { id: "hs_extras",     label: "Hs. Extra",       icon: Clock },
-  { id: "reclutamiento", label: "Reclutamiento",   icon: SearchCheck },
-  { id: "capacitacion",  label: "Capacitación",    icon: BookOpen },
-  { id: "kpis",          label: "KPIs Custom",     icon: Target },
-  { id: "carga",         label: "Carga de Datos",  icon: FolderOpen },
+  { id: "resumen", label: "Resumen", icon: LayoutDashboard },
+  { id: "headcount", label: "Headcount", icon: Users },
+  { id: "rotacion", label: "Rotación", icon: RefreshCw },
+  { id: "ausentismo", label: "Ausentismo", icon: CalendarX },
+  { id: "nomina", label: "Nómina", icon: DollarSign },
+  { id: "hs_extras", label: "Hs. Extra", icon: Clock },
+  { id: "reclutamiento", label: "Reclutamiento", icon: SearchCheck },
+  { id: "capacitacion", label: "Capacitación", icon: BookOpen },
+  { id: "kpis", label: "KPIs Custom", icon: Target },
+  { id: "carga", label: "Carga de Datos", icon: FolderOpen },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
 
-// ── Mapping tipo archivo → tab ────────────────────────────────────────────────
-
 const TYPE_TO_TAB: Record<DetectedFileType, TabId | null> = {
-  empleados:   "headcount",
+  empleados: "headcount",
   ausentismos: "ausentismo",
-  sueldos:     "nomina",
-  hs_extras:   "hs_extras",
+  sueldos: "nomina",
+  hs_extras: "hs_extras",
   desconocido: null,
 };
 
-// ── Estado global de datos ────────────────────────────────────────────────────
-
-export type RrhhData = Partial<Record<DetectedFileType, ParsedFile>>;
+const TAB_TO_TYPE: Partial<Record<TabId, DetectedFileType>> = {
+  headcount: "empleados",
+  ausentismo: "ausentismos",
+  nomina: "sueldos",
+  hs_extras: "hs_extras",
+};
 
 // ── Tabla genérica ────────────────────────────────────────────────────────────
 
@@ -67,8 +57,10 @@ function DataTable({ file }: { file: ParsedFile }) {
 
   const filtered = file.rows.filter((row) =>
     file.columns.some((col) =>
-      String(row[col] ?? "").toLowerCase().includes(search.toLowerCase())
-    )
+      String(row[col] ?? "")
+        .toLowerCase()
+        .includes(search.toLowerCase()),
+    ),
   );
 
   return (
@@ -76,7 +68,7 @@ function DataTable({ file }: { file: ParsedFile }) {
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-3">
         <input
           type="text"
-          placeholder="��� Buscar..."
+          placeholder="Buscar..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="bg-zinc-950 border border-zinc-700 text-zinc-200 text-sm rounded-lg px-3 py-1.5 outline-none focus:border-yellow-400 w-56 transition-colors"
@@ -165,196 +157,164 @@ function EmptyState({ onGoToCarga }: { onGoToCarga: () => void }) {
 
 export default function RrhhDashboardPage() {
   const [activeTab, setActiveTab] = useState<TabId>("carga");
-  const [data, setData] = useState<RrhhData>({});
-
-  const handleFilesLoaded = useCallback((files: ParsedFile[]) => {
-    setData((prev) => {
-      const next = { ...prev };
-      files.forEach((f) => {
-        if (f.type !== "desconocido") next[f.type] = f;
-      });
-      return next;
-    });
-  }, []);
+  const { data, setFiles, removeFile, clearAll, hydrated } = useRrhhData();
 
   const loadedCount = Object.keys(data).length;
 
   const renderTabContent = (tab: TabId) => {
     const goToCarga = () => setActiveTab("carga");
 
-    switch (tab) {
-      case "carga":
-        return (
-          <div className="max-w-2xl">
-            <div className="mb-6">
-              <h2 className="text-yellow-400 font-bold text-xl uppercase tracking-wide font-condensed">
+    if (tab === "carga") {
+      return (
+        <div className="max-w-2xl">
+          <div className="mb-6 flex items-start justify-between">
+            <div>
+              <h2 className="text-yellow-400 font-bold text-xl uppercase tracking-wide">
                 Carga de Datos
               </h2>
               <p className="text-zinc-500 text-sm mt-1">
-                Arrastrá uno o varios archivos Excel. El sistema detecta automáticamente el tipo de datos.
+                Arrastrá uno o varios archivos Excel. El sistema detecta
+                automáticamente el tipo.
               </p>
             </div>
-            <FileDropZone onFilesLoaded={handleFilesLoaded} />
-
             {loadedCount > 0 && (
-              <div className="mt-6 rounded-xl border border-yellow-400/20 bg-yellow-400/5 px-5 py-4">
-                <p className="text-yellow-400 text-sm font-semibold mb-2">
-                  ✓ {loadedCount} archivo{loadedCount > 1 ? "s" : ""} cargado{loadedCount > 1 ? "s" : ""}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {(Object.keys(data) as DetectedFileType[]).map((type) => (
-                    <button
-                      key={type}
-                      onClick={() => {
-                        const tabId = TYPE_TO_TAB[type];
-                        if (tabId) setActiveTab(tabId);
-                      }}
-                      className="text-xs px-3 py-1 rounded-full bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
-                    >
-                      {data[type]?.fileName} — {data[type]?.rows.length} filas
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <button
+                onClick={() => {
+                  if (confirm("¿Borrar todos los datos cargados?")) clearAll();
+                }}
+                className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition-colors"
+              >
+                <Trash2 size={14} />
+                Limpiar todo
+              </button>
             )}
           </div>
-        );
 
-      case "headcount":
-        return data.empleados ? (
-          <div>
-            <div className="mb-5">
-              <h2 className="text-yellow-400 font-bold text-xl uppercase tracking-wide">
-                Headcount
-              </h2>
-              <p className="text-zinc-500 text-sm mt-1">
-                {data.empleados.rows.length} empleados · {data.empleados.fileName}
+          <FileDropZone onFilesLoaded={setFiles} />
+
+          {loadedCount > 0 && (
+            <div className="mt-6 rounded-xl border border-yellow-400/20 bg-yellow-400/5 px-5 py-4">
+              <p className="text-yellow-400 text-sm font-semibold mb-3">
+                ✓ {loadedCount} fuente{loadedCount > 1 ? "s" : ""} persistida
+                {loadedCount > 1 ? "s" : ""} en navegador
               </p>
+              <div className="flex flex-wrap gap-2">
+                {(Object.keys(data) as DetectedFileType[]).map((type) => {
+                  const f = data[type];
+                  if (!f) return null;
+                  return (
+                    <div
+                      key={type}
+                      className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-full bg-zinc-800 text-zinc-300"
+                    >
+                      <button
+                        onClick={() => {
+                          const tabId = TYPE_TO_TAB[type];
+                          if (tabId) setActiveTab(tabId);
+                        }}
+                        className="hover:text-yellow-400 transition-colors"
+                      >
+                        {f.fileName} — {f.rows.length} filas
+                      </button>
+                      <button
+                        onClick={() => removeFile(type)}
+                        className="text-zinc-600 hover:text-red-400 transition-colors"
+                        title="Quitar"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-            <DataTable file={data.empleados} />
-          </div>
-        ) : (
-          <EmptyState onGoToCarga={goToCarga} />
-        );
-
-      case "ausentismo":
-        return data.ausentismos ? (
-          <div>
-            <div className="mb-5">
-              <h2 className="text-yellow-400 font-bold text-xl uppercase tracking-wide">
-                Ausentismo
-              </h2>
-              <p className="text-zinc-500 text-sm mt-1">
-                {data.ausentismos.rows.length} registros · {data.ausentismos.fileName}
-              </p>
-            </div>
-            <DataTable file={data.ausentismos} />
-          </div>
-        ) : (
-          <EmptyState onGoToCarga={goToCarga} />
-        );
-
-      case "nomina":
-        return data.sueldos ? (
-          <div>
-            <div className="mb-5">
-              <h2 className="text-yellow-400 font-bold text-xl uppercase tracking-wide">
-                Nómina / Sueldos
-              </h2>
-              <p className="text-zinc-500 text-sm mt-1">
-                {data.sueldos.rows.length} empleados · {data.sueldos.fileName}
-              </p>
-            </div>
-            <DataTable file={data.sueldos} />
-          </div>
-        ) : (
-          <EmptyState onGoToCarga={goToCarga} />
-        );
-
-      case "hs_extras":
-        return data.hs_extras ? (
-          <div>
-            <div className="mb-5">
-              <h2 className="text-yellow-400 font-bold text-xl uppercase tracking-wide">
-                Horas Extra
-              </h2>
-              <p className="text-zinc-500 text-sm mt-1">
-                {data.hs_extras.rows.length} registros · {data.hs_extras.fileName}
-              </p>
-            </div>
-            <DataTable file={data.hs_extras} />
-          </div>
-        ) : (
-          <EmptyState onGoToCarga={goToCarga} />
-        );
-
-      default:
-        return (
-          <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
-            <Target size={40} className="text-zinc-700" />
-            <p className="text-zinc-500 text-sm">Sección en desarrollo</p>
-          </div>
-        );
+          )}
+        </div>
+      );
     }
+
+    const type = TAB_TO_TYPE[tab];
+    if (type && data[type]) {
+      const f = data[type]!;
+      const titles: Record<DetectedFileType, string> = {
+        empleados: "Headcount",
+        ausentismos: "Ausentismo",
+        sueldos: "Nómina / Sueldos",
+        hs_extras: "Horas Extra",
+        desconocido: "",
+      };
+      return (
+        <div>
+          <div className="mb-5">
+            <h2 className="text-yellow-400 font-bold text-xl uppercase tracking-wide">
+              {titles[type]}
+            </h2>
+            <p className="text-zinc-500 text-sm mt-1">
+              {f.rows.length} registros · {f.fileName}
+            </p>
+          </div>
+          <DataTable file={f} />
+        </div>
+      );
+    }
+
+    if (type) return <EmptyState onGoToCarga={goToCarga} />;
+
+    return (
+      <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
+        <Target size={40} className="text-zinc-700" />
+        <p className="text-zinc-500 text-sm">Sección en desarrollo</p>
+      </div>
+    );
   };
 
   return (
     <div className="min-h-screen bg-[#111111] text-white">
-      {/* Header */}
       <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 flex items-center justify-between px-8 h-16">
         <div className="flex items-center gap-4">
-          <div>
-            <span className="font-bold text-yellow-400 text-2xl tracking-wide uppercase">
-              EVER WEAR{" "}
-              <span className="text-sm tracking-[3px] font-normal">S.A.</span>
-            </span>
-          </div>
+          <span className="font-bold text-yellow-400 text-2xl tracking-wide uppercase">
+            EVER WEAR{" "}
+            <span className="text-sm tracking-[3px] font-normal">S.A.</span>
+          </span>
           <div className="w-px h-7 bg-yellow-400/30" />
           <span className="text-zinc-500 text-sm">
             Dashboard de Recursos Humanos — Directorio
           </span>
         </div>
 
-        {loadedCount > 0 && (
+        {hydrated && loadedCount > 0 && (
           <div className="flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-full px-4 py-1.5 text-xs text-yellow-400 font-semibold">
             <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
-            {loadedCount} fuente{loadedCount > 1 ? "s" : ""} activa{loadedCount > 1 ? "s" : ""}
+            {loadedCount} fuente{loadedCount > 1 ? "s" : ""} activa
+            {loadedCount > 1 ? "s" : ""}
           </div>
         )}
       </header>
 
-      {/* Tabs */}
       <nav className="bg-[#242424] border-b border-zinc-800 px-8 flex gap-0 overflow-x-auto">
-        {TABS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className={`flex items-center gap-2 px-5 py-4 text-sm font-medium border-b-[3px] whitespace-nowrap transition-all duration-100 ${
-              activeTab === id
-                ? "text-yellow-400 border-yellow-400"
-                : "text-zinc-500 border-transparent hover:text-zinc-200"
-            }`}
-          >
-            <Icon size={15} />
-            {label}
-            {/* Badge si tiene datos */}
-            {id !== "carga" && id !== "resumen" && id !== "reclutamiento" && id !== "capacitacion" && id !== "kpis" && id !== "rotacion" && (() => {
-              const typeMap: Partial<Record<TabId, DetectedFileType>> = {
-                headcount: "empleados",
-                ausentismo: "ausentismos",
-                nomina: "sueldos",
-                hs_extras: "hs_extras",
-              };
-              const type = typeMap[id];
-              return type && data[type] ? (
+        {TABS.map(({ id, label, icon: Icon }) => {
+          const type = TAB_TO_TYPE[id];
+          const hasData = type && data[type];
+          return (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={`flex items-center gap-2 px-5 py-4 text-sm font-medium border-b-[3px] whitespace-nowrap transition-all duration-100 ${
+                activeTab === id
+                  ? "text-yellow-400 border-yellow-400"
+                  : "text-zinc-500 border-transparent hover:text-zinc-200"
+              }`}
+            >
+              <Icon size={15} />
+              {label}
+              {hasData && (
                 <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 ml-0.5" />
-              ) : null;
-            })()}
-          </button>
-        ))}
+              )}
+            </button>
+          );
+        })}
       </nav>
 
-      {/* Content */}
       <main className="max-w-[1400px] mx-auto px-8 py-8">
         {renderTabContent(activeTab)}
       </main>

@@ -1,9 +1,23 @@
-import type { ParsedFile, DetectedFileType, ParsedRow } from "./Parsexlsx";
+// lib/rrhh/join.ts
+import type { ParsedFile, ParsedRow } from "./parseXlsx";
 
-/**
- * Enriquece filas de sueldos con datos de empleados (Area, Puesto, Sucursal)
- * Join por Legajo.
- */
+/** "$ 1.234,56" → 1234.56 */
+export function parseMoney(v: unknown): number {
+  if (typeof v === "number") return v;
+  if (v == null) return 0;
+  const n = parseFloat(String(v).replace(/[$\s.]/g, "").replace(",", "."));
+  return isNaN(n) ? 0 : n;
+}
+
+function norm(s: unknown): string {
+  return String(s ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+/** Enriquece sueldos con datos de empleados (join por Legajo). */
 export function joinSueldosConEmpleados(
   sueldos: ParsedFile | undefined,
   empleados: ParsedFile | undefined
@@ -11,55 +25,45 @@ export function joinSueldosConEmpleados(
   if (!sueldos?.rows?.length) return [];
   if (!empleados?.rows?.length) return sueldos.rows;
 
-  // Index por Legajo (string para evitar problemas de tipos)
-  const empleadosMap = new Map<string, ParsedRow>();
+  const empMap = new Map<string, ParsedRow>();
   empleados.rows.forEach((emp) => {
-    const legajo = String(emp["Legajo"] ?? "").trim();
-    if (legajo) empleadosMap.set(legajo, emp);
+    const leg = norm(emp["Legajo"]);
+    if (leg) empMap.set(leg, emp);
   });
 
   return sueldos.rows.map((row) => {
-    const legajo = String(row["Legajo"] ?? "").trim();
-    const emp = empleadosMap.get(legajo);
+    const emp = empMap.get(norm(row["Legajo"]));
     if (!emp) return row;
-
     return {
       ...row,
       Area: emp["Area"] ?? row["Area"],
       Puesto: emp["Puesto"] ?? row["Puesto"],
       Sucursal: emp["Sucursal"] ?? row["Sucursal"],
       Tipo_Contrato: emp["Tipo_Contrato"] ?? row["Tipo_Contrato"],
+      Estado: emp["Estado"] ?? row["Estado"],
+      Fecha_Ingreso: emp["Fecha_Ingreso"] ?? row["Fecha_Ingreso"],
     };
   });
 }
 
-/**
- * Agrupa un array de filas por un campo y aplica un reducer numérico.
- */
+/** Agrupa por campo y suma otro. Output ordenado desc, listo para Recharts. */
 export function groupBySum(
   rows: ParsedRow[],
   groupField: string,
-  sumField: string
+  sumField: string,
+  parser: (v: unknown) => number = parseMoney
 ): { name: string; value: number }[] {
   const acc: Record<string, number> = {};
-
   rows.forEach((r) => {
     const key = String(r[groupField] ?? "Sin dato").trim() || "Sin dato";
-    const raw = String(r[sumField] ?? "0")
-      .replace(/[$\s.]/g, "")
-      .replace(",", ".");
-    const val = parseFloat(raw);
-    if (!isNaN(val)) acc[key] = (acc[key] ?? 0) + val;
+    acc[key] = (acc[key] ?? 0) + parser(r[sumField]);
   });
-
   return Object.entries(acc)
     .map(([name, value]) => ({ name, value }))
     .sort((a, b) => b.value - a.value);
 }
 
-/**
- * Agrupa por campo y cuenta ocurrencias.
- */
+/** Agrupa por campo y cuenta. Output ordenado desc. */
 export function groupByCount(
   rows: ParsedRow[],
   groupField: string
@@ -74,21 +78,15 @@ export function groupByCount(
     .sort((a, b) => b.value - a.value);
 }
 
-/**
- * Empleados activos / no activos (para rotación derivada).
- */
+/** Separa empleados en activos / egresados. */
 export function splitByEstado(empleados: ParsedFile | undefined) {
-  if (!empleados?.rows?.length) return { activos: [], egresados: [] };
-
   const activos: ParsedRow[] = [];
   const egresados: ParsedRow[] = [];
+  if (!empleados?.rows?.length) return { activos, egresados };
 
   empleados.rows.forEach((r) => {
-    const estado = String(r["Estado"] ?? "").toLowerCase().trim();
-    if (estado === "activo") activos.push(r);
+    if (norm(r["Estado"]) === "activo") activos.push(r);
     else egresados.push(r);
   });
-
   return { activos, egresados };
 }
-
