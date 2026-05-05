@@ -15,6 +15,12 @@ import {
   Trash2,
 } from "lucide-react";
 import FileDropZone from "@/app/rrhh/components/FileDropZone";
+import CollapsibleTable from "@/app/rrhh/components/CollapsibleTable";
+import HeadcountTab from "@/app/rrhh/components/tabs/HeadcountTab";
+import NominaTab from "@/app/rrhh/components/tabs/NominaTab";
+import AusentismoTab from "@/app/rrhh/components/tabs/AusentismoTab";
+import HsExtrasTab from "@/app/rrhh/components/tabs/HsExtrasTab";
+import ResumenTab from "@/app/rrhh/components/tabs/ResumenTab";
 import { useRrhhData } from "@/lib/rrhh/store";
 import type { ParsedFile, DetectedFileType } from "@/lib/rrhh/parseXlsx";
 
@@ -22,11 +28,11 @@ import type { ParsedFile, DetectedFileType } from "@/lib/rrhh/parseXlsx";
 
 const TABS = [
   { id: "resumen", label: "Resumen", icon: LayoutDashboard },
-  { id: "headcount", label: "Headcount", icon: Users },
-  { id: "rotacion", label: "Rotación", icon: RefreshCw },
-  { id: "ausentismo", label: "Ausentismo", icon: CalendarX },
+  { id: "headcount", label: "Empleados", icon: Users },
   { id: "nomina", label: "Nómina", icon: DollarSign },
+  { id: "ausentismo", label: "Ausentismo", icon: CalendarX },
   { id: "hs_extras", label: "Hs. Extra", icon: Clock },
+  { id: "rotacion", label: "Rotación", icon: RefreshCw },
   { id: "reclutamiento", label: "Reclutamiento", icon: SearchCheck },
   { id: "capacitacion", label: "Capacitación", icon: BookOpen },
   { id: "kpis", label: "KPIs Custom", icon: Target },
@@ -50,6 +56,14 @@ const TAB_TO_TYPE: Partial<Record<TabId, DetectedFileType>> = {
   hs_extras: "hs_extras",
 };
 
+const TAB_TITLES: Record<DetectedFileType, string> = {
+  empleados: "Empleados",
+  ausentismos: "Ausentismo",
+  sueldos: "Nómina / Sueldos",
+  hs_extras: "Horas Extra",
+  desconocido: "",
+};
+
 // ── Tabla genérica ────────────────────────────────────────────────────────────
 
 function DataTable({ file }: { file: ParsedFile }) {
@@ -64,7 +78,7 @@ function DataTable({ file }: { file: ParsedFile }) {
   );
 
   return (
-    <div className="rounded-xl border border-zinc-800 overflow-hidden">
+    <div className="overflow-hidden">
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-3">
         <input
           type="text"
@@ -81,9 +95,18 @@ function DataTable({ file }: { file: ParsedFile }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-zinc-900/80">
-              {file.columns.map((col) => (
+              {/* {file.columns.map((col) => (
                 <th
                   key={col}
+                  className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500 whitespace-nowrap border-b border-zinc-800"
+                >
+                  {col}
+                </th>
+              ))}
+               */}
+              {file.columns.map((col, index) => (
+                <th
+                  key={`${col}-${index}`}
                   className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500 whitespace-nowrap border-b border-zinc-800"
                 >
                   {col}
@@ -164,6 +187,7 @@ export default function RrhhDashboardPage() {
   const renderTabContent = (tab: TabId) => {
     const goToCarga = () => setActiveTab("carga");
 
+    // ── Carga de datos ──────────────────────────────────────────────────────
     if (tab === "carga") {
       return (
         <div className="max-w-2xl">
@@ -233,33 +257,41 @@ export default function RrhhDashboardPage() {
       );
     }
 
+    // ── Resumen ─────────────────────────────────────────────────────────────
+    if (tab === "resumen") {
+      return <ResumenTab data={data} onGoToCarga={goToCarga} />;
+    }
+
+    // ── Tabs con datos: gráficos + tabla colapsable ─────────────────────────
     const type = TAB_TO_TYPE[tab];
     if (type && data[type]) {
       const f = data[type]!;
-      const titles: Record<DetectedFileType, string> = {
-        empleados: "Headcount",
-        ausentismos: "Ausentismo",
-        sueldos: "Nómina / Sueldos",
-        hs_extras: "Horas Extra",
-        desconocido: "",
-      };
       return (
         <div>
           <div className="mb-5">
             <h2 className="text-yellow-400 font-bold text-xl uppercase tracking-wide">
-              {titles[type]}
+              {TAB_TITLES[type]}
             </h2>
             <p className="text-zinc-500 text-sm mt-1">
               {f.rows.length} registros · {f.fileName}
             </p>
           </div>
-          <DataTable file={f} />
+
+          <div className="space-y-6">
+            {type === "empleados" && <HeadcountTab file={f} />}
+            {type === "sueldos" && <NominaTab file={f} />}
+            {type === "ausentismos" && <AusentismoTab file={f} />}
+            {type === "hs_extras" && <HsExtrasTab file={f} />}
+
+            <CollapsibleTable file={f} renderTable={(file) => <DataTable file={file} />} />
+          </div>
         </div>
       );
     }
 
     if (type) return <EmptyState onGoToCarga={goToCarga} />;
 
+    // ── Tabs en desarrollo ──────────────────────────────────────────────────
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
         <Target size={40} className="text-zinc-700" />

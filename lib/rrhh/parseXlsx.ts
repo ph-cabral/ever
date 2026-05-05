@@ -21,18 +21,39 @@ export interface ParsedFile {
   rawHeaders: string[];
 }
 
-// ── Columnas clave por tipo de archivo ───────────────────────────────────────
-// La detección busca que TODAS las columnas clave estén presentes (case-insensitive)
+// ── Firmas de detección ──────────────────────────────────────────────────────
+// Cada firma define:
+//  - keys: substrings que deben aparecer (todos) en headers normalizados
+//  - sheet: nombre de hoja preferido (opcional)
+//  - headerRow: índice 0-based de la fila de headers (opcional, default = autodetect)
 
-const SIGNATURES: Record<DetectedFileType, string[]> = {
-  empleados: ["legajo", "nombre_completo", "area", "estado", "fecha_ingreso"],
-  ausentismos: ["nombre_completo", "fecha", "tipo", "motivo"],
-  sueldos: ["legajo", "neto", "bruto", "costos"],
-  hs_extras: ["hs extras 50%", "hs extras 100%", "total hs extras"],
-  desconocido: [],
+interface Signature {
+  keys: string[];
+  sheet?: string;
+  headerRow?: number;
+}
+
+const SIGNATURES: Record<
+  Exclude<DetectedFileType, "desconocido">,
+  Signature
+> = {
+  empleados: {
+    keys: ["legajo", "nombre", "area", "estado", "fecha de ingreso"],
+    sheet: "REG. EMPLEADOS",
+    headerRow: 1,
+  },
+  ausentismos: {
+    keys: ["nombre", "fecha", "tipo", "motivo"],
+  },
+  sueldos: {
+    keys: ["legajo", "neto", "costos"],
+  },
+  hs_extras: {
+    keys: ["hs extras 50", "hs extras 100", "total hs extras"],
+  },
 };
 
-// ── Detección de tipo ─────────────────────────────────────────────────────────
+// ── Detección ────────────────────────────────────────────────────────────────
 
 function normalize(s: string): string {
   return s
@@ -42,19 +63,25 @@ function normalize(s: string): string {
     .trim();
 }
 
+function isJunkHeader(h: string): boolean {
+  if (!h) return true;
+  if (/^unnamed:\s*\d+$/i.test(h.trim())) return true;
+  if (/^column\d+$/i.test(h.trim())) return true;
+  return false;
+}
+
 export function detectFileType(headers: string[]): DetectedFileType {
   const normHeaders = headers.map(normalize);
-
-  for (const [type, keys] of Object.entries(SIGNATURES)) {
-    if (type === "desconocido") continue;
-    const match = keys.every((k) => normHeaders.some((h) => h.includes(normalize(k))));
+  for (const [type, sig] of Object.entries(SIGNATURES)) {
+    const match = sig.keys.every((k) =>
+      normHeaders.some((h) => h.includes(normalize(k))),
+    );
     if (match) return type as DetectedFileType;
   }
-
   return "desconocido";
 }
 
-// ── Labels amigables por tipo ─────────────────────────────────────────────────
+// ── Labels ────────────────────────────────────────────────────────────────────
 
 export const FILE_TYPE_LABELS: Record<DetectedFileType, string> = {
   empleados: "Headcount / Empleados",
@@ -64,66 +91,90 @@ export const FILE_TYPE_LABELS: Record<DetectedFileType, string> = {
   desconocido: "Desconocido",
 };
 
-// ── Columnas visibles (display) por tipo ──────────────────────────────────────
+// ── Helpers de hoja ───────────────────────────────────────────────────────────
 
-export const DISPLAY_COLUMNS: Record<DetectedFileType, string[]> = {
-  empleados: [
-    "Legajo",
-    "Nombre_Completo",
-    "Area",
-    "Puesto",
-    "Fecha_Ingreso",
-    "Tipo_Contrato",
-    "Estado",
-  ],
-  ausentismos: [
-    "Nombre_Completo",
-    "Fecha",
-    "Mes",
-    "Tipo",
-    "Motivo",
-    "Supervisor",
-  ],
-  sueldos: [
-    "Legajo",
-    "Nombre_Completo",
-    "Neto",
-    "Bruto",
-    "Retenciones",
-    "Costos",
-    "Banco",
-  ],
-  hs_extras: [
-    "Periodo",
-    "Legajo",
-    "Nombre Completo",
-    "Area",
-    "Hs Normales del mes",
-    "Hs Extras 50%",
-    "Hs Extras 100%",
-    "Total Hs Extras",
-  ],
-  desconocido: [],
-};
+function findSheet(wb: XLSX.WorkBook, target?: string): string {
+  if (!target) return wb.SheetNames[0];
+  const t = normalize(target);
+  return (
+    wb.SheetNames.find((n) => normalize(n) === t) ??
+    wb.SheetNames.find((n) => normalize(n).includes(t)) ??
+    wb.SheetNames[0]
+  );
+}
 
-// ── Parser principal ──────────────────────────────────────────────────────────
-
-export async function parseXlsxFile(file: File): Promise<ParsedFile> {
-  const buffer = await file.arrayBuffer();
-  const wb = XLSX.read(buffer, { type: "array", cellDates: true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
+function readSheet(
+  ws: XLSX.WorkSheet,
+  forcedHeaderRow?: number,
+): { headers: string[]; dataRows: (string | number | null)[][] } {
   const raw: (string | number | null)[][] = XLSX.utils.sheet_to_json(ws, {
     header: 1,
     defval: null,
     blankrows: false,
   });
 
-  // Filtrar filas completamente vacías y encontrar la primera fila con headers
-  const headerRowIndex = raw.findIndex(
-    (row) => row.filter((c) => c !== null && c !== "").length >= 3
+  let headerRowIndex: number;
+  if (typeof forcedHeaderRow === "number" && raw[forcedHeaderRow]) {
+    headerRowIndex = forcedHeaderRow;
+  } else {
+    headerRowIndex = raw.findIndex(
+      (row) => row.filter((c) => c !== null && c !== "").length >= 3,
+    );
+  }
+
+  if (headerRowIndex === -1) return { headers: [], dataRows: [] };
+
+  const headers = (raw[headerRowIndex] ?? []).map((h) =>
+    h !== null && h !== undefined ? String(h).trim() : "",
   );
 
-  if (headerRowIndex === -1) {
+  const dataRows = raw
+    .slice(headerRowIndex + 1)
+    .filter((row) => row.some((c) => c !== null && c !== ""));
+
+  return { headers, dataRows };
+}
+
+// ── Parser principal ──────────────────────────────────────────────────────────
+
+export async function parseXlsxFile(file: File): Promise<ParsedFile> {
+  const buffer = await file.arrayBuffer();
+  const wb = XLSX.read(buffer, { type: "array", cellDates: true });
+
+  // Estrategia: probar cada firma con su hoja/headerRow preferidos.
+  // Si ninguna firma matchea, fallback a hoja 0 con autodetección.
+
+  type Attempt = {
+    type: DetectedFileType;
+    headers: string[];
+    dataRows: (string | number | null)[][];
+  };
+
+  const attempts: Attempt[] = [];
+
+  for (const [type, sig] of Object.entries(SIGNATURES)) {
+    const sheetName = findSheet(wb, sig.sheet);
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+    const { headers, dataRows } = readSheet(ws, sig.headerRow);
+    if (headers.length === 0) continue;
+    if (detectFileType(headers) === type) {
+      attempts.push({ type: type as DetectedFileType, headers, dataRows });
+      break;
+    }
+  }
+
+  let chosen: Attempt;
+  if (attempts.length > 0) {
+    chosen = attempts[0];
+  } else {
+    // Fallback: hoja 0, autodetect
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const { headers, dataRows } = readSheet(ws);
+    chosen = { type: detectFileType(headers), headers, dataRows };
+  }
+
+  if (chosen.headers.length === 0) {
     return {
       type: "desconocido",
       fileName: file.name,
@@ -133,59 +184,58 @@ export async function parseXlsxFile(file: File): Promise<ParsedFile> {
     };
   }
 
-  const rawHeaders = raw[headerRowIndex].map((h) =>
-    h !== null ? String(h).trim() : ""
-  );
+  const { type, headers: rawHeaders, dataRows } = chosen;
 
-  const dataRows = raw.slice(headerRowIndex + 1).filter(
-    (row) => row.some((c) => c !== null && c !== "")
-  );
-
-  const type = detectFileType(rawHeaders);
+  // Deduplicar headers: si hay nombres repetidos, sufijar con _2, _3, etc.
+  // Evita que columnas posteriores pisen valores de columnas con el mismo nombre.
+  const seen = new Map<string, number>();
+  const uniqueHeaders = rawHeaders.map((h) => {
+    if (!h) return h;
+    const count = seen.get(h) ?? 0;
+    seen.set(h, count + 1);
+    return count === 0 ? h : `${h}_${count + 1}`;
+  });
 
   const rows: ParsedRow[] = dataRows.map((row) => {
     const obj: ParsedRow = {};
-    rawHeaders.forEach((header, i) => {
+    uniqueHeaders.forEach((header, i) => {
       if (!header) return;
-      const val = row[i];
-      // Formatear fechas
+      const val: unknown = row[i];
       if (val instanceof Date) {
         obj[header] = val.toLocaleDateString("es-AR");
       } else {
-        obj[header] = val;
+        obj[header] = val as string | number | null;
       }
     });
     return obj;
   });
 
-  // Usar columnas de display si el tipo fue detectado, sino usar todas las del archivo
-  const displayCols = DISPLAY_COLUMNS[type];
-  const columns =
-    displayCols.length > 0
-      ? rawHeaders.filter((h) =>
-          displayCols.some((d) => normalize(d) === normalize(h))
-        )
-      : rawHeaders.filter(Boolean);
+  // Mostrar todas las columnas reales (sin Unnamed / vacías)
+  const columns = uniqueHeaders.filter((h) => h && !isJunkHeader(h));
 
   return {
     type,
     fileName: file.name,
-    columns: columns.length > 0 ? columns : rawHeaders.filter(Boolean),
+    columns,
     rows,
-    rawHeaders,
+    rawHeaders: uniqueHeaders,
   };
 }
 
-// ── Helpers para KPIs ─────────────────────────────────────────────────────────
+// ── KPIs (sin cambios) ────────────────────────────────────────────────────────
 
 export function calcKpisEmpleados(rows: ParsedRow[]) {
   const activos = rows.filter(
-    (r) => normalize(String(r["Estado"] ?? "")) === "activo"
+    (r) => normalize(String(r["ESTADO"] ?? r["Estado"] ?? "")) === "activo",
   ).length;
-  const areas = [...new Set(rows.map((r) => r["Area"]).filter(Boolean))];
+  const areas = [
+    ...new Set(rows.map((r) => r["AREA"] ?? r["Area"]).filter(Boolean)),
+  ];
   const porArea: Record<string, number> = {};
   areas.forEach((a) => {
-    porArea[String(a)] = rows.filter((r) => r["Area"] === a).length;
+    porArea[String(a)] = rows.filter(
+      (r) => (r["AREA"] ?? r["Area"]) === a,
+    ).length;
   });
   return { total: rows.length, activos, porArea };
 }
@@ -207,7 +257,11 @@ export function calcKpisAusentismos(rows: ParsedRow[]) {
 export function calcKpisSueldos(rows: ParsedRow[]) {
   const sumField = (field: string) =>
     rows.reduce((acc, r) => {
-      const v = parseFloat(String(r[field] ?? "0").replace(/[$.]/g, "").replace(",", "."));
+      const v = parseFloat(
+        String(r[field] ?? "0")
+          .replace(/[$.]/g, "")
+          .replace(",", "."),
+      );
       return acc + (isNaN(v) ? 0 : v);
     }, 0);
 
