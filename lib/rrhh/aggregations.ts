@@ -137,7 +137,34 @@ function toDate(v: unknown): Date | null {
   return null;
 }
 
+function getRowsWithLegajo(file: ParsedFile): Row[] {
+  const colLegajo = findCol(file, [
+    "Nro. de Legajo",
+    "LEGAJO",
+    "NRO LEGAJO",
+    "NÚMERO DE LEGAJO",
+    "LEG.",
+  ]);
+  if (!colLegajo) return file.rows; // Si no existe la columna, no filtramos (fallback seguro)
 
+  return (file.rows as Row[]).filter((r) => {
+    const val = r[colLegajo];
+    if (val == null) return false; // null o undefined
+    const str = String(val).trim();
+    if (
+      str === "" ||
+      str === "0" ||
+      str.toUpperCase() === "S/N" ||
+      str.toUpperCase() === "N/A"
+    ) {
+      return false; // Vacío o marcadores de sin dato
+    }
+    // Si el parser lo leyó como número, debe ser mayor a 0
+    if (typeof val === "number") return val > 0;
+    return true;
+  });
+}
+// ── Helpers ──────────────────────────────────────────────────────────────────
 // ── EMPLEADOS ────────────────────────────────────────────────────────────────
 
 export interface EmpleadosKpis {
@@ -263,7 +290,7 @@ export function distribucionEdades(
 export function ingresosPorMes(
   file: ParsedFile,
 ): Array<{ name: string; ingresos: number }> {
-  const col = findCol(file, ["FECHA DE INGRESO", "INGRESO"]);
+  const col = findCol(file, ["FECHA DE INGRESO"]);
   if (!col) return [];
   
   // ✅ Filtro opcional por empresa
@@ -298,6 +325,8 @@ export function ingresosPorMes(
   
   return [...map.entries()].map(([name, ingresos]) => ({ name, ingresos }));
 }
+
+// ── EMPLEADOS ────────────────────────────────────────────────────────────────
 // ── NÓMINA / SUELDOS ─────────────────────────────────────────────────────────
 
 export interface NominaKpis {
@@ -307,29 +336,62 @@ export interface NominaKpis {
   netoPromedio: number;
 }
 
+
 export function nominaKpis(file: ParsedFile): NominaKpis {
-  const colNeto = findCol(file, ["Neto + Bono", "Neto+Bono", "Neto"]);
-  const colCostos = findCol(file, ["Costos", "Costo Total", "Costo"]);
+  const colNeto = findCol(file, ["Neto + Bono", "Neto+Bono"]);
+  const colCostos = findCol(file, ["Costos", "Costo"]);
+  const colLegajo = findCol(file, [
+    "Nro. de Legajo",
+    "LEGAJO",
+    "NRO LEGAJO",
+    "NÚMERO DE LEGAJO",
+    "LEG.",
+  ]);
   let totalNeto = 0,
     totalCostos = 0,
     netoCount = 0;
+  const legajosUnicos = new Set<string>();
+
+  
   for (const r of file.rows) {
-    if (colNeto) {
-      const v = toNumber(r[colNeto]);
-      if (v) {
-        totalNeto += v;
-        netoCount++;
+      // 1. Sumar Neto y Costos de TODAS las filas válidas (incluye desdoblamientos bancarios)
+      if (colNeto) {
+        const v = toNumber(r[colNeto]);
+        if (v > 0) {
+          totalNeto += v;
+        }
+      }
+      if (colCostos) {
+        totalCostos += toNumber(r[colCostos]);
+      }
+
+      // 2. Contar Legajos Únicos (solo si la fila tiene un legajo válido)
+      if (colLegajo && r[colLegajo]) {
+        const val = r[colLegajo];
+        if (val != null) {
+          const str = String(val).trim();
+          // Validamos que no sea vacío, S/N, 0 o guiones
+          if (
+            str !== "" &&
+            str !== "S/N" &&
+            str !== "0" &&
+            str !== "—" &&
+            str !== "-"
+          ) {
+            legajosUnicos.add(str);
+          }
+        }
       }
     }
-    if (colCostos) totalCostos += toNumber(r[colCostos]);
-  }
+
+  const countEmpleadosUnicos = legajosUnicos.size;
   return {
     totalNeto,
     totalCostos,
-    empleadosLiquidados: file.rows.length,
-    netoPromedio: netoCount ? totalNeto / netoCount : 0,
+    netoPromedio: totalNeto / countEmpleadosUnicos ,
   };
 }
+
 
 export function costoPorArea(
   file: ParsedFile,
@@ -348,30 +410,31 @@ export function costoPorArea(
     .sort((a, b) => b.costo - a.costo);
 }
 
+
 export function netoPromedioPorArea(
   file: ParsedFile,
 ): Array<{ name: string; promedio: number }> {
-  const colArea = findCol(file, ["AREA", "ÁREA", "SECTOR"]);
+  const colArea = findCol(file, ["AREA"]);
   const colNeto = findCol(file, ["Neto"]);
   if (!colArea || !colNeto) return [];
   const sums = new Map<string, { sum: number; count: number }>();
   for (const r of file.rows) {
     const k = String(r[colArea] ?? "Sin dato").trim() || "Sin dato";
-    const v = toNumber(r[colNeto]);
-    if (!v) continue;
     const cur = sums.get(k) ?? { sum: 0, count: 0 };
-    cur.sum += v;
+    cur.sum += toNumber(r[colNeto]);
     cur.count++;
     sums.set(k, cur);
   }
   return [...sums.entries()]
     .map(([name, { sum, count }]) => ({
       name,
-      promedio: Math.round(sum / count),
+      promedio: count ? Math.round(sum / count) : 0,
     }))
     .sort((a, b) => b.promedio - a.promedio);
 }
 
+
+// ── NÓMINA / SUELDOS ─────────────────────────────────────────────────────────
 // ── AUSENTISMO ───────────────────────────────────────────────────────────────
 
 export interface AusentismoKpis {
@@ -443,6 +506,7 @@ export function topAusenciasPorPersona(
     .slice(0, limit);
 }
 
+// ── AUSENTISMO ───────────────────────────────────────────────────────────────
 // ── HORAS EXTRA ──────────────────────────────────────────────────────────────
 
 export interface HsExtrasKpis {
@@ -501,3 +565,5 @@ export function hsExtrasPorMes(
     .map(([name, horas]) => ({ name, horas: +horas.toFixed(1) }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
+
+// ── HORAS EXTRA ──────────────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+// app/rrhh/components/tabs/HeadcountTab.tsx
 "use client";
 
 import { Users, Cake, Briefcase, UserPlus } from "lucide-react";
@@ -6,7 +7,10 @@ import KpiCard from "@/app/rrhh/components/KpiCard";
 import BarChartCard from "@/app/rrhh/components/charts/BarChartCard";
 import PieChartCard from "@/app/rrhh/components/charts/PieChartCard";
 import LineChartCard from "@/app/rrhh/components/charts/LineChartCard";
+import HorizontalBarChartCard from "@/app/rrhh/components/charts/HorizontalBarChartCard"; // ← Nuevo import
 import FilteredEmployeesTable from "@/app/rrhh/components/tabs/FilteredEmployeesTable";
+import { Card} from "@/components/ui/card"; // ← ¡Este import faltaba!
+import { everWearTheme as t } from "@/lib/rrhh/theme";
 
 import {
   empleadosKpis,
@@ -41,7 +45,7 @@ export default function HeadcountTab({ file }: { file: ParsedFile }) {
           accent="zinc"
         />
         <KpiCard
-          label="Ingresos este mes"
+          label="Ingresos mes pasado"
           value={kpis.ingresosUltimoMes}
           icon={UserPlus}
           accent="green"
@@ -49,36 +53,52 @@ export default function HeadcountTab({ file }: { file: ParsedFile }) {
       </div>
 
       {/* Gráficos */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1  lg:grid-cols-2 gap-4">
+        {/* ← Gráfico horizontal para áreas con labels internos */}
         {porArea.length > 0 && (
-          <BarChartCard
-            title="Empleados por área"
-            data={porArea}
-            xKey="name"
-            yKey="value"
-          />
+          <Card
+            className="col-span-1 rounded-lg border p-4"
+            style={{ background: t.bgCard, borderColor: t.border }} // ← Centralizado
+          >
+            <HorizontalBarChartCard
+              title="Empleados por área"
+              data={porArea}
+              xKey="name"
+              yKey="value"
+            />
+          </Card>
         )}
+
         {porEdad.length > 0 && (
-          <BarChartCard
-            title="Distribución por edad"
-            data={porEdad}
-            xKey="name"
-            yKey="value"
-          />
+          <Card
+            className="col-span-1 rounded-lg border p-4"
+            style={{ background: t.bgCard, borderColor: t.border }} // ← Centralizado
+          >
+          {/* <CardGraph>
+            <div className="grid grid-row-2 gap-4"> */}
+              <BarChartCard
+                title="Distribución por edad"
+                data={porEdad}
+                xKey="name"
+                yKey="value"
+              />
+              <LineChartCard
+                title="Ingresos últimos 12 meses"
+                data={ingresos}
+                xKey="name"
+                yKeys={["ingresos"]}
+              />
+        </Card>
+
         )}
+
         {porSexo.length > 0 && (
           <PieChartCard title="Distribución por género" data={porSexo} />
         )}
-        {ingresos.length > 0 && (
-          <LineChartCard
-            title="Ingresos últimos 12 meses"
-            data={ingresos}
-            xKey="name"
-            yKeys={["ingresos"]}
-          />
-        )}
+
       </div>
-        <FilteredEmployeesTable file={file} />
+
+      <FilteredEmployeesTable file={file} />
     </div>
   );
 }

@@ -24,7 +24,6 @@ export default function NominaTab({ file }: { file: ParsedFile }) {
         <KpiCard label="Total neto + bono" value={fmtARS(kpis.totalNeto)} icon={Wallet} accent="green" />
         <KpiCard label="Costo total nómina" value={fmtARS(kpis.totalCostos)} icon={DollarSign} accent="green" />
         <KpiCard label="Neto promedio" value={fmtARS(kpis.netoPromedio)} icon={TrendingUp} accent="zinc" />
-        <KpiCard label="Empleados liquidados" value={kpis.empleadosLiquidados} icon={Users} accent="zinc" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
