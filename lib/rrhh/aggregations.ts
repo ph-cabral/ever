@@ -175,8 +175,6 @@ export interface EmpleadosKpis {
 }
 
 export function empleadosKpis(file: ParsedFile): EmpleadosKpis {
-  
-  
   const colFechaNac = findCol(file, [
     "FECHA DE NAC.",
     "FECHA NACIMIENTO",
@@ -184,13 +182,15 @@ export function empleadosKpis(file: ParsedFile): EmpleadosKpis {
   ]);
   const colFechaIng = findCol(file, ["FECHA DE INGRESO"]);
 
-  
-  
   const today = new Date();
   const yearMs = 1000 * 60 * 60 * 24 * 365.25;
-  
-  const activos = onlyActivos(file);
 
+  // Calculamos la fecha del mes anterior para comparar
+  const prevMonthDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const prevMonth = prevMonthDate.getMonth();
+  const prevYear = prevMonthDate.getFullYear();
+
+  const activos = onlyActivos(file);
 
   let edadSum = 0,
     edadCount = 0;
@@ -211,10 +211,9 @@ export function empleadosKpis(file: ParsedFile): EmpleadosKpis {
       if (d) {
         antSum += (today.getTime() - d.getTime()) / yearMs;
         antCount++;
-        if (
-          d.getMonth() === today.getMonth() &&
-          d.getFullYear() === today.getFullYear()
-        ) {
+
+        // ✅ Condición modificada: Compara con el mes y año ANTERIOR
+        if (d.getMonth() === prevMonth && d.getFullYear() === prevYear) {
           ingresosMes++;
         }
       }
@@ -348,8 +347,7 @@ export function nominaKpis(file: ParsedFile): NominaKpis {
     "LEG.",
   ]);
   let totalNeto = 0,
-    totalCostos = 0,
-    netoCount = 0;
+    totalCostos = 0;
   const legajosUnicos = new Set<string>();
 
   

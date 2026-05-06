@@ -136,3 +136,8 @@
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* En tu CSS */
+body {
+  font-family: 'Roboto', sans-serif;
+}

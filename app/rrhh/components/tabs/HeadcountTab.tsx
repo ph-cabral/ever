@@ -9,7 +9,7 @@ import PieChartCard from "@/app/rrhh/components/charts/PieChartCard";
 import LineChartCard from "@/app/rrhh/components/charts/LineChartCard";
 import HorizontalBarChartCard from "@/app/rrhh/components/charts/HorizontalBarChartCard"; // ← Nuevo import
 import FilteredEmployeesTable from "@/app/rrhh/components/tabs/FilteredEmployeesTable";
-import { Card} from "@/components/ui/card"; // ← ¡Este import faltaba!
+import { Card } from "@/components/ui/card"; // ← ¡Este import faltaba!
 import { everWearTheme as t } from "@/lib/rrhh/theme";
 
 import {
