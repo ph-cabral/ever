@@ -279,11 +279,22 @@ export default function RrhhDashboardPage() {
 
           <div className="space-y-6">
             {type === "empleados" && <HeadcountTab file={f} />}
-            {type === "sueldos" && <NominaTab file={f} />}
+            {type === "sueldos" &&
+              (data.empleados ? (
+                <NominaTab file={f} fileEmpleados={data.empleados} />
+              ) : (
+                <p className="text-zinc-500 text-sm">
+                  Cargá también el archivo de empleados para ver el costo por
+                  área.
+                </p>
+              ))}
             {type === "ausentismos" && <AusentismoTab file={f} />}
             {type === "hs_extras" && <HsExtrasTab file={f} />}
 
-            <CollapsibleTable file={f} renderTable={(file) => <DataTable file={file} />} />
+            <CollapsibleTable
+              file={f}
+              renderTable={(file) => <DataTable file={file} />}
+            />
           </div>
         </div>
       );

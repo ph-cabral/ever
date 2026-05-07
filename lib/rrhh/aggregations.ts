@@ -41,20 +41,6 @@ function toNumber(v: unknown): number {
   return 0;
 }
 
-// function toDate(v: unknown): Date | null {
-//   if (!v) return null;
-//   if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
-//   if (typeof v === "number") {
-//     // Excel serial → ms (días desde 1899-12-30)
-//     const d = new Date((v - 25569) * 86400 * 1000);
-//     return Number.isNaN(d.getTime()) ? null : d;
-//   }
-//   if (typeof v === "string") {
-//     const d = new Date(v);
-//     return Number.isNaN(d.getTime()) ? null : d;
-//   }
-//   return null;
-// }
 
 /** Filtra filas dejando solo empleados activos de EVER WEAR S.A. */
 function onlyActivos(file: ParsedFile): Row[] {
@@ -392,19 +378,57 @@ export function nominaKpis(file: ParsedFile): NominaKpis {
 
 
 export function costoPorArea(
-  file: ParsedFile,
-): Array<{ name: string; costo: number }> {
-  const colArea = findCol(file, ["AREA", "ÁREA", "SECTOR"]);
-  const colCostos = findCol(file, ["Costos", "Costo Total"]);
-  if (!colArea || !colCostos) return [];
-  const m = groupBy<number>(
-    file.rows,
-    colArea,
-    (r) => toNumber(r[colCostos]),
-    (a, b) => a + b,
-  );
-  return [...m.entries()]
-    .map(([name, costo]) => ({ name, costo: Math.round(costo) }))
+  filePagos: ParsedFile,
+  fileEmpleados: ParsedFile,
+): Array<{ name: string; costo: number; promedio: number }> {
+  const colNombrePagos = findCol(filePagos, [
+    "Apellido y Nombre",
+    "NOMBRE",
+    "Nombre",
+  ]);
+  const colCostos = findCol(filePagos, ["Costos", "Costo Total"]);
+  const colNombreEmp = findCol(fileEmpleados, [
+    "NOMBRE",
+    "Apellido y Nombre",
+    "Nombre",
+  ]);
+  const colArea = findCol(fileEmpleados, ["AREA", "ÁREA", "SECTOR"]);
+
+  if (!colNombrePagos || !colCostos || !colNombreEmp || !colArea) return [];
+
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+
+  // Mapa NOMBRE → AREA (solo activos de EVER WEAR)
+  const nombreToArea = new Map<string, string>();
+  for (const r of onlyActivos(fileEmpleados)) {
+    const nombre = norm(String(r[colNombreEmp] ?? ""));
+    const area = String(r[colArea] ?? "Sin dato").trim() || "Sin dato";
+    if (nombre) nombreToArea.set(nombre, area);
+  }
+
+  // Agrupar costos por area (left join: solo filas con match)
+  const sums = new Map<string, { sum: number; count: number }>();
+  for (const r of filePagos.rows) {
+    const nombre = norm(String(r[colNombrePagos] ?? ""));
+    const area = nombreToArea.get(nombre);
+    if (!area) continue; // sin match → descartar
+    const cur = sums.get(area) ?? { sum: 0, count: 0 };
+    cur.sum += toNumber(r[colCostos]);
+    cur.count++;
+    sums.set(area, cur);
+  }
+
+  return [...sums.entries()]
+    .map(([name, { sum, count }]) => ({
+      name,
+      costo: Math.round(sum),
+      promedio: count ? Math.round(sum / count) : 0,
+    }))
     .sort((a, b) => b.costo - a.costo);
 }
 
