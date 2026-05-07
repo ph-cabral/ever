@@ -9,6 +9,7 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  
   LabelList,
 } from "recharts";
 import { everWearTheme as t } from "@/lib/rrhh/theme";
@@ -20,6 +21,9 @@ interface HorizontalBarChartCardProps {
   xKey?: string;
   yKey?: string;
   color?: string;
+  labelFill?: string;
+  ubicacionLabel?: string;
+  labelFontSize?: number;
 }
 
 export default function HorizontalBarChartCard({
@@ -28,6 +32,8 @@ export default function HorizontalBarChartCard({
   xKey = "name",
   yKey = "value",
   color = t.palette[0],
+  ubicacionLabel,
+  labelFill,
 }: HorizontalBarChartCardProps) {
   const sortedData = [...data].sort((a, b) => b[yKey] - a[yKey]);
 
@@ -70,7 +76,7 @@ export default function HorizontalBarChartCard({
             <LabelList
               dataKey={yKey}
               position="insideRight"
-              fill={t.bgCard} // ← El número de la barra usa el color del fondo para "calar" el texto
+              fill={labelFill ?? t.bgCard} // ← El número de la barra usa el color del fondo para "calar" el texto
               fontSize={18}
               fontWeight={50}
             />

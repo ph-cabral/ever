@@ -1,4 +1,4 @@
-"use client";
+"use client"
 
 import {
   BarChart,
@@ -8,7 +8,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
   LabelList,
 } from "recharts";
 import { everWearTheme as t } from "@/lib/rrhh/theme";
@@ -21,6 +20,13 @@ type Props = {
   yKey: string;
   height?: number;
 };
+
+const fmtARS = (n: number) =>
+  new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 0,
+  }).format(n);
 
 export default function BarChartCard({
   title,
@@ -39,9 +45,19 @@ export default function BarChartCard({
       </CardTitle>
 
       <ResponsiveContainer width="100%" height={height}>
-        <BarChart data={data}>
+        <BarChart
+          data={data}
+          margin={{ top: 10, right: 30, left: 0, bottom: 60 }}
+        >
           <CartesianGrid strokeDasharray="3 3" stroke={t.grid} />
-          <XAxis dataKey={xKey} stroke={t.textMuted} tick={{ fontSize: 12 }} />
+          <XAxis
+            dataKey={xKey}
+            stroke={t.textMuted}
+            tick={{ fontSize: 12 }}
+            angle={-45}
+            textAnchor="end"
+            height={80}
+          />
           <YAxis stroke={t.textMuted} tick={{ fontSize: 12 }} />
           <Tooltip
             contentStyle={{
@@ -50,15 +66,16 @@ export default function BarChartCard({
               color: t.text,
             }}
             cursor={{ fill: t.border, opacity: 0.3 }}
+            formatter={(value) => fmtARS(Number(value))}
           />
-          <Legend wrapperStyle={{ color: t.textMuted, fontSize: 12 }} />
           <Bar dataKey={yKey} fill={t.primary} radius={[4, 4, 0, 0]}>
             <LabelList
               dataKey={yKey}
-              position="insideTop"
-              fill={t.bgCard} // ← El número de la barra usa el color del fondo para "calar" el texto
-              fontSize={18}
-              fontWeight={50}
+              position="top"
+              fill={t.text}
+              fontSize={12}
+              fontWeight={600}
+              formatter={(value) => fmtARS(Number(value))}
             />
           </Bar>
         </BarChart>

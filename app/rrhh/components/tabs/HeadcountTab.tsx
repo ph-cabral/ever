@@ -72,30 +72,30 @@ export default function HeadcountTab({ file }: { file: ParsedFile }) {
         {porEdad.length > 0 && (
           <Card
             className="col-span-1 rounded-lg border p-4"
-            style={{ background: t.bgCard, borderColor: t.border }} // ← Centralizado
+            style={{ background: t.bgCard, borderColor: t.border }}
           >
-          {/* <CardGraph>
-            <div className="grid grid-row-2 gap-4"> */}
-              <BarChartCard
-                title="Distribución por edad"
-                data={porEdad}
-                xKey="name"
-                yKey="value"
-              />
-              <LineChartCard
-                title="Ingresos últimos 12 meses"
-                data={ingresos}
-                xKey="name"
-                yKeys={["ingresos"]}
-              />
-        </Card>
-
+            <BarChartCard
+              height={350}
+              title="Distribución por edad"
+              ubicacionLabel="insideTop"
+              labelFontSize={14}
+              data={porEdad}
+              xKey="name"
+              yKey="value"
+              xTickFontSize={14}
+            />
+            <LineChartCard
+              title="Ingresos últimos 12 meses"
+              data={ingresos}
+              xKey="name"
+              yKeys={["ingresos"]}
+            />
+          </Card>
         )}
 
         {porSexo.length > 0 && (
           <PieChartCard title="Distribución por género" data={porSexo} />
         )}
-
       </div>
 
       <FilteredEmployeesTable file={file} />
