@@ -323,7 +323,8 @@ export interface NominaKpis {
 
 
 export function nominaKpis(file: ParsedFile): NominaKpis {
-  const colNeto = findCol(file, ["Neto + Bono", "Neto+Bono"]);
+  const colNeto = findCol(file, ["Neto"]);
+  const colBono = findCol(file, ["Bono"]);
   const colCostos = findCol(file, ["Costos", "Costo"]);
   const colLegajo = findCol(file, [
     "Nro. de Legajo",
@@ -338,35 +339,35 @@ export function nominaKpis(file: ParsedFile): NominaKpis {
 
   
   for (const r of file.rows) {
-      // 1. Sumar Neto y Costos de TODAS las filas válidas (incluye desdoblamientos bancarios)
-      if (colNeto) {
-        const v = toNumber(r[colNeto]);
-        if (v > 0) {
-          totalNeto += v;
-        }
+    // 1. Sumar Neto (+ Bono si existe) y Costos de TODAS las filas válidas (incluye desdoblamientos bancarios)
+    if (colNeto) {
+      const v = toNumber(r[colNeto]) + (colBono ? toNumber(r[colBono]) : 0);
+      if (v > 0) {
+        totalNeto += v;
       }
-      if (colCostos) {
-        totalCostos += toNumber(r[colCostos]);
-      }
+    }
+    if (colCostos) {
+      totalCostos += toNumber(r[colCostos]);
+    }
 
-      // 2. Contar Legajos Únicos (solo si la fila tiene un legajo válido)
-      if (colLegajo && r[colLegajo]) {
-        const val = r[colLegajo];
-        if (val != null) {
-          const str = String(val).trim();
-          // Validamos que no sea vacío, S/N, 0 o guiones
-          if (
-            str !== "" &&
-            str !== "S/N" &&
-            str !== "0" &&
-            str !== "—" &&
-            str !== "-"
-          ) {
-            legajosUnicos.add(str);
-          }
+    // 2. Contar Legajos Únicos (solo si la fila tiene un legajo válido)
+    if (colLegajo && r[colLegajo]) {
+      const val = r[colLegajo];
+      if (val != null) {
+        const str = String(val).trim();
+        // Validamos que no sea vacío, S/N, 0 o guiones
+        if (
+          str !== "" &&
+          str !== "S/N" &&
+          str !== "0" &&
+          str !== "—" &&
+          str !== "-"
+        ) {
+          legajosUnicos.add(str);
         }
       }
     }
+  }
 
   const countEmpleadosUnicos = legajosUnicos.size;
   return {
@@ -432,21 +433,54 @@ export function costoPorArea(
     .sort((a, b) => b.costo - a.costo);
 }
 
-
 export function netoPromedioPorArea(
-  file: ParsedFile,
+  fileEmpleados: ParsedFile,
+  filePagos: ParsedFile,
 ): Array<{ name: string; promedio: number }> {
-  const colArea = findCol(file, ["AREA"]);
-  const colNeto = findCol(file, ["Neto"]);
-  if (!colArea || !colNeto) return [];
-  const sums = new Map<string, { sum: number; count: number }>();
-  for (const r of file.rows) {
-    const k = String(r[colArea] ?? "Sin dato").trim() || "Sin dato";
-    const cur = sums.get(k) ?? { sum: 0, count: 0 };
-    cur.sum += toNumber(r[colNeto]);
-    cur.count++;
-    sums.set(k, cur);
+  const colLegajoPagos = findCol(filePagos, [
+    "Nro. de Legajo",
+    "LEGAJO",
+    "NRO LEGAJO",
+  ]);
+  const colNetoPagos = findCol(filePagos, ["Neto"]);
+  const colLegajoEmp = findCol(fileEmpleados, [
+    "Nro. de Legajo",
+    "LEGAJO",
+    "NRO LEGAJO",
+  ]);
+  const colAreaEmp = findCol(fileEmpleados, ["AREA", "ÁREA", "SECTOR"]);
+
+  if (!colLegajoPagos || !colNetoPagos || !colLegajoEmp || !colAreaEmp)
+    return [];
+
+  // 1. Agregar PAGOS por LEGAJO (suma netos si hay desdoblamientos)
+  const legajoToNeto = new Map<string, number>();
+  for (const r of filePagos.rows) {
+    const leg = String(r[colLegajoPagos] ?? "").trim();
+    if (!leg) continue;
+    const neto = toNumber(r[colNetoPagos]);
+    legajoToNeto.set(leg, (legajoToNeto.get(leg) ?? 0) + neto);
   }
+
+  // 2. Mapear LEGAJO → AREA (solo activos de EVER WEAR)
+  const legajoToArea = new Map<string, string>();
+  for (const r of onlyActivos(fileEmpleados)) {
+    const leg = String(r[colLegajoEmp] ?? "").trim();
+    const area = String(r[colAreaEmp] ?? "Sin dato").trim() || "Sin dato";
+    if (leg) legajoToArea.set(leg, area);
+  }
+
+  // 3. Agrupar por AREA, sumando netos y contando legajos
+  const sums = new Map<string, { sum: number; count: number }>();
+  for (const [leg, neto] of legajoToNeto.entries()) {
+    const area = legajoToArea.get(leg);
+    if (!area) continue; // sin match → descartar
+    const cur = sums.get(area) ?? { sum: 0, count: 0 };
+    cur.sum += neto;
+    cur.count++;
+    sums.set(area, cur);
+  }
+
   return [...sums.entries()]
     .map(([name, { sum, count }]) => ({
       name,
