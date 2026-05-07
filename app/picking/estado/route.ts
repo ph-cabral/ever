@@ -15,3 +15,28 @@ export async function GET() {
   }
 }
 
+// // GET — depósito lista eventos (filtra por uno o varios estados)
+// export async function GET(req: NextRequest) {
+//   try {
+//     const { searchParams } = new URL(req.url);
+//     const estados = searchParams.getAll("estado");
+//     const limit = Number(searchParams.get("limit") ?? "50");
+
+//     // Sin filtro → default a pendientes
+//     const where =
+//       estados.length === 0
+//         ? { estado: "pendiente" }
+//         : { estado: { in: estados } };
+
+//     const eventos = await prisma.picking_eventos.findMany({
+//       where,
+//       orderBy: { creado_en: "desc" },
+//       take: limit,
+//     });
+
+//     return NextResponse.json(eventos);
+//   } catch (error) {
+//     console.error("GET /api/picking/eventos", error);
+//     return NextResponse.json({ error: "Error interno" }, { status: 500 });
+//   }
+// }

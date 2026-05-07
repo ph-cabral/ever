@@ -16,12 +16,14 @@ type ChatMensaje = {
   mensaje: string;
   creado_en: string;
 };
+const ESTADOS_DISPONIBLES = ["pendiente", "pedido", "s/e"] as const;
+type Estado = (typeof ESTADOS_DISPONIBLES)[number];
 
 export default function PickingPage() {
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [mensajes, setMensajes] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState<Record<number, boolean>>({});
-  
+
   const [chatMensajes, setChatMensajes] = useState<ChatMensaje[]>([]);
 
   const [mensajeSeleccionado, setMensajeSeleccionado] = useState<number | null>(
@@ -29,8 +31,9 @@ export default function PickingPage() {
   );
   const [respuesta, setRespuesta] = useState("");
   const respuestaRef = useRef<HTMLInputElement>(null);
-
-
+  const [estadoActivo, setEstadoActivo] = useState<Estado>("pendiente");
+  const [busqueda, setBusqueda] = useState("");
+  
   const responderChat = async (id: number) => {
     if (!respuesta.trim()) return;
     await fetch(`/api/chat/${id}/responder`, {
@@ -43,19 +46,30 @@ export default function PickingPage() {
     fetchChat();
   };
 
-
   const fetchChat = async () => {
     const res = await fetch("/api/chat");
     if (res.ok) setChatMensajes(await res.json());
   };
 
   const fetchEventos = async () => {
-    const res = await fetch("/api/picking/eventos?estado=pendiente");
+    const res = await fetch(
+      `/api/picking/eventos?estado=${encodeURIComponent(estadoActivo)}`,
+    );
     if (res.ok) {
       const data = await res.json();
       setEventos(data);
     }
   };
+
+
+  const eventosFiltrados = eventos.filter((e) => {
+    const q = busqueda.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      e.codigo.toLowerCase().includes(q) ||
+      e.picker_nombre.toLowerCase().includes(q)
+    );
+  });
 
   useEffect(() => {
     fetchEventos();
@@ -65,7 +79,7 @@ export default function PickingPage() {
       fetchChat();
     }, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [estadoActivo]);
 
   const responder = async (id: number, estado: "pedido" | "s/e") => {
     setLoading((prev) => ({ ...prev, [id]: true }));
@@ -89,11 +103,49 @@ export default function PickingPage() {
         Deposito - Pedidos pendientes
       </h1>
 
+      <div className="flex gap-2 mb-4 shrink-0 flex-wrap items-center">
+        {ESTADOS_DISPONIBLES.map((estado) => (
+          <button
+            key={estado}
+            // onClick={() => setEstadoActivo(estado)}
+            onClick={() => {
+              setBusqueda(""); // Asumiendo que setBusqueda limpia o resetea algo
+              setEstadoActivo(estado);
+            }}
+            className={`px-4 py-2 rounded-lg font-medium capitalize transition ${
+              estadoActivo === estado
+                ? "bg-blue-600 text-white"
+                : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+            }`}
+          >
+            {estado}
+          </button>
+        ))}
+
+        <input
+          type="text"
+          placeholder="Buscar por código o picker..."
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          className="ml-auto bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 w-64"
+        />
+
+        {busqueda && (
+          <button
+            onClick={() => setBusqueda("")}
+            className="text-gray-400 hover:text-white px-2"
+            title="Limpiar búsqueda"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
       {/* Layout principal */}
       <div className="flex gap-4 flex-1 overflow-hidden">
         {/* Tabla: scroll propio si es larga */}
         <div className="flex-1 overflow-auto">
-          {eventos.length === 0 ? (
+          {eventosFiltrados.length === 0 ? (
             <p className="text-gray-400">Sin pedidos pendientes</p>
           ) : (
             <div className="overflow-x-auto">
@@ -109,7 +161,7 @@ export default function PickingPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {eventos.map((e) => (
+                  {eventosFiltrados.map((e) => (
                     <tr
                       key={e.id}
                       className="border-b border-gray-800 hover:bg-gray-900"
