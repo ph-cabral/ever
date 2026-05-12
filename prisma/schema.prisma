@@ -76,8 +76,8 @@ model everwear_personal {
   nombre String  @db.VarChar(100)
   area   String  @db.VarChar(50)
   activo Boolean @default(true)
-  legajo legajo? 
-  
+  legajo legajo?
+
   @@map("personal")
   @@schema("everwear")
 }
