@@ -76,8 +76,8 @@ model everwear_personal {
   nombre String  @db.VarChar(100)
   area   String  @db.VarChar(50)
   activo Boolean @default(true)
-  legajo legajo? // ← agregar esta línea
-
+  legajo legajo? 
+  
   @@map("personal")
   @@schema("everwear")
 }
@@ -93,124 +93,102 @@ model chat_mensajes {
   @@schema("preparado")
 }
 
-
-
-
-
-
-
 model legajo {
-  id              Int      @id @default(autoincrement())
-  codigo          String   @unique // "L-001", "L-002"...
-  estado          String   @default("draft") @db.VarChar(20) // draft | activo | inactivo
-  personalId      Int?     @unique
-  personal        everwear_personal? @relation(fields: [personalId], references: [id])
-
-  // ===== Step 1: Personales =====
-  apellido           String   @db.VarChar(100)
-  nombre             String   @db.VarChar(100)
-  dni                String   @unique @db.VarChar(20)
-  cuil               String   @db.VarChar(20)
-  fechaNacimiento    DateTime @db.Date
-  lugarNacimiento    String   @db.VarChar(150)
-  nacionalidad       String   @default("Argentina") @db.VarChar(60)
-  sexo               String   @db.VarChar(2)         // M | F | X
-  estadoCivil        String   @db.VarChar(20)
-  altura             Float?
-  peso               Float?
-  manoHabil          String   @db.VarChar(20)
-  telefonoFijo       String?  @db.VarChar(40)
-  telefonoCelular    String   @db.VarChar(40)
-  emailPersonal      String   @db.VarChar(150)
-  antecedentesPenales Boolean @default(false)
-  antecedentesDetalle String?
-  aceptaPsicotecnico  Boolean @default(false)
-
-  // ===== Step 2: Domicilio =====
-  calle           String?  @db.VarChar(150)
-  numero          String?  @db.VarChar(20)
-  piso            String?  @db.VarChar(10)
-  depto           String?  @db.VarChar(10)
-  codigoPostal    String?  @db.VarChar(10)
-  localidad       String?  @db.VarChar(100)
-  provincia       String?  @db.VarChar(60)
-  comprobanteUrl  String?
-  ddjjConformidad Boolean  @default(false)
-
-  // ===== Step 3: Laboral / ARCA =====
-  fechaInicio          DateTime? @db.Date
-  fechaCese            DateTime? @db.Date
-  modalidadContrato    String?   @db.VarChar(100)
-  situacionRevista     String?   @db.VarChar(20)
-  regimen              String?   @db.VarChar(40)
-  convenio             String?   @db.VarChar(100)
-  categoria            String?   @db.VarChar(100)
-  puestoInterno        String?   @db.VarChar(100)
-  sector               String?   @db.VarChar(60)
-  retribucionPactada   Float?
-  modalidadLiquidacion String?   @db.VarChar(20)
-  obraSocial           String?   @db.VarChar(100)
-  tipoServicio         String?   @db.VarChar(100)
-  actividadEconomica   String?   @db.VarChar(100)
-  domicilioExplotacion String?   @db.VarChar(200)
-  claveAltaArca        String?   @db.VarChar(40)
-  fechaEnvioAlta       DateTime?
-  banco                String?   @db.VarChar(40)
-  bancoOtro            String?   @db.VarChar(60)
-  diaPago              Int?
-  percibeSeguroDesempleo Boolean @default(false)
-  ddjjArt12            Boolean   @default(false)
-
-  // ===== Step 4: Familia =====
-  tieneCargasFamilia Boolean @default(false)
-  medioPagoAaff      String? @db.VarChar(40)
-  medioPagoAaffOtro  String? @db.VarChar(100)
-
-  // ===== Step 5: Seguro / ART =====
-  estatura            Float?
-  pesoSalud           Float?
-  presionMin          Int?
-  presionMax          Int?
-  patologiaNervioso       Boolean @default(false)
-  patologiaRespiratorio   Boolean @default(false)
-  patologiaCirculatorio   Boolean @default(false)
-  patologiaDigestivo      Boolean @default(false)
-  patologiaRenal          Boolean @default(false)
-  patologiaOseo           Boolean @default(false)
-  patologiaSangre         Boolean @default(false)
-  patologiaCancer         Boolean @default(false)
-  patologiaCongenitas     Boolean @default(false)
-  patologiaEndocrinas     Boolean @default(false)
-  patologiaGinecologicas  Boolean @default(false)
-  patologiaEmbarazo       Boolean @default(false)
-  patologiaOtras          Boolean @default(false)
-  patologiaChagas         Boolean @default(false)
-  observacionesSalud      String?
-  numeroSolicitud         String? @db.VarChar(60)
-  numeroPoliza            String? @db.VarChar(60)
-  capitalAsegurado        Float?
-  fechaIngresoEmpleo      DateTime? @db.Date
-  artCompania             String? @db.VarChar(80)
-  artNumeroContrato       String? @db.VarChar(60)
-  artCredencialEntregada  Boolean @default(false)
-
-  // ===== Step 6: Equipos =====
-  aceptaClausulas Boolean @default(false)
-  jurisdiccion    String  @default("San Francisco, Córdoba") @db.VarChar(100)
-  firmaEmpleado   String?
-  fechaFirma      DateTime? @db.Date
-
-  // Auditoría
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relaciones hijas
-  familiares       legajo_familiar[]
-  beneficiarios    legajo_beneficiario[]
-  estudios         legajo_estudio[]
-  idiomas          legajo_idioma[]
-  equipos          legajo_equipo[]
-  antecedentesSrt  legajo_antecedente_srt[]
+  id                     Int                      @id @default(autoincrement())
+  codigo                 String                   @unique
+  estado                 String                   @default("draft") @db.VarChar(20)
+  personalId             Int?                     @unique
+  apellido               String                   @db.VarChar(100)
+  nombre                 String                   @db.VarChar(100)
+  dni                    String                   @unique @db.VarChar(20)
+  cuil                   String                   @db.VarChar(20)
+  fechaNacimiento        DateTime                 @db.Date
+  lugarNacimiento        String                   @db.VarChar(150)
+  nacionalidad           String                   @default("Argentina") @db.VarChar(60)
+  sexo                   String                   @db.VarChar(2)
+  estadoCivil            String                   @db.VarChar(20)
+  altura                 Float?
+  peso                   Float?
+  manoHabil              String                   @db.VarChar(20)
+  telefonoFijo           String?                  @db.VarChar(40)
+  telefonoCelular        String                   @db.VarChar(40)
+  emailPersonal          String                   @db.VarChar(150)
+  antecedentesPenales    Boolean                  @default(false)
+  antecedentesDetalle    String?
+  aceptaPsicotecnico     Boolean                  @default(false)
+  calle                  String?                  @db.VarChar(150)
+  numero                 String?                  @db.VarChar(20)
+  piso                   String?                  @db.VarChar(10)
+  depto                  String?                  @db.VarChar(10)
+  codigoPostal           String?                  @db.VarChar(10)
+  localidad              String?                  @db.VarChar(100)
+  provincia              String?                  @db.VarChar(60)
+  comprobanteUrl         String?
+  ddjjConformidad        Boolean                  @default(false)
+  fechaInicio            DateTime?                @db.Date
+  fechaCese              DateTime?                @db.Date
+  modalidadContrato      String?                  @db.VarChar(100)
+  situacionRevista       String?                  @db.VarChar(20)
+  regimen                String?                  @db.VarChar(40)
+  convenio               String?                  @db.VarChar(100)
+  categoria              String?                  @db.VarChar(100)
+  puestoInterno          String?                  @db.VarChar(100)
+  sector                 String?                  @db.VarChar(60)
+  retribucionPactada     Float?
+  modalidadLiquidacion   String?                  @db.VarChar(20)
+  obraSocial             String?                  @db.VarChar(100)
+  tipoServicio           String?                  @db.VarChar(100)
+  actividadEconomica     String?                  @db.VarChar(100)
+  domicilioExplotacion   String?                  @db.VarChar(200)
+  claveAltaArca          String?                  @db.VarChar(40)
+  fechaEnvioAlta         DateTime?
+  banco                  String?                  @db.VarChar(40)
+  bancoOtro              String?                  @db.VarChar(60)
+  diaPago                Int?
+  percibeSeguroDesempleo Boolean                  @default(false)
+  ddjjArt12              Boolean                  @default(false)
+  tieneCargasFamilia     Boolean                  @default(false)
+  medioPagoAaff          String?                  @db.VarChar(40)
+  medioPagoAaffOtro      String?                  @db.VarChar(100)
+  estatura               Float?
+  pesoSalud              Float?
+  presionMin             Int?
+  presionMax             Int?
+  patologiaNervioso      Boolean                  @default(false)
+  patologiaRespiratorio  Boolean                  @default(false)
+  patologiaCirculatorio  Boolean                  @default(false)
+  patologiaDigestivo     Boolean                  @default(false)
+  patologiaRenal         Boolean                  @default(false)
+  patologiaOseo          Boolean                  @default(false)
+  patologiaSangre        Boolean                  @default(false)
+  patologiaCancer        Boolean                  @default(false)
+  patologiaCongenitas    Boolean                  @default(false)
+  patologiaEndocrinas    Boolean                  @default(false)
+  patologiaGinecologicas Boolean                  @default(false)
+  patologiaEmbarazo      Boolean                  @default(false)
+  patologiaOtras         Boolean                  @default(false)
+  patologiaChagas        Boolean                  @default(false)
+  observacionesSalud     String?
+  numeroSolicitud        String?                  @db.VarChar(60)
+  numeroPoliza           String?                  @db.VarChar(60)
+  capitalAsegurado       Float?
+  fechaIngresoEmpleo     DateTime?                @db.Date
+  artCompania            String?                  @db.VarChar(80)
+  artNumeroContrato      String?                  @db.VarChar(60)
+  artCredencialEntregada Boolean                  @default(false)
+  aceptaClausulas        Boolean                  @default(false)
+  jurisdiccion           String                   @default("San Francisco, Córdoba") @db.VarChar(100)
+  firmaEmpleado          String?
+  fechaFirma             DateTime?                @db.Date
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  personal               everwear_personal?       @relation(fields: [personalId], references: [id])
+  antecedentesSrt        legajo_antecedente_srt[]
+  beneficiarios          legajo_beneficiario[]
+  equipos                legajo_equipo[]
+  estudios               legajo_estudio[]
+  familiares             legajo_familiar[]
+  idiomas                legajo_idioma[]
 
   @@index([estado])
   @@index([apellido, nombre])
@@ -220,7 +198,6 @@ model legajo {
 model legajo_familiar {
   id              Int      @id @default(autoincrement())
   legajoId        Int
-  legajo          legajo   @relation(fields: [legajoId], references: [id], onDelete: Cascade)
   parentesco      String   @db.VarChar(20)
   apellido        String   @db.VarChar(100)
   nombre          String   @db.VarChar(100)
@@ -231,21 +208,22 @@ model legajo_familiar {
   telefono        String?  @db.VarChar(40)
   ocupacion       String?  @db.VarChar(100)
   convive         Boolean  @default(false)
+  legajo          legajo   @relation(fields: [legajoId], references: [id], onDelete: Cascade)
 
   @@index([legajoId])
   @@schema("everwear")
 }
 
 model legajo_beneficiario {
-  id              Int      @id @default(autoincrement())
+  id              Int    @id @default(autoincrement())
   legajoId        Int
-  legajo          legajo   @relation(fields: [legajoId], references: [id], onDelete: Cascade)
-  apellidoNombre  String   @db.VarChar(200)
-  tipoDocumento   String   @default("DNI") @db.VarChar(10)
-  numeroDocumento String   @db.VarChar(20)
-  parentesco      String   @db.VarChar(40)
-  domicilio       String   @db.VarChar(200)
+  apellidoNombre  String @db.VarChar(200)
+  tipoDocumento   String @default("DNI") @db.VarChar(10)
+  numeroDocumento String @db.VarChar(20)
+  parentesco      String @db.VarChar(40)
+  domicilio       String @db.VarChar(200)
   porcentaje      Float
+  legajo          legajo @relation(fields: [legajoId], references: [id], onDelete: Cascade)
 
   @@index([legajoId])
   @@schema("everwear")
@@ -254,25 +232,25 @@ model legajo_beneficiario {
 model legajo_estudio {
   id          Int     @id @default(autoincrement())
   legajoId    Int
-  legajo      legajo  @relation(fields: [legajoId], references: [id], onDelete: Cascade)
   nivel       String  @db.VarChar(20)
   institucion String  @db.VarChar(200)
   desde       String  @db.VarChar(10)
   hasta       String? @db.VarChar(10)
   titulo      String? @db.VarChar(200)
   enCurso     Boolean @default(false)
+  legajo      legajo  @relation(fields: [legajoId], references: [id], onDelete: Cascade)
 
   @@index([legajoId])
   @@schema("everwear")
 }
 
 model legajo_idioma {
-  id         Int    @id @default(autoincrement())
-  legajoId   Int
-  legajo     legajo @relation(fields: [legajoId], references: [id], onDelete: Cascade)
-  idioma     String @db.VarChar(60)
-  habla      String @db.VarChar(20)
-  escritura  String @db.VarChar(20)
+  id        Int    @id @default(autoincrement())
+  legajoId  Int
+  idioma    String @db.VarChar(60)
+  habla     String @db.VarChar(20)
+  escritura String @db.VarChar(20)
+  legajo    legajo @relation(fields: [legajoId], references: [id], onDelete: Cascade)
 
   @@index([legajoId])
   @@schema("everwear")
@@ -281,27 +259,27 @@ model legajo_idioma {
 model legajo_equipo {
   id            Int      @id @default(autoincrement())
   legajoId      Int
-  legajo        legajo   @relation(fields: [legajoId], references: [id], onDelete: Cascade)
   tipo          String   @db.VarChar(30)
   marca         String   @db.VarChar(60)
   modelo        String   @db.VarChar(100)
   detalle       String?
   numeroSerie   String   @db.VarChar(80)
   fechaEntrega  DateTime @db.Date
-  estado        String   @db.VarChar(10)  // nuevo | usado
+  estado        String   @db.VarChar(10)
   observaciones String?
+  legajo        legajo   @relation(fields: [legajoId], references: [id], onDelete: Cascade)
 
   @@index([legajoId])
   @@schema("everwear")
 }
 
 model legajo_antecedente_srt {
-  id            Int      @id @default(autoincrement())
+  id            Int       @id @default(autoincrement())
   legajoId      Int
-  legajo        legajo   @relation(fields: [legajoId], references: [id], onDelete: Cascade)
-  descripcion   String   @db.VarChar(300)
+  descripcion   String    @db.VarChar(300)
   fecha         DateTime? @db.Date
   observaciones String?
+  legajo        legajo    @relation(fields: [legajoId], references: [id], onDelete: Cascade)
 
   @@index([legajoId])
   @@schema("everwear")

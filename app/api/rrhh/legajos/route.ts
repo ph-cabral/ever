@@ -12,17 +12,17 @@ export async function GET(req: NextRequest) {
   );
   const search = (searchParams.get("search") ?? "").trim();
 
-  const where = search
-    ? {
-        OR: [
-          { nombre: { contains: search, mode: "insensitive" as const } },
-          { apellido: { contains: search, mode: "insensitive" as const } },
-          { sector: { contains: search, mode: "insensitive" as const } },
-          { codigo: { contains: search, mode: "insensitive" as const } },
-          { dni: { contains: search } },
-        ],
-      }
-    : {};
+      const where = search
+        ? {
+            OR: [
+              { nombre: { contains: search, mode: "insensitive" as const } },
+              { apellido: { contains: search, mode: "insensitive" as const } },
+              { sector: { contains: search, mode: "insensitive" as const } },
+              { codigo: { contains: search, mode: "insensitive" as const } },
+              { dni: { contains: search } },
+            ],
+          }
+        : {};
 
   const [total, items] = await Promise.all([
     prisma.legajo.count({ where }),
