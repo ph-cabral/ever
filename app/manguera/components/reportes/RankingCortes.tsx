@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { DateField } from "@/components/ui/date-field";
 
 interface RankingItem {
   codigo: string;
@@ -60,25 +61,18 @@ export default function RankingCortes() {
       <div className="flex flex-wrap gap-3 mb-4 items-end">
         <div className="flex flex-col gap-1">
           <label className="text-xs text-gray-500 font-medium">Desde</label>
-          <input
-            type="date"
-            value={desde}
-            onChange={(e) => handleDesde(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+          <DateField value={desde} onChange={handleDesde} />
         </div>
 
         <div className="flex flex-col gap-1">
           <label className={`text-xs font-medium ${!desde ? "text-gray-300" : "text-gray-500"}`}>
             Hasta
           </label>
-          <input
-            type="date"
+          <DateField
             value={hasta}
-            onChange={(e) => handleHasta(e.target.value)}
+            onChange={handleHasta}
             disabled={!desde}
             min={desde}
-            className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-300"
           />
         </div>
 

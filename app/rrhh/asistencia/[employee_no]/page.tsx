@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo, use } from "react";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -95,8 +96,8 @@ export default function AsistenciaEmpleadoPage({
             <SelectItem value="SALIDA">SALIDA</SelectItem>
           </SelectContent>
         </Select>
-        <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} />
-        <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} />
+        <DateField value={desde} onChange={setDesde} />
+        <DateField value={hasta} onChange={setHasta} />
       </div>
 
       <div className="rounded-md border">

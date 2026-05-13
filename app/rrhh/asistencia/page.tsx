@@ -173,6 +173,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -333,17 +334,8 @@ export default function AsistenciaPage() {
             <SelectItem value="lilser">lilser</SelectItem>
           </SelectContent>
         </Select>
-        <Input
-          type="date"
-          value={desde}
-          onChange={(e) => onDesdeChange(e.target.value)}
-        />
-        <Input
-          type="date"
-          value={hasta}
-          min={desde}
-          onChange={(e) => onHastaChange(e.target.value)}
-        />
+        <DateField value={desde} onChange={onDesdeChange} />
+        <DateField value={hasta} min={desde} onChange={onHastaChange} />
       </div>
 
       <div className="rounded-md border">

@@ -12,6 +12,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -149,7 +150,13 @@ export function Step5SeguroArt({
             />
           </Field>
           <Field label="Fecha de ingreso al empleo" error={errors.fechaIngresoEmpleo?.message}>
-            <Input type="date" {...register("fechaIngresoEmpleo")} />
+            <Controller
+              control={control}
+              name="fechaIngresoEmpleo"
+              render={({ field }) => (
+                <DateField value={field.value ?? ""} onChange={field.onChange} />
+              )}
+            />
           </Field>
         </div>
       </section>
@@ -229,9 +236,15 @@ export function Step5SeguroArt({
                 </div>
                 <div className="md:col-span-2">
                   <Label className="text-xs">Fecha</Label>
-                  <Input
-                    type="date"
-                    {...register(`antecedentesSrt.${idx}.fecha`)}
+                  <Controller
+                    control={control}
+                    name={`antecedentesSrt.${idx}.fecha`}
+                    render={({ field }) => (
+                      <DateField
+                        value={field.value ?? ""}
+                        onChange={field.onChange}
+                      />
+                    )}
                   />
                 </div>
                 <div className="md:col-span-4">

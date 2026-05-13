@@ -7,6 +7,7 @@ import { step3Schema, type Step3Data } from "@/app/rrhh/legajos/nuevo/schemas/st
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -61,10 +62,22 @@ export function Step3Laboral({
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Field label="Fecha de inicio" error={errors.fechaInicio?.message} required>
-            <Input type="date" {...register("fechaInicio")} />
+            <Controller
+              control={control}
+              name="fechaInicio"
+              render={({ field }) => (
+                <DateField value={field.value ?? ""} onChange={field.onChange} />
+              )}
+            />
           </Field>
           <Field label="Fecha de cese" error={errors.fechaCese?.message}>
-            <Input type="date" {...register("fechaCese")} />
+            <Controller
+              control={control}
+              name="fechaCese"
+              render={({ field }) => (
+                <DateField value={field.value ?? ""} onChange={field.onChange} />
+              )}
+            />
           </Field>
           <Field label="Modalidad de contrato" error={errors.modalidadContrato?.message} required>
             <Input

@@ -13,6 +13,7 @@ import { calcularCuil } from "@/lib/rrhh/cuil";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -109,7 +110,13 @@ export function Step1Personales({
             error={errors.fechaNacimiento?.message}
             required
           >
-            <Input type="date" {...register("fechaNacimiento")} />
+            <Controller
+              control={control}
+              name="fechaNacimiento"
+              render={({ field }) => (
+                <DateField value={field.value ?? ""} onChange={field.onChange} />
+              )}
+            />
           </Field>
           <Field
             label="Lugar de nacimiento"

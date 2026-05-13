@@ -12,6 +12,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -272,9 +273,15 @@ export function Step4Familia({
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
                   <div>
                     <Label className="text-xs">F. nacimiento</Label>
-                    <Input
-                      type="date"
-                      {...register(`familiares.${idx}.fechaNacimiento`)}
+                    <Controller
+                      control={control}
+                      name={`familiares.${idx}.fechaNacimiento`}
+                      render={({ field }) => (
+                        <DateField
+                          value={field.value ?? ""}
+                          onChange={field.onChange}
+                        />
+                      )}
                     />
                   </div>
                   <div>

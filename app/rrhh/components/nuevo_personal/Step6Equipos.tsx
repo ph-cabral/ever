@@ -11,6 +11,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -179,9 +180,15 @@ export function Step6Equipos({
                   </div>
                   <div>
                     <Label className="text-xs">Fecha entrega</Label>
-                    <Input
-                      type="date"
-                      {...register(`equipos.${idx}.fechaEntrega`)}
+                    <Controller
+                      control={control}
+                      name={`equipos.${idx}.fechaEntrega`}
+                      render={({ field }) => (
+                        <DateField
+                          value={field.value ?? ""}
+                          onChange={field.onChange}
+                        />
+                      )}
                     />
                   </div>
                   <div>
@@ -318,7 +325,13 @@ export function Step6Equipos({
             error={errors.fechaFirma?.message}
             required
           >
-            <Input type="date" {...register("fechaFirma")} />
+            <Controller
+              control={control}
+              name="fechaFirma"
+              render={({ field }) => (
+                <DateField value={field.value ?? ""} onChange={field.onChange} />
+              )}
+            />
           </Field>
           <div className="space-y-1">
             <Label className="text-sm">Jurisdicción</Label>
