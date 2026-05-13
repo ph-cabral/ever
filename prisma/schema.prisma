@@ -6,7 +6,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["everwear", "fabrica", "preparado"]
+  schemas  = ["everwear", "fabrica", "preparado", "asistencia"]
 }
 
 model personal {
@@ -283,4 +283,43 @@ model legajo_antecedente_srt {
 
   @@index([legajoId])
   @@schema("everwear")
+}
+
+// ─── Asistencia (Hikvision sync) ──────────────────────────────────────────────
+model asistencia_evento {
+  id             BigInt    @id @default(autoincrement())
+  device         String    @db.VarChar(50)
+  employee_no    String    @db.VarChar(50)
+  employee_name  String?   @db.VarChar(200)
+  event_time     DateTime  @db.Timestamptz(6)
+  major          Int?
+  minor          Int?
+  card_no        String?   @db.VarChar(50)
+  tipo           String?   @db.VarChar(20)
+  job_id         BigInt?
+  created_at     DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([employee_no, event_time, device])
+  @@index([employee_no, event_time])
+  @@index([job_id])
+  @@map("evento")
+  @@schema("asistencia")
+}
+
+model asistencia_resumen_diario {
+  id             BigInt    @id @default(autoincrement())
+  employee_no    String    @db.VarChar(50)
+  employee_name  String?   @db.VarChar(200)
+  fecha          DateTime  @db.Date
+  check_in       DateTime? @db.Timestamptz(6)
+  check_out      DateTime? @db.Timestamptz(6)
+  minutos        Int?
+  eventos_dia    Int?
+  devices        String?
+  job_id         BigInt?
+
+  @@unique([employee_no, fecha])
+  @@index([fecha])
+  @@map("resumen_diario")
+  @@schema("asistencia")
 }
