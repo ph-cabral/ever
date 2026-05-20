@@ -1,0 +1,236 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+type Msg = { role: "user" | "assistant"; content: string };
+
+const USER_ID = "1";
+const SESSION_ID = `user_${USER_ID}`;
+
+const GENEROS = [
+  { label: "Masculino", value: "male" },
+  { label: "Femenino", value: "female" },
+];
+const UBICACIONES = [
+  { label: "Fábrica", value: "fabrica" },
+  { label: "Lilser", value: "lilser" },
+  { label: "Oficina", value: "oficina" },
+];
+
+// Detecta si el último mensaje del asistente abrió el flujo de creación
+function isAwaitingEmployeeData(messages: Msg[]) {
+  const last = [...messages].reverse().find((m) => m.role === "assistant");
+  if (!last) return false;
+  return /Foto capturada del reloj/i.test(last.content);
+}
+
+function renderContent(text: string) {
+  // Render imágenes embebidas markdown ![alt](data:...)
+  const imgRegex = /!\[[^\]]*\]\((data:image\/[^)]+)\)/g;
+  const parts: Array<{ t: "text" | "img"; v: string }> = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = imgRegex.exec(text)) !== null) {
+    if (m.index > last) parts.push({ t: "text", v: text.slice(last, m.index) });
+    parts.push({ t: "img", v: m[1] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push({ t: "text", v: text.slice(last) });
+
+  return parts.map((p, i) =>
+    p.t === "img" ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        key={i}
+        src={p.v}
+        alt="foto"
+        className="my-2 rounded-lg max-w-xs border border-zinc-700"
+      />
+    ) : (
+      <span key={i} className="whitespace-pre-wrap">{p.v}</span>
+    ),
+  );
+}
+
+export default function VickiPage() {
+  const [messages, setMessages] = useState<Msg[]>([]);
+  const [input, setInput] = useState("");
+  const [gender, setGender] = useState<string>("");
+  const [location, setLocation] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const endRef = useRef<HTMLDivElement | null>(null);
+
+  // Cargar historial
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`/api/vicki/history/${SESSION_ID}`);
+        if (!r.ok) return;
+        const data = await r.json();
+        const map: Record<string, "user" | "assistant"> = {
+          human: "user",
+          ai: "assistant",
+        };
+        const hist: Msg[] = (data.history ?? []).map((m: any) => ({
+          role: map[m.role] ?? m.role,
+          content: m.content,
+        }));
+        setMessages(hist);
+      } catch {}
+    })();
+  }, []);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  const awaitingEmp = isAwaitingEmployeeData(messages);
+  const inputLocked = awaitingEmp && (!gender || !location);
+  const placeholder = awaitingEmp
+    ? !gender || !location
+      ? "Seleccioná sexo y ubicación primero"
+      : "Nombre y apellido del empleado…"
+    : "Escribí tu mensaje… (ej: /crea empleado)";
+
+  async function send(message: string) {
+    if (!message.trim() || loading) return;
+    const userMsg: Msg = { role: "user", content: message };
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+    setLoading(true);
+
+    const payload: any = {
+      message,
+      session_id: SESSION_ID,
+      user_id: USER_ID,
+    };
+    if (awaitingEmp && gender && location) {
+      payload.gender = gender;
+      payload.location = location;
+    }
+
+    try {
+      const r = await fetch("/api/vicki/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json();
+      const answer = data.response ?? `Error: ${data.error ?? "desconocido"}`;
+      setMessages((prev) => [...prev, { role: "assistant", content: answer }]);
+
+      // Si se creó exitosamente, reseteo selects
+      if (/Empleado \*\*\d+\*\*/.test(answer) || answer.startsWith("✅")) {
+        setGender("");
+        setLocation("");
+      }
+    } catch (e: any) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Error de conexión: ${e?.message ?? e}` },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    send(input);
+  }
+
+  return (
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
+      <header className="border-b border-zinc-800 px-6 py-4">
+        <h1 className="text-lg font-semibold">Vicki — Selección de Personal</h1>
+      </header>
+
+      <main className="flex-1 overflow-y-auto px-4 py-6">
+        <div className="mx-auto max-w-2xl flex flex-col gap-4">
+          {messages.length === 0 && (
+            <div className="text-zinc-500 text-sm text-center py-12">
+              Escribí <code className="bg-zinc-800 px-1.5 py-0.5 rounded">/crea empleado</code> para empezar.
+            </div>
+          )}
+
+          {messages.map((m, i) => (
+            <div
+              key={i}
+              className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              <div
+                className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm ${
+                  m.role === "user"
+                    ? "bg-blue-600 text-white"
+                    : "bg-zinc-800 text-zinc-100"
+                }`}
+              >
+                {renderContent(m.content)}
+              </div>
+            </div>
+          ))}
+
+          {loading && (
+            <div className="flex justify-start">
+              <div className="bg-zinc-800 text-zinc-400 rounded-2xl px-4 py-2.5 text-sm">
+                Pensando…
+              </div>
+            </div>
+          )}
+          <div ref={endRef} />
+        </div>
+      </main>
+
+      <footer className="border-t border-zinc-800 px-4 py-4">
+        <form onSubmit={onSubmit} className="mx-auto max-w-2xl flex flex-col gap-2">
+          {awaitingEmp && (
+            <div className="flex gap-2">
+              <select
+                value={gender}
+                onChange={(e) => setGender(e.target.value)}
+                className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              >
+                <option value="">Sexo…</option>
+                {GENEROS.map((g) => (
+                  <option key={g.value} value={g.value}>
+                    {g.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              >
+                <option value="">Ubicación…</option>
+                {UBICACIONES.map((u) => (
+                  <option key={u.value} value={u.value}>
+                    {u.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <Input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={placeholder}
+              disabled={inputLocked || loading}
+              className="flex-1 bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-500"
+            />
+            <Button
+              type="submit"
+              disabled={inputLocked || loading || !input.trim()}
+            >
+              Enviar
+            </Button>
+          </div>
+        </form>
+      </footer>
+    </div>
+  );
+}
