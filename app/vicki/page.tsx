@@ -23,40 +23,8 @@ const UBICACIONES = [
 function isAwaitingEmployeeData(messages: Msg[]) {
   const last = [...messages].reverse().find((m) => m.role === "assistant");
   if (!last) return false;
-  return /Foto capturada del reloj/i.test(last.content);
-  // return /Foto tomada/i.test(last.content);
+  return /Foto tomada/i.test(last.content);
 }
-
-// function renderContent(text: string) {
-//   // Render imágenes embebidas markdown ![alt](data:...)
-//   const imgRegex = /!\[[^\]]*\]\((data:image\/[^)]+)\)/g;
-//   const parts: Array<{ t: "text" | "img"; v: string }> = [];
-//   let last = 0;
-//   let m: RegExpExecArray | null;
-//   while ((m = imgRegex.exec(text)) !== null) {
-//     if (m.index > last) parts.push({ t: "text", v: text.slice(last, m.index) });
-//     parts.push({ t: "img", v: m[1] });
-//     last = m.index + m[0].length;
-//   }
-//   if (last < text.length) parts.push({ t: "text", v: text.slice(last) });
-
-//   return parts.map((p, i) =>
-//     p.t === "img" ? (
-//       // eslint-disable-next-line @next/next/no-img-element
-//       <img
-//         key={i}
-//         src={p.v}
-//         alt="foto"
-//         className="my-2 rounded-lg max-w-xs border border-zinc-700"
-//       />
-//     ) : (
-//       // <span key={i} className="whitespace-pre-wrap">{p.v}</span>
-//       <span key={i} className="whitespace-pre-wrap break-all">
-//         {p.v}
-//       </span>
-//     ),
-//   );
-// }
 
 
 function renderContent(text: string, onCancel?: () => void) {
@@ -98,17 +66,7 @@ function renderContent(text: string, onCancel?: () => void) {
 }
 
 
-async function cancelEmployee() {
-  try {
-    await fetch(`/api/vicki/cancel_employee/${SESSION_ID}`, { method: "POST" });
-  } catch {}
-  setGender("");
-  setLocation("");
-  setMessages((prev) => [
-    ...prev,
-    { role: "assistant", content: "❌ Operación cancelada." },
-  ]);
-}
+
 
 export default function VickiPage() {
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -117,11 +75,15 @@ export default function VickiPage() {
   const [location, setLocation] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
+  
 
   // Cargar historial
   useEffect(() => {
     (async () => {
       try {
+        fetch("/api/vicki/history/user_1")
+          .then((r) => r.json())
+          .then(console.log);
         const r = await fetch(`/api/vicki/history/${SESSION_ID}`);
         if (!r.ok) return;
         const data = await r.json();
@@ -142,7 +104,16 @@ export default function VickiPage() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  const awaitingEmp = isAwaitingEmployeeData(messages);
+  // const awaitingEmp = isAwaitingEmployeeData(messages);
+
+  const [awaitingEmp, setAwaitingEmp] = useState(false);
+
+  useEffect(() => {
+    fetch(`/api/vicki/draft_status/${SESSION_ID}`)
+      .then((r) => r.json())
+      .then((d) => setAwaitingEmp(!!d.has_draft));
+  }, [messages]);
+
   const inputLocked = awaitingEmp && (!gender || !location);
   const placeholder = awaitingEmp
     ? !gender || !location
@@ -177,7 +148,6 @@ export default function VickiPage() {
       const answer = data.response ?? `Error: ${data.error ?? "desconocido"}`;
       setMessages((prev) => [...prev, { role: "assistant", content: answer }]);
 
-      // Si se creó exitosamente, reseteo selects
       if (/Empleado \*\*\d+\*\*/.test(answer) || answer.startsWith("✅")) {
         setGender("");
         setLocation("");
@@ -192,10 +162,25 @@ export default function VickiPage() {
     }
   }
 
+  async function cancelEmployee() {
+    try {
+      await fetch(`/api/vicki/cancel_employee/${SESSION_ID}`, {
+        method: "POST",
+      });
+    } catch {}
+    setGender("");
+    setLocation("");
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", content: "❌ Operación cancelada." },
+    ]);
+  }
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     send(input);
   }
+
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
