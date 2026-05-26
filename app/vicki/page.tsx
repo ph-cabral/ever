@@ -23,12 +23,43 @@ const UBICACIONES = [
 function isAwaitingEmployeeData(messages: Msg[]) {
   const last = [...messages].reverse().find((m) => m.role === "assistant");
   if (!last) return false;
-  // return /Foto capturada del reloj/i.test(last.content);
-  return /Foto tomada/i.test(last.content);
+  return /Foto capturada del reloj/i.test(last.content);
+  // return /Foto tomada/i.test(last.content);
 }
 
-function renderContent(text: string) {
-  // Render imágenes embebidas markdown ![alt](data:...)
+// function renderContent(text: string) {
+//   // Render imágenes embebidas markdown ![alt](data:...)
+//   const imgRegex = /!\[[^\]]*\]\((data:image\/[^)]+)\)/g;
+//   const parts: Array<{ t: "text" | "img"; v: string }> = [];
+//   let last = 0;
+//   let m: RegExpExecArray | null;
+//   while ((m = imgRegex.exec(text)) !== null) {
+//     if (m.index > last) parts.push({ t: "text", v: text.slice(last, m.index) });
+//     parts.push({ t: "img", v: m[1] });
+//     last = m.index + m[0].length;
+//   }
+//   if (last < text.length) parts.push({ t: "text", v: text.slice(last) });
+
+//   return parts.map((p, i) =>
+//     p.t === "img" ? (
+//       // eslint-disable-next-line @next/next/no-img-element
+//       <img
+//         key={i}
+//         src={p.v}
+//         alt="foto"
+//         className="my-2 rounded-lg max-w-xs border border-zinc-700"
+//       />
+//     ) : (
+//       // <span key={i} className="whitespace-pre-wrap">{p.v}</span>
+//       <span key={i} className="whitespace-pre-wrap break-all">
+//         {p.v}
+//       </span>
+//     ),
+//   );
+// }
+
+
+function renderContent(text: string, onCancel?: () => void) {
   const imgRegex = /!\[[^\]]*\]\((data:image\/[^)]+)\)/g;
   const parts: Array<{ t: "text" | "img"; v: string }> = [];
   let last = 0;
@@ -42,17 +73,41 @@ function renderContent(text: string) {
 
   return parts.map((p, i) =>
     p.t === "img" ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        key={i}
-        src={p.v}
-        alt="foto"
-        className="my-2 rounded-lg max-w-xs border border-zinc-700"
-      />
+      <div key={i} className="my-2 flex items-start gap-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={p.v}
+          alt="foto"
+          className="rounded-lg max-w-xs border border-zinc-700"
+        />
+        {onCancel && (
+          <button
+            onClick={onCancel}
+            className="rounded-md bg-red-600 hover:bg-red-700 px-3 py-1.5 text-xs text-white"
+          >
+            Cancelar
+          </button>
+        )}
+      </div>
     ) : (
-      <span key={i} className="whitespace-pre-wrap">{p.v}</span>
+      <span key={i} className="whitespace-pre-wrap break-all">
+        {p.v}
+      </span>
     ),
   );
+}
+
+
+async function cancelEmployee() {
+  try {
+    await fetch(`/api/vicki/cancel_employee/${SESSION_ID}`, { method: "POST" });
+  } catch {}
+  setGender("");
+  setLocation("");
+  setMessages((prev) => [
+    ...prev,
+    { role: "assistant", content: "❌ Operación cancelada." },
+  ]);
 }
 
 export default function VickiPage() {
@@ -152,7 +207,11 @@ export default function VickiPage() {
         <div className="mx-auto max-w-2xl flex flex-col gap-4">
           {messages.length === 0 && (
             <div className="text-zinc-500 text-sm text-center py-12">
-              Escribí <code className="bg-zinc-800 px-1.5 py-0.5 rounded">/crea empleado</code> para empezar.
+              Escribí{" "}
+              <code className="bg-zinc-800 px-1.5 py-0.5 rounded">
+                /crea empleado
+              </code>{" "}
+              para empezar.
             </div>
           )}
 
@@ -162,13 +221,23 @@ export default function VickiPage() {
               className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm ${
+                // className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm ${
+                className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm overflow-hidden break-words ${
                   m.role === "user"
                     ? "bg-blue-600 text-white"
                     : "bg-zinc-800 text-zinc-100"
                 }`}
               >
-                {renderContent(m.content)}
+                {/* {renderContent(m.content)}
+                 */}
+                {renderContent(
+                  m.content,
+                  awaitingEmp &&
+                    m.role === "assistant" &&
+                    i === messages.length - 1
+                    ? cancelEmployee
+                    : undefined,
+                )}
               </div>
             </div>
           ))}
@@ -185,7 +254,10 @@ export default function VickiPage() {
       </main>
 
       <footer className="border-t border-zinc-800 px-4 py-4">
-        <form onSubmit={onSubmit} className="mx-auto max-w-2xl flex flex-col gap-2">
+        <form
+          onSubmit={onSubmit}
+          className="mx-auto max-w-2xl flex flex-col gap-2"
+        >
           {awaitingEmp && (
             <div className="flex gap-2">
               <select
