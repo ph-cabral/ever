@@ -23,7 +23,8 @@ const UBICACIONES = [
 function isAwaitingEmployeeData(messages: Msg[]) {
   const last = [...messages].reverse().find((m) => m.role === "assistant");
   if (!last) return false;
-  return /Foto capturada del reloj/i.test(last.content);
+  // return /Foto capturada del reloj/i.test(last.content);
+  return /Foto tomada/i.test(last.content);
 }
 
 function renderContent(text: string) {
