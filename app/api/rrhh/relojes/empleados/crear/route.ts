@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 const RELOJES = [
-  { ip: "10.10.0.12", nombre: "Oficina" },
+  { ip: "10.10.0.30", nombre: "Oficina" },
 ];
 
 // { ip: "10.10.0.30", nombre: "Fabrica" },
