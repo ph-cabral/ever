@@ -37,9 +37,9 @@ type ResultadoCrear = {
 };
 
 const RELOJES_DISPONIBLES = [
-  { ip: "10.10.0.12", nombre: "reloj-12" },
-  { ip: "10.10.0.30", nombre: "reloj-30" },
-  { ip: "10.10.0.92", nombre: "reloj-92" },
+  { ip: "10.10.0.12", nombre: "Oficina" },
+  { ip: "10.10.0.30", nombre: "Fabrica" },
+  { ip: "10.10.0.92", nombre: "Lilser" },
 ];
 
 type Tab = "lista" | "crear";
