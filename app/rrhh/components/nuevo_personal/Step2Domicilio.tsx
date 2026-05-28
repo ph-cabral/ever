@@ -62,12 +62,12 @@ export function Step2Domicilio({
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
           <div className="md:col-span-3">
-            <Field label="Calle" error={errors.calle?.message} required>
+            <Field label="Calle" error={errors.calle?.message}>
               <Input {...register("calle")} />
             </Field>
           </div>
           <div className="md:col-span-1">
-            <Field label="Número" error={errors.numero?.message} required>
+            <Field label="Número" error={errors.numero?.message}>
               <Input {...register("numero")} />
             </Field>
           </div>
@@ -83,7 +83,7 @@ export function Step2Domicilio({
           </div>
 
           <div className="md:col-span-2">
-            <Field label="Código postal" error={errors.codigoPostal?.message} required>
+            <Field label="Código postal" error={errors.codigoPostal?.message}>
               <Input
                 {...register("codigoPostal")}
                 inputMode="numeric"
@@ -92,12 +92,12 @@ export function Step2Domicilio({
             </Field>
           </div>
           <div className="md:col-span-2">
-            <Field label="Localidad" error={errors.localidad?.message} required>
+            <Field label="Localidad" error={errors.localidad?.message}>
               <Input {...register("localidad")} placeholder="San Francisco" />
             </Field>
           </div>
           <div className="md:col-span-2">
-            <Field label="Provincia" error={errors.provincia?.message} required>
+            <Field label="Provincia" error={errors.provincia?.message}>
               <Controller
                 name="provincia"
                 control={control}

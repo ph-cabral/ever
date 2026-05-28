@@ -18,7 +18,6 @@ import {
 type Legajo = {
   codigo: string;
   nombre: string;
-  apellido: string;
   sector: string | null;
 };
 
@@ -107,7 +106,7 @@ export default function LegajosListPage() {
       <div className="relative mb-4 max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Buscar por nombre, apellido, sector, DNI o legajo…"
+          placeholder="Buscar por nombre, sector, DNI o legajo…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-9"
@@ -120,7 +119,6 @@ export default function LegajosListPage() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-[110px]">Legajo</TableHead>
-              <TableHead>Apellido</TableHead>
               <TableHead>Nombre</TableHead>
               <TableHead>Sector</TableHead>
             </TableRow>
@@ -155,14 +153,6 @@ export default function LegajosListPage() {
                       className="block"
                     >
                       {l.codigo}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    <Link
-                      href={`/rrhh/legajos/${l.codigo}`}
-                      className="block"
-                    >
-                      {l.apellido}
                     </Link>
                   </TableCell>
                   <TableCell>

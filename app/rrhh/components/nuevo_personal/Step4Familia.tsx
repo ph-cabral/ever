@@ -137,7 +137,6 @@ export function Step4Familia({
           <Field
             label="Medio de pago AAFF"
             error={errors.medioPagoAaff?.message}
-            required
           >
             <Controller
               name="medioPagoAaff"

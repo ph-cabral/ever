@@ -16,7 +16,6 @@ export async function GET(req: NextRequest) {
     ? {
         OR: [
           { nombre: { contains: search, mode: "insensitive" as const } },
-          { apellido: { contains: search, mode: "insensitive" as const } },
           { sector: { contains: search, mode: "insensitive" as const } },
           { codigo: { contains: search, mode: "insensitive" as const } },
           { dni: { contains: search } },
@@ -31,11 +30,10 @@ export async function GET(req: NextRequest) {
       select: {
         codigo: true,
         nombre: true,
-        apellido: true,
         sector: true,
         estado: true,
       },
-      orderBy: [{ apellido: "asc" }, { nombre: "asc" }],
+      orderBy: [{ nombre: "asc" }],
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
@@ -64,10 +62,9 @@ export async function POST(req: NextRequest) {
         codigo: genCodigo(),
         estado: "draft",
         // step1
-        apellido: step1.apellido,
         nombre: step1.nombre,
-        dni: step1.dni,
-        cuil: step1.cuil,
+        dni: step1.dni?.trim() || null,
+        cuil: step1.cuil?.trim() || null,
         // fechaNacimiento: new Date(step1.fechaNacimiento),
         fechaNacimiento: step1.fechaNacimiento
           ? new Date(step1.fechaNacimiento)

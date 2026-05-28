@@ -61,7 +61,7 @@ export function Step3Laboral({
           Fechas y modalidad
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Field label="Fecha de inicio" error={errors.fechaInicio?.message} required>
+          <Field label="Fecha de inicio" error={errors.fechaInicio?.message}>
             <Controller
               control={control}
               name="fechaInicio"
@@ -79,16 +79,16 @@ export function Step3Laboral({
               )}
             />
           </Field>
-          <Field label="Modalidad de contrato" error={errors.modalidadContrato?.message} required>
+          <Field label="Modalidad de contrato" error={errors.modalidadContrato?.message}>
             <Input
               {...register("modalidadContrato")}
               placeholder="014 - Nuevo período de prueba"
             />
           </Field>
-          <Field label="Situación de revista" error={errors.situacionRevista?.message} required>
+          <Field label="Situación de revista" error={errors.situacionRevista?.message}>
             <Input {...register("situacionRevista")} placeholder="01 - Activo" />
           </Field>
-          <Field label="Régimen" error={errors.regimen?.message} required>
+          <Field label="Régimen" error={errors.regimen?.message}>
             <Input {...register("regimen")} />
           </Field>
         </div>
@@ -100,25 +100,25 @@ export function Step3Laboral({
           Puesto y convenio
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Convenio colectivo" error={errors.convenio?.message} required>
+          <Field label="Convenio colectivo" error={errors.convenio?.message}>
             <Input
               {...register("convenio")}
               placeholder="0130/75 - Comercio"
             />
           </Field>
-          <Field label="Categoría" error={errors.categoria?.message} required>
+          <Field label="Categoría" error={errors.categoria?.message}>
             <Input
               {...register("categoria")}
               placeholder="007604 - Categoría B Administrativo"
             />
           </Field>
-          <Field label="Puesto interno" error={errors.puestoInterno?.message} required>
+          <Field label="Puesto interno" error={errors.puestoInterno?.message}>
             <Input
               {...register("puestoInterno")}
               placeholder="Encargado de sistemas"
             />
           </Field>
-          <Field label="Sector" error={errors.sector?.message} required>
+          <Field label="Sector" error={errors.sector?.message}>
             <Input {...register("sector")} placeholder="Sistemas" />
           </Field>
         </div>
@@ -130,14 +130,14 @@ export function Step3Laboral({
           Retribución
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Field label="Retribución pactada ($)" error={errors.retribucionPactada?.message} required>
+          <Field label="Retribución pactada ($)" error={errors.retribucionPactada?.message} >
             <Input
               type="number"
               step="0.01"
               {...register("retribucionPactada", { valueAsNumber: true })}
             />
           </Field>
-          <Field label="Modalidad de liquidación" error={errors.modalidadLiquidacion?.message} required>
+          <Field label="Modalidad de liquidación" error={errors.modalidadLiquidacion?.message}>
             <Controller
               name="modalidadLiquidacion"
               control={control}
@@ -170,7 +170,7 @@ export function Step3Laboral({
           Obra social y ARCA
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Obra social" error={errors.obraSocial?.message} required>
+          <Field label="Obra social" error={errors.obraSocial?.message}>
             <Input
               {...register("obraSocial")}
               placeholder="126205 - OSECAC"
@@ -200,7 +200,7 @@ export function Step3Laboral({
           Cuenta sueldo
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Banco" error={errors.banco?.message} required>
+          <Field label="Banco" error={errors.banco?.message}>
             <Controller
               name="banco"
               control={control}
@@ -218,7 +218,7 @@ export function Step3Laboral({
             />
           </Field>
           {banco === "otro" && (
-            <Field label="Otro banco" error={errors.bancoOtro?.message} required>
+            <Field label="Otro banco" error={errors.bancoOtro?.message}>
               <Input {...register("bancoOtro")} />
             </Field>
           )}

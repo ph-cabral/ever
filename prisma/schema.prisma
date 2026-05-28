@@ -6,7 +6,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["everwear", "fabrica", "preparado", "asistencia"]
+  schemas  = ["asistencia", "everwear", "fabrica", "preparado"]
 }
 
 model personal {
@@ -95,26 +95,23 @@ model chat_mensajes {
 
 model legajo {
   id                     Int                      @id @default(autoincrement())
-  employeeNo             String?                  @unique @db.VarChar(50)
-  codigo                 String?                   @unique
-  nroLegajo              Int?                     @unique
-  estado                 String                   @default("activo") @db.VarChar(20)
+  codigo                 String?                  @unique
+  estado                 String                   @default("draft") @db.VarChar(20)
   personalId             Int?                     @unique
-  apellido               String                   @db.VarChar(100)
   nombre                 String                   @db.VarChar(100)
-  dni                    String?                   @unique @db.VarChar(20)
-  cuil                   String?                   @db.VarChar(20)
-  fechaNacimiento        DateTime?                 @db.Date
-  lugarNacimiento        String?                   @db.VarChar(150)
-  nacionalidad           String?                   @default("Argentina") @db.VarChar(60)
+  dni                    String?                  @unique @db.VarChar(20)
+  cuil                   String?                  @db.VarChar(20)
+  fechaNacimiento        DateTime?                @db.Date
+  lugarNacimiento        String?                  @db.VarChar(150)
+  nacionalidad           String?                  @default("Argentina") @db.VarChar(60)
   sexo                   String                   @db.VarChar(2)
-  estadoCivil            String?                   @db.VarChar(20)
+  estadoCivil            String?                  @db.VarChar(20)
   altura                 Float?
   peso                   Float?
-  manoHabil              String?                   @db.VarChar(20)
+  manoHabil              String?                  @db.VarChar(20)
   telefonoFijo           String?                  @db.VarChar(40)
-  telefonoCelular        String?                   @db.VarChar(40)
-  emailPersonal          String?                   @db.VarChar(150)
+  telefonoCelular        String?                  @db.VarChar(40)
+  emailPersonal          String?                  @db.VarChar(150)
   antecedentesPenales    Boolean                  @default(false)
   antecedentesDetalle    String?
   aceptaPsicotecnico     Boolean                  @default(false)
@@ -147,9 +144,9 @@ model legajo {
   banco                  String?                  @db.VarChar(40)
   bancoOtro              String?                  @db.VarChar(60)
   diaPago                Int?
-  percibeSeguroDesempleo Boolean?                  @default(false)
+  percibeSeguroDesempleo Boolean?                 @default(false)
   ddjjArt12              Boolean                  @default(false)
-  tieneCargasFamilia     Boolean?                  @default(false)
+  tieneCargasFamilia     Boolean?                 @default(false)
   medioPagoAaff          String?                  @db.VarChar(40)
   medioPagoAaffOtro      String?                  @db.VarChar(100)
   estatura               Float?
@@ -184,6 +181,7 @@ model legajo {
   fechaFirma             DateTime?                @db.Date
   createdAt              DateTime                 @default(now())
   updatedAt              DateTime                 @updatedAt
+  employeeNo             String?                  @unique @db.VarChar(50)
   personal               everwear_personal?       @relation(fields: [personalId], references: [id])
   antecedentesSrt        legajo_antecedente_srt[]
   beneficiarios          legajo_beneficiario[]
@@ -193,7 +191,6 @@ model legajo {
   idiomas                legajo_idioma[]
 
   @@index([estado])
-  @@index([apellido, nombre])
   @@schema("everwear")
 }
 
@@ -287,41 +284,66 @@ model legajo_antecedente_srt {
   @@schema("everwear")
 }
 
-// ─── Asistencia (Hikvision sync) ──────────────────────────────────────────────
 model asistencia_evento {
-  id             BigInt    @id @default(autoincrement())
-  device         String    @db.VarChar(50)
-  employee_no    String    @db.VarChar(50)
-  employee_name  String?   @db.VarChar(200)
-  event_time     DateTime  @db.Timestamptz(6)
-  major          Int?
-  minor          Int?
-  card_no        String?   @db.VarChar(50)
-  tipo           String?   @db.VarChar(20)
-  job_id         BigInt?
-  created_at     DateTime? @default(now()) @db.Timestamptz(6)
+  id            BigInt    @id @default(autoincrement())
+  device        String    @db.VarChar(50)
+  employee_no   String    @db.VarChar(50)
+  employee_name String?   @db.VarChar(200)
+  event_time    DateTime  @db.Timestamptz(6)
+  major         Int?
+  minor         Int?
+  card_no       String?   @db.VarChar(50)
+  tipo          String?   @db.VarChar(20)
+  job_id        BigInt?
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
 
   @@unique([employee_no, event_time, device])
   @@index([employee_no, event_time])
   @@index([job_id])
+  @@index([employee_no, event_time], map: "idx_evento_emp_fecha")
+  @@index([job_id], map: "idx_evento_job")
   @@map("evento")
   @@schema("asistencia")
 }
 
 model asistencia_resumen_diario {
-  id             BigInt    @id @default(autoincrement())
-  employee_no    String    @db.VarChar(50)
-  employee_name  String?   @db.VarChar(200)
-  fecha          DateTime  @db.Date
-  check_in       DateTime? @db.Timestamptz(6)
-  check_out      DateTime? @db.Timestamptz(6)
-  minutos        Int?
-  eventos_dia    Int?
-  devices        String?
-  job_id         BigInt?
+  id            BigInt    @id @default(autoincrement())
+  employee_no   String    @db.VarChar(50)
+  employee_name String?   @db.VarChar(200)
+  fecha         DateTime  @db.Date
+  check_in      DateTime? @db.Timestamptz(6)
+  check_out     DateTime? @db.Timestamptz(6)
+  minutos       Int?
+  eventos_dia   Int?
+  devices       String?
+  job_id        BigInt?
 
   @@unique([employee_no, fecha])
   @@index([fecha])
+  @@index([fecha], map: "idx_resumen_fecha")
   @@map("resumen_diario")
   @@schema("asistencia")
+}
+
+model job {
+  id            BigInt    @id @default(autoincrement())
+  start_ts      DateTime  @db.Timestamptz(6)
+  end_ts        DateTime  @db.Timestamptz(6)
+  status        String?   @default("running") @db.VarChar(20)
+  eventos_raw   Int?
+  eventos_ok    Int?
+  resumen_filas Int?
+  error_msg     String?
+  duracion_seg  Float?    @db.Real
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@schema("asistencia")
+}
+
+model user_id_registry {
+  id           Int       @id @default(autoincrement())
+  external_ref String?
+  created_at   DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@schema("everwear")
 }

@@ -132,8 +132,7 @@ export async function POST(req: NextRequest) {
           employeeNo: userInfo.employeeNo,
           codigo: userInfo.employeeNo,
           estado: "activo",
-          apellido: userInfo.name,
-          nombre: "",
+          nombre: userInfo.name,
           sexo: SEXO_MAP[userInfo.gender ?? "unknown"],
         },
       });

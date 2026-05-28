@@ -84,13 +84,29 @@ export function Step1Personales({
           Identidad
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Apellido" error={errors.apellido?.message} required>
-            <Input {...register("apellido")} />
-          </Field>
-          <Field label="Nombre/s" error={errors.nombre?.message} required>
+
+          <Field label="Nombre" error={errors.nombre?.message} required>
             <Input {...register("nombre")} />
           </Field>
-          <Field label="DNI" error={errors.dni?.message} required>
+  <Field label="Sexo" error={errors.sexo?.message} required>
+    <Controller
+      name="sexo"
+      control={control}
+      render={({ field }) => (
+        <Select onValueChange={field.onChange} value={field.value  ?? ""}>
+          <SelectTrigger>
+            <SelectValue placeholder="Seleccionar" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="M">Masculino</SelectItem>
+            <SelectItem value="F">Femenino</SelectItem>
+            <SelectItem value="X">X</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
+    />
+  </Field>
+          <Field label="DNI" error={errors.dni?.message} >
             <Input
               {...register("dni")}
               inputMode="numeric"
@@ -101,14 +117,12 @@ export function Step1Personales({
           <Field
             label="CUIL (autocalculado)"
             error={errors.cuil?.message}
-            required
           >
             <Input {...register("cuil")} placeholder="XX-XXXXXXXX-X" />
           </Field>
           <Field
             label="Fecha de nacimiento"
             error={errors.fechaNacimiento?.message}
-            required
           >
             <Controller
               control={control}
@@ -121,7 +135,6 @@ export function Step1Personales({
           <Field
             label="Lugar de nacimiento"
             error={errors.lugarNacimiento?.message}
-            required
           >
             <Input
               {...register("lugarNacimiento")}
@@ -131,32 +144,12 @@ export function Step1Personales({
           <Field
             label="Nacionalidad"
             error={errors.nacionalidad?.message}
-            required
           >
             <Input {...register("nacionalidad")} />
-          </Field>
-          <Field label="Sexo" error={errors.sexo?.message} required>
-            <Controller
-              name="sexo"
-              control={control}
-              render={({ field }) => (
-                <Select onValueChange={field.onChange} value={field.value  ?? ""}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccionar" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="M">Masculino</SelectItem>
-                    <SelectItem value="F">Femenino</SelectItem>
-                    <SelectItem value="X">X</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-            />
           </Field>
           <Field
             label="Estado civil"
             error={errors.estadoCivil?.message}
-            required
           >
             <Controller
               name="estadoCivil"
@@ -178,7 +171,7 @@ export function Step1Personales({
               )}
             />
           </Field>
-          <Field label="Mano hábil" error={errors.manoHabil?.message} required>
+          <Field label="Mano hábil" error={errors.manoHabil?.message}>
             <Controller
               name="manoHabil"
               control={control}
@@ -225,7 +218,6 @@ export function Step1Personales({
           <Field
             label="Teléfono celular"
             error={errors.telefonoCelular?.message}
-            required
           >
             <Input
               {...register("telefonoCelular")}
@@ -235,7 +227,6 @@ export function Step1Personales({
           <Field
             label="Email personal"
             error={errors.emailPersonal?.message}
-            required
           >
             <Input
               type="email"

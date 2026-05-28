@@ -167,13 +167,13 @@ export function Step5SeguroArt({
           ART (Aseguradora de Riesgos del Trabajo)
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-          <Field label="Compañía" error={errors.artCompania?.message} required>
+          <Field label="Compañía" error={errors.artCompania?.message}>
             <Input
               {...register("artCompania")}
               placeholder="Prevención ART"
             />
           </Field>
-          <Field label="N° de contrato" error={errors.artNumeroContrato?.message} required>
+          <Field label="N° de contrato" error={errors.artNumeroContrato?.message}>
             <Input
               {...register("artNumeroContrato")}
               placeholder="221535"

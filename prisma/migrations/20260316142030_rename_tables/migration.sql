@@ -1,4 +1,10 @@
 -- CreateTable
+
+CREATE SCHEMA IF NOT EXISTS "everwear";
+CREATE SCHEMA IF NOT EXISTS "fabrica";
+CREATE SCHEMA IF NOT EXISTS "preparado";
+CREATE SCHEMA IF NOT EXISTS "asistencia";
+
 CREATE TABLE "fabrica"."personal" (
     "id" SERIAL NOT NULL,
     "nombre" TEXT NOT NULL,

@@ -16,10 +16,17 @@ export const idiomaSchema = z.object({
 });
 
 export const step1Schema = z.object({
-  apellido: z.string().max(100).optional(),
-  nombre: z.string().max(100).optional(),
-  dni: z.string().regex(/^\d{7,8}$/, "DNI inválido (7 u 8 dígitos)"),
-  cuil: z.string().regex(/^\d{2}-\d{7,8}-\d$/, "Formato CUIL: XX-XXXXXXXX-X"),
+  nombre: z.string().min(1, "Requerido").max(200),
+  dni: z
+    .string()
+    .regex(/^\d{7,8}$/, "DNI inválido")
+    .optional()
+    .or(z.literal("")),
+  cuil: z
+    .string()
+    .regex(/^\d{2}-\d{7,8}-\d$/, "Formato CUIL")
+    .optional()
+    .or(z.literal("")),
   fechaNacimiento: z.string().optional(),
   lugarNacimiento: z.string().optional(),
   nacionalidad: z.string().optional().default("Argentina"),

@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
     SELECT
       e.device,
       e.employee_no,
-      COALESCE(NULLIF(TRIM(l.apellido || ', ' || l.nombre), ','), e.employee_name) AS employee_name,
+      COALESCE(NULLIF(TRIM(l.nombre), ''), e.employee_name) AS employee_name,
       e.event_time,
       e.tipo,
       e.major,

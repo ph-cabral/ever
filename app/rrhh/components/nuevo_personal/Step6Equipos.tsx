@@ -323,7 +323,6 @@ export function Step6Equipos({
           <Field
             label="Fecha de firma"
             error={errors.fechaFirma?.message}
-            required
           >
             <Controller
               control={control}

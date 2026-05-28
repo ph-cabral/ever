@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
       WITH ev AS (
         SELECT
           e.employee_no,
-          COALESCE(NULLIF(TRIM(l.apellido || ', ' || l.nombre), ','), e.employee_name) AS employee_name,
+          COALESCE(NULLIF(TRIM(l.nombre), ''), e.employee_name) AS employee_name,
           l.sector AS departamento,
           e.device,
           (e.event_time AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS fecha,
