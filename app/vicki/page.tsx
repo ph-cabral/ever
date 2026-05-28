@@ -271,7 +271,7 @@ export default function VickiPage() {
           onSubmit={onSubmit}
           className="mx-auto max-w-2xl flex flex-col gap-2"
         >
-          {pickingLocation && !awaitingEmp && (
+          {pickingLocation && (
             <div className="flex gap-2">
               {UBICACIONES.map((u) => (
                 <Button
