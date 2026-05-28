@@ -2,31 +2,27 @@ import { z } from "zod";
 
 export const estudioSchema = z.object({
   nivel: z.enum(["primaria", "secundaria", "terciario", "universitario", "otro"]),
-  institucion: z.string().min(1, "Requerido"),
-  desde: z.string().min(1, "Requerido"), // YYYY-MM o YYYY
+  institucion: z.string().optional(),
+  desde: z.string().optional(), // YYYY-MM o YYYY
   hasta: z.string().optional(),
   titulo: z.string().optional(),
   enCurso: z.boolean().default(false),
 });
 
 export const idiomaSchema = z.object({
-  idioma: z.string().min(1, "Requerido"),
+  idioma: z.string().optional(),
   habla: z.enum(["basico", "intermedio", "avanzado", "nativo"]),
   escritura: z.enum(["basico", "intermedio", "avanzado", "nativo"]),
 });
 
 export const step1Schema = z.object({
-  apellido: z.string().min(1, "Requerido").max(100),
-  nombre: z.string().min(1, "Requerido").max(100),
-  dni: z
-    .string()
-    .regex(/^\d{7,8}$/, "DNI inválido (7 u 8 dígitos)"),
-  cuil: z
-    .string()
-    .regex(/^\d{2}-\d{7,8}-\d$/, "Formato CUIL: XX-XXXXXXXX-X"),
-  fechaNacimiento: z.string().min(1, "Requerido"),
-  lugarNacimiento: z.string().min(1, "Requerido"),
-  nacionalidad: z.string().min(1, "Requerido").default("Argentina"),
+  apellido: z.string().max(100).optional(),
+  nombre: z.string().max(100).optional(),
+  dni: z.string().regex(/^\d{7,8}$/, "DNI inválido (7 u 8 dígitos)"),
+  cuil: z.string().regex(/^\d{2}-\d{7,8}-\d$/, "Formato CUIL: XX-XXXXXXXX-X"),
+  fechaNacimiento: z.string().optional(),
+  lugarNacimiento: z.string().optional(),
+  nacionalidad: z.string().optional().default("Argentina"),
   sexo: z.enum(["M", "F", "X"]),
   estadoCivil: z.enum([
     "soltero",
@@ -48,7 +44,7 @@ export const step1Schema = z.object({
     .optional(),
   manoHabil: z.enum(["derecha", "izquierda", "ambidiestro"]),
   telefonoFijo: z.string().optional(),
-  telefonoCelular: z.string().min(1, "Requerido"),
+  telefonoCelular: z.string().optional(),
   emailPersonal: z.string().email("Email inválido"),
   estudios: z.array(estudioSchema).default([]),
   idiomas: z.array(idiomaSchema).default([]),

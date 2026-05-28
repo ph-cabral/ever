@@ -97,7 +97,8 @@ model legajo {
   id                     Int                      @id @default(autoincrement())
   employeeNo             String?                  @unique @db.VarChar(50)
   codigo                 String?                   @unique
-  estado                 String                   @default("draft") @db.VarChar(20)
+  nroLegajo              Int?                     @unique
+  estado                 String                   @default("activo") @db.VarChar(20)
   personalId             Int?                     @unique
   apellido               String                   @db.VarChar(100)
   nombre                 String                   @db.VarChar(100)

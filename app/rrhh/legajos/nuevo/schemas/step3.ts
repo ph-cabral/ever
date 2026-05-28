@@ -1,24 +1,24 @@
 import { z } from "zod";
 
 export const step3Schema = z.object({
-  fechaInicio: z.string().min(1, "Requerido"),
+  fechaInicio: z.string().optional(),
   fechaCese: z.string().optional(),
 
-  modalidadContrato: z.string().min(1, "Requerido"), // ej "014 - Nuevo período de prueba"
-  situacionRevista: z.string().min(1, "Requerido").default("01"),
-  regimen: z.string().min(1, "Requerido").default("SIPA"),
+  modalidadContrato: z.string().optional(), // ej "014 - Nuevo período de prueba"
+  situacionRevista: z.string().optional().default("01"),
+  regimen: z.string().optional().default("SIPA"),
 
-  convenio: z.string().min(1, "Requerido"), // ej "0130/75 - Comercio"
-  categoria: z.string().min(1, "Requerido"), // ej "007604 - Categoría B Adm."
-  puestoInterno: z.string().min(1, "Requerido"),
-  sector: z.string().min(1, "Requerido"),
+  convenio: z.string().optional(), // ej "0130/75 - Comercio"
+  categoria: z.string().optional(), // ej "007604 - Categoría B Adm."
+  puestoInterno: z.string().optional(),
+  sector: z.string().optional(),
 
   retribucionPactada: z
     .number({ invalid_type_error: "Numérico" })
     .min(0, "No puede ser negativa"),
   modalidadLiquidacion: z.enum(["mes", "quincena", "dia"]),
 
-  obraSocial: z.string().min(1, "Requerido"), // ej "126205 - OSECAC"
+  obraSocial: z.string().optional(), // ej "126205 - OSECAC"
   tipoServicio: z.string().optional(),
   actividadEconomica: z.string().optional(),
   domicilioExplotacion: z.string().optional(),

@@ -68,7 +68,10 @@ export async function POST(req: NextRequest) {
         nombre: step1.nombre,
         dni: step1.dni,
         cuil: step1.cuil,
-        fechaNacimiento: new Date(step1.fechaNacimiento),
+        // fechaNacimiento: new Date(step1.fechaNacimiento),
+        fechaNacimiento: step1.fechaNacimiento
+          ? new Date(step1.fechaNacimiento)
+          : null,
         lugarNacimiento: step1.lugarNacimiento,
         nacionalidad: step1.nacionalidad ?? "Argentina",
         sexo: step1.sexo,

@@ -11,11 +11,11 @@ export const equipoSchema = z.object({
     "perifericos",
     "otro",
   ]),
-  marca: z.string().min(1, "Requerido"),
-  modelo: z.string().min(1, "Requerido"),
+  marca: z.string().optional(),
+  modelo: z.string().optional(),
   detalle: z.string().optional(), // specs adicionales
-  numeroSerie: z.string().min(1, "Requerido"),
-  fechaEntrega: z.string().min(1, "Requerido"),
+  numeroSerie: z.string().optional(),
+  fechaEntrega: z.string().optional(),
   estado: z.enum(["nuevo", "usado"]),
   observaciones: z.string().optional(),
 });
@@ -29,7 +29,7 @@ export const step6Schema = z.object({
     }),
   jurisdiccion: z.string().default("San Francisco, Córdoba"),
   firmaEmpleado: z.string().optional(), // path/URL imagen firma o nombre escrito
-  fechaFirma: z.string().min(1, "Requerido"),
+  fechaFirma: z.string().optional(),
 });
 
 export type Step6Data = z.infer<typeof step6Schema>;

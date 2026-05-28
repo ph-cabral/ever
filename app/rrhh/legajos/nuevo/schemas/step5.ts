@@ -29,7 +29,7 @@ const patologiasShape = PATOLOGIAS.reduce<Record<string, z.ZodBoolean>>(
 );
 
 export const antecedenteSrtSchema = z.object({
-  descripcion: z.string().min(1, "Requerido"),
+  descripcion: z.string().optional(),
   fecha: z.string().optional(),
   observaciones: z.string().optional(),
 });
@@ -62,8 +62,8 @@ export const step5Schema = z.object({
   fechaIngresoEmpleo: z.string().optional(),
 
   // ART
-  artCompania: z.string().min(1, "Requerido"),
-  artNumeroContrato: z.string().min(1, "Requerido"),
+  artCompania: z.string().optional(),
+  artNumeroContrato: z.string().optional(),
   artCredencialEntregada: z.boolean().default(false),
 
   // SRT 37/2010

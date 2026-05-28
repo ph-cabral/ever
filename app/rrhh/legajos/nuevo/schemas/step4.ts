@@ -4,23 +4,23 @@ export const familiarSchema = z.object({
   parentesco: z.enum([
     "padre", "madre", "hermano", "conyuge", "pareja", "hijo", "otro",
   ]),
-  apellido: z.string().min(1, "Requerido"),
-  nombre: z.string().min(1, "Requerido"),
+  apellido: z.string().optional(),
+  nombre: z.string().optional(),
   tipoDocumento: z.enum(["DNI", "LE", "LC", "PAS", "CI"]).default("DNI"),
-  numeroDocumento: z.string().min(1, "Requerido"),
-  fechaNacimiento: z.string().min(1, "Requerido"),
-  nacionalidad: z.string().min(1, "Requerido").default("Argentina"),
+  numeroDocumento: z.string().optional(),
+  fechaNacimiento: z.string().optional(),
+  nacionalidad: z.string().optional().default("Argentina"),
   telefono: z.string().optional(),
   ocupacion: z.string().optional(),
   convive: z.boolean().default(false),
 });
 
 export const beneficiarioSchema = z.object({
-  apellidoNombre: z.string().min(1, "Requerido"),
+  apellidoNombre: z.string().optional(),
   tipoDocumento: z.enum(["DNI", "LE", "LC", "PAS", "CI"]).default("DNI"),
-  numeroDocumento: z.string().min(1, "Requerido"),
-  parentesco: z.string().min(1, "Requerido"),
-  domicilio: z.string().min(1, "Requerido"),
+  numeroDocumento: z.string().optional(),
+  parentesco: z.string().optional(),
+  domicilio: z.string().optional(),
   porcentaje: z
     .number({ invalid_type_error: "Numérico" })
     .min(0.01, "Mayor a 0")
