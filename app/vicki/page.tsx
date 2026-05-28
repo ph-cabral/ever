@@ -14,9 +14,9 @@ const GENEROS = [
   { label: "Femenino", value: "female" },
 ];
 const UBICACIONES = [
-  { label: "Fábrica", value: "fabrica" },
-  { label: "Lilser", value: "lilser" },
-  { label: "Oficina", value: "oficina" },
+  { label: "Fábrica", value: "Fabrica" },
+  { label: "Lilser", value: "Lilser" },
+  { label: "Oficina", value: "Oficina" },
 ];
 
 // Detecta si el último mensaje del asistente abrió el flujo de creación
@@ -59,7 +59,7 @@ function renderContent(text: string, onCancel?: () => void) {
       </div>
     ) : (
       <span key={i} className="whitespace-pre-wrap break-all">
-        {p.v}
+        {p.v.replace("[LOC_PICK]", "")}
       </span>
     ),
   );
@@ -74,6 +74,7 @@ export default function VickiPage() {
   const [gender, setGender] = useState<string>("");
   const [location, setLocation] = useState<string>("");
   const [loading, setLoading] = useState(false);
+  const [pickingLocation, setPickingLocation] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
   
 
@@ -104,11 +105,11 @@ export default function VickiPage() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  // const awaitingEmp = isAwaitingEmployeeData(messages);
-
   const [awaitingEmp, setAwaitingEmp] = useState(false);
 
   useEffect(() => {
+    const last = [...messages].reverse().find((m) => m.role === "assistant");
+    setPickingLocation(!!last && /\[LOC_PICK\]/.test(last.content));
     fetch(`/api/vicki/draft_status/${SESSION_ID}`)
       .then((r) => r.json())
       .then((d) => setAwaitingEmp(!!d.has_draft));
@@ -175,6 +176,33 @@ export default function VickiPage() {
       { role: "assistant", content: "❌ Operación cancelada." },
     ]);
   }
+
+
+  async function pickLocation(loc: string) {
+    setLoading(true);
+    try {
+      const r = await fetch("/api/vicki/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: loc,
+          session_id: SESSION_ID,
+          user_id: USER_ID,
+          location: loc,
+        }),
+      });
+      const data = await r.json();
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", content: `📍 ${loc}` },
+        { role: "assistant", content: data.response },
+      ]);
+      setLocation(loc);
+    } finally {
+      setLoading(false);
+    }
+  }
+
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -243,6 +271,21 @@ export default function VickiPage() {
           onSubmit={onSubmit}
           className="mx-auto max-w-2xl flex flex-col gap-2"
         >
+          {pickingLocation && !awaitingEmp && (
+            <div className="flex gap-2">
+              {UBICACIONES.map((u) => (
+                <Button
+                  key={u.value}
+                  type="button"
+                  onClick={() => pickLocation(u.value)}
+                  disabled={loading}
+                  className="flex-1"
+                >
+                  {u.label}
+                </Button>
+              ))}
+            </div>
+          )}
           {awaitingEmp && (
             <div className="flex gap-2">
               <select
