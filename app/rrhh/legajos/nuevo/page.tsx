@@ -74,25 +74,24 @@ export default function NuevoLegajoPage() {
 
     setSubmitting(true);
     try {
-      // TODO: cuando esté la API, descomentar:
-      // const res = await fetch("/api/rrhh/legajos", {
-      //   method: "POST",
-      //   headers: { "Content-Type": "application/json" },
-      //   body: JSON.stringify(fullPayload),
-      // });
-      // if (!res.ok) throw new Error("Error al crear legajo");
-      // const { legajoCodigo } = await res.json();
-
-      // Mock por ahora:
-      console.log("Legajo a crear:", fullPayload);
-      const legajoCodigo = "L-002";
+      const res = await fetch("/api/rrhh/legajos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fullPayload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? "Error al crear legajo");
+      }
+      const { legajoCodigo } = await res.json();
 
       toast.success(`Legajo ${legajoCodigo} creado correctamente`);
       reset();
       router.push(`/rrhh/legajos/${legajoCodigo}`);
-    } catch (e) {
+
+    } catch (e: any) {
       console.error(e);
-      toast.error("No se pudo crear el legajo. Reintentá.");
+      toast.error(e?.message ?? "No se pudo crear el legajo. Reintentá.");
     } finally {
       setSubmitting(false);
     }

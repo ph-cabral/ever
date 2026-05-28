@@ -12,17 +12,17 @@ export async function GET(req: NextRequest) {
   );
   const search = (searchParams.get("search") ?? "").trim();
 
-      const where = search
-        ? {
-            OR: [
-              { nombre: { contains: search, mode: "insensitive" as const } },
-              { apellido: { contains: search, mode: "insensitive" as const } },
-              { sector: { contains: search, mode: "insensitive" as const } },
-              { codigo: { contains: search, mode: "insensitive" as const } },
-              { dni: { contains: search } },
-            ],
-          }
-        : {};
+  const where = search
+    ? {
+        OR: [
+          { nombre: { contains: search, mode: "insensitive" as const } },
+          { apellido: { contains: search, mode: "insensitive" as const } },
+          { sector: { contains: search, mode: "insensitive" as const } },
+          { codigo: { contains: search, mode: "insensitive" as const } },
+          { dni: { contains: search } },
+        ],
+      }
+    : {};
 
   const [total, items] = await Promise.all([
     prisma.legajo.count({ where }),
@@ -48,4 +48,189 @@ export async function GET(req: NextRequest) {
     total,
     totalPages: Math.ceil(total / pageSize),
   });
+}
+
+function genCodigo() {
+  return `L-${Date.now().toString(36).toUpperCase()}`;
+}
+
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const { step1, step2, step3, step4, step5, step6 } = body;
+
+  try {
+    const legajo = await prisma.legajo.create({
+      data: {
+        codigo: genCodigo(),
+        estado: "draft",
+        // step1
+        apellido: step1.apellido,
+        nombre: step1.nombre,
+        dni: step1.dni,
+        cuil: step1.cuil,
+        fechaNacimiento: new Date(step1.fechaNacimiento),
+        lugarNacimiento: step1.lugarNacimiento,
+        nacionalidad: step1.nacionalidad ?? "Argentina",
+        sexo: step1.sexo,
+        estadoCivil: step1.estadoCivil,
+        altura: step1.altura ?? null,
+        peso: step1.peso ?? null,
+        manoHabil: step1.manoHabil,
+        telefonoFijo: step1.telefonoFijo ?? null,
+        telefonoCelular: step1.telefonoCelular,
+        emailPersonal: step1.emailPersonal,
+        antecedentesPenales: step1.antecedentesPenales ?? false,
+        antecedentesDetalle: step1.antecedentesDetalle ?? null,
+        aceptaPsicotecnico: step1.aceptaPsicotecnico ?? false,
+        // step2
+        calle: step2?.calle ?? null,
+        numero: step2?.numero ?? null,
+        piso: step2?.piso ?? null,
+        depto: step2?.depto ?? null,
+        codigoPostal: step2?.codigoPostal ?? null,
+        localidad: step2?.localidad ?? null,
+        provincia: step2?.provincia ?? null,
+        comprobanteUrl: step2?.comprobanteUrl ?? null,
+        ddjjConformidad: step2?.ddjjConformidad ?? false,
+        // step3
+        fechaInicio: step3?.fechaInicio ? new Date(step3.fechaInicio) : null,
+        fechaCese: step3?.fechaCese ? new Date(step3.fechaCese) : null,
+        modalidadContrato: step3?.modalidadContrato ?? null,
+        situacionRevista: step3?.situacionRevista ?? null,
+        regimen: step3?.regimen ?? null,
+        convenio: step3?.convenio ?? null,
+        categoria: step3?.categoria ?? null,
+        puestoInterno: step3?.puestoInterno ?? null,
+        sector: step3?.sector ?? null,
+        retribucionPactada: step3?.retribucionPactada ?? null,
+        modalidadLiquidacion: step3?.modalidadLiquidacion ?? null,
+        obraSocial: step3?.obraSocial ?? null,
+        tipoServicio: step3?.tipoServicio ?? null,
+        actividadEconomica: step3?.actividadEconomica ?? null,
+        domicilioExplotacion: step3?.domicilioExplotacion ?? null,
+        claveAltaArca: step3?.claveAltaArca || null,
+        fechaEnvioAlta: step3?.fechaEnvioAlta
+          ? new Date(step3.fechaEnvioAlta)
+          : null,
+        banco: step3?.banco ?? null,
+        bancoOtro: step3?.bancoOtro ?? null,
+        diaPago: step3?.diaPago ?? null,
+        percibeSeguroDesempleo: step3?.percibeSeguroDesempleo ?? false,
+        ddjjArt12: step3?.ddjjArt12 ?? false,
+        // step4
+        tieneCargasFamilia: step4?.tieneCargasFamilia ?? false,
+        medioPagoAaff: step4?.medioPagoAaff ?? null,
+        medioPagoAaffOtro: step4?.medioPagoAaffOtro ?? null,
+        // step5
+        estatura: step5?.estatura ?? null,
+        pesoSalud: step5?.peso ?? null,
+        presionMin: step5?.presionMin ?? null,
+        presionMax: step5?.presionMax ?? null,
+        patologiaNervioso: step5?.patologias?.nervioso ?? false,
+        patologiaRespiratorio: step5?.patologias?.respiratorio ?? false,
+        patologiaCirculatorio: step5?.patologias?.circulatorio ?? false,
+        patologiaDigestivo: step5?.patologias?.digestivo ?? false,
+        patologiaRenal: step5?.patologias?.renal ?? false,
+        patologiaOseo: step5?.patologias?.oseo ?? false,
+        patologiaSangre: step5?.patologias?.sangre ?? false,
+        patologiaCancer: step5?.patologias?.cancer ?? false,
+        patologiaCongenitas: step5?.patologias?.congenitas ?? false,
+        patologiaEndocrinas: step5?.patologias?.endocrinas ?? false,
+        patologiaGinecologicas: step5?.patologias?.ginecologicas ?? false,
+        patologiaEmbarazo: step5?.patologias?.embarazo ?? false,
+        patologiaOtras: step5?.patologias?.otras ?? false,
+        patologiaChagas: step5?.patologias?.chagas ?? false,
+        observacionesSalud: step5?.observacionesSalud ?? null,
+        numeroSolicitud: step5?.numeroSolicitud ?? null,
+        numeroPoliza: step5?.numeroPoliza ?? null,
+        capitalAsegurado: step5?.capitalAsegurado ?? null,
+        fechaIngresoEmpleo: step5?.fechaIngresoEmpleo
+          ? new Date(step5.fechaIngresoEmpleo)
+          : null,
+        artCompania: step5?.artCompania ?? null,
+        artNumeroContrato: step5?.artNumeroContrato ?? null,
+        artCredencialEntregada: step5?.artCredencialEntregada ?? false,
+        // step6
+        aceptaClausulas: step6?.aceptaClausulas ?? false,
+        jurisdiccion: step6?.jurisdiccion ?? "San Francisco, Córdoba",
+        firmaEmpleado: step6?.firmaEmpleado ?? null,
+        fechaFirma: step6?.fechaFirma ? new Date(step6.fechaFirma) : null,
+        // relaciones
+        estudios: {
+          create: (step1.estudios ?? []).map((e: any) => ({
+            nivel: e.nivel,
+            institucion: e.institucion,
+            desde: e.desde,
+            hasta: e.hasta ?? null,
+            titulo: e.titulo ?? null,
+            enCurso: e.enCurso ?? false,
+          })),
+        },
+        idiomas: {
+          create: (step1.idiomas ?? []).map((i: any) => ({
+            idioma: i.idioma,
+            habla: i.habla,
+            escritura: i.escritura,
+          })),
+        },
+        familiares: {
+          create: (step4?.familiares ?? []).map((f: any) => ({
+            parentesco: f.parentesco,
+            apellido: f.apellido,
+            nombre: f.nombre,
+            tipoDocumento: f.tipoDocumento ?? "DNI",
+            numeroDocumento: f.numeroDocumento,
+            fechaNacimiento: new Date(f.fechaNacimiento),
+            nacionalidad: f.nacionalidad ?? "Argentina",
+            telefono: f.telefono ?? null,
+            ocupacion: f.ocupacion ?? null,
+            convive: f.convive ?? false,
+          })),
+        },
+        beneficiarios: {
+          create: (step4?.beneficiarios ?? []).map((b: any) => ({
+            apellidoNombre: b.apellidoNombre,
+            tipoDocumento: b.tipoDocumento ?? "DNI",
+            numeroDocumento: b.numeroDocumento,
+            parentesco: b.parentesco,
+            domicilio: b.domicilio,
+            porcentaje: b.porcentaje,
+          })),
+        },
+        antecedentesSrt: {
+          create: (step5?.antecedentesSrt ?? []).map((a: any) => ({
+            descripcion: a.descripcion,
+            fecha: a.fecha ? new Date(a.fecha) : null,
+            observaciones: a.observaciones ?? null,
+          })),
+        },
+        equipos: {
+          create: (step6?.equipos ?? []).map((eq: any) => ({
+            tipo: eq.tipo,
+            marca: eq.marca,
+            modelo: eq.modelo,
+            detalle: eq.detalle ?? null,
+            numeroSerie: eq.numeroSerie,
+            fechaEntrega: new Date(eq.fechaEntrega),
+            estado: eq.estado,
+            observaciones: eq.observaciones ?? null,
+          })),
+        },
+      },
+      select: { codigo: true },
+    });
+
+    return NextResponse.json({ legajoCodigo: legajo.codigo }, { status: 201 });
+  } catch (e: any) {
+    console.error("POST legajo error:", e);
+    return NextResponse.json(
+      {
+        error:
+          e?.code === "P2002"
+            ? "DNI o CUIL ya existe"
+            : "Error al crear legajo",
+      },
+      { status: 400 },
+    );
+  }
 }

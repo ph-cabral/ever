@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
+import { prisma } from "@/lib/prisma"; 
 export const dynamic = "force-dynamic";
 
 const RELOJES = [
@@ -11,20 +11,21 @@ const RELOJES = [
 const USER = process.env.HIKVISION_USER ?? "admin";
 const PASS = process.env.HIKVISION_PASS ?? "161982br";
 const AUTH = "Basic " + Buffer.from(`${USER}:${PASS}`).toString("base64");
+const SEXO_MAP: Record<string, string> = {
+  male: "M",
+  female: "F",
+  unknown: "X",
+};
 
 type CreatePayload = {
-  employeeNo: string;      // string numérico, único
+  employeeNo: string;
   name: string;
-  userType?: string;       // "normal" | "visitor" | "blackList"
-  Valid?: {
-    enable: boolean;
-    beginTime: string;     // "2020-01-01T00:00:00"
-    endTime: string;       // "2037-12-31T23:59:59"
-  };
+  userType?: string;
+  gender?: string;
+  Valid?: { enable: boolean; beginTime: string; endTime: string };
   password?: string;
-  doorRight?: string;      // "1"
+  doorRight?: string;
   RightPlan?: Array<{ doorNo: number; planTemplateNo: string }>;
-  // ips: qué relojes (undefined = todos)
   ips?: string[];
 };
 
@@ -37,6 +38,7 @@ async function crearEnReloj(
       employeeNo: userInfo.employeeNo,
       name: userInfo.name,
       userType: userInfo.userType ?? "normal",
+      gender: userInfo.gender ?? "unknown",  
       Valid: userInfo.Valid ?? {
         enable: true,
         beginTime: "2020-01-01T00:00:00",
@@ -119,5 +121,27 @@ export async function POST(req: NextRequest) {
   const hayError = respuesta.some((r) => !r.ok);
   const status = hayError ? 207 : 200; // 207 Multi-Status si alguno falló
 
+
+
+  if (respuesta.some((r) => r.ok)) {
+    try {
+      await prisma.legajo.upsert({
+        where: { employeeNo: userInfo.employeeNo },
+        update: {},
+        create: {
+          employeeNo: userInfo.employeeNo,
+          codigo: userInfo.employeeNo,
+          estado: "activo",
+          apellido: userInfo.name,
+          nombre: "",
+          sexo: SEXO_MAP[userInfo.gender ?? "unknown"],
+        },
+      });
+    } catch (e) {
+      console.error("Error creando legajo:", e);
+    }
+  }
+
   return NextResponse.json({ resultados: respuesta }, { status });
 }
+

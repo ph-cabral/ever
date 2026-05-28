@@ -48,6 +48,7 @@ const FORM_VACIO = {
   employeeNo: "",
   name: "",
   userType: "normal",
+  gender: "unknown", // ← nuevo
   password: "",
   ips: [] as string[],
 };
@@ -120,6 +121,7 @@ export default function RelojEmpPage() {
         employeeNo: form.employeeNo.trim(),
         name: form.name.trim(),
         userType: form.userType,
+        gender: form.gender,
         ...(form.password ? { password: form.password } : {}),
         // ips vacío = todos
         ...(form.ips.length ? { ips: form.ips } : {}),
@@ -335,6 +337,23 @@ export default function RelojEmpPage() {
                 <SelectItem value="normal">Normal</SelectItem>
                 <SelectItem value="visitor">Visitante</SelectItem>
                 <SelectItem value="blackList">Lista negra</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Sexo</Label>
+            <Select
+              value={form.gender}
+              onValueChange={(v) => setForm((f) => ({ ...f, gender: v }))}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="male">Masculino</SelectItem>
+                <SelectItem value="female">Femenino</SelectItem>
+                <SelectItem value="unknown">Sin especificar</SelectItem>
               </SelectContent>
             </Select>
           </div>

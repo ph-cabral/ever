@@ -95,24 +95,25 @@ model chat_mensajes {
 
 model legajo {
   id                     Int                      @id @default(autoincrement())
+  employeeNo             String?                  @unique @db.VarChar(50)
   codigo                 String                   @unique
   estado                 String                   @default("draft") @db.VarChar(20)
   personalId             Int?                     @unique
   apellido               String                   @db.VarChar(100)
   nombre                 String                   @db.VarChar(100)
-  dni                    String                   @unique @db.VarChar(20)
-  cuil                   String                   @db.VarChar(20)
-  fechaNacimiento        DateTime                 @db.Date
-  lugarNacimiento        String                   @db.VarChar(150)
-  nacionalidad           String                   @default("Argentina") @db.VarChar(60)
+  dni                    String?                   @unique @db.VarChar(20)
+  cuil                   String?                   @db.VarChar(20)
+  fechaNacimiento        DateTime?                 @db.Date
+  lugarNacimiento        String?                   @db.VarChar(150)
+  nacionalidad           String?                   @default("Argentina") @db.VarChar(60)
   sexo                   String                   @db.VarChar(2)
-  estadoCivil            String                   @db.VarChar(20)
+  estadoCivil            String?                   @db.VarChar(20)
   altura                 Float?
   peso                   Float?
-  manoHabil              String                   @db.VarChar(20)
+  manoHabil              String?                   @db.VarChar(20)
   telefonoFijo           String?                  @db.VarChar(40)
-  telefonoCelular        String                   @db.VarChar(40)
-  emailPersonal          String                   @db.VarChar(150)
+  telefonoCelular        String?                   @db.VarChar(40)
+  emailPersonal          String?                   @db.VarChar(150)
   antecedentesPenales    Boolean                  @default(false)
   antecedentesDetalle    String?
   aceptaPsicotecnico     Boolean                  @default(false)
@@ -145,9 +146,9 @@ model legajo {
   banco                  String?                  @db.VarChar(40)
   bancoOtro              String?                  @db.VarChar(60)
   diaPago                Int?
-  percibeSeguroDesempleo Boolean                  @default(false)
+  percibeSeguroDesempleo Boolean?                  @default(false)
   ddjjArt12              Boolean                  @default(false)
-  tieneCargasFamilia     Boolean                  @default(false)
+  tieneCargasFamilia     Boolean?                  @default(false)
   medioPagoAaff          String?                  @db.VarChar(40)
   medioPagoAaffOtro      String?                  @db.VarChar(100)
   estatura               Float?
