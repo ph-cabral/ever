@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useForm, useFieldArray, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Trash2, Plus } from "lucide-react";
@@ -43,7 +43,7 @@ export function Step1Personales({
     watch,
     setValue,
     getValues,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<Step1Data>({
     resolver: zodResolver(step1Schema),
     defaultValues: {
@@ -59,7 +59,6 @@ export function Step1Personales({
 
   const estudios = useFieldArray({ control, name: "estudios" });
   const idiomas = useFieldArray({ control, name: "idiomas" });
-
   // Autocálculo CUIL
   const dni = watch("dni");
   const sexo = watch("sexo");
@@ -72,41 +71,47 @@ export function Step1Personales({
     }
   }, [dni, sexo, setValue]);
 
-  const handleDraft = () => {
-    onSaveDraft?.(getValues());
-  };
+const allValues = watch();
+const prevRef = useRef<string>("");
+useEffect(() => {
+  const serialized = JSON.stringify(allValues);
+  if (isDirty && serialized !== prevRef.current) {
+    prevRef.current = serialized;
+    onSaveDraft?.(allValues);
+  }
+});
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
       {/* ===== IDENTIDAD ===== */}
       <section>
-        <h3 className="mb-4 text-lg font-semibold border-b pb-2">
-          Identidad
-        </h3>
+        <h3 className="mb-4 text-lg font-semibold border-b pb-2">Identidad</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
           <Field label="Nombre" error={errors.nombre?.message} required>
             <Input {...register("nombre")} />
           </Field>
-  <Field label="Sexo" error={errors.sexo?.message} required>
-    <Controller
-      name="sexo"
-      control={control}
-      render={({ field }) => (
-        <Select onValueChange={field.onChange} value={field.value  ?? ""}>
-          <SelectTrigger>
-            <SelectValue placeholder="Seleccionar" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="M">Masculino</SelectItem>
-            <SelectItem value="F">Femenino</SelectItem>
-            <SelectItem value="X">X</SelectItem>
-          </SelectContent>
-        </Select>
-      )}
-    />
-  </Field>
-          <Field label="DNI" error={errors.dni?.message} >
+          <Field label="Sexo" error={errors.sexo?.message} required>
+            <Controller
+              name="sexo"
+              control={control}
+              render={({ field }) => (
+                <Select
+                  onValueChange={field.onChange}
+                  value={field.value ?? ""}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="M">Masculino</SelectItem>
+                    <SelectItem value="F">Femenino</SelectItem>
+                    <SelectItem value="X">X</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </Field>
+          <Field label="DNI" error={errors.dni?.message}>
             <Input
               {...register("dni")}
               inputMode="numeric"
@@ -114,10 +119,7 @@ export function Step1Personales({
               maxLength={8}
             />
           </Field>
-          <Field
-            label="CUIL (autocalculado)"
-            error={errors.cuil?.message}
-          >
+          <Field label="CUIL (autocalculado)" error={errors.cuil?.message}>
             <Input {...register("cuil")} placeholder="XX-XXXXXXXX-X" />
           </Field>
           <Field
@@ -128,7 +130,10 @@ export function Step1Personales({
               control={control}
               name="fechaNacimiento"
               render={({ field }) => (
-                <DateField value={field.value ?? ""} onChange={field.onChange} />
+                <DateField
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                />
               )}
             />
           </Field>
@@ -141,21 +146,18 @@ export function Step1Personales({
               placeholder="San Francisco, Córdoba"
             />
           </Field>
-          <Field
-            label="Nacionalidad"
-            error={errors.nacionalidad?.message}
-          >
+          <Field label="Nacionalidad" error={errors.nacionalidad?.message}>
             <Input {...register("nacionalidad")} />
           </Field>
-          <Field
-            label="Estado civil"
-            error={errors.estadoCivil?.message}
-          >
+          <Field label="Estado civil" error={errors.estadoCivil?.message}>
             <Controller
               name="estadoCivil"
               control={control}
               render={({ field }) => (
-                <Select onValueChange={field.onChange} value={field.value  ?? ""}>
+                <Select
+                  onValueChange={field.onChange}
+                  value={field.value ?? ""}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Seleccionar" />
                   </SelectTrigger>
@@ -176,7 +178,10 @@ export function Step1Personales({
               name="manoHabil"
               control={control}
               render={({ field }) => (
-                <Select onValueChange={field.onChange} value={field.value  ?? ""}>
+                <Select
+                  onValueChange={field.onChange}
+                  value={field.value ?? ""}
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -224,10 +229,7 @@ export function Step1Personales({
               placeholder="+54 9 3564..."
             />
           </Field>
-          <Field
-            label="Email personal"
-            error={errors.emailPersonal?.message}
-          >
+          <Field label="Email personal" error={errors.emailPersonal?.message}>
             <Input
               type="email"
               {...register("emailPersonal")}
@@ -301,17 +303,11 @@ export function Step1Personales({
               </div>
               <div>
                 <Label className="text-xs">Desde</Label>
-                <Input
-                  type="month"
-                  {...register(`estudios.${idx}.desde`)}
-                />
+                <Input type="month" {...register(`estudios.${idx}.desde`)} />
               </div>
               <div>
                 <Label className="text-xs">Hasta</Label>
-                <Input
-                  type="month"
-                  {...register(`estudios.${idx}.hasta`)}
-                />
+                <Input type="month" {...register(`estudios.${idx}.hasta`)} />
               </div>
               <div className="flex items-end gap-2">
                 <div className="flex-1">
@@ -435,7 +431,7 @@ export function Step1Personales({
             render={({ field }) => (
               <label className="flex items-center gap-2">
                 <Checkbox
-                  checked={field.value  ?? ""}
+                  checked={field.value ?? ""}
                   onCheckedChange={field.onChange}
                 />
                 <span className="text-sm">
@@ -445,10 +441,7 @@ export function Step1Personales({
             )}
           />
           {antecedentes && (
-            <Field
-              label="Detalle"
-              error={errors.antecedentesDetalle?.message}
-            >
+            <Field label="Detalle" error={errors.antecedentesDetalle?.message}>
               <Textarea
                 {...register("antecedentesDetalle")}
                 rows={3}
@@ -462,7 +455,7 @@ export function Step1Personales({
             render={({ field }) => (
               <label className="flex items-center gap-2">
                 <Checkbox
-                  checked={field.value  ?? ""}
+                  checked={field.value ?? ""}
                   onCheckedChange={field.onChange}
                 />
                 <span className="text-sm">
@@ -479,7 +472,7 @@ export function Step1Personales({
         <Button
           type="button"
           variant="outline"
-          onClick={handleDraft}
+          onClick={() => onSaveDraft?.(allValues)}
           disabled={isSubmitting}
         >
           Guardar borrador

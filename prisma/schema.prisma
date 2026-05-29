@@ -96,7 +96,7 @@ model chat_mensajes {
 model legajo {
   id                     Int                      @id @default(autoincrement())
   codigo                 String?                  @unique
-  estado                 String                   @default("draft") @db.VarChar(20)
+  estado                 String                   @default("ACTIVO") @db.VarChar(20)
   personalId             Int?                     @unique
   nombre                 String                   @db.VarChar(100)
   dni                    String?                  @unique @db.VarChar(20)

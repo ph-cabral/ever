@@ -87,7 +87,9 @@ export default function NuevoLegajoPage() {
 
       toast.success(`Legajo ${legajoCodigo} creado correctamente`);
       reset();
-      router.push(`/rrhh/legajos/${legajoCodigo}`);
+      localStorage.removeItem("everwear:wizard:legajo-nuevo");
+      // router.push(`/rrhh/legajos/${legajoCodigo}`);
+      router.push(`/rrhh/legajos/nuevo`);
 
     } catch (e: any) {
       console.error(e);

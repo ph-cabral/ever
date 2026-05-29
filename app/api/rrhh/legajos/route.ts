@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
     const legajo = await prisma.legajo.create({
       data: {
         codigo: genCodigo(),
-        estado: "draft",
+        estado: "ACTIVO",
         // step1
         nombre: step1.nombre,
         dni: step1.dni?.trim() || null,
