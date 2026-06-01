@@ -118,9 +118,18 @@ export default function VickiPage() {
 
   const [awaitingEmp, setAwaitingEmp] = useState(false);
 
+  // useEffect(() => {
+  //   const last = [...messages].reverse().find((m) => m.role === "assistant");
+  //   setPickingLocation(!!last && /\[LOC_PICK\]/.test(last.content));
+  //   fetch(`/api/vicki/draft_status/${SESSION_ID}`)
+  //     .then((r) => r.json())
+  //     .then((d) => setAwaitingEmp(!!d.has_draft));
+  // }, [messages]);
+
   useEffect(() => {
     const last = [...messages].reverse().find((m) => m.role === "assistant");
     setPickingLocation(!!last && /\[LOC_PICK\]/.test(last.content));
+    if (last && /Foto tomada/i.test(last.content)) setAwaitingEmp(true);
     fetch(`/api/vicki/draft_status/${SESSION_ID}`)
       .then((r) => r.json())
       .then((d) => setAwaitingEmp(!!d.has_draft));
@@ -194,11 +203,18 @@ export default function VickiPage() {
       const r = await fetch("/api/vicki/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // body: JSON.stringify({
+        //   message: loc,
+        //   session_id: SESSION_ID,
+        //   user_id: USER_ID,
+        //   location: loc,
+        // }),
         body: JSON.stringify({
           message: loc,
           session_id: SESSION_ID,
           user_id: USER_ID,
           location: loc,
+          retake,
         }),
       });
       const data = await r.json();
