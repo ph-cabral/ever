@@ -26,8 +26,11 @@ function isAwaitingEmployeeData(messages: Msg[]) {
   return /Foto tomada/i.test(last.content);
 }
 
-
-function renderContent(text: string, onCancel?: () => void) {
+function renderContent(
+  text: string,
+  onCancel?: () => void,
+  onRetake?: () => void,
+) {
   const imgRegex = /!\[[^\]]*\]\((data:image\/[^)]+)\)/g;
   const parts: Array<{ t: "text" | "img"; v: string }> = [];
   let last = 0;
@@ -41,20 +44,32 @@ function renderContent(text: string, onCancel?: () => void) {
 
   return parts.map((p, i) =>
     p.t === "img" ? (
-      <div key={i} className="my-2 flex items-start gap-2">
+      <div key={i} className="my-2 flex flex-col sm:flex-row items-start gap-2">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={p.v}
           alt="foto"
-          className="rounded-lg max-w-xs border border-zinc-700"
+          className="rounded-lg w-full max-w-xs border border-zinc-700"
         />
-        {onCancel && (
-          <button
-            onClick={onCancel}
-            className="rounded-md bg-red-600 hover:bg-red-700 px-3 py-1.5 text-xs text-white"
-          >
-            Cancelar
-          </button>
+        {(onCancel || onRetake) && (
+          <div className="flex flex-row sm:flex-col gap-2">
+            {onRetake && (
+              <button
+                onClick={onRetake}
+                className="rounded-md bg-zinc-600 hover:bg-zinc-500 px-3 py-1.5 text-xs text-white shrink-0"
+              >
+                🔄 Sacar de nuevo
+              </button>
+            )}
+            {onCancel && (
+              <button
+                onClick={onCancel}
+                className="rounded-md bg-red-600 hover:bg-red-700 px-3 py-1.5 text-xs text-white shrink-0"
+              >
+                Cancelar
+              </button>
+            )}
+          </div>
         )}
       </div>
     ) : (
@@ -65,9 +80,6 @@ function renderContent(text: string, onCancel?: () => void) {
   );
 }
 
-
-
-
 export default function VickiPage() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -76,7 +88,6 @@ export default function VickiPage() {
   const [loading, setLoading] = useState(false);
   const [pickingLocation, setPickingLocation] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
-  
 
   // Cargar historial
   useEffect(() => {
@@ -177,8 +188,7 @@ export default function VickiPage() {
     ]);
   }
 
-
-  async function pickLocation(loc: string) {
+  async function pickLocation(loc: string, retake = false) {
     setLoading(true);
     try {
       const r = await fetch("/api/vicki/chat", {
@@ -194,7 +204,7 @@ export default function VickiPage() {
       const data = await r.json();
       setMessages((prev) => [
         ...prev,
-        { role: "user", content: `📍 ${loc}` },
+        { role: "user", content: retake ? `🔄 ${loc}` : `📍 ${loc}` },
         { role: "assistant", content: data.response },
       ]);
       setLocation(loc);
@@ -203,12 +213,15 @@ export default function VickiPage() {
     }
   }
 
+  async function retakePhoto() {
+    if (!location || loading) return;
+    await pickLocation(location, true);
+  }
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     send(input);
   }
-
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
@@ -249,6 +262,12 @@ export default function VickiPage() {
                     m.role === "assistant" &&
                     i === messages.length - 1
                     ? cancelEmployee
+                    : undefined,
+                  awaitingEmp &&
+                    m.role === "assistant" &&
+                    i === messages.length - 1 &&
+                    /!\[[^\]]*\]\(data:image\//.test(m.content)
+                    ? retakePhoto
                     : undefined,
                 )}
               </div>
