@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { DateField } from "@/components/ui/date-field";
-import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -20,11 +20,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 type Row = {
   employee_no: string;
   employee_name: string | null;
+  departamento: string | null;
   fecha: string;
   check_in: string | null;
   check_out: string | null;
@@ -33,8 +34,36 @@ type Row = {
   devices: string | null;
 };
 
-// Fecha local (AR) en formato YYYY-MM-DD. No usar toISOString() porque eso da UTC
-// y a la noche en AR ya está al día siguiente.
+type Edit = {
+  estado?: string;
+  dias?: string;
+  novedad?: string;
+  horas?: string;
+};
+
+const ESTADOS = [
+  "Art",
+  "Vacaciones",
+  "Enfermedad",
+  "Fallecimientos",
+  "Nac. de hijo",
+  "Gira comercial",
+  "Ausentismo",
+  "Suspención",
+  "Acompañamiento familiar",
+  "Normal",
+  "Ausente",
+  "Revisar",
+];
+
+const NOVEDADES = [
+  "Tram. Ban.",
+  "Tram. Per.",
+  "Tram. Jud.",
+  "Est. Med.",
+  "Prob. Mov.",
+];
+
 const todayLocal = () => {
   const d = new Date();
   const y = d.getFullYear();
@@ -58,11 +87,157 @@ const fmtHHMM = (min: number | null) => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 };
 
-const getEstado = (r: Row): "NORMAL" | "REVISAR" | "INCOMPLETA" => {
-  if (!r.check_out) return "INCOMPLETA";
-  if ((r.minutos ?? 0) < 60) return "REVISAR";
-  return "NORMAL";
+// Estado calculado por defecto (uno de: Normal | Ausente | Revisar)
+const calcEstado = (r: Row): "Normal" | "Ausente" | "Revisar" => {
+  if (!r.check_in) return "Ausente";
+  if (!r.check_out) return "Revisar";
+  if ((r.minutos ?? 0) < 60) return "Revisar";
+  return "Normal";
 };
+
+const estadoTone = (s: string) => {
+  if (s === "Normal")
+    return "bg-emerald-100 text-emerald-800 border-emerald-200";
+  if (s === "Ausente") return "bg-zinc-100 text-zinc-700 border-zinc-200";
+  if (s === "Revisar") return "bg-amber-100 text-amber-800 border-amber-200";
+  return "bg-sky-100 text-sky-800 border-sky-200"; // justificaciones
+};
+
+// Picker genérico: botón que despliega opciones; al elegir, foco al input num.
+function Picker({
+  value,
+  options,
+  toneClass,
+  numValue,
+  numLabel,
+  placeholder,
+  onPick,
+  onNum,
+}: {
+  value?: string;
+  options: string[];
+  toneClass?: string;
+  numValue?: string;
+  numLabel: string;
+  placeholder: string;
+  onPick: (v: string) => void;
+  onNum: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  }>({
+    top: 0,
+    left: 0,
+    width: 192,
+  });
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const numRef = useRef<HTMLInputElement>(null);
+
+  const place = () => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r)
+      setCoords({
+        top: r.bottom + 4,
+        left: r.left,
+        width: Math.max(r.width, 176),
+      });
+  };
+
+  const toggle = () => {
+    if (!open) place();
+    setOpen((o) => !o);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (
+        btnRef.current &&
+        !btnRef.current.contains(t) &&
+        panelRef.current &&
+        !panelRef.current.contains(t)
+      )
+        setOpen(false);
+    };
+    const onScroll = () => setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [open]);
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="relative">
+        <button
+          ref={btnRef}
+          type="button"
+          onClick={toggle}
+          className={cn(
+            "inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium whitespace-nowrap hover:opacity-90",
+            value
+              ? toneClass
+              : "bg-muted text-muted-foreground border-transparent",
+          )}
+        >
+          {value ?? placeholder}
+        </button>
+        {open &&
+          createPortal(
+            <div
+              ref={panelRef}
+              style={{
+                position: "fixed",
+                top: coords.top,
+                left: coords.left,
+                width: coords.width,
+              }}
+              className="z-[100] max-h-72 overflow-auto rounded-md border bg-popover p-1 shadow-md"
+            >
+              {options.map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => {
+                    onPick(opt);
+                    setOpen(false);
+                    setTimeout(() => numRef.current?.focus(), 0);
+                  }}
+                  className={cn(
+                    "block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent",
+                    value === opt && "bg-accent",
+                  )}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>,
+            document.body,
+          )}
+      </div>
+      <Input
+        ref={numRef}
+        type="number"
+        min={0}
+        inputMode="numeric"
+        value={numValue ?? ""}
+        onChange={(e) => onNum(e.target.value)}
+        placeholder={numLabel}
+        title={numLabel}
+        className="h-8 w-16"
+      />
+    </div>
+  );
+}
 
 export default function AsistenciaPage() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -70,24 +245,25 @@ export default function AsistenciaPage() {
   const [empleado, setEmpleado] = useState("");
   const [estado, setEstado] = useState<string>("all");
   const [origen, setOrigen] = useState<string>("all");
+  const [edits, setEdits] = useState<Record<string, Edit>>({});
 
-  // Default: hoy → hoy (un solo día)
   const [desde, setDesde] = useState(todayLocal());
   const [hasta, setHasta] = useState(todayLocal());
-
-  // Marca si el usuario ya tocó "hasta" manualmente. Mientras no lo haga,
-  // cambiar "desde" arrastra "hasta" al mismo valor.
   const hastaTouched = useRef(false);
 
   const onDesdeChange = (v: string) => {
     setDesde(v);
     if (!hastaTouched.current) setHasta(v);
-    else if (v > hasta) setHasta(v); // nunca dejar hasta < desde
+    else if (v > hasta) setHasta(v);
   };
   const onHastaChange = (v: string) => {
     hastaTouched.current = true;
     setHasta(v);
   };
+
+  const keyOf = (r: Row) => `${r.employee_no}|${r.fecha}`;
+  const patch = (k: string, p: Edit) =>
+    setEdits((prev) => ({ ...prev, [k]: { ...prev[k], ...p } }));
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -95,8 +271,7 @@ export default function AsistenciaPage() {
       const qs = new URLSearchParams({ desde, hasta });
       const r = await fetch(`/api/rrhh/asistencia/resumen?${qs}`);
       if (!r.ok) {
-        const err = await r.json().catch(() => ({ error: r.statusText }));
-        console.error(err);
+        console.error(await r.json().catch(() => ({ error: r.statusText })));
         setRows([]);
         return;
       }
@@ -110,6 +285,8 @@ export default function AsistenciaPage() {
     fetchData();
   }, [fetchData]);
 
+  const effEstado = (r: Row) => edits[keyOf(r)]?.estado ?? calcEstado(r);
+
   const filtered = useMemo(() => {
     return rows.filter((r) => {
       if (
@@ -117,28 +294,18 @@ export default function AsistenciaPage() {
         !(r.employee_name ?? "").toLowerCase().includes(empleado.toLowerCase())
       )
         return false;
-      if (estado !== "all" && getEstado(r) !== estado) return false;
+      if (estado !== "all" && effEstado(r) !== estado) return false;
       if (origen !== "all" && !(r.devices ?? "").includes(origen)) return false;
       return true;
     });
-  }, [rows, empleado, estado, origen]);
-
-  const badgeFor = (s: string) => {
-    const variant =
-      s === "NORMAL"
-        ? "default"
-        : s === "REVISAR"
-          ? "destructive"
-          : "secondary";
-    return <Badge variant={variant as any}>{s}</Badge>;
-  };
+  }, [rows, empleado, estado, origen, edits]);
 
   return (
     <div className="container mx-auto px-6 py-8">
       <header className="mb-6">
         <h1 className="text-2xl font-medium">Asistencia</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Marcas de los relojes Hikvision · una fila por empleado/día/reloj.
+          Empleados activos · estado calculado y editable · novedades por día.
         </p>
       </header>
 
@@ -154,9 +321,11 @@ export default function AsistenciaPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos los estados</SelectItem>
-            <SelectItem value="NORMAL">NORMAL</SelectItem>
-            <SelectItem value="REVISAR">REVISAR</SelectItem>
-            <SelectItem value="INCOMPLETA">INCOMPLETA</SelectItem>
+            {ESTADOS.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <Select value={origen} onValueChange={setOrigen}>
@@ -184,14 +353,15 @@ export default function AsistenciaPage() {
               <TableHead>Ingreso</TableHead>
               <TableHead>Egreso</TableHead>
               <TableHead>Horas</TableHead>
-              <TableHead>Estado</TableHead>
+              <TableHead>Estado / Días</TableHead>
+              <TableHead className="text-right">Novedad / Horas</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={8}
                   className="text-center py-8 text-muted-foreground"
                 >
                   Cargando…
@@ -201,38 +371,72 @@ export default function AsistenciaPage() {
             {!loading && filtered.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={8}
                   className="text-center py-8 text-muted-foreground"
                 >
                   Sin resultados
                 </TableCell>
               </TableRow>
             )}
-            {filtered.map((r, i) => (
-              <TableRow key={`${r.employee_no}-${r.fecha}-${r.devices}-${i}`}>
-                <TableCell>
-                  <Link
-                    href={`/rrhh/asistencia/${r.employee_no}?desde=${desde}&hasta=${hasta}`}
-                    className="text-primary hover:underline"
-                  >
-                    {r.employee_name ?? `#${r.employee_no}`}
-                  </Link>
-                </TableCell>
-                <TableCell>{r.fecha}</TableCell>
-                <TableCell>
-                  <button
-                    onClick={() => setOrigen((r.devices ?? "").trim())}
-                    className="text-primary hover:underline"
-                  >
-                    {r.devices}
-                  </button>
-                </TableCell>
-                <TableCell>{fmtTime(r.check_in)}</TableCell>
-                <TableCell>{fmtTime(r.check_out)}</TableCell>
-                <TableCell>{fmtHHMM(r.minutos)}</TableCell>
-                <TableCell>{badgeFor(getEstado(r))}</TableCell>
-              </TableRow>
-            ))}
+            {filtered.map((r) => {
+              const k = keyOf(r);
+              const e = edits[k] ?? {};
+              const est = e.estado ?? calcEstado(r);
+              return (
+                <TableRow key={`${k}-${r.devices}`}>
+                  <TableCell>
+                    <Link
+                      href={`/rrhh/asistencia/${r.employee_no}?desde=${desde}&hasta=${hasta}`}
+                      className="text-primary hover:underline"
+                    >
+                      {r.employee_name ?? `#${r.employee_no}`}
+                    </Link>
+                  </TableCell>
+                  <TableCell>{r.fecha}</TableCell>
+                  <TableCell>
+                    {r.devices ? (
+                      <button
+                        onClick={() => setOrigen((r.devices ?? "").trim())}
+                        className="text-primary hover:underline"
+                      >
+                        {r.devices}
+                      </button>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+                  <TableCell>{fmtTime(r.check_in)}</TableCell>
+                  <TableCell>{fmtTime(r.check_out)}</TableCell>
+                  <TableCell>{fmtHHMM(r.minutos)}</TableCell>
+                  <TableCell>
+                    <Picker
+                      value={est}
+                      options={ESTADOS}
+                      toneClass={estadoTone(est)}
+                      numValue={e.dias}
+                      numLabel="días"
+                      placeholder="Estado"
+                      onPick={(v) => patch(k, { estado: v })}
+                      onNum={(v) => patch(k, { dias: v })}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end">
+                      <Picker
+                        value={e.novedad}
+                        options={NOVEDADES}
+                        toneClass="bg-violet-100 text-violet-800 border-violet-200"
+                        numValue={e.horas}
+                        numLabel="hs"
+                        placeholder="Novedad"
+                        onPick={(v) => patch(k, { novedad: v })}
+                        onNum={(v) => patch(k, { horas: v })}
+                      />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>

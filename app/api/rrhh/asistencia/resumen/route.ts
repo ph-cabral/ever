@@ -12,7 +12,7 @@ type Row = {
   check_out: string | null;
   minutos: number | null;
   eventos_dia: number | null;
-  devices: string;
+  devices: string | null;
 };
 
 export async function GET(req: NextRequest) {
@@ -29,45 +29,57 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const desdeTs = `${desde}T00:00:00-03:00`;
-    const hastaTs = `${hasta}T23:59:59-03:00`;
-
     const rows = await prisma.$queryRawUnsafe<any[]>(
       `
-      WITH ev AS (
+      WITH bounds AS (
+        SELECT ($1::date)::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires' AS lo,
+               (($2::date + 1)::timestamp) AT TIME ZONE 'America/Argentina/Buenos_Aires' AS hi
+      ),
+      dias AS (
+        SELECT generate_series($1::date, $2::date, interval '1 day')::date AS fecha
+      ),
+      act AS (
+        SELECT l."employeeNo" AS employee_no,
+               NULLIF(TRIM(l.nombre), '') AS employee_name,
+               l.sector AS departamento
+        FROM everwear.legajo l
+        WHERE l.estado = 'ACTIVO' AND l."employeeNo" IS NOT NULL
+        ${employee_no ? `AND l."employeeNo" = $3` : ""}
+      ),
+      ev AS (
         SELECT
           e.employee_no,
-          COALESCE(NULLIF(TRIM(l.nombre), ''), e.employee_name) AS employee_name,
-          l.sector AS departamento,
-          e.device,
           (e.event_time AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS fecha,
-          e.event_time
-        FROM asistencia.evento e
-        LEFT JOIN everwear.legajo l ON l."employeeNo" = e.employee_no
-        WHERE e.event_time BETWEEN $1::timestamptz AND $2::timestamptz
-          ${employee_no ? "AND e.employee_no = $3" : ""}
+          string_agg(DISTINCT e.device, ',' ORDER BY e.device) AS devices,
+          MIN(e.event_time) AS check_in,
+          CASE WHEN COUNT(*) > 1 THEN MAX(e.event_time) ELSE NULL END AS check_out,
+          CASE
+            WHEN COUNT(*) > 1
+              THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (MAX(e.event_time) - MIN(e.event_time))) / 60)::int)
+            ELSE 0
+          END AS minutos,
+          COUNT(*)::int AS eventos_dia
+        FROM asistencia.evento e, bounds b
+        WHERE e.event_time >= b.lo AND e.event_time < b.hi
+        GROUP BY e.employee_no, (e.event_time AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
       )
       SELECT
-        employee_no,
-        (array_agg(employee_name) FILTER (WHERE employee_name IS NOT NULL))[1] AS employee_name,
-        (array_agg(departamento)  FILTER (WHERE departamento  IS NOT NULL))[1] AS departamento,
-        to_char(fecha, 'YYYY-MM-DD') AS fecha,
-        string_agg(DISTINCT device, ',' ORDER BY device) AS devices,
-        MIN(event_time) AS check_in,
-        CASE WHEN COUNT(*) > 1 THEN MAX(event_time) ELSE NULL END AS check_out,
-        CASE
-          WHEN COUNT(*) > 1
-            THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (MAX(event_time) - MIN(event_time))) / 60)::int)
-          ELSE 0
-        END AS minutos,
-        COUNT(*)::int AS eventos_dia
-      FROM ev
-      GROUP BY employee_no, fecha
-      ORDER BY (array_agg(employee_name) FILTER (WHERE employee_name IS NOT NULL))[1] NULLS LAST,
-               fecha
+        a.employee_no,
+        a.employee_name,
+        a.departamento,
+        to_char(d.fecha, 'YYYY-MM-DD') AS fecha,
+        ev.devices,
+        ev.check_in,
+        ev.check_out,
+        COALESCE(ev.minutos, 0) AS minutos,
+        COALESCE(ev.eventos_dia, 0) AS eventos_dia
+      FROM dias d
+      CROSS JOIN act a
+      LEFT JOIN ev ON ev.employee_no = a.employee_no AND ev.fecha = d.fecha
+      ORDER BY a.employee_name NULLS LAST, d.fecha
       `,
-      desdeTs,
-      hastaTs,
+      desde,
+      hasta,
       ...(employee_no ? [employee_no] : []),
     );
 
@@ -82,7 +94,7 @@ export async function GET(req: NextRequest) {
       check_out: fmt(r.check_out),
       minutos: r.minutos,
       eventos_dia: r.eventos_dia,
-      devices: r.devices,
+      devices: r.devices ?? null,
     }));
 
     return NextResponse.json(out);
