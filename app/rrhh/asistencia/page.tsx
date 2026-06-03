@@ -511,7 +511,15 @@ export default function AsistenciaPage() {
                   </TableCell>
                   <TableCell>{fmtTime(r.check_in)}</TableCell>
                   <TableCell>{fmtTime(r.check_out)}</TableCell>
-                  <TableCell>{fmtHHMM(r.minutos)}</TableCell>
+                  <TableCell
+                    title={
+                      horasNov
+                        ? `Bruto ${fmtHHMM(r.minutos)} − ${horasNov} hs`
+                        : undefined
+                    }
+                  >
+                    {fmtHHMM(netMin)}
+                  </TableCell>
                   <TableCell
                     title={`Neto ${fmtHHMM(netMin)} · tope ${fmtHHMM(topeMin(r.fecha))}`}
                   >

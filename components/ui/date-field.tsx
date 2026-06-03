@@ -22,7 +22,9 @@ const dateToIso = (d: Date): string =>
 
 const isoToDisplay = (iso?: string | null): string => {
   const d = isoToDate(iso);
-  return d ? `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}` : "";
+  return d
+    ? `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`
+    : "";
 };
 
 /** Acepta dd/mm/yyyy o ddmmyyyy. Devuelve ISO o null. */
@@ -34,11 +36,7 @@ const displayToIso = (s: string): string | null => {
   const yyyy = +digits.slice(4, 8);
   if (mm < 1 || mm > 12 || dd < 1 || dd > 31 || yyyy < 1900) return null;
   const d = new Date(yyyy, mm - 1, dd);
-  if (
-    d.getFullYear() !== yyyy ||
-    d.getMonth() !== mm - 1 ||
-    d.getDate() !== dd
-  )
+  if (d.getFullYear() !== yyyy || d.getMonth() !== mm - 1 || d.getDate() !== dd)
     return null;
   return dateToIso(d);
 };
@@ -63,8 +61,18 @@ const startOfDay = (d: Date) =>
 
 const WEEKDAYS = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"];
 const MONTHS = [
-  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+  "Enero",
+  "Febrero",
+  "Marzo",
+  "Abril",
+  "Mayo",
+  "Junio",
+  "Julio",
+  "Agosto",
+  "Septiembre",
+  "Octubre",
+  "Noviembre",
+  "Diciembre",
 ];
 
 interface CalendarProps {
@@ -76,14 +84,12 @@ interface CalendarProps {
 
 function Calendar({ selected, min, max, onSelect }: CalendarProps) {
   const [cursor, setCursor] = React.useState<Date>(
-    () => selected ?? new Date()
+    () => selected ?? new Date(),
   );
 
-  // mes mostrado
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
   const firstOfMonth = new Date(year, month, 1);
-  // lunes = 0
   const firstWeekday = (firstOfMonth.getDay() + 6) % 7;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
@@ -128,7 +134,9 @@ function Calendar({ selected, min, max, onSelect }: CalendarProps) {
 
       <div className="grid grid-cols-7 gap-0.5 text-center text-[11px] text-muted-foreground mb-1">
         {WEEKDAYS.map((w) => (
-          <div key={w} className="py-1">{w}</div>
+          <div key={w} className="py-1">
+            {w}
+          </div>
         ))}
       </div>
 
@@ -143,14 +151,17 @@ function Calendar({ selected, min, max, onSelect }: CalendarProps) {
               key={i}
               type="button"
               disabled={disabled}
+              // Evita que el mousedown saque el foco del input antes del select.
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => onSelect(d)}
               className={cn(
                 "h-7 w-7 mx-auto rounded text-xs transition-colors",
                 "hover:bg-accent hover:text-accent-foreground",
-                disabled && "opacity-30 cursor-not-allowed hover:bg-transparent",
+                disabled &&
+                  "opacity-30 cursor-not-allowed hover:bg-transparent",
                 isToday && !isSelected && "border border-border",
                 isSelected &&
-                  "bg-primary text-primary-foreground hover:bg-primary"
+                  "bg-primary text-primary-foreground hover:bg-primary",
               )}
             >
               {d.getDate()}
@@ -164,18 +175,13 @@ function Calendar({ selected, min, max, onSelect }: CalendarProps) {
 
 /* ---------------- DateField ---------------- */
 
-export interface DateFieldProps
-  extends Omit<
-    React.InputHTMLAttributes<HTMLInputElement>,
-    "value" | "onChange" | "type" | "min" | "max"
-  > {
-  /** Valor en formato ISO `YYYY-MM-DD`. */
+export interface DateFieldProps extends Omit<
+  React.InputHTMLAttributes<HTMLInputElement>,
+  "value" | "onChange" | "type" | "min" | "max"
+> {
   value?: string;
-  /** Recibe ISO `YYYY-MM-DD` o `""`. */
   onChange?: (value: string) => void;
-  /** Mínimo ISO. */
   min?: string;
-  /** Máximo ISO. */
   max?: string;
   placeholder?: string;
 }
@@ -192,12 +198,15 @@ export const DateField = React.forwardRef<HTMLInputElement, DateFieldProps>(
       disabled,
       ...rest
     },
-    ref
+    ref,
   ) {
     const [open, setOpen] = React.useState(false);
     const [text, setText] = React.useState(() => isoToDisplay(value));
 
-    // Sincronizar texto cuando cambia value externo
+    const innerRef = React.useRef<HTMLInputElement>(null);
+    const anchorRef = React.useRef<HTMLDivElement>(null);
+    React.useImperativeHandle(ref, () => innerRef.current as HTMLInputElement);
+
     React.useEffect(() => {
       setText(isoToDisplay(value));
     }, [value]);
@@ -215,7 +224,6 @@ export const DateField = React.forwardRef<HTMLInputElement, DateFieldProps>(
     };
 
     const handleBlur = () => {
-      // Si quedó parcial e inválido, restaurar a último válido
       if (text && !displayToIso(text)) setText(isoToDisplay(value));
     };
 
@@ -225,26 +233,24 @@ export const DateField = React.forwardRef<HTMLInputElement, DateFieldProps>(
     };
 
     return (
+      // Sin Popover.Trigger: el toggle del trigger peleaba con onFocus al
+      // saltar entre dos DateField. open lo maneja solo el foco; base-ui
+      // cierra por click afuera vía onOpenChange. Anclamos el popup por ref.
       <Popover.Root open={open} onOpenChange={setOpen}>
         <div
+          ref={anchorRef}
           data-slot="date-field"
           className={cn(
             "group flex h-8 w-full min-w-0 items-center gap-1 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base transition-colors md:text-sm",
             "focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50",
-            disabled && "pointer-events-none cursor-not-allowed bg-input/50 opacity-50",
+            disabled &&
+              "pointer-events-none cursor-not-allowed bg-input/50 opacity-50",
             "dark:bg-input/30",
-            className
+            className,
           )}
-          onMouseDown={(e) => {
-            // Click en cualquier parte (excepto el input) abre el popover
-            if ((e.target as HTMLElement).tagName !== "INPUT") {
-              e.preventDefault();
-              setOpen((o) => !o);
-            }
-          }}
         >
           <input
-            ref={ref}
+            ref={innerRef}
             type="text"
             inputMode="numeric"
             autoComplete="off"
@@ -268,27 +274,27 @@ export const DateField = React.forwardRef<HTMLInputElement, DateFieldProps>(
             className="flex-1 min-w-0 bg-transparent outline-none placeholder:text-muted-foreground"
             {...rest}
           />
-          <Popover.Trigger
-            render={(props) => (
-              <button
-                {...props}
-                type="button"
-                aria-label="Abrir calendario"
-                className="text-muted-foreground hover:text-foreground transition-colors"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  props.onClick?.(e);
-                }}
-              >
-                <CalendarIcon className="h-4 w-4" />
-              </button>
-            )}
-          />
+          {/* Click en el ícono → enfocar input (abre por onFocus). */}
+          <button
+            type="button"
+            aria-label="Abrir calendario"
+            tabIndex={-1}
+            disabled={disabled}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => innerRef.current?.focus()}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <CalendarIcon className="h-4 w-4" />
+          </button>
         </div>
 
         <Popover.Portal>
-          <Popover.Positioner sideOffset={6} align="start">
-            <Popover.Popup className="z-50 rounded-lg border border-border bg-popover text-popover-foreground shadow-md outline-none">
+          <Popover.Positioner anchor={anchorRef} sideOffset={6} align="start">
+            <Popover.Popup
+              // Mantener foco en el input al interactuar con el calendario.
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              className="z-50 rounded-lg border border-border bg-popover text-popover-foreground shadow-md outline-none"
+            >
               <Calendar
                 selected={selectedDate}
                 min={minDate}
@@ -300,5 +306,5 @@ export const DateField = React.forwardRef<HTMLInputElement, DateFieldProps>(
         </Popover.Portal>
       </Popover.Root>
     );
-  }
+  },
 );
