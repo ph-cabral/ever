@@ -5,6 +5,24 @@ import { Popover } from "@base-ui/react/popover";
 import { CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/* ---- estado global: solo un DateField abierto a la vez ---- */
+let _active: string | null = null;
+const _subs = new Set<() => void>();
+const _setActive = (id: string | null) => {
+  _active = id;
+  _subs.forEach((l) => l());
+};
+const _subscribe = (l: () => void) => {
+  _subs.add(l);
+  return () => _subs.delete(l);
+};
+const useActiveField = () =>
+  React.useSyncExternalStore(
+    _subscribe,
+    () => _active,
+    () => _active,
+  );
+
 /* ---------------- utils fecha (ISO yyyy-mm-dd <-> dd/mm/yyyy) ---------------- */
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -200,7 +218,14 @@ export const DateField = React.forwardRef<HTMLInputElement, DateFieldProps>(
     },
     ref,
   ) {
-    const [open, setOpen] = React.useState(false);
+    const id = React.useId();
+    const active = useActiveField();
+    const open = active === id;
+    const setOpen = (v: boolean | ((p: boolean) => boolean)) => {
+      const next = typeof v === "function" ? v(open) : v;
+      _setActive(next ? id : null);
+    };
+
     const [text, setText] = React.useState(() => isoToDisplay(value));
 
     const innerRef = React.useRef<HTMLInputElement>(null);
@@ -234,9 +259,20 @@ export const DateField = React.forwardRef<HTMLInputElement, DateFieldProps>(
 
     return (
       // Sin Popover.Trigger: el toggle del trigger peleaba con onFocus al
-      // saltar entre dos DateField. open lo maneja solo el foco; base-ui
-      // cierra por click afuera vía onOpenChange. Anclamos el popup por ref.
-      <Popover.Root open={open} onOpenChange={setOpen}>
+      // saltar entre dos DateField. open lo maneja el estado global (un solo
+      // field activo); el click dentro del propio field no cierra.
+      <Popover.Root
+        open={open}
+        onOpenChange={(o, details) => {
+          if (!o) {
+            const t = (details as any)?.event?.target as Node | undefined;
+            if (t && anchorRef.current?.contains(t)) return; // click en el input/ícono: no cerrar
+            _setActive(null);
+          } else {
+            _setActive(id);
+          }
+        }}
+      >
         <div
           ref={anchorRef}
           data-slot="date-field"
@@ -257,7 +293,7 @@ export const DateField = React.forwardRef<HTMLInputElement, DateFieldProps>(
             value={text}
             placeholder={placeholder}
             disabled={disabled}
-            onFocus={() => setOpen(true)}
+            onFocus={() => _setActive(id)}
             onChange={(e) => handleTextChange(e.target.value)}
             onBlur={handleBlur}
             onKeyDown={(e) => {
@@ -291,8 +327,7 @@ export const DateField = React.forwardRef<HTMLInputElement, DateFieldProps>(
         <Popover.Portal>
           <Popover.Positioner anchor={anchorRef} sideOffset={6} align="start">
             <Popover.Popup
-              // Mantener foco en el input al interactuar con el calendario.
-              onOpenAutoFocus={(e) => e.preventDefault()}
+              initialFocus={false}
               className="z-50 rounded-lg border border-border bg-popover text-popover-foreground shadow-md outline-none"
             >
               <Calendar

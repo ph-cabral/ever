@@ -140,26 +140,29 @@ function Picker({
 }) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{
-    top: number;
+    top?: number;
+    bottom?: number;
     left: number;
     width: number;
-  }>({
-    top: 0,
-    left: 0,
-    width: 192,
-  });
+  }>({ top: 0, left: 0, width: 192 });
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const numRef = useRef<HTMLInputElement>(null);
 
   const place = () => {
     const r = btnRef.current?.getBoundingClientRect();
-    if (r)
-      setCoords({
-        top: r.bottom + 4,
-        left: r.left,
-        width: Math.max(r.width, 176),
-      });
+    if (!r) return;
+    const margin = 8;
+    const panelH = panelRef.current?.offsetHeight ?? options.length * 32 + 8;
+    const spaceBelow = window.innerHeight - r.bottom - margin;
+    const flipUp = spaceBelow < panelH && r.top - margin > spaceBelow;
+    setCoords({
+      ...(flipUp
+        ? { bottom: window.innerHeight - r.top + 4 }
+        : { top: r.bottom + 4 }),
+      left: r.left,
+      width: Math.max(r.width, 176),
+    });
   };
 
   const toggle = () => {
@@ -213,10 +216,11 @@ function Picker({
               style={{
                 position: "fixed",
                 top: coords.top,
+                bottom: coords.bottom,
                 left: coords.left,
                 width: coords.width,
               }}
-              className="z-[100] max-h-72 overflow-auto rounded-md border bg-popover p-1 shadow-md"
+              className="z-[100] rounded-md border bg-popover p-1 shadow-md"
             >
               {options.map((opt) => (
                 <button
