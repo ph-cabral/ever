@@ -32,10 +32,6 @@ type Row = {
   minutos: number | null;
   eventos_dia: number | null;
   devices: string | null;
-  estado: string | null;
-  dias: number | null;
-  novedad: string | null;
-  horas: number | null;
 };
 
 type Edit = {
@@ -91,14 +87,6 @@ const fmtHHMM = (min: number | null) => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 };
 
-// Tope diario en minutos: viernes 480, fin de semana 0, resto 540.
-const topeMin = (fecha: string) => {
-  const dow = new Date(`${fecha}T00:00:00`).getDay(); // 0 Dom .. 6 Sab
-  if (dow === 5) return 480;
-  if (dow === 0 || dow === 6) return 0;
-  return 540;
-};
-
 // Estado calculado por defecto (uno de: Normal | Ausente | Revisar)
 const calcEstado = (r: Row): "Normal" | "Ausente" | "Revisar" => {
   if (!r.check_in) return "Ausente";
@@ -116,7 +104,6 @@ const estadoTone = (s: string) => {
 };
 
 // Picker genérico: botón que despliega opciones; al elegir, foco al input num.
-// El guardado se dispara en onBlur / Enter del input numérico (onCommit).
 function Picker({
   value,
   options,
@@ -126,7 +113,6 @@ function Picker({
   placeholder,
   onPick,
   onNum,
-  onCommit,
 }: {
   value?: string;
   options: string[];
@@ -136,7 +122,6 @@ function Picker({
   placeholder: string;
   onPick: (v: string) => void;
   onNum: (v: string) => void;
-  onCommit: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{
@@ -246,13 +231,6 @@ function Picker({
         inputMode="numeric"
         value={numValue ?? ""}
         onChange={(e) => onNum(e.target.value)}
-        onBlur={() => onCommit()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            e.currentTarget.blur(); // dispara onBlur -> onCommit
-          }
-        }}
         placeholder={numLabel}
         title={numLabel}
         className="h-8 w-16"
@@ -268,12 +246,6 @@ export default function AsistenciaPage() {
   const [estado, setEstado] = useState<string>("all");
   const [origen, setOrigen] = useState<string>("all");
   const [edits, setEdits] = useState<Record<string, Edit>>({});
-
-  // Ref para leer ediciones actuales dentro de onBlur sin closures stale.
-  const editsRef = useRef(edits);
-  useEffect(() => {
-    editsRef.current = edits;
-  }, [edits]);
 
   const [desde, setDesde] = useState(todayLocal());
   const [hasta, setHasta] = useState(todayLocal());
@@ -293,57 +265,6 @@ export default function AsistenciaPage() {
   const patch = (k: string, p: Edit) =>
     setEdits((prev) => ({ ...prev, [k]: { ...prev[k], ...p } }));
 
-  // Guardado en DB (blur/Enter). kind = qué picker disparó.
-  const commit = useCallback(
-    async (k: string, kind: "estado" | "novedad", bruto?: number) => {
-      const sep = k.lastIndexOf("|");
-      const employee_no = k.slice(0, sep);
-      const fecha = k.slice(sep + 1);
-      const e = editsRef.current[k] ?? {};
-
-      let body: any;
-      if (kind === "estado") {
-        body = {
-          employee_no,
-          fecha,
-          kind,
-          value: e.estado ?? null,
-          num: e.dias ?? null,
-        };
-      } else {
-        const horas = parseInt(e.horas || "0", 10) || 0;
-        const brutoMin = bruto ?? 0;
-        const netoMin = Math.max(0, brutoMin - horas * 60);
-        body = {
-          employee_no,
-          fecha,
-          kind,
-          value: e.novedad ?? null,
-          num: e.horas ?? null,
-          bruto: brutoMin,
-          neto: netoMin,
-        };
-      }
-
-      if (
-        (body.value == null || body.value === "") &&
-        (body.num == null || body.num === "")
-      )
-        return;
-
-      try {
-        await fetch("/api/rrhh/asistencia/novedad", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-      } catch (err) {
-        console.error("[novedad commit]", err);
-      }
-    },
-    [],
-  );
-
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -352,30 +273,9 @@ export default function AsistenciaPage() {
       if (!r.ok) {
         console.error(await r.json().catch(() => ({ error: r.statusText })));
         setRows([]);
-        setEdits({});
         return;
       }
-      const data: Row[] = await r.json();
-      setRows(data);
-
-      // Precargar ediciones guardadas (reemplaza al cambiar de rango).
-      const initial: Record<string, Edit> = {};
-      for (const row of data) {
-        if (
-          row.estado != null ||
-          row.dias != null ||
-          row.novedad != null ||
-          row.horas != null
-        ) {
-          initial[`${row.employee_no}|${row.fecha}`] = {
-            estado: row.estado ?? undefined,
-            dias: row.dias != null ? String(row.dias) : undefined,
-            novedad: row.novedad ?? undefined,
-            horas: row.horas != null ? String(row.horas) : undefined,
-          };
-        }
-      }
-      setEdits(initial);
+      setRows(await r.json());
     } finally {
       setLoading(false);
     }
@@ -452,8 +352,7 @@ export default function AsistenciaPage() {
               <TableHead>Origen</TableHead>
               <TableHead>Ingreso</TableHead>
               <TableHead>Egreso</TableHead>
-              <TableHead>En empresa</TableHead>
-              <TableHead>RRHH</TableHead>
+              <TableHead>Horas</TableHead>
               <TableHead>Estado / Días</TableHead>
               <TableHead className="text-right">Novedad / Horas</TableHead>
             </TableRow>
@@ -462,7 +361,7 @@ export default function AsistenciaPage() {
             {loading && (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={8}
                   className="text-center py-8 text-muted-foreground"
                 >
                   Cargando…
@@ -472,7 +371,7 @@ export default function AsistenciaPage() {
             {!loading && filtered.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={8}
                   className="text-center py-8 text-muted-foreground"
                 >
                   Sin resultados
@@ -483,9 +382,6 @@ export default function AsistenciaPage() {
               const k = keyOf(r);
               const e = edits[k] ?? {};
               const est = e.estado ?? calcEstado(r);
-              const horasNov = parseInt(e.horas || "0", 10) || 0;
-              const netMin = Math.max(0, (r.minutos ?? 0) - horasNov * 60);
-              const rrhhMin = Math.min(netMin, topeMin(r.fecha));
               return (
                 <TableRow key={`${k}-${r.devices}`}>
                   <TableCell>
@@ -512,11 +408,6 @@ export default function AsistenciaPage() {
                   <TableCell>{fmtTime(r.check_in)}</TableCell>
                   <TableCell>{fmtTime(r.check_out)}</TableCell>
                   <TableCell>{fmtHHMM(r.minutos)}</TableCell>
-                  <TableCell
-                    title={`Neto ${fmtHHMM(netMin)} · tope ${fmtHHMM(topeMin(r.fecha))}`}
-                  >
-                    {fmtHHMM(rrhhMin)}
-                  </TableCell>
                   <TableCell>
                     <Picker
                       value={est}
@@ -527,7 +418,6 @@ export default function AsistenciaPage() {
                       placeholder="Estado"
                       onPick={(v) => patch(k, { estado: v })}
                       onNum={(v) => patch(k, { dias: v })}
-                      onCommit={() => commit(k, "estado")}
                     />
                   </TableCell>
                   <TableCell>
@@ -541,7 +431,6 @@ export default function AsistenciaPage() {
                         placeholder="Novedad"
                         onPick={(v) => patch(k, { novedad: v })}
                         onNum={(v) => patch(k, { horas: v })}
-                        onCommit={() => commit(k, "novedad", r.minutos ?? 0)}
                       />
                     </div>
                   </TableCell>
