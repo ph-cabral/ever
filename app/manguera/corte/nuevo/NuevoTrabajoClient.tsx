@@ -111,11 +111,36 @@ export function NuevoTrabajoClient({
     }
   }
 
+  // function commitCorte() {
+  //   if (!selected) return;
+  //   const n = parseFloat(qty) || 0;
+  //   const o = obs.trim();
+  //   if (n <= 0 && !o) return; // necesita metros o un motivo
+  //   setCortes((p) => [
+  //     ...p,
+  //     {
+  //       mangueraId: selected.id,
+  //       codigo: selected.codigo,
+  //       metros: n,
+  //       observacion: o || null,
+  //     },
+  //   ]);
+  //   setSelected(null);
+  //   setQuery("");
+  //   setQty("");
+  //   setObs("");
+  //   focus(codeRef);
+  // }
+
   function commitCorte() {
     if (!selected) return;
-    const n = parseFloat(qty) || 0;
+    if (cant && cortes.length >= cant) {
+      alert(`Límite alcanzado: ${cant} cortes`);
+      return;
+    }
+    const n = Math.round((parseFloat(qty) || 0) * 100) / 100;
     const o = obs.trim();
-    if (n <= 0 && !o) return; // necesita metros o un motivo
+    if (n <= 0 && !o) return;
     setCortes((p) => [
       ...p,
       {
@@ -155,9 +180,53 @@ export function NuevoTrabajoClient({
     setClienteErr(!cli);
   }
 
+  // async function terminar() {
+  //   if (!operarioId) return alert("Elegí un operario");
+  //   if (cortes.length === 0) return alert("Agregá al menos un corte");
+  //   setSaving(true);
+  //   try {
+  //     await createTrabajoAction({
+  //       legajoId: operarioId as number,
+  //       clienteNumero: clienteNumero ? parseInt(clienteNumero, 10) : null,
+  //       ordenTrabajo: numInterno,
+  //       prioridad,
+  //       producto,
+  //       cantidadAProducir: cantidad ? parseInt(cantidad, 10) : null,
+  //       observaciones,
+  //       inicio: inicioRef.current,
+  //       cortes,
+  //     });
+  //     router.push("/manguera");
+  //     router.refresh();
+  //   } catch (err) {
+  //     alert(err instanceof Error ? err.message : "Error al guardar");
+  //     setSaving(false);
+  //   }
+  // }
   async function terminar() {
     if (!operarioId) return alert("Elegí un operario");
-    if (cortes.length === 0) return alert("Agregá al menos un corte");
+
+    // auto-commit del corte pendiente
+    let lista = cortes;
+    if (selected && (parseFloat(qty) > 0 || obs.trim())) {
+      lista = [
+        ...cortes,
+        {
+          mangueraId: selected.id,
+          codigo: selected.codigo,
+          // metros: parseFloat(qty) || 0,
+          metros: Math.round((parseFloat(qty) || 0) * 100) / 100,
+          observacion: obs.trim() || null,
+        },
+      ];
+      setCortes(lista);
+      setSelected(null);
+      setQuery("");
+      setQty("");
+      setObs("");
+    }
+    if (lista.length === 0) return alert("Agregá al menos un corte");
+
     setSaving(true);
     try {
       await createTrabajoAction({
@@ -169,9 +238,9 @@ export function NuevoTrabajoClient({
         cantidadAProducir: cantidad ? parseInt(cantidad, 10) : null,
         observaciones,
         inicio: inicioRef.current,
-        cortes,
+        cortes: lista,
       });
-      router.push("/manguera");
+      router.push("/manguera/corte");
       router.refresh();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Error al guardar");
@@ -190,7 +259,7 @@ export function NuevoTrabajoClient({
 
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Nuevo trabajo</h1>
-        <Link href="/manguera" className="text-gray-500 hover:text-gray-700">
+        <Link href="/manguera/corte" className="text-gray-500 hover:text-gray-700">
           ← Volver
         </Link>
       </div>
@@ -300,6 +369,8 @@ export function NuevoTrabajoClient({
           </label>
           <input
             type="number"
+            min="0"
+            step="0.01"
             value={cantidad}
             onChange={(e) => setCantidad(e.target.value)}
             className={inputCls}
@@ -460,7 +531,12 @@ export function NuevoTrabajoClient({
                   <input
                     list="obs-opciones"
                     value={obs}
-                    disabled={!selected}
+                    // disabled={!selected}
+                    disabled={
+                      !selected ||
+                      (!parseFloat(qty) && !obs.trim()) ||
+                      (!!cant && cortes.length >= cant)
+                    }
                     onChange={(e) => setObs(e.target.value)}
                     onKeyDown={onCommitKey}
                     placeholder={selected ? "Motivo / SIN STOCK" : ""}
@@ -469,6 +545,16 @@ export function NuevoTrabajoClient({
                 </td>
                 <td className="px-4 py-2 text-xs text-gray-400">
                   {selected ? "Enter para agregar" : "escribí un código"}
+
+                  {/*
+                 <td className="px-4 py-2">
+                  <button
+                    onClick={commitCorte}
+                    disabled={!selected || (!parseFloat(qty) && !obs.trim())}
+                    className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded disabled:opacity-40"
+                  >
+                    + Agregar
+                  </button> */}
                 </td>
               </tr>
             </tbody>
@@ -481,7 +567,8 @@ export function NuevoTrabajoClient({
           </span>
           <button
             onClick={terminar}
-            disabled={saving || cortes.length === 0}
+            // disabled={saving || cortes.length === 0}
+            disabled={saving || (cortes.length === 0 && !selected)}
             className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? "Guardando…" : "Terminar y guardar"}
