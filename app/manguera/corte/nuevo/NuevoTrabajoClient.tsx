@@ -110,9 +110,11 @@ export function NuevoTrabajoClient({
       if (!selected && matches.length > 0) selectManguera(matches[0]);
     }
   }
+  
   function commitCorte() {
     if (!selected) return;
-    if (cant && cortes.length >= cant) return;
+    if (!cant || cant <= 0) return;
+    if (cortes.length >= cant) return;
     const n = Math.round((parseFloat(qty) || 0) * 100) / 100;
     const o = obs.trim();
     if (n <= 0 && !o) return;
@@ -159,13 +161,18 @@ export function NuevoTrabajoClient({
 
     // auto-commit del corte pendiente
     let lista = cortes;
-    if (selected && (parseFloat(qty) > 0 || obs.trim())) {
+    if (
+      selected &&
+      (parseFloat(qty) > 0 || obs.trim()) &&
+      cant &&
+      cant > 0 &&
+      cortes.length < cant
+    ) {
       lista = [
         ...cortes,
         {
           mangueraId: selected.id,
           codigo: selected.codigo,
-          // metros: parseFloat(qty) || 0,
           metros: Math.round((parseFloat(qty) || 0) * 100) / 100,
           observacion: obs.trim() || null,
         },
@@ -422,7 +429,7 @@ export function NuevoTrabajoClient({
                     onKeyDown={onCodeKeyDown}
                     placeholder="Código de manguera…"
                     className="w-full px-2 py-1 border rounded text-gray-900"
-                    disabled={!!cant && cortes.length >= cant}
+                    disabled={!cant || cant <= 0 || cortes.length >= cant}
                   />
                   {!selected && matches.length > 0 && (
                     <ul className="absolute z-20 mt-1 w-80 bg-white border border-gray-200 rounded-lg shadow max-h-56 overflow-auto">
@@ -456,9 +463,11 @@ export function NuevoTrabajoClient({
                     ref={qtyRef}
                     type="number"
                     min="0"
-                    step="0.1"
+                    step="0.01"
                     value={qty}
-                    disabled={!selected}
+                    disabled={
+                      !selected || !cant || cant <= 0 || cortes.length >= cant
+                    }
                     onChange={(e) => setQty(e.target.value)}
                     onKeyDown={onCommitKey}
                     placeholder={selected ? "Metros" : ""}
@@ -470,34 +479,17 @@ export function NuevoTrabajoClient({
                     </p>
                   )}
                 </td>
-                <td className="px-4 py-2">
-                  <input
-                    list="obs-opciones"
-                    value={obs}
-                    // disabled={!selected}
-                    disabled={
-                      !selected ||
-                      (!parseFloat(qty) && !obs.trim()) ||
-                      (!!cant && cortes.length >= cant)
-                    }
-                    onChange={(e) => setObs(e.target.value)}
-                    onKeyDown={onCommitKey}
-                    placeholder={selected ? "Motivo / SIN STOCK" : ""}
-                    className="w-full px-2 py-1 border rounded text-gray-900 disabled:bg-gray-100"
-                  />
+                <td className="px-4 py-2 text-xs text-gray-400">
+                  {!cant || cant <= 0
+                    ? "definí cantidad a producir"
+                    : cortes.length >= cant
+                      ? "límite alcanzado"
+                      : selected
+                        ? "Enter para agregar"
+                        : "escribí un código"}
                 </td>
                 <td className="px-4 py-2 text-xs text-gray-400">
                   {selected ? "Enter para agregar" : "escribí un código"}
-
-                  {/*
-                 <td className="px-4 py-2">
-                  <button
-                    onClick={commitCorte}
-                    disabled={!selected || (!parseFloat(qty) && !obs.trim())}
-                    className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded disabled:opacity-40"
-                  >
-                    + Agregar
-                  </button> */}
                 </td>
               </tr>
             </tbody>
@@ -510,7 +502,6 @@ export function NuevoTrabajoClient({
           </span>
           <button
             onClick={terminar}
-            // disabled={saving || cortes.length === 0}
             disabled={saving || (cortes.length === 0 && !selected)}
             className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
           >
