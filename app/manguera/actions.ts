@@ -91,12 +91,22 @@ export async function getTrabajosAction() {
       id: true,
       ordenTrabajo: true,
       fechaPedido: true,
-      producto: true,
       estado: true,
       legajo: { select: { nombre: true } },
       sector: { select: { nombre: true } },
       cliente: { select: { nombre: true } },
       _count: { select: { cortes: true } },
+       cortes: {
+        orderBy: { fecha: "desc" },
+        select: {
+          id: true,
+          codigo: true,
+          metros: true,
+          fecha: true,
+          observacion: true,
+          personal: { select: { nombre: true } },
+        },
+      },
     },
   });
 }

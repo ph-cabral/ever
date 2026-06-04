@@ -110,34 +110,9 @@ export function NuevoTrabajoClient({
       if (!selected && matches.length > 0) selectManguera(matches[0]);
     }
   }
-
-  // function commitCorte() {
-  //   if (!selected) return;
-  //   const n = parseFloat(qty) || 0;
-  //   const o = obs.trim();
-  //   if (n <= 0 && !o) return; // necesita metros o un motivo
-  //   setCortes((p) => [
-  //     ...p,
-  //     {
-  //       mangueraId: selected.id,
-  //       codigo: selected.codigo,
-  //       metros: n,
-  //       observacion: o || null,
-  //     },
-  //   ]);
-  //   setSelected(null);
-  //   setQuery("");
-  //   setQty("");
-  //   setObs("");
-  //   focus(codeRef);
-  // }
-
   function commitCorte() {
     if (!selected) return;
-    if (cant && cortes.length >= cant) {
-      alert(`Límite alcanzado: ${cant} cortes`);
-      return;
-    }
+    if (cant && cortes.length >= cant) return;
     const n = Math.round((parseFloat(qty) || 0) * 100) / 100;
     const o = obs.trim();
     if (n <= 0 && !o) return;
@@ -179,30 +154,6 @@ export function NuevoTrabajoClient({
     setClienteNombre(cli?.nombre ?? null);
     setClienteErr(!cli);
   }
-
-  // async function terminar() {
-  //   if (!operarioId) return alert("Elegí un operario");
-  //   if (cortes.length === 0) return alert("Agregá al menos un corte");
-  //   setSaving(true);
-  //   try {
-  //     await createTrabajoAction({
-  //       legajoId: operarioId as number,
-  //       clienteNumero: clienteNumero ? parseInt(clienteNumero, 10) : null,
-  //       ordenTrabajo: numInterno,
-  //       prioridad,
-  //       producto,
-  //       cantidadAProducir: cantidad ? parseInt(cantidad, 10) : null,
-  //       observaciones,
-  //       inicio: inicioRef.current,
-  //       cortes,
-  //     });
-  //     router.push("/manguera");
-  //     router.refresh();
-  //   } catch (err) {
-  //     alert(err instanceof Error ? err.message : "Error al guardar");
-  //     setSaving(false);
-  //   }
-  // }
   async function terminar() {
     if (!operarioId) return alert("Elegí un operario");
 
@@ -259,7 +210,10 @@ export function NuevoTrabajoClient({
 
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Nuevo trabajo</h1>
-        <Link href="/manguera/corte" className="text-gray-500 hover:text-gray-700">
+        <Link
+          href="/manguera/corte"
+          className="text-gray-500 hover:text-gray-700"
+        >
           ← Volver
         </Link>
       </div>
@@ -351,18 +305,6 @@ export function NuevoTrabajoClient({
             className={inputCls}
           />
         </div>
-
-        {/* <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Producto
-          </label>
-          <input
-            value={producto}
-            onChange={(e) => setProducto(e.target.value.toUpperCase())}
-            className={inputCls}
-          />
-        </div> */}
-
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Cantidad a producir (n° mangueras)
@@ -436,7 +378,7 @@ export function NuevoTrabajoClient({
                   Código
                 </th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                  Metros
+                  Mts / Kgs
                 </th>
                 <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                   Observación
@@ -451,7 +393,7 @@ export function NuevoTrabajoClient({
                     {c.codigo}
                   </td>
                   <td className="px-4 py-2 text-gray-900">
-                    {c.metros > 0 ? `${c.metros} mts` : "—"}
+                    {c.metros > 0 ? `${c.metros} ` : "—"}
                   </td>
                   <td className="px-4 py-2 text-gray-700">
                     {c.observacion || ""}
@@ -480,6 +422,7 @@ export function NuevoTrabajoClient({
                     onKeyDown={onCodeKeyDown}
                     placeholder="Código de manguera…"
                     className="w-full px-2 py-1 border rounded text-gray-900"
+                    disabled={!!cant && cortes.length >= cant}
                   />
                   {!selected && matches.length > 0 && (
                     <ul className="absolute z-20 mt-1 w-80 bg-white border border-gray-200 rounded-lg shadow max-h-56 overflow-auto">
