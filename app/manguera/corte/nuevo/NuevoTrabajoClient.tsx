@@ -1,0 +1,502 @@
+"use client";
+
+import { useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { AddMangueraModal } from "../../components/AddMangueraModal";
+import { createTrabajoAction, getClienteAction } from "../../actions";
+
+type Legajo = {
+  id: number;
+  nombre: string;
+  sectorRel: { nombre: string } | null;
+};
+type Manguera = {
+  id: number;
+  codigo: string;
+  metros: number;
+  ubicacion: string | null;
+};
+type CorteRow = {
+  mangueraId: number;
+  codigo: string;
+  metros: number;
+  observacion: string | null;
+};
+
+export function NuevoTrabajoClient({
+  legajos,
+  mangueras,
+}: {
+  legajos: Legajo[];
+  mangueras: Manguera[];
+}) {
+  const router = useRouter();
+  const inicioRef = useRef<string>(new Date().toISOString());
+  const codeRef = useRef<HTMLInputElement>(null);
+  const qtyRef = useRef<HTMLInputElement>(null);
+
+  // cabecera
+  const [operarioId, setOperarioId] = useState<number | "">("");
+  const [numInterno, setNumInterno] = useState("");
+  const [prioridad, setPrioridad] = useState("MEDIA");
+  const [producto, setProducto] = useState("");
+  const [cantidad, setCantidad] = useState("");
+  const [observaciones, setObservaciones] = useState("");
+
+  // cliente
+  const [clienteNumero, setClienteNumero] = useState("");
+  const [clienteNombre, setClienteNombre] = useState<string | null>(null);
+  const [clienteErr, setClienteErr] = useState(false);
+
+  // cortes
+  const [cortes, setCortes] = useState<CorteRow[]>([]);
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Manguera | null>(null);
+  const [qty, setQty] = useState("");
+  const [obs, setObs] = useState("");
+
+  const [modalManguera, setModalManguera] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const operario = legajos.find((l) => l.id === operarioId);
+  const sectorNombre = operario?.sectorRel?.nombre || "—";
+
+  const stagedByRoll = useMemo(() => {
+    const m: Record<number, number> = {};
+    for (const c of cortes) m[c.mangueraId] = (m[c.mangueraId] || 0) + c.metros;
+    return m;
+  }, [cortes]);
+  const avail = (m: Manguera) => m.metros - (stagedByRoll[m.id] || 0);
+
+  // muestra TODAS las mangueras que matchean (con o sin stock)
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return mangueras
+      .filter((m) => m.codigo.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [query, mangueras]);
+
+  const cant = cantidad ? parseInt(cantidad, 10) : null;
+  const estadoCalc =
+    !cant || cant <= 0
+      ? cortes.length > 0
+        ? "TERMINADO"
+        : "PENDIENTE"
+      : cortes.length === cant
+        ? "CUMPLIDO"
+        : cortes.length < cant
+          ? "INCOMPLETO"
+          : "EXCEDIDO";
+
+  const totalMetros = cortes.reduce((a, c) => a + c.metros, 0);
+
+  function focus(ref: React.RefObject<HTMLInputElement>) {
+    setTimeout(() => ref.current?.focus(), 30);
+  }
+
+  function selectManguera(m: Manguera) {
+    setSelected(m);
+    setQuery(m.codigo);
+    setQty("");
+    setObs("");
+    focus(qtyRef);
+  }
+
+  function onCodeKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (!selected && matches.length > 0) selectManguera(matches[0]);
+    }
+  }
+
+  function commitCorte() {
+    if (!selected) return;
+    const n = parseFloat(qty) || 0;
+    const o = obs.trim();
+    if (n <= 0 && !o) return; // necesita metros o un motivo
+    setCortes((p) => [
+      ...p,
+      {
+        mangueraId: selected.id,
+        codigo: selected.codigo,
+        metros: n,
+        observacion: o || null,
+      },
+    ]);
+    setSelected(null);
+    setQuery("");
+    setQty("");
+    setObs("");
+    focus(codeRef);
+  }
+
+  function onCommitKey(e: React.KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitCorte();
+    }
+  }
+
+  function removeCorte(i: number) {
+    setCortes((p) => p.filter((_, idx) => idx !== i));
+  }
+
+  async function resolveCliente() {
+    const n = parseInt(clienteNumero, 10);
+    if (isNaN(n)) {
+      setClienteNombre(null);
+      setClienteErr(false);
+      return;
+    }
+    const cli = await getClienteAction(n);
+    setClienteNombre(cli?.nombre ?? null);
+    setClienteErr(!cli);
+  }
+
+  async function terminar() {
+    if (!operarioId) return alert("Elegí un operario");
+    if (cortes.length === 0) return alert("Agregá al menos un corte");
+    setSaving(true);
+    try {
+      await createTrabajoAction({
+        legajoId: operarioId as number,
+        clienteNumero: clienteNumero ? parseInt(clienteNumero, 10) : null,
+        ordenTrabajo: numInterno,
+        prioridad,
+        producto,
+        cantidadAProducir: cantidad ? parseInt(cantidad, 10) : null,
+        observaciones,
+        inicio: inicioRef.current,
+        cortes,
+      });
+      router.push("/manguera");
+      router.refresh();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error al guardar");
+      setSaving(false);
+    }
+  }
+
+  const inputCls =
+    "w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none";
+
+  return (
+    <main className="container mx-auto p-4 space-y-6">
+      <datalist id="obs-opciones">
+        <option value="SIN STOCK" />
+      </datalist>
+
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Nuevo trabajo</h1>
+        <Link href="/manguera" className="text-gray-500 hover:text-gray-700">
+          ← Volver
+        </Link>
+      </div>
+
+      {/* CABECERA */}
+      <div className="bg-white rounded-lg shadow p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Operario *
+          </label>
+          <select
+            value={operarioId}
+            onChange={(e) =>
+              setOperarioId(e.target.value ? Number(e.target.value) : "")
+            }
+            className={inputCls}
+          >
+            <option value="">Elegí…</option>
+            {legajos.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.nombre}
+              </option>
+            ))}
+          </select>
+          {legajos.length === 0 && (
+            <p className="text-xs text-amber-600 mt-1">
+              No hay legajos en sector “mangueras”.
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Sector
+          </label>
+          <input
+            value={sectorNombre}
+            readOnly
+            className={`${inputCls} bg-gray-100`}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Fecha pedido
+          </label>
+          <input
+            value={new Date(inicioRef.current).toLocaleDateString("es-AR")}
+            readOnly
+            className={`${inputCls} bg-gray-100`}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Cliente (n°)
+          </label>
+          <input
+            type="number"
+            value={clienteNumero}
+            onChange={(e) => setClienteNumero(e.target.value)}
+            onBlur={resolveCliente}
+            onKeyDown={(e) => e.key === "Enter" && resolveCliente()}
+            placeholder="N° de cliente"
+            className={inputCls}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Cliente
+          </label>
+          <input
+            value={clienteErr ? "No encontrado" : clienteNombre || ""}
+            readOnly
+            placeholder="—"
+            className={`${inputCls} bg-gray-100 ${clienteErr ? "text-red-600" : ""}`}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            N° interno
+          </label>
+          <input
+            value={numInterno}
+            onChange={(e) => setNumInterno(e.target.value)}
+            placeholder="Cruce de datos"
+            className={inputCls}
+          />
+        </div>
+
+        {/* <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Producto
+          </label>
+          <input
+            value={producto}
+            onChange={(e) => setProducto(e.target.value.toUpperCase())}
+            className={inputCls}
+          />
+        </div> */}
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Cantidad a producir (n° mangueras)
+          </label>
+          <input
+            type="number"
+            value={cantidad}
+            onChange={(e) => setCantidad(e.target.value)}
+            className={inputCls}
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Prioridad
+          </label>
+          <select
+            value={prioridad}
+            onChange={(e) => setPrioridad(e.target.value)}
+            className={inputCls}
+          >
+            <option>ALTA</option>
+            <option>MEDIA</option>
+            <option>BAJA</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Estado (auto)
+          </label>
+          <input
+            value={estadoCalc}
+            readOnly
+            className={`${inputCls} bg-gray-100 font-medium`}
+          />
+        </div>
+
+        <div className="md:col-span-3">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Observaciones de corte
+          </label>
+          <textarea
+            value={observaciones}
+            onChange={(e) => setObservaciones(e.target.value)}
+            rows={2}
+            className={inputCls}
+          />
+        </div>
+      </div>
+
+      {/* CORTES */}
+      <div className="bg-white rounded-lg shadow p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Cortes</h2>
+          <button
+            onClick={() => setModalManguera(true)}
+            className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg"
+          >
+            + Agregar manguera
+          </button>
+        </div>
+
+        <div className="overflow-x-auto md:overflow-visible">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  Código
+                </th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  Metros
+                </th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  Observación
+                </th>
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {cortes.map((c, i) => (
+                <tr key={i}>
+                  <td className="px-4 py-2 text-gray-900 font-medium">
+                    {c.codigo}
+                  </td>
+                  <td className="px-4 py-2 text-gray-900">
+                    {c.metros > 0 ? `${c.metros} mts` : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-gray-700">
+                    {c.observacion || ""}
+                  </td>
+                  <td className="px-4 py-2">
+                    <button
+                      onClick={() => removeCorte(i)}
+                      className="text-red-500 hover:text-red-700 text-sm"
+                    >
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              ))}
+
+              {/* fila de carga */}
+              <tr className="bg-green-50/40">
+                <td className="px-4 py-2 relative">
+                  <input
+                    ref={codeRef}
+                    value={query}
+                    onChange={(e) => {
+                      setQuery(e.target.value.toUpperCase());
+                      if (selected) setSelected(null);
+                    }}
+                    onKeyDown={onCodeKeyDown}
+                    placeholder="Código de manguera…"
+                    className="w-full px-2 py-1 border rounded text-gray-900"
+                  />
+                  {!selected && matches.length > 0 && (
+                    <ul className="absolute z-20 mt-1 w-80 bg-white border border-gray-200 rounded-lg shadow max-h-56 overflow-auto">
+                      {matches.map((m) => {
+                        const disp = avail(m);
+                        return (
+                          <li key={m.id}>
+                            <button
+                              onClick={() => selectManguera(m)}
+                              className="w-full text-left px-3 py-2 hover:bg-green-50 text-sm text-gray-900"
+                            >
+                              <span className="font-medium">{m.codigo}</span>
+                              {disp > 0 ? (
+                                ` · ${disp} mts`
+                              ) : (
+                                <span className="text-gray-400">
+                                  {" "}
+                                  · sin stock
+                                </span>
+                              )}
+                              {m.ubicacion ? ` · ${m.ubicacion}` : ""}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </td>
+                <td className="px-4 py-2">
+                  <input
+                    ref={qtyRef}
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={qty}
+                    disabled={!selected}
+                    onChange={(e) => setQty(e.target.value)}
+                    onKeyDown={onCommitKey}
+                    placeholder={selected ? "Metros" : ""}
+                    className="w-28 px-2 py-1 border rounded text-gray-900 disabled:bg-gray-100"
+                  />
+                  {selected && parseFloat(qty) > avail(selected) && (
+                    <p className="text-[11px] text-amber-600 mt-1">
+                      supera stock (se registra igual)
+                    </p>
+                  )}
+                </td>
+                <td className="px-4 py-2">
+                  <input
+                    list="obs-opciones"
+                    value={obs}
+                    disabled={!selected}
+                    onChange={(e) => setObs(e.target.value)}
+                    onKeyDown={onCommitKey}
+                    placeholder={selected ? "Motivo / SIN STOCK" : ""}
+                    className="w-full px-2 py-1 border rounded text-gray-900 disabled:bg-gray-100"
+                  />
+                </td>
+                <td className="px-4 py-2 text-xs text-gray-400">
+                  {selected ? "Enter para agregar" : "escribí un código"}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex items-center justify-between pt-2 border-t">
+          <span className="text-sm text-gray-600">
+            {cortes.length} cortes · {totalMetros} mts · {estadoCalc}
+          </span>
+          <button
+            onClick={terminar}
+            disabled={saving || cortes.length === 0}
+            className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {saving ? "Guardando…" : "Terminar y guardar"}
+          </button>
+        </div>
+      </div>
+
+      <AddMangueraModal
+        isOpen={modalManguera}
+        onClose={() => {
+          setModalManguera(false);
+          router.refresh();
+        }}
+        codigoPrellenado={query}
+      />
+    </main>
+  );
+}

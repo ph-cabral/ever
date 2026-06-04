@@ -38,12 +38,15 @@ model corte {
   metros      Float
   fecha       DateTime @default(now())
   observacion String?
-  personalId  Int
+  personalId  Int?
   codigo      String
-  personal    personal @relation(fields: [personalId], references: [id])
+  trabajoId   Int?
+  personal    personal? @relation(fields: [personalId], references: [id])
+  trabajo     trabajo?  @relation(fields: [trabajoId], references: [id])
 
   @@index([fecha])
   @@index([personalId])
+  @@index([trabajoId])
   @@schema("fabrica")
 }
 
@@ -189,7 +192,9 @@ model legajo {
   estudios               legajo_estudio[]
   familiares             legajo_familiar[]
   idiomas                legajo_idioma[]
-
+  sectorId               Int?
+  sectorRel              sector?   @relation(fields: [sectorId], references: [id])
+  trabajos               trabajo[]
   @@index([estado])
   @@schema("everwear")
 }
@@ -346,4 +351,63 @@ model user_id_registry {
   created_at   DateTime? @default(now()) @db.Timestamptz(6)
 
   @@schema("everwear")
+}
+
+model area {
+  id        Int      @id @default(autoincrement())
+  nombre    String   @unique @db.VarChar(80)
+  createdAt DateTime @default(now())
+  sectores  sector[]
+
+  @@schema("everwear")
+}
+
+model sector {
+  id        Int       @id @default(autoincrement())
+  nombre    String    @db.VarChar(80)
+  areaId    Int
+  createdAt DateTime  @default(now())
+  area      area      @relation(fields: [areaId], references: [id])
+  legajos   legajo[]
+  trabajos  trabajo[]
+
+  @@unique([nombre, areaId])
+  @@index([areaId])
+  @@schema("everwear")
+}
+
+model cliente {
+  numero    Int       @id
+  nombre    String    @db.VarChar(150)
+  createdAt DateTime  @default(now())
+  trabajos  trabajo[]
+
+  @@schema("everwear")
+}
+
+model trabajo {
+  id                  Int       @id @default(autoincrement())
+  fechaPedido         DateTime  @default(now())
+  pedidoTransferencia String?   @db.VarChar(60)
+  ordenTrabajo        String?   @db.VarChar(60)
+  prioridad           String?   @db.VarChar(20)
+  producto            String?   @db.VarChar(80)
+  cantidadAProducir   Float?
+  observaciones       String?
+  estado              String    @default("EN_PROCESO") @db.VarChar(20)
+  legajoId            Int
+  sectorId            Int?
+  clienteNumero       Int?
+  inicio              DateTime  @default(now())
+  fin                 DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  legajo              legajo    @relation(fields: [legajoId], references: [id])
+  sector              sector?   @relation(fields: [sectorId], references: [id])
+  cliente             cliente?  @relation(fields: [clienteNumero], references: [numero])
+  cortes              corte[]
+
+  @@index([legajoId])
+  @@index([estado])
+  @@schema("fabrica")
 }
