@@ -195,6 +195,7 @@ model legajo {
   sectorId               Int?
   sectorRel              sector?   @relation(fields: [sectorId], references: [id])
   trabajos               trabajo[]
+  anvizId                String?         @unique @db.VarChar(20)
   @@index([estado])
   @@schema("everwear")
 }

@@ -96,7 +96,7 @@ export async function getTrabajosAction() {
       sector: { select: { nombre: true } },
       cliente: { select: { nombre: true } },
       _count: { select: { cortes: true } },
-       cortes: {
+      cortes: {
         orderBy: { fecha: "desc" },
         select: {
           id: true,
@@ -127,13 +127,26 @@ type NuevoTrabajoInput = {
   observaciones?: string | null;
   inicio: string;
   cortes: NuevoCorte[];
+  finalizar?: boolean;
 };
 
-function calcEstado(cantidad: number | null | undefined, nCortes: number) {
-  if (!cantidad || cantidad <= 0)
-    return nCortes > 0 ? "TERMINADO" : "PENDIENTE";
-  if (nCortes === cantidad) return "CUMPLIDO";
-  return nCortes < cantidad ? "INCOMPLETO" : "EXCEDIDO";
+// function calcEstado(cantidad: number | null | undefined, nCortes: number) {
+//   if (!cantidad || cantidad <= 0)
+//     return nCortes > 0 ? "TERMINADO" : "PENDIENTE";
+//   if (nCortes === cantidad) return "CUMPLIDO";
+//   return nCortes < cantidad ? "INCOMPLETO" : "EXCEDIDO";
+// }
+function calcEstado(
+  finalizar: boolean,
+  cortes: { observacion?: string | null }[],
+) {
+  if (
+    cortes.some(
+      (c) => (c.observacion || "").toUpperCase() === "ESPERA DE RECEPCION",
+    )
+  )
+    return "ESPERA_RECEPCION";
+  return finalizar ? "CUMPLIDO" : "EN_PROCESO";
 }
 
 export async function createTrabajoAction(input: NuevoTrabajoInput) {
@@ -155,7 +168,8 @@ export async function createTrabajoAction(input: NuevoTrabajoInput) {
     clienteNumero = cli.numero;
   }
 
-  const estado = calcEstado(input.cantidadAProducir, input.cortes.length);
+  // const estado = calcEstado(input.cantidadAProducir, input.cortes.length);
+  const estado = calcEstado(!!input.finalizar, input.cortes);
 
   await prisma.$transaction(async (tx) => {
     const trabajo = await tx.trabajo.create({
@@ -198,5 +212,194 @@ export async function createTrabajoAction(input: NuevoTrabajoInput) {
     }
   });
 
+  revalidatePath("/manguera");
+}
+
+export async function updateCorteAction(input: {
+  corteId: number;
+  metros: number;
+  observacion?: string | null;
+}) {
+  const corte = await prisma.corte.findUnique({
+    where: { id: input.corteId },
+  });
+  if (!corte) throw new Error("Corte no encontrado");
+
+  const nuevo = Math.max(0, Math.round((input.metros || 0) * 100) / 100);
+  const diff = nuevo - corte.metros; // >0 consume más, <0 devuelve
+  const obs = input.observacion?.trim() || null;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.corte.update({
+      where: { id: corte.id },
+      data: { metros: nuevo, observacion: obs },
+    });
+
+    if (diff !== 0) {
+      const rollo = await tx.manguera.findFirst({
+        where: { codigo: corte.codigo },
+        orderBy: { createdAt: "asc" },
+      });
+      if (rollo) {
+        const stock = rollo.metros - diff;
+        if (stock <= 0) await tx.manguera.delete({ where: { id: rollo.id } });
+        else
+          await tx.manguera.update({
+            where: { id: rollo.id },
+            data: { metros: stock },
+          });
+      } else if (diff < 0) {
+        // rollo se borró al llegar a 0 → recrear con lo devuelto
+        await tx.manguera.create({
+          data: { codigo: corte.codigo, metros: -diff },
+        });
+      }
+      // diff>0 sin rollo: se registra igual, no hay stock que descontar
+    }
+
+    if (corte.trabajoId) {
+      const trabajo = await tx.trabajo.findUnique({
+        where: { id: corte.trabajoId },
+        select: { estado: true },
+      });
+      const cortes = await tx.corte.findMany({
+        where: { trabajoId: corte.trabajoId },
+        select: { observacion: true },
+      });
+      const hayEspera = cortes.some(
+        (c) => (c.observacion || "").toUpperCase() === "ESPERA DE RECEPCION",
+      );
+      let estado = trabajo?.estado ?? "EN_PROCESO";
+      if (hayEspera) estado = "ESPERA_RECEPCION";
+      else if (estado === "ESPERA_RECEPCION") estado = "EN_PROCESO";
+      await tx.trabajo.update({
+        where: { id: corte.trabajoId },
+        data: { estado },
+      });
+    }
+  });
+
+  revalidatePath("/manguera/corte");
+  revalidatePath("/manguera");
+}
+export async function getTrabajoAction(id: number) {
+  return prisma.trabajo.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      legajoId: true,
+      clienteNumero: true,
+      ordenTrabajo: true,
+      prioridad: true,
+      producto: true,
+      cantidadAProducir: true,
+      observaciones: true,
+      fechaPedido: true,
+      estado: true,
+      cliente: { select: { nombre: true } },
+      cortes: {
+        orderBy: { fecha: "asc" },
+        select: { id: true, codigo: true, metros: true, observacion: true },
+      },
+    },
+  });
+}
+
+export async function updateTrabajoAction(
+  input: NuevoTrabajoInput & { trabajoId: number },
+) {
+  if (!input.trabajoId) throw new Error("Falta trabajoId");
+  if (!input.legajoId) throw new Error("Elegí un operario");
+  if (!input.cortes?.length) throw new Error("Agregá al menos un corte");
+
+  const legajo = await prisma.legajo.findUnique({
+    where: { id: input.legajoId },
+    select: { id: true, sectorId: true },
+  });
+  if (!legajo) throw new Error("Operario no encontrado");
+
+  let clienteNumero: number | null = null;
+  if (input.clienteNumero != null && !isNaN(input.clienteNumero)) {
+    const cli = await prisma.cliente.findUnique({
+      where: { numero: input.clienteNumero },
+    });
+    if (!cli) throw new Error(`Cliente ${input.clienteNumero} no existe`);
+    clienteNumero = cli.numero;
+  }
+
+  const estado = calcEstado(!!input.finalizar, input.cortes);
+
+  await prisma.$transaction(async (tx) => {
+    const previos = await tx.corte.findMany({
+      where: { trabajoId: input.trabajoId },
+      select: { metros: true, codigo: true },
+    });
+
+    const sumar = (arr: { codigo: string; metros: number }[]) => {
+      const m: Record<string, number> = {};
+      for (const c of arr) m[c.codigo] = (m[c.codigo] || 0) + (c.metros || 0);
+      return m;
+    };
+    const oldByCod = sumar(previos);
+    const newByCod = sumar(
+      input.cortes.map((c) => ({
+        codigo: c.codigo,
+        metros: Math.max(0, c.metros || 0),
+      })),
+    );
+
+    // reconciliar stock por código: delta = nuevo - viejo
+    const cods = new Set([...Object.keys(oldByCod), ...Object.keys(newByCod)]);
+    for (const cod of cods) {
+      const delta = (newByCod[cod] || 0) - (oldByCod[cod] || 0);
+      if (delta === 0) continue;
+      const rollo = await tx.manguera.findFirst({
+        where: { codigo: cod },
+        orderBy: { createdAt: "asc" },
+      });
+      if (rollo) {
+        const stock = rollo.metros - delta;
+        if (stock <= 0) await tx.manguera.delete({ where: { id: rollo.id } });
+        else
+          await tx.manguera.update({
+            where: { id: rollo.id },
+            data: { metros: stock },
+          });
+      } else if (delta < 0) {
+        await tx.manguera.create({ data: { codigo: cod, metros: -delta } });
+      }
+      // delta>0 sin rollo: se registra igual
+    }
+
+    await tx.corte.deleteMany({ where: { trabajoId: input.trabajoId } });
+    for (const c of input.cortes) {
+      await tx.corte.create({
+        data: {
+          codigo: c.codigo,
+          metros: Math.max(0, c.metros || 0),
+          observacion: c.observacion?.trim() || null,
+          trabajoId: input.trabajoId,
+        },
+      });
+    }
+
+    await tx.trabajo.update({
+      where: { id: input.trabajoId },
+      data: {
+        legajoId: legajo.id,
+        sectorId: legajo.sectorId,
+        clienteNumero,
+        ordenTrabajo: input.ordenTrabajo?.trim() || null,
+        prioridad: input.prioridad || null,
+        producto: input.producto?.trim() || null,
+        cantidadAProducir: input.cantidadAProducir ?? null,
+        observaciones: input.observaciones?.trim() || null,
+        estado,
+        fin: input.finalizar ? new Date() : null,
+      },
+    });
+  });
+
+  revalidatePath("/manguera/corte");
   revalidatePath("/manguera");
 }

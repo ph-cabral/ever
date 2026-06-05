@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 type Corte = {
@@ -16,7 +17,6 @@ type Trabajo = {
   id: number;
   ordenTrabajo: string | null;
   fechaPedido: string | Date;
-  // producto: string | null;
   estado: string;
   legajo: { nombre: string } | null;
   sector: { nombre: string } | null;
@@ -26,16 +26,19 @@ type Trabajo = {
 };
 
 export function TrabajosClient({ trabajos }: { trabajos: Trabajo[] }) {
+  const router = useRouter();
   const [filtro, setFiltro] = useState("");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
   const f = filtro.toLowerCase();
   const filtrados = trabajos.filter(
     (t) =>
       (t.ordenTrabajo || "").toLowerCase().includes(f) ||
-      (t.producto || "").toLowerCase().includes(f) ||
       (t.legajo?.nombre || "").toLowerCase().includes(f) ||
       (t.cliente?.nombre || "").toLowerCase().includes(f),
   );
+  const incompletos = filtrados.filter((t) => t.estado !== "CUMPLIDO");
+
   const fmt = (d: string | Date) => new Date(d).toLocaleDateString("es-AR");
   const fmtDT = (d: string | Date) =>
     new Date(d).toLocaleString("es-AR", {
@@ -50,6 +53,13 @@ export function TrabajosClient({ trabajos }: { trabajos: Trabajo[] }) {
       return n;
     });
 
+  const badge = (e: string) =>
+    e === "CUMPLIDO"
+      ? "bg-green-100 text-green-800"
+      : e === "ESPERA_RECEPCION"
+        ? "bg-amber-100 text-amber-800"
+        : "bg-blue-100 text-blue-800";
+
   const cols = [
     "",
     "OT n°",
@@ -62,8 +72,8 @@ export function TrabajosClient({ trabajos }: { trabajos: Trabajo[] }) {
   ];
 
   return (
-    <main className="container mx-auto p-4">
-      <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between mb-6">
+    <main className="container mx-auto p-4 space-y-8">
+      <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
         <h1 className="text-2xl font-bold">Trabajos</h1>
         <div className="flex items-center gap-2 w-full lg:w-auto">
           <div className="relative w-full lg:w-72">
@@ -92,159 +102,240 @@ export function TrabajosClient({ trabajos }: { trabajos: Trabajo[] }) {
         </div>
       </div>
 
-      <div className="overflow-x-auto bg-white rounded-lg shadow">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              {cols.map((h, i) => (
-                <th
-                  key={i}
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {filtrados.length === 0 ? (
+      {/* TABLA SUPERIOR: no completos (click → editar) */}
+      <div>
+        <h2 className="text-lg font-semibold mb-2">Pendientes / en proceso</h2>
+        <div className="overflow-x-auto bg-white rounded-lg shadow">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
               <tr>
-                <td
-                  colSpan={cols.length}
-                  className="px-6 py-4 text-left text-gray-500"
-                >
-                  Sin trabajos
-                </td>
+                {[
+                  "OT n°",
+                  "Fecha",
+                  "Operario",
+                  "Cliente",
+                  "N° cortes",
+                  "Estado",
+                ].map((h, i) => (
+                  <th
+                    key={i}
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
-            ) : (
-              filtrados.map((t) => {
-                const isOpen = expanded.has(t.id);
-                const totalMetros = t.cortes.reduce((s, c) => s + c.metros, 0);
-                return (
-                  <Fragment key={t.id}>
-                    <tr
-                      key={t.id}
-                      onClick={() => toggle(t.id)}
-                      className="cursor-pointer hover:bg-gray-50"
-                    >
-                      <td className="px-6 py-4 whitespace-nowrap text-gray-500 select-none">
-                        <span
-                          className={`inline-block transition-transform duration-300 ${isOpen ? "rotate-90" : ""}`}
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {incompletos.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-4 text-left text-gray-500">
+                    Sin pendientes
+                  </td>
+                </tr>
+              ) : (
+                incompletos.map((t) => (
+                  <tr
+                    key={t.id}
+                    onClick={() =>
+                      router.push(`/manguera/corte/${t.id}/editar`)
+                    }
+                    className="cursor-pointer hover:bg-gray-50"
+                  >
+                    <td className="px-6 py-4 whitespace-nowrap text-left font-medium text-gray-900">
+                      {t.ordenTrabajo || `#${t.id}`}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
+                      {fmt(t.fechaPedido)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
+                      {t.legajo?.nombre || "-"}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
+                      {t.cliente?.nombre || "-"}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
+                      {t._count.cortes}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-left">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${badge(t.estado)}`}
+                      >
+                        {t.estado.replace(/_/g, " ")}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* TABLA INFERIOR: todos (expandible, solo lectura) */}
+      <div>
+        <h2 className="text-lg font-semibold mb-2">Todos</h2>
+        <div className="overflow-x-auto bg-white rounded-lg shadow">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                {cols.map((h, i) => (
+                  <th
+                    key={i}
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {filtrados.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={cols.length}
+                    className="px-6 py-4 text-left text-gray-500"
+                  >
+                    Sin trabajos
+                  </td>
+                </tr>
+              ) : (
+                // filtrados.map((t) => {
+                filtrados
+                  .filter((t) => t.estado === "CUMPLIDO")
+                  .map((t) => {
+                    const isOpen = expanded.has(t.id);
+                    const totalMetros = t.cortes.reduce(
+                      (s, c) => s + c.metros,
+                      0,
+                    );
+                    return (
+                      <Fragment key={t.id}>
+                        <tr
+                          onClick={() => toggle(t.id)}
+                          className="cursor-pointer hover:bg-gray-50"
                         >
-                          ▶
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-left font-medium text-gray-900">
-                        {t.ordenTrabajo || `#${t.id}`}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
-                        {fmt(t.fechaPedido)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
-                        {t.legajo?.nombre || "-"}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
-                        {t.sector?.nombre || "-"}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
-                        {t.cliente?.nombre || "-"}
-                      </td>
-                      {/* <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
-                        {t.producto || "-"}
-                      </td> */}
-                      <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
-                        {t._count.cortes}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-left">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          {t.estado}
-                        </span>
-                      </td>
-                    </tr>
-                    <tr key={`${t.id}-det`} className="bg-gray-50">
-                      <td colSpan={cols.length} className="p-0">
-                        <div
-                          className={`grid transition-all duration-300 ease-in-out ${
-                            isOpen
-                              ? "grid-rows-[1fr] opacity-100"
-                              : "grid-rows-[0fr] opacity-0"
-                          }`}
-                        >
-                          <div className="overflow-hidden">
-                            <div className="px-6 py-4">
-                              {t.cortes.length === 0 ? (
-                                <p className="text-sm text-gray-500">
-                                  Sin cortes
-                                </p>
-                              ) : (
-                                <div className="overflow-x-auto">
-                                  <table className="min-w-full text-sm">
-                                    <thead>
-                                      <tr className="text-xs text-gray-500 uppercase">
-                                        <th className="px-3 py-2 text-left">
-                                          Fecha
-                                        </th>
-                                        <th className="px-3 py-2 text-left">
-                                          Código
-                                        </th>
-                                        <th className="px-3 py-2 text-right">
-                                          Metros
-                                        </th>
-                                        <th className="px-3 py-2 text-left">
-                                          Operario
-                                        </th>
-                                        <th className="px-3 py-2 text-left">
-                                          Observación
-                                        </th>
-                                      </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-200">
-                                      {t.cortes.map((c) => (
-                                        <tr key={c.id}>
-                                          <td className="px-3 py-2 text-gray-900">
-                                            {fmtDT(c.fecha)}
-                                          </td>
-                                          <td className="px-3 py-2 text-gray-900">
-                                            {c.codigo}
-                                          </td>
-                                          <td className="px-3 py-2 text-right text-gray-900">
-                                            {c.metros}
-                                          </td>
-                                          <td className="px-3 py-2 text-gray-900">
-                                            {c.personal?.nombre || "-"}
-                                          </td>
-                                          <td className="px-3 py-2 text-gray-900">
-                                            {c.observacion || "-"}
-                                          </td>
-                                        </tr>
-                                      ))}
-                                      <tr className="font-medium bg-gray-100">
-                                        <td className="px-3 py-2" colSpan={2}>
-                                          Total
-                                        </td>
-                                        <td className="px-3 py-2 text-right">
-                                          {totalMetros}
-                                        </td>
-                                        <td
-                                          className="px-3 py-2"
-                                          colSpan={2}
-                                        ></td>
-                                      </tr>
-                                    </tbody>
-                                  </table>
+                          <td className="px-6 py-4 whitespace-nowrap text-gray-500 select-none">
+                            <span
+                              className={`inline-block transition-transform duration-300 ${isOpen ? "rotate-90" : ""}`}
+                            >
+                              ▶
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-left font-medium text-gray-900">
+                            {t.ordenTrabajo || `#${t.id}`}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
+                            {fmt(t.fechaPedido)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
+                            {t.legajo?.nombre || "-"}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
+                            {t.sector?.nombre || "-"}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
+                            {t.cliente?.nombre || "-"}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
+                            {t._count.cortes}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-left">
+                            <span
+                              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${badge(t.estado)}`}
+                            >
+                              {t.estado.replace(/_/g, " ")}
+                            </span>
+                          </td>
+                        </tr>
+                        <tr className="bg-gray-50">
+                          <td colSpan={cols.length} className="p-0">
+                            <div
+                              className={`grid transition-all duration-300 ease-in-out ${
+                                isOpen
+                                  ? "grid-rows-[1fr] opacity-100"
+                                  : "grid-rows-[0fr] opacity-0"
+                              }`}
+                            >
+                              <div className="overflow-hidden">
+                                <div className="px-6 py-4">
+                                  {t.cortes.length === 0 ? (
+                                    <p className="text-sm text-gray-500">
+                                      Sin cortes
+                                    </p>
+                                  ) : (
+                                    <div className="overflow-x-auto">
+                                      <table className="min-w-full text-sm">
+                                        <thead>
+                                          <tr className="text-xs text-gray-500 uppercase">
+                                            <th className="px-3 py-2 text-left">
+                                              Fecha
+                                            </th>
+                                            <th className="px-3 py-2 text-left">
+                                              Código
+                                            </th>
+                                            <th className="px-3 py-2 text-right">
+                                              Metros
+                                            </th>
+                                            <th className="px-3 py-2 text-left">
+                                              Operario
+                                            </th>
+                                            <th className="px-3 py-2 text-left">
+                                              Observación
+                                            </th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-200">
+                                          {t.cortes.map((c) => (
+                                            <tr key={c.id}>
+                                              <td className="px-3 py-2 text-gray-900">
+                                                {fmtDT(c.fecha)}
+                                              </td>
+                                              <td className="px-3 py-2 text-gray-900">
+                                                {c.codigo}
+                                              </td>
+                                              <td className="px-3 py-2 text-right text-gray-900">
+                                                {c.metros}
+                                              </td>
+                                              <td className="px-3 py-2 text-gray-900">
+                                                {c.personal?.nombre || "-"}
+                                              </td>
+                                              <td className="px-3 py-2 text-gray-900">
+                                                {c.observacion || "-"}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                          <tr className="font-medium bg-gray-100">
+                                            <td
+                                              className="px-3 py-2"
+                                              colSpan={2}
+                                            >
+                                              Total
+                                            </td>
+                                            <td className="px-3 py-2 text-right">
+                                              {totalMetros}
+                                            </td>
+                                            <td
+                                              className="px-3 py-2"
+                                              colSpan={2}
+                                            ></td>
+                                          </tr>
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
                                 </div>
-                              )}
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  </Fragment>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                          </td>
+                        </tr>
+                      </Fragment>
+                    );
+                  })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </main>
   );
