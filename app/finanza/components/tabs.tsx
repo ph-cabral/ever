@@ -4,217 +4,113 @@ import React from "react";
 import { RefreshCw } from "lucide-react";
 import type { FinanzaData } from "@/lib/finanza/parseFinanza";
 import type { MacroData } from "@/lib/finanza/store";
-import { Card, KPI, Grid, Table, PageTitle, fmtArs, fmtUsd, fmtNum, fmtPct, fmtDate, fmtMes, type Col } from "./ui";
+import {
+  PageTitle,
+  SectionTitle,
+  Panel,
+  KPI,
+  Grid,
+  Tag,
+  Progress,
+  Table,
+  ChartBar,
+  ChartLine,
+  ChartDonut,
+  PALETTE,
+  fmtArs,
+  fmtUsd,
+  fmtNum,
+  fmtPct,
+  fmtDate,
+  fmtMes,
+  fmtShort,
+  type Col,
+  type Serie,
+} from "./ui";
 
-const sum = (a: (number | null)[]) => a.reduce<number>((s, v) => s + (v ?? 0), 0);
+const sum = (a: (number | null | undefined)[]) =>
+  a.reduce<number>((s, v) => s + (v ?? 0), 0);
+const clip = (s: string, n = 22) => (s.length > n ? s.slice(0, n) + "…" : s);
 
-// ─── CTAS CTES ───────────────────────────────────────────────────────────────
-export function CtasCtesTab({ d }: { d: FinanzaData["ctasctes"] }) {
-  return (
-    <div className="space-y-6">
-      <PageTitle title="Cuentas Corrientes" sub="Cobranzas MAGNUS (recibos), plazos, vendedores, saldos y cheques rechazados" />
-      <Grid cols={4}>
-        <KPI label="Plazo ponderado" value={d.plazoAll != null ? `${d.plazoAll.toFixed(1)} d` : "—"} sub="todos los clientes" />
-        <KPI label="Plazo s/ OMAR-CAR" value={d.plazoSinOmar != null ? `${d.plazoSinOmar.toFixed(1)} d` : "—"} />
-        <KPI label="Cobrado (MAGNUS)" value={fmtArs(d.cobradoTotal)} sub="hoja RECIBOS" accent="green" />
-        <KPI label="Recibos MAGNUS / PR" value={fmtArs(d.reciboTotal ? Math.abs(d.reciboTotal.magnus ?? 0) : null)} sub={`PR ${fmtArs(d.reciboTotal ? Math.abs(d.reciboTotal.pr ?? 0) : null)}`} />
-      </Grid>
-
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">Cobranzas por vendedor (MAGNUS)</h3>
-        <Table<{ vendedor: string; cobrado: number }>
-          cols={[{ key: "vendedor", label: "Vendedor" }, { key: "cobrado", label: "Cobrado", num: true, render: (r) => fmtArs(r.cobrado) }]}
-          rows={d.vendedores} max={50}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">Cobranzas (MAGNUS vs PR)</h3>
-          <Table cols={pivotCols("MAGNUS", "PR")} rows={d.cobranzas} max={60} />
-        </div>
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">Saldos a cobrar</h3>
-          <Table cols={pivotCols("MAGNUS", "PRUEBA")} rows={d.saldos} max={60} />
-        </div>
-      </div>
-
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">Cheques rechazados — saldos &gt; 0</h3>
-        <Table<{ cliente: string; magnus: number | null; total: number | null }>
-          cols={[{ key: "cliente", label: "Cliente" }, { key: "magnus", label: "MAGNUS", num: true, render: (r) => fmtArs(r.magnus) }, { key: "total", label: "Total", num: true, render: (r) => fmtArs(r.total) }]}
-          rows={d.chequesRechazadosSaldos} max={60}
-        />
-      </div>
-    </div>
-  );
-}
-function pivotCols(a: string, b: string): Col<{ label: string; magnus: number | null; pr: number | null; total: number | null }>[] {
-  return [
-    { key: "label", label: "" },
-    { key: "magnus", label: a, num: true, render: (r) => fmtArs(r.magnus) },
-    { key: "pr", label: b, num: true, render: (r) => fmtArs(r.pr) },
-    { key: "total", label: "Total", num: true, render: (r) => fmtArs(r.total) },
-  ];
+type RiskTone = "red" | "amber" | "orange" | "neutral";
+function riskTag(n: number) {
+  const t: RiskTone =
+    n >= 3_000_000
+      ? "red"
+      : n >= 1_500_000
+        ? "amber"
+        : n >= 800_000
+          ? "orange"
+          : "neutral";
+  const l =
+    t === "red"
+      ? "CRÍTICO"
+      : t === "amber"
+        ? "ALTO"
+        : t === "orange"
+          ? "MODERADO"
+          : "—";
+  return <Tag tone={t}>{l}</Tag>;
 }
 
-// ─── COMERCIO EXTERIOR ─────────────────────────────────────────────────────────
-export function ComexTab({ d }: { d: FinanzaData["comex"] }) {
-  const totNac = sum(d.resumenMensual.map((m) => m.nac));
-  const totFlete = sum(d.resumenMensual.map((m) => m.flete));
-  const badge = (txt: string, ok: boolean, neutral?: boolean) => (
-    <span className={`text-xs px-2 py-0.5 rounded-full ${neutral ? "bg-zinc-700/40 text-zinc-400" : ok ? "bg-green-400/10 text-green-400" : "bg-yellow-400/10 text-yellow-400"}`}>{txt}</span>
-  );
+type MatRow = {
+  label: string;
+  cells: React.ReactNode[];
+  bold?: boolean;
+  rowTone?: "total" | "neg" | "pos" | "comex";
+};
+function MatrixTable({
+  head,
+  rows,
+  firstLabel = "Concepto",
+}: {
+  head: string[];
+  rows: MatRow[];
+  firstLabel?: string;
+}) {
+  const bg: Record<string, string> = {
+    total: "bg-yellow-400/5",
+    neg: "bg-red-400/5",
+    pos: "bg-green-400/5",
+    comex: "bg-red-400/[0.06]",
+  };
   return (
-    <div className="space-y-6">
-      <PageTitle title="Comercio Exterior" sub="Resumen mensual (nacionalizaciones + fletes), detalle de operaciones y financiaciones CDI/FIIM (USD)" />
-      <Grid cols={3}>
-        <KPI label="Nac. pendiente (USD)" value={fmtUsd(totNac)} accent="red" />
-        <KPI label="Fletes pendientes (USD)" value={fmtUsd(totFlete)} accent="red" />
-        <KPI label="Operaciones (desde 08-2025)" value={fmtNum(d.operaciones.length)} />
-      </Grid>
-
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">Resumen mensual (USD, por fecha de nacionalización)</h3>
-        <Table<{ mes: string; nac: number; flete: number; total: number }>
-          cols={[
-            { key: "mes", label: "Mes", render: (r) => fmtMes(r.mes) },
-            { key: "nac", label: "Nacionalización", num: true, render: (r) => fmtUsd(r.nac) },
-            { key: "flete", label: "Flete", num: true, render: (r) => fmtUsd(r.flete) },
-            { key: "total", label: "Total", num: true, render: (r) => fmtUsd(r.total) },
-          ]}
-          rows={d.resumenMensual}
-        />
-      </div>
-
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">Financiaciones COMEX (CDI / FIIM)</h3>
-        <Table<FinanzaData["comex"]["financiaciones"][number]>
-          cols={[
-            { key: "tipo", label: "Tipo" }, { key: "banco", label: "Banco" },
-            { key: "importe", label: "Importe", num: true, render: (r) => fmtUsd(r.importe) },
-            { key: "saldo", label: "Saldo", num: true, render: (r) => fmtUsd(r.saldo) },
-            { key: "vto", label: "Vto", render: (r) => fmtDate(r.vto) },
-            { key: "pedido", label: "Pedido" },
-            { key: "estado", label: "Estado" },
-          ]}
-          rows={d.financiaciones}
-        />
-      </div>
-
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">Operaciones</h3>
-        <Table<FinanzaData["comex"]["operaciones"][number]>
-          cols={[
-            { key: "pedido", label: "Pedido" }, { key: "nombre", label: "Producto" },
-            { key: "fecha", label: "Fecha", render: (r) => fmtDate(r.fecha) },
-            { key: "nac", label: "Nacionalización", render: (r) => r.nacEstado === "completada" ? badge("OK", true) : badge(r.nacMonto != null ? fmtUsd(r.nacMonto) : "pendiente", false) },
-            { key: "flete", label: "Flete", render: (r) => r.fleteEstado === "pagado" ? badge("pagado", true) : r.fleteEstado === "sin_costo" ? badge("sin costo", false, true) : badge(r.fleteMonto != null ? fmtUsd(r.fleteMonto) : "pendiente", false) },
-          ]}
-          rows={d.operaciones} max={250}
-        />
-      </div>
-    </div>
-  );
-}
-
-// ─── PROVEEDORES NACIONALES ─────────────────────────────────────────────────────
-export function ProveedoresTab({ d }: { d: FinanzaData["proveedores"] }) {
-  const totalSaldos = sum(d.saldos.map((s) => s.saldo));
-  return (
-    <div className="space-y-6">
-      <PageTitle title="Proveedores Nacionales" sub="Saldos por pagar, plazo ponderado y pagos del período" />
-      <Grid cols={4}>
-        <KPI label="Saldo por pagar" value={fmtArs(totalSaldos)} sub={`${d.saldos.length} proveedores`} accent="red" />
-        <KPI label="Plazo ponderado (saldos)" value={d.plazoPonderado != null ? `${d.plazoPonderado.toFixed(1)} d` : "—"} />
-        <KPI label="Pagos del período" value={fmtArs(d.totalPagos)} sub={`${d.pagos.length} pagos`} accent="green" />
-        <KPI label="Plazo ponderado (pagos)" value={d.plazoPagos != null ? `${d.plazoPagos.toFixed(1)} d` : "—"} />
-      </Grid>
-
-      <Grid cols={4}>
-        {Object.entries(d.clasificacion).map(([k, v]) => (
-          <Card key={k} title={k === "<=30" ? "≤ 30 días" : k === "31-60" ? "31–60 días" : k === ">60" ? "> 60 días" : "Sin datos"}>
-            <p className="text-lg font-bold text-zinc-200">{fmtArs(v)}</p>
-          </Card>
-        ))}
-      </Grid>
-
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">Saldos por proveedor</h3>
-        <Table<FinanzaData["proveedores"]["saldos"][number]>
-          cols={[
-            { key: "nombre", label: "Proveedor" },
-            { key: "ultimoMov", label: "Últ. mov.", render: (r) => fmtDate(r.ultimoMov) },
-            { key: "plazo", label: "Plazo", num: true, render: (r) => r.plazo != null ? `${r.plazo} d` : "—" },
-            { key: "saldo", label: "Saldo", num: true, render: (r) => fmtArs(r.saldo) },
-          ]}
-          rows={d.saldos} max={100}
-        />
-      </div>
-
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">Pagos del período</h3>
-        <Table<FinanzaData["proveedores"]["pagos"][number]>
-          cols={[
-            { key: "fecha", label: "Fecha", render: (r) => fmtDate(r.fecha) },
-            { key: "nombre", label: "Proveedor" },
-            { key: "dias", label: "Plazo", num: true, render: (r) => r.dias != null ? `${r.dias} d` : "—" },
-            { key: "importe", label: "Importe", num: true, render: (r) => fmtArs(r.importe) },
-          ]}
-          rows={d.pagos} max={150}
-        />
-      </div>
-    </div>
-  );
-}
-
-// ─── PRESUPUESTOS ───────────────────────────────────────────────────────────────
-export function PresupuestosTab({ d }: { d: FinanzaData["presupuestos"] }) {
-  const estados = [...new Set(d.porArea.flatMap((a) => Object.keys(a.estados)))];
-  return (
-    <div className="space-y-6">
-      <PageTitle title="Presupuestos / Órdenes de Compra" sub="Importe por área y estado" />
-      <Grid cols={3}><KPI label="Total" value={fmtArs(d.total)} /></Grid>
-      <div className="rounded-xl bg-[#171717] border border-zinc-800 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-[#1f1f1f]">
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500 border-b border-zinc-800">Área</th>
-              {estados.map((e) => <th key={e} className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500 border-b border-zinc-800 whitespace-nowrap">{e}</th>)}
-              <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-yellow-400 border-b border-zinc-800">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {d.porArea.map((a, i) => (
-              <tr key={i} className="border-b border-zinc-800/50 hover:bg-zinc-900/40">
-                <td className="px-4 py-2.5 text-zinc-300">{a.area}</td>
-                {estados.map((e) => <td key={e} className="px-4 py-2.5 text-right tabular-nums text-zinc-400">{a.estados[e] ? fmtArs(a.estados[e]) : "—"}</td>)}
-                <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-zinc-200">{fmtArs(a.total)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ─── Matriz mensual genérica (Impuestos / Cash) ─────────────────────────────────
-function MatrixTable({ meses, rows }: { meses: string[]; rows: { label: string; values: (number | null)[]; bg?: string; bold?: boolean }[] }) {
-  return (
-    <div className="rounded-xl bg-[#171717] border border-zinc-800 overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
+    <div className="rounded-lg bg-[#171717] border border-zinc-800 overflow-auto">
+      <table className="w-full text-[12px]">
+        <thead className="sticky top-0 z-10">
           <tr className="bg-[#1f1f1f]">
-            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500 border-b border-zinc-800">Concepto</th>
-            {meses.map((m, i) => <th key={i} className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500 border-b border-zinc-800 whitespace-nowrap">{fmtMes(m)}</th>)}
+            <th className="px-2.5 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-zinc-500 border-b border-zinc-800 sticky left-0 bg-[#1f1f1f]">
+              {firstLabel}
+            </th>
+            {head.map((h, i) => (
+              <th
+                key={i}
+                className="px-2.5 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-zinc-500 border-b border-zinc-800 whitespace-nowrap"
+              >
+                {h}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i} className={`border-b border-zinc-800/50 ${r.bg ?? "hover:bg-zinc-900/40"}`}>
-              <td className={`px-4 py-2.5 ${r.bold ? "font-semibold text-zinc-100" : "text-zinc-300"}`}>{r.label}</td>
-              {r.values.map((v, j) => <td key={j} className={`px-4 py-2.5 text-right tabular-nums ${r.bold ? "font-semibold text-zinc-100" : "text-zinc-300"}`}>{fmtArs(v)}</td>)}
+            <tr
+              key={i}
+              className={`border-b border-zinc-800/60 ${r.rowTone ? bg[r.rowTone] : "hover:bg-[#1f1f1f]"}`}
+            >
+              <td
+                className={`px-2.5 py-1.5 sticky left-0 ${r.rowTone ? bg[r.rowTone] : "bg-[#171717]"} ${r.bold ? "font-semibold text-zinc-100" : "text-zinc-300"}`}
+              >
+                {r.label}
+              </td>
+              {r.cells.map((c, j) => (
+                <td
+                  key={j}
+                  className={`px-2.5 py-1.5 text-right tabular-nums ${r.bold ? "font-semibold text-zinc-100" : "text-zinc-300"}`}
+                >
+                  {c}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -223,39 +119,734 @@ function MatrixTable({ meses, rows }: { meses: string[]; rows: { label: string; 
   );
 }
 
-export function ImpuestosTab({ d }: { d: FinanzaData["impuestos"] }) {
+function pivotCols(
+  a: string,
+  b: string,
+): Col<FinanzaData["ctasctes"]["cobranzas"][number]>[] {
+  return [
+    { key: "label", label: "Etiqueta" },
+    { key: "magnus", label: a, num: true, render: (r) => fmtArs(r.magnus) },
+    { key: "pr", label: b, num: true, render: (r) => fmtArs(r.pr) },
+    { key: "total", label: "Total", num: true, render: (r) => fmtArs(r.total) },
+  ];
+}
+
+// ─── CTAS CTES ───────────────────────────────────────────────────────────────
+export function CtasCtesTab({ d }: { d: FinanzaData["ctasctes"] }) {
+  const saldoTot = d.saldos.find((s) => /total/i.test(s.label));
+  const saldoDeudores = saldoTot
+    ? saldoTot.total
+    : sum(d.saldos.map((s) => s.total));
+  const chRechTotal = sum(d.chequesRechazadosSaldos.map((c) => c.total));
+  const vendSorted = [...d.vendedores].sort((a, b) => b.cobrado - a.cobrado);
+  const topVend = vendSorted
+    .slice(0, 12)
+    .map((v) => ({ vendedor: clip(v.vendedor), cobrado: v.cobrado }));
+  const vendRows = vendSorted.map((v, i) => ({
+    rank: i + 1,
+    vendedor: v.vendedor,
+    cobrado: v.cobrado,
+  }));
+
   return (
-    <div className="space-y-6">
-      <PageTitle title="Impuestos & Laborales" sub="Proyección de haberes, cargas, planes fiscales" />
-      <MatrixTable
-        meses={d.meses}
-        rows={[...d.conceptos.map((c) => ({ label: c.concepto, values: c.valores })), { label: "TOTAL", values: d.total, bold: true, bg: "bg-yellow-400/5" }]}
+    <div>
+      <PageTitle
+        title="Cuentas Corrientes"
+        sub="Cobranzas MAGNUS (recibos), plazos por vendedor, saldos y cheques rechazados"
+      />
+
+      <Grid cols={6}>
+        <KPI
+          label="Cobrado MAGNUS"
+          value={fmtArs(d.cobradoTotal)}
+          sub="hoja RECIBOS"
+          accent="green"
+        />
+        <KPI
+          label="Recibos PR"
+          value={fmtArs(
+            d.reciboTotal?.pr != null ? Math.abs(d.reciboTotal.pr) : null,
+          )}
+          accent="neutral"
+        />
+        <KPI
+          label="Plazo ponderado"
+          value={d.plazoAll != null ? `${d.plazoAll.toFixed(1)} d` : "—"}
+          accent="amber"
+        />
+        <KPI
+          label="Plazo s/ OMAR-CAR"
+          value={
+            d.plazoSinOmar != null ? `${d.plazoSinOmar.toFixed(1)} d` : "—"
+          }
+          accent="neutral"
+        />
+        <KPI
+          label="Saldo deudores"
+          value={fmtArs(saldoDeudores)}
+          accent="yellow"
+        />
+        <KPI
+          label="Cheques rechazados"
+          value={fmtArs(chRechTotal)}
+          sub={`${d.chequesRechazadosSaldos.length} clientes`}
+          accent="red"
+        />
+      </Grid>
+
+      <SectionTitle>💰 Cobranzas por Vendedor — MAGNUS</SectionTitle>
+      <Panel title="Top vendedores por cobranza" accent="(hoja RECIBOS)">
+        <ChartBar
+          data={topVend}
+          xKey="vendedor"
+          horizontal
+          height={Math.max(220, topVend.length * 26)}
+          series={[{ key: "cobrado", name: "Cobrado", color: PALETTE[0] }]}
+        />
+      </Panel>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+        <div>
+          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+            Detalle por vendedor
+          </h4>
+          <Table<{ rank: number; vendedor: string; cobrado: number }>
+            cols={[
+              { key: "rank", label: "#", num: true },
+              { key: "vendedor", label: "Vendedor" },
+              {
+                key: "cobrado",
+                label: "Cobrado",
+                num: true,
+                render: (r) => fmtArs(r.cobrado),
+              },
+            ]}
+            rows={vendRows}
+            max={50}
+            maxH={420}
+          />
+          <div className="mt-3 rounded-lg bg-[#1f1f1f] border border-zinc-800 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+              Plazo promedio ponderado
+            </p>
+            <Progress
+              label="Con todos los clientes"
+              pct={d.plazoAll != null ? Math.min(100, d.plazoAll) : 0}
+              value={d.plazoAll != null ? `${d.plazoAll.toFixed(1)} d` : "—"}
+              tone="yellow"
+              labelMin={170}
+            />
+            {d.plazoSinOmar != null && (
+              <Progress
+                label="Sin OMAR-CAR"
+                pct={Math.min(100, d.plazoSinOmar)}
+                value={`${d.plazoSinOmar.toFixed(1)} d`}
+                tone="green"
+                labelMin={170}
+              />
+            )}
+          </div>
+        </div>
+        <div>
+          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+            Cobranzas — MAGNUS vs PR
+          </h4>
+          <Table
+            cols={pivotCols("MAGNUS", "PR")}
+            rows={d.cobranzas}
+            max={60}
+            maxH={500}
+          />
+        </div>
+      </div>
+
+      <SectionTitle>🔴 Cheques Rechazados — Saldos Vigentes</SectionTitle>
+      <Table<FinanzaData["ctasctes"]["chequesRechazadosSaldos"][number]>
+        cols={[
+          { key: "cliente", label: "Cliente" },
+          {
+            key: "magnus",
+            label: "MAGNUS",
+            num: true,
+            render: (r) => fmtArs(r.magnus),
+          },
+          {
+            key: "total",
+            label: "Saldo",
+            num: true,
+            render: (r) => (
+              <span className="text-red-400">{fmtArs(r.total)}</span>
+            ),
+          },
+          {
+            key: "riesgo",
+            label: "Riesgo",
+            render: (r) => riskTag(r.total ?? 0),
+          },
+        ]}
+        rows={[...d.chequesRechazadosSaldos].sort(
+          (a, b) => (b.total ?? 0) - (a.total ?? 0),
+        )}
+        max={60}
+        maxH={400}
+      />
+
+      <SectionTitle>📊 Saldos a Cobrar — MAGNUS vs PR</SectionTitle>
+      <Table
+        cols={pivotCols("MAGNUS", "PRUEBA")}
+        rows={d.saldos}
+        max={80}
+        maxH={420}
       />
     </div>
   );
 }
 
-// ─── PRESTAMOS ─────────────────────────────────────────────────────────────────
-export function PrestamosTab({ d }: { d: FinanzaData["prestamos"] }) {
-  const saldoActual = [...d.cuadro].reverse().find((r) => r.saldo != null)?.saldo ?? null;
+// ─── COMERCIO EXTERIOR ─────────────────────────────────────────────────────────
+export function ComexTab({ d }: { d: FinanzaData["comex"] }) {
+  const totNac = sum(d.resumenMensual.map((m) => m.nac));
+  const totFlete = sum(d.resumenMensual.map((m) => m.flete));
+  const finSaldo = sum(d.financiaciones.map((f) => f.saldo));
+  const pendientes = d.operaciones.filter(
+    (o) => o.nacEstado === "pendiente",
+  ).length;
+  const chartData = d.resumenMensual.map((m) => ({
+    mes: fmtMes(m.mes),
+    nac: m.nac,
+    flete: m.flete,
+  }));
+
   return (
-    <div className="space-y-6">
+    <div>
+      <PageTitle
+        title="Comercio Exterior"
+        sub="Nacionalizaciones, fletes, operaciones y financiaciones CDI/FIIM (USD)"
+      />
+
+      <Grid cols={6}>
+        <KPI
+          label="Nac. pendiente"
+          value={fmtUsd(totNac)}
+          sub="por nacionalizar"
+          accent="red"
+        />
+        <KPI
+          label="Fletes pendientes"
+          value={fmtUsd(totFlete)}
+          accent="amber"
+        />
+        <KPI
+          label="Exposición total"
+          value={fmtUsd(totNac + totFlete + finSaldo)}
+          sub="Nac + Fletes + Fin."
+          accent="yellow"
+        />
+        <KPI
+          label="Financiaciones (saldo)"
+          value={fmtUsd(finSaldo)}
+          sub={`${d.financiaciones.length} operaciones`}
+          accent="red"
+        />
+        <KPI
+          label="Operaciones"
+          value={fmtNum(d.operaciones.length)}
+          accent="neutral"
+        />
+        <KPI
+          label="Pendientes nac."
+          value={fmtNum(pendientes)}
+          accent="amber"
+        />
+      </Grid>
+
+      <SectionTitle>📅 Resumen Mensual — Nacionalización + Flete</SectionTitle>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Table<FinanzaData["comex"]["resumenMensual"][number]>
+          cols={[
+            { key: "mes", label: "Mes", render: (r) => fmtMes(r.mes) },
+            {
+              key: "nac",
+              label: "Nac. (USD)",
+              num: true,
+              render: (r) => fmtUsd(r.nac),
+            },
+            {
+              key: "flete",
+              label: "Flete (USD)",
+              num: true,
+              render: (r) => fmtUsd(r.flete),
+            },
+            {
+              key: "total",
+              label: "Total (USD)",
+              num: true,
+              render: (r) => <strong>{fmtUsd(r.total)}</strong>,
+            },
+          ]}
+          rows={d.resumenMensual}
+          max={24}
+        />
+        <Panel title="Pendientes por mes" accent="(USD)">
+          <ChartBar
+            data={chartData}
+            xKey="mes"
+            height={220}
+            series={[
+              { key: "nac", name: "Nacionalización", color: PALETTE[5] },
+              { key: "flete", name: "Flete", color: PALETTE[2] },
+            ]}
+            fmt={(n) => fmtShort(n, "US$")}
+          />
+        </Panel>
+      </div>
+
+      <SectionTitle>📦 Operaciones Pendientes</SectionTitle>
+      <Table<FinanzaData["comex"]["operaciones"][number]>
+        cols={[
+          {
+            key: "pedido",
+            label: "Pedido",
+            render: (r) => String(r.pedido ?? "—"),
+          },
+          {
+            key: "nombre",
+            label: "Producto",
+            render: (r) => r.nombre || r.mercaderia || "—",
+          },
+          { key: "fecha", label: "Registr.", render: (r) => fmtDate(r.fecha) },
+          {
+            key: "nac",
+            label: "Nacionalización",
+            render: (r) =>
+              r.nacEstado === "completada" ? (
+                <Tag tone="green">OK</Tag>
+              ) : (
+                <Tag tone="amber">
+                  {r.nacMonto != null ? fmtUsd(r.nacMonto) : "PENDIENTE"}
+                </Tag>
+              ),
+          },
+          {
+            key: "fechaNac",
+            label: "Vto. Nac.",
+            render: (r) => fmtDate(r.fechaNac),
+          },
+          {
+            key: "flete",
+            label: "Flete",
+            render: (r) =>
+              r.fleteEstado === "pagado" ? (
+                <Tag tone="green">pagado</Tag>
+              ) : r.fleteEstado === "sin_costo" ? (
+                <Tag tone="neutral">sin costo</Tag>
+              ) : (
+                <Tag tone="amber">
+                  {r.fleteMonto != null ? fmtUsd(r.fleteMonto) : "PEND."}
+                </Tag>
+              ),
+          },
+        ]}
+        rows={d.operaciones}
+        max={300}
+        maxH={520}
+      />
+
+      <SectionTitle>🏦 Financiaciones COMEX (CDI / FIIM)</SectionTitle>
+      <Table<FinanzaData["comex"]["financiaciones"][number]>
+        cols={[
+          { key: "tipo", label: "Tipo", render: (r) => r.tipo ?? "—" },
+          { key: "banco", label: "Banco", render: (r) => r.banco ?? "—" },
+          {
+            key: "importe",
+            label: "Importe",
+            num: true,
+            render: (r) => fmtUsd(r.importe),
+          },
+          {
+            key: "saldo",
+            label: "Saldo",
+            num: true,
+            render: (r) => (
+              <span className="text-red-400">{fmtUsd(r.saldo)}</span>
+            ),
+          },
+          { key: "vto", label: "Vto", render: (r) => fmtDate(r.vto) },
+          { key: "pedido", label: "Pedido", render: (r) => r.pedido ?? "—" },
+          { key: "estado", label: "Estado", render: (r) => r.estado ?? "—" },
+        ]}
+        rows={d.financiaciones}
+        max={60}
+      />
+    </div>
+  );
+}
+
+// ─── PROVEEDORES NACIONALES ─────────────────────────────────────────────────────
+const CLAS_LABEL: Record<string, string> = {
+  "<=30": "≤ 30 días",
+  "31-60": "31–60 días",
+  ">60": "> 60 días",
+  sin: "Sin datos",
+  "": "Sin datos",
+};
+export function ProveedoresTab({ d }: { d: FinanzaData["proveedores"] }) {
+  const totalSaldos = sum(d.saldos.map((s) => s.saldo));
+  const top10 = [...d.saldos]
+    .sort((a, b) => b.saldo - a.saldo)
+    .slice(0, 10)
+    .map((s) => ({ nombre: clip(s.nombre, 20), saldo: s.saldo }));
+  const clasData = Object.entries(d.clasificacion).map(([k, v], i) => ({
+    name: CLAS_LABEL[k] ?? k,
+    value: v,
+    color: PALETTE[i],
+  }));
+
+  return (
+    <div>
+      <PageTitle
+        title="Proveedores Nacionales"
+        sub="Saldos por pagar, plazo ponderado y pagos del período"
+      />
+
+      <Grid cols={4}>
+        <KPI
+          label="Saldo por pagar"
+          value={fmtArs(totalSaldos)}
+          sub={`${d.saldos.length} proveedores`}
+          accent="red"
+        />
+        <KPI
+          label="Plazo ponderado (saldos)"
+          value={
+            d.plazoPonderado != null ? `${d.plazoPonderado.toFixed(1)} d` : "—"
+          }
+          accent="amber"
+        />
+        <KPI
+          label="Pagos del período"
+          value={fmtArs(d.totalPagos)}
+          sub={`${d.pagos.length} pagos`}
+          accent="green"
+        />
+        <KPI
+          label="Plazo ponderado (pagos)"
+          value={d.plazoPagos != null ? `${d.plazoPagos.toFixed(1)} d` : "—"}
+          accent="neutral"
+        />
+      </Grid>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5">
+        <Panel title="Top 10 proveedores por saldo" accent="($)">
+          <ChartBar
+            data={top10}
+            xKey="nombre"
+            horizontal
+            height={300}
+            series={[{ key: "saldo", name: "Saldo", color: PALETTE[5] }]}
+          />
+        </Panel>
+        <Panel title="Distribución por plazo de pago">
+          <ChartDonut data={clasData} height={300} fmt={(n) => fmtShort(n)} />
+        </Panel>
+      </div>
+
+      <SectionTitle>📋 Saldo por Proveedor</SectionTitle>
+      <Table<FinanzaData["proveedores"]["saldos"][number]>
+        cols={[
+          { key: "nombre", label: "Proveedor" },
+          {
+            key: "ultimoMov",
+            label: "Últ. mov.",
+            render: (r) => fmtDate(r.ultimoMov),
+          },
+          {
+            key: "plazo",
+            label: "Plazo",
+            num: true,
+            render: (r) => (r.plazo != null ? `${r.plazo} d` : "—"),
+          },
+          {
+            key: "saldo",
+            label: "Saldo",
+            num: true,
+            render: (r) => fmtArs(r.saldo),
+          },
+        ]}
+        rows={[...d.saldos].sort((a, b) => b.saldo - a.saldo)}
+        max={120}
+        maxH={460}
+      />
+
+      <SectionTitle>💳 Pagos del Período</SectionTitle>
+      <Table<FinanzaData["proveedores"]["pagos"][number]>
+        cols={[
+          { key: "fecha", label: "Fecha", render: (r) => fmtDate(r.fecha) },
+          { key: "nombre", label: "Proveedor" },
+          {
+            key: "dias",
+            label: "Plazo",
+            num: true,
+            render: (r) => (r.dias != null ? `${r.dias} d` : "—"),
+          },
+          {
+            key: "importe",
+            label: "Importe",
+            num: true,
+            render: (r) => fmtArs(r.importe),
+          },
+        ]}
+        rows={d.pagos}
+        max={150}
+        maxH={460}
+      />
+    </div>
+  );
+}
+
+// ─── PRESUPUESTOS ───────────────────────────────────────────────────────────────
+export function PresupuestosTab({ d }: { d: FinanzaData["presupuestos"] }) {
+  const estados = [
+    ...new Set(d.porArea.flatMap((a) => Object.keys(a.estados))),
+  ];
+  const estadoTot = estados.map((e, i) => ({
+    name: e,
+    value: sum(d.porArea.map((a) => a.estados[e])),
+    color: PALETTE[i],
+  }));
+  const areaBar = [...d.porArea]
+    .sort((a, b) => b.total - a.total)
+    .map((a) => ({ area: clip(a.area, 18), total: a.total }));
+  const rows: MatRow[] = d.porArea.map((a) => ({
+    label: a.area,
+    cells: [
+      ...estados.map((e) => (a.estados[e] ? fmtArs(a.estados[e]) : "—")),
+      <strong key="t">{fmtArs(a.total)}</strong>,
+    ],
+  }));
+  rows.push({
+    label: "TOTAL",
+    bold: true,
+    rowTone: "total",
+    cells: [
+      ...estados.map((e) => fmtArs(sum(d.porArea.map((a) => a.estados[e])))),
+      fmtArs(d.total),
+    ],
+  });
+
+  return (
+    <div>
+      <PageTitle
+        title="Presupuestos / Órdenes de Compra"
+        sub="Importe por área y estado"
+      />
+      <Grid cols={3}>
+        <KPI label="Total OC" value={fmtArs(d.total)} accent="yellow" />
+      </Grid>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5">
+        <Panel title="Estado de órdenes">
+          <ChartDonut data={estadoTot} height={280} />
+        </Panel>
+        <Panel title="Importe por área" accent="($)">
+          <ChartBar
+            data={areaBar}
+            xKey="area"
+            horizontal
+            height={280}
+            series={[{ key: "total", name: "Total", color: PALETTE[0] }]}
+          />
+        </Panel>
+      </div>
+
+      <SectionTitle>📋 Detalle por Área</SectionTitle>
+      <MatrixTable firstLabel="Área" head={[...estados, "Total"]} rows={rows} />
+    </div>
+  );
+}
+
+// ─── IMPUESTOS & LABORALES ──────────────────────────────────────────────────────
+export function ImpuestosTab({ d }: { d: FinanzaData["impuestos"] }) {
+  const totByConc = d.conceptos.map((c) => ({
+    c,
+    t: sum(c.valores.map((v) => Math.abs(v ?? 0))),
+  }));
+  const top = [...totByConc]
+    .sort((a, b) => b.t - a.t)
+    .slice(0, 6)
+    .map((x) => x.c);
+  const topSet = new Set(top.map((c) => c.concepto));
+  const lastIdx = d.meses.length - 1;
+
+  const evo = d.meses.map((m, i) => {
+    const row: Record<string, string | number> = { mes: fmtMes(m) };
+    top.forEach((c) => (row[c.concepto] = c.valores[i] ?? 0));
+    row["Otros"] = sum(
+      d.conceptos
+        .filter((c) => !topSet.has(c.concepto))
+        .map((c) => c.valores[i] ?? 0),
+    );
+    return row;
+  });
+  const evoSeries: Serie[] = [
+    ...top.map((c, i) => ({
+      key: c.concepto,
+      name: clip(c.concepto, 16),
+      color: PALETTE[i],
+      stackId: "a",
+    })),
+    { key: "Otros", name: "Otros", color: PALETTE[8], stackId: "a" },
+  ];
+  const comp = top.map((c, i) => ({
+    name: clip(c.concepto, 16),
+    value: Math.abs(c.valores[lastIdx] ?? 0),
+    color: PALETTE[i],
+  }));
+
+  const rows: MatRow[] = d.conceptos.map((c) => ({
+    label: c.concepto,
+    cells: c.valores.map((v) => fmtArs(v)),
+  }));
+  rows.push({
+    label: "TOTAL",
+    bold: true,
+    rowTone: "total",
+    cells: d.total.map((v) => fmtArs(v)),
+  });
+
+  return (
+    <div>
+      <PageTitle
+        title="Impuestos & Laborales"
+        sub="Proyección de haberes, cargas y planes fiscales"
+      />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Panel title="Estructura de obligaciones" accent="(por mes)">
+          <ChartBar data={evo} xKey="mes" height={300} series={evoSeries} />
+        </Panel>
+        <Panel
+          title={`Composición ${lastIdx >= 0 ? fmtMes(d.meses[lastIdx]) : ""}`}
+        >
+          <ChartDonut data={comp} height={300} fmt={(n) => fmtShort(n)} />
+        </Panel>
+      </div>
+      <SectionTitle>📊 Detalle Proyección</SectionTitle>
+      <MatrixTable head={d.meses.map(fmtMes)} rows={rows} />
+    </div>
+  );
+}
+
+// ─── PRÉSTAMOS ─────────────────────────────────────────────────────────────────
+export function PrestamosTab({ d }: { d: FinanzaData["prestamos"] }) {
+  const saldoActual =
+    [...d.cuadro].reverse().find((r) => r.saldo != null)?.saldo ?? null;
+  const saldoLine = d.cuadro
+    .filter((r) => r.saldo != null)
+    .map((r) => ({ vto: fmtDate(r.vencimiento), saldo: r.saldo }));
+  const comp = d.cuadro
+    .slice(0, 12)
+    .map((r, i) => ({
+      n: `#${i + 1}`,
+      capital: r.capital ?? 0,
+      interes: r.interes ?? 0,
+      impuesto: r.impuesto ?? 0,
+    }));
+
+  return (
+    <div>
       <PageTitle title="Préstamos" sub={d.titulo ?? "Cuadro de amortización"} />
       <Grid cols={3}>
-        <KPI label="Monto original" value={fmtArs(d.monto)} />
-        <KPI label="Saldo (última cuota)" value={fmtArs(saldoActual)} accent="red" />
-        <KPI label="Cuotas" value={fmtNum(d.cuadro.length)} />
+        <KPI label="Monto original" value={fmtArs(d.monto)} accent="yellow" />
+        <KPI
+          label="Saldo (última cuota)"
+          value={fmtArs(saldoActual)}
+          accent="red"
+        />
+        <KPI label="Cuotas" value={fmtNum(d.cuadro.length)} accent="neutral" />
       </Grid>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5">
+        <Panel title="Evolución del saldo de capital">
+          <ChartLine
+            data={saldoLine}
+            xKey="vto"
+            height={280}
+            series={[{ key: "saldo", name: "Saldo", color: PALETTE[0] }]}
+          />
+        </Panel>
+        <Panel
+          title="Composición de cuota"
+          accent="(capital · interés · impuesto)"
+        >
+          <ChartBar
+            data={comp}
+            xKey="n"
+            height={280}
+            series={[
+              {
+                key: "capital",
+                name: "Capital",
+                color: PALETTE[1],
+                stackId: "a",
+              },
+              {
+                key: "interes",
+                name: "Interés",
+                color: PALETTE[2],
+                stackId: "a",
+              },
+              {
+                key: "impuesto",
+                name: "Impuesto",
+                color: PALETTE[5],
+                stackId: "a",
+              },
+            ]}
+          />
+        </Panel>
+      </div>
+
+      <SectionTitle>📅 Cuadro de Amortización</SectionTitle>
       <Table<FinanzaData["prestamos"]["cuadro"][number]>
         cols={[
-          { key: "vencimiento", label: "Vto", render: (r) => fmtDate(r.vencimiento) },
-          { key: "capital", label: "Capital", num: true, render: (r) => fmtArs(r.capital) },
-          { key: "interes", label: "Interés", num: true, render: (r) => fmtArs(r.interes) },
-          { key: "impuesto", label: "Impuesto", num: true, render: (r) => fmtArs(r.impuesto) },
-          { key: "cuota", label: "Cuota", num: true, render: (r) => fmtArs(r.cuota) },
-          { key: "saldo", label: "Saldo", num: true, render: (r) => fmtArs(r.saldo) },
+          {
+            key: "vencimiento",
+            label: "Vto",
+            render: (r) => fmtDate(r.vencimiento),
+          },
+          {
+            key: "capital",
+            label: "Capital",
+            num: true,
+            render: (r) => fmtArs(r.capital),
+          },
+          {
+            key: "interes",
+            label: "Interés",
+            num: true,
+            render: (r) => fmtArs(r.interes),
+          },
+          {
+            key: "impuesto",
+            label: "Impuesto",
+            num: true,
+            render: (r) => fmtArs(r.impuesto),
+          },
+          {
+            key: "cuota",
+            label: "Cuota",
+            num: true,
+            render: (r) => fmtArs(r.cuota),
+          },
+          {
+            key: "saldo",
+            label: "Saldo",
+            num: true,
+            render: (r) => fmtArs(r.saldo),
+          },
         ]}
-        rows={d.cuadro} max={100}
+        rows={d.cuadro}
+        max={120}
+        maxH={460}
       />
     </div>
   );
@@ -263,47 +854,224 @@ export function PrestamosTab({ d }: { d: FinanzaData["prestamos"] }) {
 
 // ─── CASH FLOW ───────────────────────────────────────────────────────────────
 export function CashTab({ d }: { d: FinanzaData["cash"] }) {
-  const rows = d.filas.map((f) => {
-    let bg: string | undefined, bold = false;
-    if (f.kind === "inicio") { bg = "bg-green-400/5"; bold = true; }
-    else if (f.kind === "egresos") { bg = "bg-red-400/10"; bold = true; }
-    else if (f.kind === "final") { bg = "bg-yellow-400/5"; bold = true; }
-    else if (f.kind === "comex") { bg = "bg-red-400/5"; }
-    return { label: f.label, values: f.values, bg, bold };
-  });
+  const finalRow = d.filas.find((f) => f.kind === "final");
+  const inicioRow = d.filas.find((f) => f.kind === "inicio");
+  const egresosRow = d.filas.find((f) => f.kind === "egresos");
+  const saldoBar = d.meses.map((m, i) => ({
+    mes: fmtMes(m),
+    saldo: finalRow?.values[i] ?? null,
+    inicio: inicioRow?.values[i] ?? null,
+  }));
+  const egrBar = d.meses.map((m, i) => ({
+    mes: fmtMes(m),
+    egresos: egresosRow ? Math.abs(egresosRow.values[i] ?? 0) : 0,
+  }));
+
+  const toneOf = (k?: string): MatRow["rowTone"] =>
+    k === "inicio"
+      ? "pos"
+      : k === "egresos"
+        ? "neg"
+        : k === "final"
+          ? "total"
+          : k === "comex"
+            ? "comex"
+            : undefined;
+  const rows: MatRow[] = d.filas.map((f) => ({
+    label: f.label,
+    bold: !!f.kind,
+    rowTone: toneOf(f.kind),
+    cells: f.values.map((v) => fmtArs(v)),
+  }));
+
   return (
-    <div className="space-y-6">
-      <PageTitle title="Cash Mensual" sub="Posición de caja proyectada · bloque COMEX en USD · saldo final" />
-      <MatrixTable meses={d.meses} rows={rows} />
+    <div>
+      <PageTitle
+        title="Cash Mensual"
+        sub="Posición de caja proyectada · bloque COMEX · saldo final"
+      />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Panel title="Saldo de caja proyectado" accent="($)">
+          <ChartBar
+            data={saldoBar}
+            xKey="mes"
+            height={260}
+            series={[
+              { key: "inicio", name: "Inicio", color: PALETTE[3] },
+              { key: "saldo", name: "Saldo final", color: PALETTE[0] },
+            ]}
+          />
+        </Panel>
+        <Panel title="Egresos por mes" accent="($)">
+          <ChartBar
+            data={egrBar}
+            xKey="mes"
+            height={260}
+            series={[{ key: "egresos", name: "Egresos", color: PALETTE[5] }]}
+          />
+        </Panel>
+      </div>
+      <SectionTitle>📋 Cash Flow Detallado</SectionTitle>
+      <MatrixTable head={d.meses.map(fmtMes)} rows={rows} />
     </div>
   );
 }
 
 // ─── MACRO & USD ───────────────────────────────────────────────────────────────
-export function MacroTab({ macro, onRefresh }: { macro: MacroData | null; onRefresh: () => void }) {
+export function MacroTab({
+  macro,
+  onRefresh,
+}: {
+  macro: MacroData | null;
+  onRefresh: () => void;
+}) {
+  const oficial = macro?.dolares.find((d) => /oficial/i.test(d.nombre));
+  const dolarBar = (macro?.dolares ?? []).map((d) => ({
+    nombre: d.nombre,
+    venta: d.venta ?? 0,
+  }));
+  const tasaBar = [
+    { k: "Infl. mensual", v: macro?.inflacionMensual ?? 0 },
+    { k: "Infl. interanual", v: macro?.inflacionInteranual ?? 0 },
+    { k: "PF TNA", v: macro?.plazoFijoTNA ?? 0 },
+  ];
+  const brechaBar = (macro?.dolares ?? [])
+    .filter(
+      (d) => !/oficial/i.test(d.nombre) && d.venta != null && oficial?.venta,
+    )
+    .map((d) => ({
+      nombre: d.nombre,
+      brecha: oficial?.venta
+        ? (((d.venta as number) - oficial.venta) / oficial.venta) * 100
+        : 0,
+    }));
+
   return (
-    <div className="space-y-6">
+    <div>
       <div className="flex items-start justify-between">
-        <PageTitle title="Macro & USD" sub="Tipo de cambio, inflación y tasas en tiempo real (Argentina)" />
-        <button onClick={onRefresh} className="flex items-center gap-2 text-xs text-yellow-400 border border-yellow-400/30 rounded-lg px-3 py-2 hover:bg-yellow-400/5">
+        <PageTitle
+          title="Macro & USD"
+          sub="Tipo de cambio, inflación y tasas (Argentina)"
+        />
+        <button
+          onClick={onRefresh}
+          className="flex items-center gap-2 text-xs text-yellow-400 border border-yellow-400/30 rounded-lg px-3 py-2 hover:bg-yellow-400/5 transition-colors"
+        >
           <RefreshCw size={14} /> Actualizar
         </button>
       </div>
+
       {!macro ? (
-        <div className="py-16 text-center text-zinc-600 text-sm">Sin datos. Tocá «Actualizar».</div>
+        <div className="py-16 text-center text-zinc-600 text-sm">
+          Sin datos. Tocá «Actualizar».
+        </div>
       ) : (
         <>
           <Grid cols={4}>
             {macro.dolares.map((d) => (
-              <KPI key={d.nombre} label={`Dólar ${d.nombre}`} value={fmtArs(d.venta)} sub={d.compra != null ? `compra ${fmtArs(d.compra)}` : undefined} />
+              <KPI
+                key={d.nombre}
+                label={`Dólar ${d.nombre}`}
+                value={fmtArs(d.venta)}
+                sub={
+                  d.compra != null ? `compra ${fmtArs(d.compra)}` : undefined
+                }
+                accent="yellow"
+              />
             ))}
           </Grid>
           <Grid cols={3}>
-            <KPI label="Inflación mensual" value={fmtPct(macro.inflacionMensual)} accent="red" />
-            <KPI label="Inflación interanual" value={fmtPct(macro.inflacionInteranual)} accent="red" />
-            <KPI label="Plazo fijo TNA (prom.)" value={fmtPct(macro.plazoFijoTNA)} accent="green" />
+            <KPI
+              label="Inflación mensual"
+              value={fmtPct(macro.inflacionMensual)}
+              accent="red"
+            />
+            <KPI
+              label="Inflación interanual"
+              value={fmtPct(macro.inflacionInteranual)}
+              accent="red"
+            />
+            <KPI
+              label="Plazo fijo TNA (prom.)"
+              value={fmtPct(macro.plazoFijoTNA)}
+              accent="green"
+            />
           </Grid>
-          <p className="text-xs text-zinc-600">Actualizado: {fmtDate(macro.fetchedAt)} {new Date(macro.fetchedAt).toLocaleTimeString("es-AR")}</p>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5">
+            <Panel title="Cotizaciones USD" accent="(venta · $)">
+              <ChartBar
+                data={dolarBar}
+                xKey="nombre"
+                height={260}
+                series={[{ key: "venta", name: "Venta", color: PALETTE[0] }]}
+                fmt={(n) => fmtShort(n)}
+                showValues
+              />
+            </Panel>
+            <Panel title="Tasas e inflación" accent="(%)">
+              <ChartBar
+                data={tasaBar}
+                xKey="k"
+                height={260}
+                series={[{ key: "v", name: "%", color: PALETTE[2] }]}
+                fmt={(n) => `${n.toFixed(1)}%`}
+                showValues
+              />
+            </Panel>
+          </div>
+
+          {brechaBar.length > 0 && (
+            <div className="mt-4">
+              <Panel title="Brecha cambiaria — vs Oficial" accent="(%)">
+                <ChartBar
+                  data={brechaBar}
+                  xKey="nombre"
+                  height={240}
+                  series={[
+                    { key: "brecha", name: "Brecha", color: PALETTE[4] },
+                  ]}
+                  fmt={(n) => `${n.toFixed(1)}%`}
+                  showValues
+                />
+              </Panel>
+            </div>
+          )}
+
+          <SectionTitle>📊 Variables Macroeconómicas</SectionTitle>
+          <Table<MacroData["dolares"][number]>
+            cols={[
+              { key: "nombre", label: "Tipo de cambio" },
+              {
+                key: "compra",
+                label: "Compra",
+                num: true,
+                render: (r) => fmtArs(r.compra),
+              },
+              {
+                key: "venta",
+                label: "Venta",
+                num: true,
+                render: (r) => fmtArs(r.venta),
+              },
+              {
+                key: "brecha",
+                label: "Brecha vs Oficial",
+                num: true,
+                render: (r) =>
+                  oficial?.venta &&
+                  r.venta != null &&
+                  !/oficial/i.test(r.nombre)
+                    ? `${(((r.venta - oficial.venta) / oficial.venta) * 100).toFixed(1)} %`
+                    : "—",
+              },
+            ]}
+            rows={macro.dolares}
+          />
+          <p className="text-xs text-zinc-600 mt-3">
+            Actualizado: {fmtDate(macro.fetchedAt)}{" "}
+            {new Date(macro.fetchedAt).toLocaleTimeString("es-AR")}
+          </p>
         </>
       )}
     </div>

@@ -1,20 +1,17 @@
 "use client";
 
+import { useMemo } from "react";
 import { CalendarX, Users, CalendarDays } from "lucide-react";
 import type { ParsedFile } from "@/lib/rrhh/parseXlsx";
 import KpiCard from "@/app/rrhh/components/KpiCard";
 import LineChartCard from "@/app/rrhh/components/charts/LineChartCard";
 import BarChartCard from "@/app/rrhh/components/charts/BarChartCard";
-import {
-  ausentismoKpis,
-  asistenciaPorMes,
-  topAusenciasPorPersona,
-} from "@/lib/rrhh/aggregations";
+import { ausentismoKpis, asistenciaPorMes, topAusenciasPorPersona } from "@/lib/rrhh/aggregations";
 
 export default function AusentismoTab({ file }: { file: ParsedFile }) {
-  const kpis = ausentismoKpis(file);
-  const porMes = asistenciaPorMes(file);
-  const topPersonas = topAusenciasPorPersona(file, 10);
+  const kpis = useMemo(() => ausentismoKpis(file), [file]);
+  const porMes = useMemo(() => asistenciaPorMes(file), [file]);
+  const topPersonas = useMemo(() => topAusenciasPorPersona(file, 10), [file]);
 
   return (
     <div className="space-y-6">
@@ -29,12 +26,7 @@ export default function AusentismoTab({ file }: { file: ParsedFile }) {
           <LineChartCard title="Horas asistidas por mes" data={porMes} xKey="name" yKeys={["horas"]} />
         )}
         {topPersonas.length > 0 && (
-          <BarChartCard
-            title="Top 10 — registros por persona"
-            data={topPersonas}
-            xKey="name"
-            yKey="value"
-          />
+          <BarChartCard title="Top 10 — registros por persona" data={topPersonas} xKey="name" yKey="value" />
         )}
       </div>
     </div>

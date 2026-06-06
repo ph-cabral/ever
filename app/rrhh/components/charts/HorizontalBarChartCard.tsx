@@ -1,5 +1,6 @@
-// app/rrhh/components/charts/HorizontalBarChartCard.tsx
 "use client";
+import { memo } from "react";
+// app/rrhh/components/charts/HorizontalBarChartCard.tsx
 
 import {
   BarChart,
@@ -26,7 +27,7 @@ interface HorizontalBarChartCardProps {
   labelFontSize?: number;
 }
 
-export default function HorizontalBarChartCard({
+function HorizontalBarChartCard({
   title,
   data,
   xKey = "name",
@@ -86,3 +87,5 @@ export default function HorizontalBarChartCard({
     </>
   );
 }
+
+export default memo(HorizontalBarChartCard);

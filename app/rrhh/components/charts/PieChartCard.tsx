@@ -1,4 +1,5 @@
 "use client";
+import { memo } from "react";
 
 import {
   PieChart,
@@ -17,7 +18,7 @@ type Props = {
   height?: number;
 };
 
-export default function PieChartCard({ title, data, height = 300 }: Props) {
+function PieChartCard({ title, data, height = 300 }: Props) {
   return (
     <>
       <CardTitle
@@ -54,3 +55,5 @@ export default function PieChartCard({ title, data, height = 300 }: Props) {
     </>
   );
 }
+
+export default memo(PieChartCard);

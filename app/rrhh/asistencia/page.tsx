@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, memo, useDeferredValue } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
@@ -376,6 +376,106 @@ function FichajesCell({
   );
 }
 
+// Fila memoizada: editar/tipear una fila no re-renderiza el resto de la tabla.
+const AsistenciaRow = memo(function AsistenciaRow({
+  row,
+  edit,
+  desde,
+  hasta,
+  onPatch,
+  onCommit,
+  onOrigen,
+}: {
+  row: Row;
+  edit: Edit | undefined;
+  desde: string;
+  hasta: string;
+  onPatch: (k: string, p: Edit) => void;
+  onCommit: (k: string, kind: "estado" | "novedad", bruto?: number) => void;
+  onOrigen: (v: string) => void;
+}) {
+  const k = `${row.employee_no}|${row.fecha}`;
+  const e = edit ?? {};
+  const est = e.estado ?? calcEstado(row);
+  const horasNov = parseInt(e.horas || "0", 10) || 0;
+  const netMin = Math.max(0, (row.minutos ?? 0) - horasNov * 60);
+  const rrhhMin = Math.min(netMin, topeMin(row.fecha));
+  return (
+    <TableRow>
+      <TableCell>
+        <Link
+          href={`/rrhh/asistencia/${row.employee_no}?desde=${desde}&hasta=${hasta}`}
+          className="text-primary hover:underline"
+        >
+          {row.employee_name ?? `#${row.employee_no}`}
+        </Link>
+      </TableCell>
+      <TableCell>{row.fecha}</TableCell>
+      <TableCell>
+        {row.devices ? (
+          <button
+            onClick={() => onOrigen((row.devices ?? "").trim())}
+            className="text-primary hover:underline"
+          >
+            {row.devices}
+          </button>
+        ) : (
+          "—"
+        )}
+      </TableCell>
+      <TableCell>{fmtTime(row.check_in)}</TableCell>
+      <TableCell>{fmtTime(row.check_out)}</TableCell>
+      <TableCell
+        title={
+          horasNov ? `Bruto ${fmtHHMM(row.minutos)} − ${horasNov} hs` : undefined
+        }
+      >
+        {fmtHHMM(netMin)}
+      </TableCell>
+      <TableCell
+        title={`Neto ${fmtHHMM(netMin)} · tope ${fmtHHMM(topeMin(row.fecha))}`}
+      >
+        {fmtHHMM(rrhhMin)}
+      </TableCell>
+      <TableCell>
+        <FichajesCell
+          employee_no={row.employee_no}
+          fecha={row.fecha}
+          count={row.eventos_dia ?? 0}
+        />
+      </TableCell>
+      <TableCell>
+        <Picker
+          value={est}
+          options={ESTADOS}
+          toneClass={estadoTone(est)}
+          numValue={e.dias}
+          numLabel="días"
+          placeholder="Estado"
+          onPick={(v) => onPatch(k, { estado: v })}
+          onNum={(v) => onPatch(k, { dias: v })}
+          onCommit={() => onCommit(k, "estado")}
+        />
+      </TableCell>
+      <TableCell>
+        <div className="flex justify-end">
+          <Picker
+            value={e.novedad}
+            options={NOVEDADES}
+            toneClass="bg-violet-100 text-violet-800 border-violet-200"
+            numValue={e.horas}
+            numLabel="hs"
+            placeholder="Novedad"
+            onPick={(v) => onPatch(k, { novedad: v })}
+            onNum={(v) => onPatch(k, { horas: v })}
+            onCommit={() => onCommit(k, "novedad", row.minutos ?? 0)}
+          />
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+});
+
 export default function AsistenciaPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
@@ -405,8 +505,12 @@ export default function AsistenciaPage() {
   };
 
   const keyOf = (r: Row) => `${r.employee_no}|${r.fecha}`;
-  const patch = (k: string, p: Edit) =>
-    setEdits((prev) => ({ ...prev, [k]: { ...prev[k], ...p } }));
+  const patch = useCallback(
+    (k: string, p: Edit) =>
+      setEdits((prev) => ({ ...prev, [k]: { ...prev[k], ...p } })),
+    [],
+  );
+  const onOrigen = useCallback((v: string) => setOrigen(v), []);
 
   // Guardado en DB (blur/Enter). kind = qué picker disparó.
   const commit = useCallback(
@@ -502,18 +606,17 @@ export default function AsistenciaPage() {
 
   const effEstado = (r: Row) => edits[keyOf(r)]?.estado ?? calcEstado(r);
 
+  const empleadoDef = useDeferredValue(empleado);
+
   const filtered = useMemo(() => {
+    const q = empleadoDef.trim().toLowerCase();
     return rows.filter((r) => {
-      if (
-        empleado &&
-        !(r.employee_name ?? "").toLowerCase().includes(empleado.toLowerCase())
-      )
-        return false;
+      if (q && !(r.employee_name ?? "").toLowerCase().includes(q)) return false;
       if (estado !== "all" && effEstado(r) !== estado) return false;
       if (origen !== "all" && !(r.devices ?? "").includes(origen)) return false;
       return true;
     });
-  }, [rows, empleado, estado, origen, edits]);
+  }, [rows, empleadoDef, estado, origen, edits]);
 
   return (
     <div className="container mx-auto px-6 py-8">
@@ -595,90 +698,18 @@ export default function AsistenciaPage() {
                 </TableCell>
               </TableRow>
             )}
-            {filtered.map((r) => {
-              const k = keyOf(r);
-              const e = edits[k] ?? {};
-              const est = e.estado ?? calcEstado(r);
-              const horasNov = parseInt(e.horas || "0", 10) || 0;
-              const netMin = Math.max(0, (r.minutos ?? 0) - horasNov * 60);
-              const rrhhMin = Math.min(netMin, topeMin(r.fecha));
-              return (
-                <TableRow key={`${k}-${r.devices}`}>
-                  <TableCell>
-                    <Link
-                      href={`/rrhh/asistencia/${r.employee_no}?desde=${desde}&hasta=${hasta}`}
-                      className="text-primary hover:underline"
-                    >
-                      {r.employee_name ?? `#${r.employee_no}`}
-                    </Link>
-                  </TableCell>
-                  <TableCell>{r.fecha}</TableCell>
-                  <TableCell>
-                    {r.devices ? (
-                      <button
-                        onClick={() => setOrigen((r.devices ?? "").trim())}
-                        className="text-primary hover:underline"
-                      >
-                        {r.devices}
-                      </button>
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell>{fmtTime(r.check_in)}</TableCell>
-                  <TableCell>{fmtTime(r.check_out)}</TableCell>
-                  <TableCell
-                    title={
-                      horasNov
-                        ? `Bruto ${fmtHHMM(r.minutos)} − ${horasNov} hs`
-                        : undefined
-                    }
-                  >
-                    {fmtHHMM(netMin)}
-                  </TableCell>
-                  <TableCell
-                    title={`Neto ${fmtHHMM(netMin)} · tope ${fmtHHMM(topeMin(r.fecha))}`}
-                  >
-                    {fmtHHMM(rrhhMin)}
-                  </TableCell>
-                  <TableCell>
-                    <FichajesCell
-                      employee_no={r.employee_no}
-                      fecha={r.fecha}
-                      count={r.eventos_dia ?? 0}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Picker
-                      value={est}
-                      options={ESTADOS}
-                      toneClass={estadoTone(est)}
-                      numValue={e.dias}
-                      numLabel="días"
-                      placeholder="Estado"
-                      onPick={(v) => patch(k, { estado: v })}
-                      onNum={(v) => patch(k, { dias: v })}
-                      onCommit={() => commit(k, "estado")}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex justify-end">
-                      <Picker
-                        value={e.novedad}
-                        options={NOVEDADES}
-                        toneClass="bg-violet-100 text-violet-800 border-violet-200"
-                        numValue={e.horas}
-                        numLabel="hs"
-                        placeholder="Novedad"
-                        onPick={(v) => patch(k, { novedad: v })}
-                        onNum={(v) => patch(k, { horas: v })}
-                        onCommit={() => commit(k, "novedad", r.minutos ?? 0)}
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
+            {filtered.map((r) => (
+              <AsistenciaRow
+                key={`${r.employee_no}|${r.fecha}-${r.devices}`}
+                row={r}
+                edit={edits[`${r.employee_no}|${r.fecha}`]}
+                desde={desde}
+                hasta={hasta}
+                onPatch={patch}
+                onCommit={commit}
+                onOrigen={onOrigen}
+              />
+            ))}
           </TableBody>
         </Table>
       </div>

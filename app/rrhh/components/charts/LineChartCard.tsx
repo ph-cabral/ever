@@ -1,4 +1,5 @@
 "use client";
+import { memo } from "react";
 
 import {
   LineChart,
@@ -22,7 +23,7 @@ type Props = {
   height?: number;
 };
 
-export default function LineChartCard({ title, data, xKey, yKeys, height = 300 }: Props) {
+function LineChartCard({ title, data, xKey, yKeys, height = 300 }: Props) {
   return (
     <>
       <CardTitle
@@ -69,3 +70,4 @@ export default function LineChartCard({ title, data, xKey, yKeys, height = 300 }
   );
 }
 
+export default memo(LineChartCard);

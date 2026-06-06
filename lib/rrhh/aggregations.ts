@@ -373,6 +373,7 @@ export function nominaKpis(file: ParsedFile): NominaKpis {
   return {
     totalNeto,
     totalCostos,
+    empleadosLiquidados: countEmpleadosUnicos,
     netoPromedio: totalNeto / countEmpleadosUnicos ,
   };
 }
@@ -622,4 +623,4 @@ export function hsExtrasPorMes(
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ── HORAS EXTRA ──────────────────────────────────────────────────────────────
+// ── HORAS EXTRA ────────────────────────────────────────────────────────────── 

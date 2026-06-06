@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Clock, Users, TrendingUp } from "lucide-react";
 import type { ParsedFile } from "@/lib/rrhh/parseXlsx";
 import KpiCard from "@/app/rrhh/components/KpiCard";
@@ -8,30 +9,21 @@ import LineChartCard from "@/app/rrhh/components/charts/LineChartCard";
 import { hsExtrasKpis, hsExtrasPorArea, hsExtrasPorMes } from "@/lib/rrhh/aggregations";
 
 export default function HsExtrasTab({ file }: { file: ParsedFile }) {
-  const kpis = hsExtrasKpis(file);
-  const porArea = hsExtrasPorArea(file);
-  const porMes = hsExtrasPorMes(file);
+  const kpis = useMemo(() => hsExtrasKpis(file), [file]);
+  const porArea = useMemo(() => hsExtrasPorArea(file), [file]);
+  const porMes = useMemo(() => hsExtrasPorMes(file), [file]);
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <KpiCard label="Total horas extra" value={kpis.totalHoras} icon={Clock} accent="blue" />
         <KpiCard label="Personas con extras" value={kpis.personasConExtras} icon={Users} accent="zinc" />
-        <KpiCard
-          label="Promedio por persona"
-          value={`${kpis.promedioPorPersona} hs`}
-          icon={TrendingUp}
-          accent="zinc"
-        />
+        <KpiCard label="Promedio por persona" value={`${kpis.promedioPorPersona} hs`} icon={TrendingUp} accent="zinc" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {porArea.length > 0 && (
-          <BarChartCard title="Horas extra por área" data={porArea} xKey="name" yKey="horas" />
-        )}
-        {porMes.length > 0 && (
-          <LineChartCard title="Horas extra por mes" data={porMes} xKey="name" yKeys={["horas"]} />
-        )}
+        {porArea.length > 0 && <BarChartCard title="Horas extra por área" data={porArea} xKey="name" yKey="horas" />}
+        {porMes.length > 0 && <LineChartCard title="Horas extra por mes" data={porMes} xKey="name" yKeys={["horas"]} />}
       </div>
 
       {porArea.length === 0 && porMes.length === 0 && (

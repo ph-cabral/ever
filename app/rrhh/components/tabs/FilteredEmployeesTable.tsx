@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useDeferredValue } from "react";
 import { ChevronDown, ChevronUp, Filter } from "lucide-react";
 import type { ParsedFile } from "@/lib/rrhh/parseXlsx";
 
@@ -27,15 +27,18 @@ function onlyActivos(file: ParsedFile): Row[] {
 export default function FilteredEmployeesTable({ file }: { file: ParsedFile }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const activos = onlyActivos(file);
+  const q = useDeferredValue(search);
 
-  const colsToShow = ["LEGAJO", "NOMBRE", "AREA", "PUESTO", "ESTADO", "EMPRESA", "FECHA DE BAJA"].filter((c) =>
-    file.columns.includes(c),
+  const activos = useMemo(() => onlyActivos(file), [file]);
+  const colsToShow = useMemo(
+    () => ["LEGAJO", "NOMBRE", "AREA", "PUESTO", "ESTADO", "EMPRESA", "FECHA DE BAJA"].filter((c) => file.columns.includes(c)),
+    [file],
   );
-
-  const filtered = activos.filter((row) =>
-    colsToShow.some((col) => String(row[col] ?? "").toLowerCase().includes(search.toLowerCase())),
-  );
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return activos;
+    return activos.filter((row) => colsToShow.some((col) => String(row[col] ?? "").toLowerCase().includes(s)));
+  }, [activos, colsToShow, q]);
 
   return (
     <div className="mt-8 border border-zinc-800 rounded-xl overflow-hidden">
@@ -45,9 +48,7 @@ export default function FilteredEmployeesTable({ file }: { file: ParsedFile }) {
       >
         <div className="flex items-center gap-2">
           <Filter size={16} className="text-yellow-400" />
-          <span className="text-sm font-medium text-zinc-200">
-            Empleados filtrados (Activos + EVER WEAR)
-          </span>
+          <span className="text-sm font-medium text-zinc-200">Empleados filtrados (Activos + EVER WEAR)</span>
           <span className="text-xs text-zinc-500">({activos.length} registros)</span>
         </div>
         {open ? <ChevronUp size={16} className="text-zinc-500" /> : <ChevronDown size={16} className="text-zinc-500" />}
@@ -57,9 +58,7 @@ export default function FilteredEmployeesTable({ file }: { file: ParsedFile }) {
         <div className="p-4 bg-zinc-950/50">
           <div className="mb-3">
             <input
-              type="text"
-              placeholder="Buscar en filtrados..."
-              value={search}
+              type="text" placeholder="Buscar en filtrados..." value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full max-w-xs bg-zinc-900 border border-zinc-700 text-zinc-200 text-sm rounded px-3 py-1.5 outline-none focus:border-yellow-400"
             />
@@ -69,34 +68,26 @@ export default function FilteredEmployeesTable({ file }: { file: ParsedFile }) {
               <thead>
                 <tr className="border-b border-zinc-800">
                   {colsToShow.map((col) => (
-                    <th key={col} className="px-3 py-2 text-left text-zinc-500 font-medium uppercase">
-                      {col}
-                    </th>
+                    <th key={col} className="px-3 py-2 text-left text-zinc-500 font-medium uppercase">{col}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((row, i) => (
+                {filtered.slice(0, 200).map((row, i) => (
                   <tr key={i} className="border-b border-zinc-800/50 hover:bg-zinc-900/30">
                     {colsToShow.map((col) => (
-                      <td key={col} className="px-3 py-2 text-zinc-300 whitespace-nowrap">
-                        {row[col] ? String(row[col]) : "—"}
-                      </td>
+                      <td key={col} className="px-3 py-2 text-zinc-300 whitespace-nowrap">{row[col] ? String(row[col]) : "—"}</td>
                     ))}
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={colsToShow.length} className="px-3 py-4 text-center text-zinc-600">
-                      Sin resultados
-                    </td>
-                  </tr>
+                  <tr><td colSpan={colsToShow.length} className="px-3 py-4 text-center text-zinc-600">Sin resultados</td></tr>
                 )}
               </tbody>
             </table>
           </div>
           <p className="mt-2 text-xs text-zinc-600">
-            Mostrando {filtered.length} de {activos.length} empleados activos de EVER WEAR S.A.
+            Mostrando {Math.min(filtered.length, 200)} de {activos.length} empleados activos de EVER WEAR S.A.
           </p>
         </div>
       )}

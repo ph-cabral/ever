@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { ParsedFile, DetectedFileType } from "./parseXlsx";
 
 export type RrhhData = Partial<Record<DetectedFileType, ParsedFile>>;
@@ -23,21 +23,29 @@ function saveToStorage(data: RrhhData) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   } catch (err) {
-    console.error("Error guardando en localStorage:", err);
+    // Cuota excedida u otro error: no romper la app.
+    console.warn("No se pudo persistir RRHH en localStorage:", err);
   }
 }
 
 export function useRrhhData() {
   const [data, setData] = useState<RrhhData>({});
   const [hydrated, setHydrated] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setData(loadFromStorage());
     setHydrated(true);
   }, []);
 
+  // Guardado debounced: evita serializar todo el dataset en cada cambio en ráfaga.
   useEffect(() => {
-    if (hydrated) saveToStorage(data);
+    if (!hydrated) return;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => saveToStorage(data), 300);
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
   }, [data, hydrated]);
 
   const setFile = useCallback((type: DetectedFileType, file: ParsedFile) => {
