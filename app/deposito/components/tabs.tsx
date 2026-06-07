@@ -258,12 +258,24 @@ export function ResumenTab({ d }: { d: DepositoData }) {
         title="Resumen de Producción"
         sub="Items recolectados, OT y rendimiento por proceso y operario — Depósito Central"
       />
+      <div className="mb-3">
+        <MesSelect
+          meses={["__all__", ...d.meses]}
+          value={mesSel}
+          onChange={setMesSel}
+          nombre={(m) =>
+            m === "__all__"
+              ? "Todos"
+              : (d.porMes.find((p) => p.mes === m)?.nombreMes ?? fmtMes(m))
+          }
+        />
+      </div>
       <Grid cols={6}>
         <KPI
           label="Items recolectados"
           value={fmtNum(kRecol)}
           sub={
-            r.nombreUltimoMes
+            esTodos && r.nombreUltimoMes
               ? `${r.nombreUltimoMes}: ${fmtNum(r.recolectadosUltimoMes)}`
               : undefined
           }
@@ -272,7 +284,7 @@ export function ResumenTab({ d }: { d: DepositoData }) {
         <KPI label="Items pedidos" value={fmtNum(kPed)} accent="neutral" />
         <KPI
           label="Fill rate"
-          value={r.fill != null ? `${kFill.toFixed(1)} %` : "—"}
+          value={kFill != null ? `${kFill.toFixed(1)} %` : "—"}
           sub="recolectado / pedido"
           accent={kFill != null && kFill >= 95 ? "green" : "amber"}
         />
@@ -281,7 +293,11 @@ export function ResumenTab({ d }: { d: DepositoData }) {
         <KPI
           label="Período"
           value={kPeriodo}
-          sub={esTodos ?  `${d.meses.length} ${d.meses.length === 1 ? "mes":"meses"}`: "1 mes"}
+          sub={
+            esTodos
+              ? `${d.meses.length} ${d.meses.length === 1 ? "mes" : "meses"}`
+              : "1 mes"
+          }
           accent="amber"
         />
       </Grid>
