@@ -175,6 +175,7 @@ function EvolucionPorOperario({
   meses: string[];
   matriz: { operario: string; valores: number[]; total: number }[];
 }) {
+  const max = Math.max(1, ...matriz.flatMap((o) => o.valores)); // escala global compartida
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-4">
       {matriz.map((o) => (
@@ -185,6 +186,7 @@ function EvolucionPorOperario({
             yKey="val"
             height={150}
             fmt={fmtNum}
+            max={max}
           />
         </Panel>
       ))}
@@ -318,7 +320,7 @@ export function ResumenTab({ d }: { d: DepositoData }) {
             height={280}
             series={cmpSeries}
             fmt={(n) => fmtNum(n)}
-            angle={-30}
+            angle={0}
             showValues
           />
         </Panel>
@@ -465,7 +467,7 @@ export function ProcesoTab({
               { key: "recolectados", name: "Recolectados", color: PALETTE[2] },
             ]}
             fmt={(n) => fmtNum(n)}
-            angle={-35}
+            angle={0}
             showValues
           />
         </Panel>
@@ -582,7 +584,7 @@ export function OperariosTab({ d }: { d: DepositoData }) {
             { key: "recolectados", name: "Recolectados", color: PALETTE[0] },
           ]}
           fmt={(n) => fmtNum(n)}
-          angle={-35}
+          angle={0}
           showValues
         />
       </Panel>

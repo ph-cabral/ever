@@ -277,7 +277,7 @@ export function ChartBar({
           top: 8,
           right: 12,
           left: horizontal ? 8 : 0,
-          bottom: angle ? 48 : 4,
+          bottom: horizontal ? 4 : angle ? 60 : 26,
         }}
       >
         <CartesianGrid
@@ -306,9 +306,9 @@ export function ChartBar({
             <XAxis
               dataKey={xKey}
               stroke={C.border}
-              height={angle ? 56 : 24}
+              tick={false}
+              height={angle ? 60 : 26}
               interval={0}
-              tick={<AxisTick pos="bottom" angle={angle} />}
             />
             <YAxis
               stroke={C.border}
@@ -344,6 +344,15 @@ export function ChartBar({
                 style={{ fontSize: 11, fontWeight: 700, fill: C.text }}
               />
             )}
+            {!horizontal && i === 0 && (
+              <LabelList
+                dataKey={xKey}
+                position="bottom"
+                angle={angle ?? 0}
+                offset={angle ? 18 : 8}
+                style={{ fontSize: 11, fill: C.muted }}
+              />
+            )}
           </Bar>
         ))}
       </BarChart>
@@ -353,25 +362,37 @@ export function ChartBar({
 
 // Mini bar chart por mes — último mes resaltado (evolución por operario)
 export function ChartEvol({
-  data, xKey, yKey, height = 150, fmt = (n) => fmtNum(n),
-}: { data: Record<string, unknown>[]; xKey: string; yKey: string; height?: number; fmt?: (n: number) => string }) {
+  data,
+  xKey,
+  yKey,
+  height = 150,
+  fmt = (n) => fmtNum(n),
+  max,
+}: {
+  data: Record<string, unknown>[];
+  xKey: string;
+  yKey: string;
+  height?: number;
+  fmt?: (n: number) => string;
+  max?: number;
+}) {
   if (!data.length) return <Empty h={height} />;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} margin={{ top: 18, right: 8, left: 0, bottom: 4 }}>
+      <BarChart data={data} margin={{ top: 18, right: 8, left: 0, bottom: 22 }}>
         <CartesianGrid
           strokeDasharray="3 3"
           stroke={C.border}
           vertical={false}
         />
-        <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: C.muted }} stroke={C.border} interval={0} />
-        {/* <XAxis
+        <XAxis
           dataKey={xKey}
-          tick={{ fontSize: 11, style: { fill: C.muted } }}
-          stroke={C.border}
+          tick={false}
+          axisLine={false}
+          height={20}
           interval={0}
-        /> */}
-        <YAxis hide />
+        />
+        <YAxis hide domain={max ? [0, max] : undefined} />
         <Bar dataKey={yKey} radius={[3, 3, 0, 0]} isAnimationActive={false}>
           {data.map((_, i) => (
             <Cell
@@ -384,6 +405,12 @@ export function ChartEvol({
             position="top"
             formatter={(v) => fmt(Number(v))}
             style={{ fontSize: 10, fontWeight: 700, fill: C.text }}
+          />
+          <LabelList
+            dataKey={xKey}
+            position="bottom"
+            offset={6}
+            style={{ fontSize: 10, fill: C.muted }}
           />
         </Bar>
       </BarChart>
