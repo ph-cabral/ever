@@ -274,7 +274,7 @@ export function ChartBar({
         data={data}
         layout={horizontal ? "vertical" : "horizontal"}
         margin={{
-          top: 8,
+          top: 28,
           right: 12,
           left: horizontal ? 8 : 0,
           bottom: horizontal ? 4 : angle ? 60 : 26,
@@ -322,8 +322,16 @@ export function ChartBar({
           cursor={{ fill: "rgba(250,204,21,.06)" }}
           formatter={(v) => fmt(Number(v))}
         />
-        {series.length > 1 && (
+        {/* {series.length > 1 && (
           <Legend wrapperStyle={{ fontSize: 11, color: C.muted }} />
+        )} */}
+        {series.length > 1 && (
+          <Legend
+            verticalAlign="top"
+            align="center"
+            height={28}
+            wrapperStyle={{ fontSize: 11, color: C.muted, paddingBottom: 8 }}
+          />
         )}
         {series.map((s, i) => (
           <Bar
@@ -336,12 +344,24 @@ export function ChartBar({
               s.stackId ? 0 : ([3, 3, 0, 0] as [number, number, number, number])
             }
           >
-            {showValues && (
+            {/* {showValues && (
               <LabelList
                 dataKey={s.key}
                 position={horizontal ? "right" : "top"}
                 formatter={(v) => fmt(Number(v))}
                 style={{ fontSize: 11, fontWeight: 700, fill: C.text }}
+              />
+            )} */}
+            {(showValues || s.stackId) && (
+              <LabelList
+                dataKey={s.key}
+                position={s.stackId ? "center" : horizontal ? "right" : "top"}
+                formatter={(v) => (Number(v) > 0 ? fmt(Number(v)) : "")}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  fill: s.stackId ? "#0d1117" : C.text,
+                }}
               />
             )}
             {!horizontal && i === 0 && (

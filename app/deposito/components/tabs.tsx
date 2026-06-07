@@ -197,6 +197,20 @@ function EvolucionPorOperario({
 // ─── RESUMEN ─────────────────────────────────────────────────────────────────
 export function ResumenTab({ d }: { d: DepositoData }) {
   const r = d.resumen;
+  const [mesSel, setMesSel] = React.useState("__all__");
+  const esTodos = !d.meses.includes(mesSel);
+  const pm = d.porMes.find((p) => p.mes === mesSel);
+  const regsMes = d.registros.filter((x) => x.mes === mesSel);
+  const kRecol = esTodos ? r.totalRecolectados : (pm?.recolectados ?? 0);
+  const kPed = esTodos ? r.totalPedidos : (pm?.pedidos ?? 0);
+  const kOT = esTodos ? r.totalOT : (pm?.ot ?? 0);
+  const kFill = esTodos ? r.fillRate : kPed > 0 ? (kRecol / kPed) * 100 : null;
+  const kOps = esTodos
+    ? r.operariosActivos
+    : new Set(regsMes.map((x) => x.operario)).size;
+  const kPeriodo = esTodos
+    ? (r.nombreUltimoMes ?? "—")
+    : (pm?.nombreMes ?? mesSel);
   const recolMes = d.porMes.map((m) => ({
     mes: fmtMes(m.mes),
     recolectados: m.recolectados,
@@ -247,7 +261,7 @@ export function ResumenTab({ d }: { d: DepositoData }) {
       <Grid cols={6}>
         <KPI
           label="Items recolectados"
-          value={fmtNum(r.totalRecolectados)}
+          value={fmtNum(kRecol)}
           sub={
             r.nombreUltimoMes
               ? `${r.nombreUltimoMes}: ${fmtNum(r.recolectadosUltimoMes)}`
@@ -255,27 +269,19 @@ export function ResumenTab({ d }: { d: DepositoData }) {
           }
           accent="green"
         />
-        <KPI
-          label="Items pedidos"
-          value={fmtNum(r.totalPedidos)}
-          accent="neutral"
-        />
+        <KPI label="Items pedidos" value={fmtNum(kPed)} accent="neutral" />
         <KPI
           label="Fill rate"
-          value={r.fillRate != null ? `${r.fillRate.toFixed(1)} %` : "—"}
+          value={r.fill != null ? `${kFill.toFixed(1)} %` : "—"}
           sub="recolectado / pedido"
-          accent={r.fillRate != null && r.fillRate >= 95 ? "green" : "amber"}
+          accent={kFill != null && kFill >= 95 ? "green" : "amber"}
         />
-        <KPI label="OT totales" value={fmtNum(r.totalOT)} accent="yellow" />
-        <KPI
-          label="Operarios activos"
-          value={fmtNum(r.operariosActivos)}
-          accent="neutral"
-        />
+        <KPI label="OT totales" value={fmtNum(kOT)} accent="yellow" />
+        <KPI label="Operarios activos" value={fmtNum(kOps)} accent="neutral" />
         <KPI
           label="Período"
-          value={r.nombreUltimoMes ?? "—"}
-          sub={`${d.meses.length} ${d.meses.length === 1 ? "mes" : "meses"}`}
+          value={kPeriodo}
+          sub={esTodos ?  `${d.meses.length} ${d.meses.length === 1 ? "mes":"meses"}`: "1 mes"}
           accent="amber"
         />
       </Grid>
@@ -412,12 +418,18 @@ export function ProcesoTab({
           title={proceso}
           sub={`Recolección, ranking y evolución por operario — ${meses.length} ${meses.length === 1 ? "mes" : "meses"}`}
         />
-        <MesSelect
-          meses={meses}
-          value={mesActivo}
-          onChange={setMesSel}
-          nombre={nombreDe}
-        />
+        <div className="mb-3">
+          <MesSelect
+            meses={["__all__", ...d.meses]}
+            value={mesSel}
+            onChange={setMesSel}
+            nombre={(m) =>
+              m === "__all__"
+                ? "Todos"
+                : (d.porMes.find((p) => p.mes === m)?.nombreMes ?? fmtMes(m))
+            }
+          />
+        </div>
       </div>
 
       <Grid cols={5}>
