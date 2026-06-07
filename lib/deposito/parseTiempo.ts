@@ -16,11 +16,13 @@ export interface TiempoData {
   parsedAt: string;
   filasCrudas: number;
   filasFiltradas: number;
-  meses: string[];                 // YYYY-MM
-  mesReciente: string | null;      // nombre del mes
-  metricas: EtapaRow[];            // por mes (cronológico)
-  porPrioridad: EtapaRow[];        // mes reciente, prioridad 1/2/3
+  meses: string[]; // YYYY-MM
+  mesReciente: string | null; // nombre del mes
+  metricas: EtapaRow[]; // por mes (cronológico)
+  porPrioridad: EtapaRow[]; // mes reciente, prioridad 1/2/3
   prioridades: PrioridadResumen[]; // mes reciente, todas las prioridades
+  porPrioridadPorMes: Record<string, EtapaRow[]>;
+  prioridadesPorMes: Record<string, PrioridadResumen[]>;
 }
 
 const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
@@ -122,12 +124,56 @@ export function parseTiempo(rows: Row[], fileName: string): TiempoData {
     o.cant += 1; o.vals.push(r.confCierre);
   });
   const prioridades: PrioridadResumen[] = [...priMap.entries()]
-    .map(([prioridad, o]) => ({ prioridad, cantidad: o.cant, tiempoPromedio: avgNoNeg(o.vals) }))
+    .map(([prioridad, o]) => ({
+      prioridad,
+      cantidad: o.cant,
+      tiempoPromedio: avgNoNeg(o.vals),
+    }))
     .sort((a, b) => a.prioridad - b.prioridad);
 
+  const porPrioridadPorMes: Record<string, EtapaRow[]> = {};
+  const prioridadesPorMes: Record<string, PrioridadResumen[]> = {};
+  for (const mk of meses) {
+    const rs = filtrados.filter((r) => r.mes === mk);
+    porPrioridadPorMes[mk] = [1, 2, 3]
+      .filter((p) => rs.some((r) => r.prioridad === p))
+      .map((p) =>
+        etapa(
+          rs.filter((r) => r.prioridad === p),
+          `Prioridad ${p}`,
+        ),
+      );
+    const pm = new Map<number, { cant: number; vals: (number | null)[] }>();
+    rs.forEach((r) => {
+      if (!Number.isFinite(r.prioridad)) return;
+      let o = pm.get(r.prioridad);
+      if (!o) {
+        o = { cant: 0, vals: [] };
+        pm.set(r.prioridad, o);
+      }
+      o.cant += 1;
+      o.vals.push(r.confCierre);
+    });
+    prioridadesPorMes[mk] = [...pm.entries()]
+      .map(([prioridad, o]) => ({
+        prioridad,
+        cantidad: o.cant,
+        tiempoPromedio: avgNoNeg(o.vals),
+      }))
+      .sort((a, b) => a.prioridad - b.prioridad);
+  }
+
   return {
-    fileName, parsedAt: new Date().toISOString(),
-    filasCrudas: rows.length, filasFiltradas: filtrados.length,
-    meses, mesReciente, metricas, porPrioridad, prioridades,
+    fileName,
+    parsedAt: new Date().toISOString(),
+    filasCrudas: rows.length,
+    filasFiltradas: filtrados.length,
+    meses,
+    mesReciente,
+    metricas,
+    porPrioridad,
+    prioridades,
+    porPrioridadPorMes,
+    prioridadesPorMes,
   };
 }

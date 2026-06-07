@@ -138,7 +138,7 @@ function MatrixTable({
 }
 
 // Selector de mes reutilizable
-function MesSelect({
+export function MesSelect({
   meses,
   value,
   onChange,
@@ -195,12 +195,11 @@ function EvolucionPorOperario({
 }
 
 // ─── RESUMEN ─────────────────────────────────────────────────────────────────
-export function ResumenTab({ d }: { d: DepositoData }) {
+export function ResumenTab({ d, mes }: { d: DepositoData; mes: string }) {
   const r = d.resumen;
-  const [mesSel, setMesSel] = React.useState("__all__");
-  const esTodos = !d.meses.includes(mesSel);
-  const pm = d.porMes.find((p) => p.mes === mesSel);
-  const regsMes = d.registros.filter((x) => x.mes === mesSel);
+  const esTodos = !d.meses.includes(mes);
+  const pm = d.porMes.find((p) => p.mes === mes);
+  const regsMes = d.registros.filter((x) => x.mes === mes);
   const kRecol = esTodos ? r.totalRecolectados : (pm?.recolectados ?? 0);
   const kPed = esTodos ? r.totalPedidos : (pm?.pedidos ?? 0);
   const kOT = esTodos ? r.totalOT : (pm?.ot ?? 0);
@@ -258,18 +257,6 @@ export function ResumenTab({ d }: { d: DepositoData }) {
         title="Resumen de Producción"
         sub="Items recolectados, OT y rendimiento por proceso y operario — Depósito Central"
       />
-      <div className="mb-3">
-        <MesSelect
-          meses={["__all__", ...d.meses]}
-          value={mesSel}
-          onChange={setMesSel}
-          nombre={(m) =>
-            m === "__all__"
-              ? "Todos"
-              : (d.porMes.find((p) => p.mes === m)?.nombreMes ?? fmtMes(m))
-          }
-        />
-      </div>
       <Grid cols={6}>
         <KPI
           label="Items recolectados"
@@ -382,14 +369,15 @@ export function ResumenTab({ d }: { d: DepositoData }) {
 export function ProcesoTab({
   d,
   proceso,
+  mes,
 }: {
   d: DepositoData;
   proceso: string;
+  mes: string;
 }) {
   const regs = d.registros.filter((r) => r.proceso === proceso);
   const meses = [...new Set(regs.map((r) => r.mes))].sort();
-  const [mesSel, setMesSel] = React.useState("");
-  const mesActivo = meses.includes(mesSel) ? mesSel : meses[meses.length - 1];
+  const mesActivo = meses.includes(mes) ? mes : meses[meses.length - 1];
 
   if (!regs.length) {
     return (
@@ -434,18 +422,6 @@ export function ProcesoTab({
           title={proceso}
           sub={`Recolección, ranking y evolución por operario — ${meses.length} ${meses.length === 1 ? "mes" : "meses"}`}
         />
-        <div className="mb-3">
-          <MesSelect
-            meses={["__all__", ...d.meses]}
-            value={mesSel}
-            onChange={setMesSel}
-            nombre={(m) =>
-              m === "__all__"
-                ? "Todos"
-                : (d.porMes.find((p) => p.mes === m)?.nombreMes ?? fmtMes(m))
-            }
-          />
-        </div>
       </div>
 
       <Grid cols={5}>
@@ -678,8 +654,14 @@ const S2: Serie[] = [
   },
 ];
 
-export function TiempoTab({ d }: { d: TiempoData }) {
-  const ult = d.metricas[d.metricas.length - 1];
+export function TiempoTab({ d, mes }: { d: TiempoData; mes: string }) {
+  const key = mes === "__all__" ? (d.meses[d.meses.length - 1] ?? "") : mes;
+  const idx = d.meses.indexOf(key); // -1 = mes sin datos
+  const ult = idx >= 0 ? d.metricas[idx] : null;
+  const nombreMes = idx >= 0 ? d.metricas[idx].clave : fmtMes(mes);
+  const priData = idx >= 0 ? (d.porPrioridadPorMes?.[key] ?? []) : [];
+  const priTabla = idx >= 0 ? (d.prioridadesPorMes?.[key] ?? []) : [];
+
   return (
     <div>
       <PageTitle
@@ -689,27 +671,31 @@ export function TiempoTab({ d }: { d: TiempoData }) {
       {ult && (
         <Grid cols={5}>
           <KPI
-            label={`Registro → Cierre · ${ult.clave}`}
-            value={aHs(ult.totalPag1)}
+            label={`Registro → Cierre · ${nombreMes}`}
+            value={ult ? aHs(ult.totalPag1) : "—"}
             accent="yellow"
           />
           <KPI
             label="Registro → Confirmación"
-            value={aHs(ult.regAConf)}
+            value={ult ? aHs(ult.regAConf) : "—"}
             accent="green"
           />
           <KPI
             label="Confirmación → Armado"
-            value={aHs(ult.confAArm)}
+            value={ult ? aHs(ult.confAArm) : "—"}
             sub="cuello de botella"
             accent="amber"
           />
           <KPI
             label="Armado → Cierre"
-            value={aHs(ult.armACierre)}
+            value={ult ? aHs(ult.armACierre) : "—"}
             accent="neutral"
           />
-          <KPI label="Pedidos (mes)" value={fmtNum(ult.ops)} accent="neutral" />
+          <KPI
+            label="Pedidos (mes)"
+            value={ult ? fmtNum(ult.ops) : "—"}
+            accent="neutral"
+          />
         </Grid>
       )}
 
@@ -779,11 +765,11 @@ export function TiempoTab({ d }: { d: TiempoData }) {
         />
       </Panel>
 
-      <SectionTitle>🎯 Por Prioridad — {d.mesReciente ?? ""}</SectionTitle>
+      <SectionTitle>🎯 Por Prioridad — {nombreMes}</SectionTitle>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Panel title="Tiempos por prioridad" accent="(Registro → Cierre)">
           <ChartBar
-            data={d.porPrioridad}
+            data={priData}
             xKey="clave"
             height={280}
             series={S3}
@@ -811,7 +797,7 @@ export function TiempoTab({ d }: { d: TiempoData }) {
                 render: (r) => aHs(r.tiempoPromedio),
               },
             ]}
-            rows={d.prioridades}
+            rows={priTabla}
           />
         </Panel>
       </div>
