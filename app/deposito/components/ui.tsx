@@ -234,32 +234,158 @@ const tooltipStyle = { background: "#0d0d0d", border: `1px solid ${C.border}`, b
 
 export type Serie = { key: string; name: string; color?: string; stackId?: string };
 
+// Tick propio: <text> con estilo inline y sin <tspan> → ningún CSS lo oculta.
+function AxisTick({ x = 0, y = 0, payload, pos = "bottom", angle = 0, format }: {
+  x?: number; y?: number; payload?: { value: number | string };
+  pos?: "bottom" | "left"; angle?: number; format?: (v: number | string) => string;
+}) {
+  const v = payload ? (format ? format(payload.value) : payload.value) : "";
+  const style = { fill: C.muted, fontSize: AXIS.fontSize } as const;
+  if (pos === "left") return <text x={x} y={y} dx={-4} dy={4} textAnchor="end" style={style}>{v}</text>;
+  return (
+    <text x={x} y={y} dy={angle ? 6 : 14} textAnchor={angle ? "end" : "middle"}
+      transform={angle ? `rotate(${angle} ${x} ${y})` : undefined} style={style}>{v}</text>
+  );
+}
+
 export function ChartBar({
-  data, xKey, series, height = 220, horizontal = false, fmt = (n) => fmtShort(n), angle, showValues = false,
-}: { data: unknown[]; xKey: string; series: Serie[]; height?: number; horizontal?: boolean; fmt?: (n: number) => string; angle?: number; showValues?: boolean }) {
+  data,
+  xKey,
+  series,
+  height = 220,
+  horizontal = false,
+  fmt = (n) => fmtShort(n),
+  angle,
+  showValues = false,
+}: {
+  data: unknown[];
+  xKey: string;
+  series: Serie[];
+  height?: number;
+  horizontal?: boolean;
+  fmt?: (n: number) => string;
+  angle?: number;
+  showValues?: boolean;
+}) {
   if (!data.length) return <Empty h={height} />;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} layout={horizontal ? "vertical" : "horizontal"} margin={{ top: 8, right: 12, left: horizontal ? 8 : 0, bottom: angle ? 48 : 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={!horizontal} horizontal={horizontal ? false : true} />
+      <BarChart
+        data={data}
+        layout={horizontal ? "vertical" : "horizontal"}
+        margin={{
+          top: 8,
+          right: 12,
+          left: horizontal ? 8 : 0,
+          bottom: angle ? 48 : 4,
+        }}
+      >
+        <CartesianGrid
+          strokeDasharray="3 3"
+          stroke={C.border}
+          vertical={!horizontal}
+          horizontal={horizontal ? false : true}
+        />
         {horizontal ? (
           <>
-            <XAxis type="number" tick={AXIS} stroke={C.border} tickFormatter={(v) => fmt(Number(v))} />
-            <YAxis type="category" dataKey={xKey} tick={AXIS} stroke={C.border} width={140} />
+            <XAxis
+              type="number"
+              stroke={C.border}
+              tick={<AxisTick pos="bottom" format={(v) => fmt(Number(v))} />}
+            />
+            <YAxis
+              type="category"
+              dataKey={xKey}
+              stroke={C.border}
+              width={140}
+              tick={<AxisTick pos="left" />}
+            />
           </>
         ) : (
           <>
-            <XAxis dataKey={xKey} tick={AXIS} stroke={C.border} angle={angle} textAnchor={angle ? "end" : "middle"} height={angle ? 56 : 24} interval={0} />
-            <YAxis tick={AXIS} stroke={C.border} tickFormatter={(v) => fmt(Number(v))} width={52} />
+            <XAxis
+              dataKey={xKey}
+              stroke={C.border}
+              height={angle ? 56 : 24}
+              interval={0}
+              tick={<AxisTick pos="bottom" angle={angle} />}
+            />
+            <YAxis
+              stroke={C.border}
+              width={52}
+              tick={<AxisTick pos="left" format={(v) => fmt(Number(v))} />}
+            />
           </>
         )}
-        <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "rgba(250,204,21,.06)" }} formatter={(v) => fmt(Number(v))} />
-        {series.length > 1 && <Legend wrapperStyle={{ fontSize: 11, color: C.muted }} />}
+        <Tooltip
+          contentStyle={tooltipStyle}
+          cursor={{ fill: "rgba(250,204,21,.06)" }}
+          formatter={(v) => fmt(Number(v))}
+        />
+        {series.length > 1 && (
+          <Legend wrapperStyle={{ fontSize: 11, color: C.muted }} />
+        )}
         {series.map((s, i) => (
-          <Bar key={s.key} dataKey={s.key} name={s.name} stackId={s.stackId} fill={s.color ?? PALETTE[i % PALETTE.length]} radius={s.stackId ? 0 : ([3, 3, 0, 0] as [number, number, number, number])}>
-            {showValues && <LabelList dataKey={s.key} position={horizontal ? "right" : "top"} formatter={(v) => fmt(Number(v))} style={{ fontSize: 10, fill: C.muted }} />}
+          <Bar
+            key={s.key}
+            dataKey={s.key}
+            name={s.name}
+            stackId={s.stackId}
+            fill={s.color ?? PALETTE[i % PALETTE.length]}
+            radius={
+              s.stackId ? 0 : ([3, 3, 0, 0] as [number, number, number, number])
+            }
+          >
+            {showValues && (
+              <LabelList
+                dataKey={s.key}
+                position={horizontal ? "right" : "top"}
+                formatter={(v) => fmt(Number(v))}
+                style={{ fontSize: 11, fontWeight: 700, fill: C.text }}
+              />
+            )}
           </Bar>
         ))}
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// Mini bar chart por mes — último mes resaltado (evolución por operario)
+export function ChartEvol({
+  data, xKey, yKey, height = 150, fmt = (n) => fmtNum(n),
+}: { data: Record<string, unknown>[]; xKey: string; yKey: string; height?: number; fmt?: (n: number) => string }) {
+  if (!data.length) return <Empty h={height} />;
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} margin={{ top: 18, right: 8, left: 0, bottom: 4 }}>
+        <CartesianGrid
+          strokeDasharray="3 3"
+          stroke={C.border}
+          vertical={false}
+        />
+        <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: C.muted }} stroke={C.border} interval={0} />
+        {/* <XAxis
+          dataKey={xKey}
+          tick={{ fontSize: 11, style: { fill: C.muted } }}
+          stroke={C.border}
+          interval={0}
+        /> */}
+        <YAxis hide />
+        <Bar dataKey={yKey} radius={[3, 3, 0, 0]} isAnimationActive={false}>
+          {data.map((_, i) => (
+            <Cell
+              key={i}
+              fill={i === data.length - 1 ? "#facc15" : "#9ca3af"}
+            />
+          ))}
+          <LabelList
+            dataKey={yKey}
+            position="top"
+            formatter={(v) => fmt(Number(v))}
+            style={{ fontSize: 10, fontWeight: 700, fill: C.text }}
+          />
+        </Bar>
       </BarChart>
     </ResponsiveContainer>
   );

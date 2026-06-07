@@ -141,3 +141,11 @@
 body {
   font-family: 'Roboto', sans-serif;
 }
+
+/* Recharts: forzar color de labels de ejes (un estilo global pisaba el fill del tspan) */
+.recharts-cartesian-axis-tick-value,
+.recharts-cartesian-axis-tick-value tspan {
+  fill: #8b949e !important;
+  fill-opacity: 1 !important;
+  opacity: 1 !important;
+}
