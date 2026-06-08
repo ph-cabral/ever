@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
       e.device,
       e.employee_no,
       COALESCE(NULLIF(TRIM(l.nombre), ''), e.employee_name) AS employee_name,
+      a.nombre AS area,
       e.event_time,
       e.tipo,
       e.major,
@@ -32,6 +33,8 @@ export async function GET(req: NextRequest) {
     FROM asistencia.evento e
     LEFT JOIN everwear.legajo l
       ON ltrim(l."employeeNo", '0') = ltrim(e.employee_no, '0')
+    LEFT JOIN everwear.sector s ON s.id = l."sectorId"
+    LEFT JOIN everwear.area   a ON a.id = s."areaId"
     WHERE e.event_time BETWEEN $1::timestamptz AND $2::timestamptz
       ${employee_no ? `AND ltrim(e.employee_no, '0') = ltrim($3, '0')` : ""}
     ORDER BY employee_name NULLS LAST, e.event_time
@@ -49,6 +52,7 @@ export async function GET(req: NextRequest) {
     tipo: r.tipo ?? null,
     major: r.major ?? null,
     minor: r.minor ?? null,
+    area: r.area ?? null,
   }));
 
   return NextResponse.json(out);

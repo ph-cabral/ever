@@ -147,6 +147,8 @@ export default function RrhhDashboardPage() {
   // Contenido memoizado: no se recomputa al arrastrar/subir/abrir popover.
   const renderTab = useCallback((tab: TabId) => {
     if (tab === "resumen") return <ResumenTab data={data} onUpload={openUpload} />;
+    if (tab === "ausentismo") return <AusentismoTab />;
+    if (tab === "hs_extras") return <HsExtrasTab />;
     const type = TAB_TO_TYPE[tab];
     if (type && data[type]) {
       const f = data[type]!;

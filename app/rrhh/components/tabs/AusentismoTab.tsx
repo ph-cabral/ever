@@ -1,33 +1,91 @@
 "use client";
 
-import { useMemo } from "react";
-import { CalendarX, Users, CalendarDays } from "lucide-react";
-import type { ParsedFile } from "@/lib/rrhh/parseXlsx";
+import { useEffect, useMemo, useState } from "react";
+import { Percent, CalendarX, Users } from "lucide-react";
 import KpiCard from "@/app/rrhh/components/KpiCard";
-import LineChartCard from "@/app/rrhh/components/charts/LineChartCard";
+import PieChartCard from "@/app/rrhh/components/charts/PieChartCard";
 import BarChartCard from "@/app/rrhh/components/charts/BarChartCard";
-import { ausentismoKpis, asistenciaPorMes, topAusenciasPorPersona } from "@/lib/rrhh/aggregations";
+import { TabHeader, Panel, ErrMsg, Empty } from "@/app/rrhh/components/IndicadorUI";
+import {
+  computeIndicadores,
+  fetchResumen,
+  mesRange,
+  currentYm,
+  type ResumenRow,
+} from "@/lib/rrhh/asistenciaIndicadores";
 
-export default function AusentismoTab({ file }: { file: ParsedFile }) {
-  const kpis = useMemo(() => ausentismoKpis(file), [file]);
-  const porMes = useMemo(() => asistenciaPorMes(file), [file]);
-  const topPersonas = useMemo(() => topAusenciasPorPersona(file, 10), [file]);
+const fmt = (n: number) =>
+  new Intl.NumberFormat("es-AR", { maximumFractionDigits: 1 }).format(n);
+
+// Pestaña Ausentismo — alimentada por la BD de fichadas (API resumen).
+// Por estado, excluye Normal / Ausente / Revisar (ver ESTADOS_NO_AUSENCIA).
+export default function AusentismoTab() {
+  const [ym, setYm] = useState(currentYm());
+  const [rows, setRows] = useState<ResumenRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const { desde, hasta } = mesRange(ym);
+    setLoading(true);
+    setError(null);
+    fetchResumen(desde, hasta)
+      .then((d) => alive && setRows(d))
+      .catch((e) => alive && setError(e.message))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [ym]);
+
+  const ind = useMemo(() => computeIndicadores(rows), [rows]);
 
   return (
     <div className="space-y-6">
+      <TabHeader
+        title="Indicadores — Ausentismo"
+        sub="Por estado, excluye Normal / Ausente / Revisar"
+        ym={ym}
+        setYm={setYm}
+        loading={loading}
+      />
+
+      {error && <ErrMsg msg={error} />}
+
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <KpiCard label="Total registros" value={kpis.totalRegistros} icon={CalendarX} accent="orange" />
-        <KpiCard label="Personas involucradas" value={kpis.personasInvolucradas} icon={Users} accent="zinc" />
-        <KpiCard label="Días con registros" value={kpis.diasUnicos} icon={CalendarDays} accent="zinc" />
+        <KpiCard
+          label="Ratio de ausencia por jornada"
+          value={`${fmt(ind.ratioAusencia)} %`}
+          icon={Percent}
+          accent="orange"
+          hint={`${ind.diasAusencia} de ${ind.jornadasEsperadas} jornadas`}
+        />
+        <KpiCard label="Días de ausencia" value={ind.diasAusencia} icon={CalendarX} accent="zinc" />
+        <KpiCard label="Personas con ausencias" value={ind.personasAusentes} icon={Users} accent="zinc" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {porMes.length > 0 && (
-          <LineChartCard title="Horas asistidas por mes" data={porMes} xKey="name" yKeys={["horas"]} />
-        )}
-        {topPersonas.length > 0 && (
-          <BarChartCard title="Top 10 — registros por persona" data={topPersonas} xKey="name" yKey="value" />
-        )}
+        <Panel>
+          {ind.ausenciaPorMotivo.length > 0 ? (
+            <PieChartCard title="Ausentismo por motivo" data={ind.ausenciaPorMotivo} />
+          ) : (
+            <Empty msg={loading ? "Cargando…" : "Sin ausencias en el período."} />
+          )}
+        </Panel>
+        <Panel>
+          {ind.ausenciaPorArea.length > 0 ? (
+            <BarChartCard
+              title="Distribución por área"
+              data={ind.ausenciaPorArea}
+              xKey="name"
+              yKey="value"
+              currency={false}
+            />
+          ) : (
+            <Empty msg={loading ? "Cargando…" : "Sin ausencias en el período."} />
+          )}
+        </Panel>
       </div>
     </div>
   );
