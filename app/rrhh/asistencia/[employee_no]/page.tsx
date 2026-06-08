@@ -35,7 +35,7 @@ export default function AsistenciaEmpleadoPage({
   const { employee_no } = use(params);
   const [evs, setEvs] = useState<Ev[]>([]);
   const [loading, setLoading] = useState(false);
-  const [origen, setOrigen] = useState("all");
+  const [area, setArea] = useState("all");
   const [tipo, setTipo] = useState("all");
   const [desde, setDesde] = useState(daysAgo(30));
   const [hasta, setHasta] = useState(today());
@@ -57,21 +57,20 @@ export default function AsistenciaEmpleadoPage({
       const r = await fetch(`/api/rrhh/asistencia/eventos?${qs}`);
       setEvs(await r.json());
     } finally { setLoading(false); }
-    if (area !== "all" && (e.area ?? "") !== area) return false;
-
+    
   },
-    // [employee_no, desde, hasta]
-  );
+  [employee_no, desde, hasta]
+);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const filtered = useMemo(() => {
     return evs.filter((e) => {
-      if (origen !== "all" && e.device !== origen) return false;
+      if (area !== "all" && (e.area ?? "") !== area) return false;
       if (tipo !== "all" && e.tipo !== tipo) return false;
       return true;
     });
-  }, [evs, origen, tipo]);
+  }, [evs, area, tipo]);
 
   const nombre = evs[0]?.employee_name ?? `#${employee_no}`;
   const dias = new Set(filtered.map((e) => e.event_time.slice(0, 10))).size;

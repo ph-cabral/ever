@@ -409,18 +409,6 @@ const AsistenciaRow = memo(function AsistenciaRow({
         </Link>
       </TableCell>
       <TableCell>{row.fecha}</TableCell>
-      <TableCell>
-        {row.devices ? (
-          <button
-            onClick={() => onOrigen((row.devices ?? "").trim())}
-            className="text-primary hover:underline"
-          >
-            {row.devices}
-          </button>
-        ) : (
-          "—"
-        )}
-      </TableCell>
       <TableCell>{row.devices ?? "—"}</TableCell>
       <TableCell>{fmtTime(row.check_in)}</TableCell>
       <TableCell>{fmtTime(row.check_out)}</TableCell>
@@ -482,7 +470,6 @@ export default function AsistenciaPage() {
   const [loading, setLoading] = useState(false);
   const [empleado, setEmpleado] = useState("");
   const [estado, setEstado] = useState<string>("all");
-  const [origen, setOrigen] = useState<string>("all");
   const [edits, setEdits] = useState<Record<string, Edit>>({});
   const [area, setArea] = useState<string>("all");
   
@@ -622,11 +609,10 @@ export default function AsistenciaPage() {
     return rows.filter((r) => {
       if (q && !(r.employee_name ?? "").toLowerCase().includes(q)) return false;
       if (estado !== "all" && effEstado(r) !== estado) return false;
-      // if (origen !== "all" && !(r.devices ?? "").includes(origen)) return false;
       if (area !== "all" && (r.departamento ?? "") !== area) return false;
       return true;
     });
-  }, [rows, empleadoDef, estado, origen, edits]);
+  }, [rows, empleadoDef, estado, area, edits]);
 
   return (
     <div className="container mx-auto px-6 py-8">
@@ -656,17 +642,7 @@ export default function AsistenciaPage() {
             ))}
           </SelectContent>
         </Select>
-        {/* <Select value={origen} onValueChange={setOrigen}>
-          <SelectTrigger>
-            <SelectValue placeholder="Reloj" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos los relojes</SelectItem>
-            <SelectItem value="oficina">oficina</SelectItem>
-            <SelectItem value="fabrica">fabrica</SelectItem>
-            <SelectItem value="lilser">lilser</SelectItem>
-          </SelectContent>
-        </Select> */}
+
         <Select value={area} onValueChange={setArea}>
           <SelectTrigger>
             <SelectValue placeholder="Área" />
@@ -690,7 +666,6 @@ export default function AsistenciaPage() {
             <TableRow>
               <TableHead>Empleado</TableHead>
               <TableHead>Fecha</TableHead>
-              <TableHead>Origen</TableHead>
               <TableHead>Ingreso</TableHead>
               <TableHead>Egreso</TableHead>
               <TableHead>En empresa</TableHead>
