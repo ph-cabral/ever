@@ -27,7 +27,7 @@ export default function NominaTab({ file, fileEmpleados }: { file: ParsedFile; f
       <div className="gap-4">
         {promedios.length > 0 && (
           <BarChartCard
-            height={400}
+            height={500}
             title="Neto promedio por área"
             ubicacionLabel="top"
             labelFontSize={14}
