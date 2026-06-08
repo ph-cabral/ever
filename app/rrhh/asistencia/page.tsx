@@ -384,7 +384,6 @@ const AsistenciaRow = memo(function AsistenciaRow({
   hasta,
   onPatch,
   onCommit,
-  onOrigen,
 }: {
   row: Row;
   edit: Edit | undefined;
@@ -392,7 +391,6 @@ const AsistenciaRow = memo(function AsistenciaRow({
   hasta: string;
   onPatch: (k: string, p: Edit) => void;
   onCommit: (k: string, kind: "estado" | "novedad", bruto?: number) => void;
-  onOrigen: (v: string) => void;
 }) {
   const k = `${row.employee_no}|${row.fecha}`;
   const e = edit ?? {};
@@ -423,11 +421,14 @@ const AsistenciaRow = memo(function AsistenciaRow({
           "—"
         )}
       </TableCell>
+      <TableCell>{row.devices ?? "—"}</TableCell>
       <TableCell>{fmtTime(row.check_in)}</TableCell>
       <TableCell>{fmtTime(row.check_out)}</TableCell>
       <TableCell
         title={
-          horasNov ? `Bruto ${fmtHHMM(row.minutos)} − ${horasNov} hs` : undefined
+          horasNov
+            ? `Bruto ${fmtHHMM(row.minutos)} − ${horasNov} hs`
+            : undefined
         }
       >
         {fmtHHMM(netMin)}
@@ -483,7 +484,8 @@ export default function AsistenciaPage() {
   const [estado, setEstado] = useState<string>("all");
   const [origen, setOrigen] = useState<string>("all");
   const [edits, setEdits] = useState<Record<string, Edit>>({});
-
+  const [area, setArea] = useState<string>("all");
+  
   // Ref para leer ediciones actuales dentro de onBlur sin closures stale.
   const editsRef = useRef(edits);
   useEffect(() => {
@@ -510,7 +512,6 @@ export default function AsistenciaPage() {
       setEdits((prev) => ({ ...prev, [k]: { ...prev[k], ...p } })),
     [],
   );
-  const onOrigen = useCallback((v: string) => setOrigen(v), []);
 
   // Guardado en DB (blur/Enter). kind = qué picker disparó.
   const commit = useCallback(
@@ -608,12 +609,21 @@ export default function AsistenciaPage() {
 
   const empleadoDef = useDeferredValue(empleado);
 
+  const areas = useMemo(
+    () =>
+      [
+        ...new Set(rows.map((r) => r.departamento).filter(Boolean) as string[]),
+      ].sort(),
+    [rows],
+  );
+
   const filtered = useMemo(() => {
     const q = empleadoDef.trim().toLowerCase();
     return rows.filter((r) => {
       if (q && !(r.employee_name ?? "").toLowerCase().includes(q)) return false;
       if (estado !== "all" && effEstado(r) !== estado) return false;
-      if (origen !== "all" && !(r.devices ?? "").includes(origen)) return false;
+      // if (origen !== "all" && !(r.devices ?? "").includes(origen)) return false;
+      if (area !== "all" && (r.departamento ?? "") !== area) return false;
       return true;
     });
   }, [rows, empleadoDef, estado, origen, edits]);
@@ -646,7 +656,7 @@ export default function AsistenciaPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={origen} onValueChange={setOrigen}>
+        {/* <Select value={origen} onValueChange={setOrigen}>
           <SelectTrigger>
             <SelectValue placeholder="Reloj" />
           </SelectTrigger>
@@ -655,6 +665,19 @@ export default function AsistenciaPage() {
             <SelectItem value="oficina">oficina</SelectItem>
             <SelectItem value="fabrica">fabrica</SelectItem>
             <SelectItem value="lilser">lilser</SelectItem>
+          </SelectContent>
+        </Select> */}
+        <Select value={area} onValueChange={setArea}>
+          <SelectTrigger>
+            <SelectValue placeholder="Área" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas las áreas</SelectItem>
+            {areas.map((a) => (
+              <SelectItem key={a} value={a}>
+                {a}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <DateField value={desde} onChange={onDesdeChange} />
@@ -707,7 +730,6 @@ export default function AsistenciaPage() {
                 hasta={hasta}
                 onPatch={patch}
                 onCommit={commit}
-                onOrigen={onOrigen}
               />
             ))}
           </TableBody>

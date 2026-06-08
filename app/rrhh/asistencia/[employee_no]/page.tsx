@@ -20,6 +20,7 @@ type Ev = {
   tipo: string | null;
   major: number | null;
   minor: number | null;
+  area: string | null;
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -39,6 +40,12 @@ export default function AsistenciaEmpleadoPage({
   const [desde, setDesde] = useState(daysAgo(30));
   const [hasta, setHasta] = useState(today());
 
+  const areas = useMemo(
+    () =>
+      [...new Set(evs.map((e) => e.area).filter(Boolean) as string[])].sort(),
+    [evs],
+  );
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -50,7 +57,11 @@ export default function AsistenciaEmpleadoPage({
       const r = await fetch(`/api/rrhh/asistencia/eventos?${qs}`);
       setEvs(await r.json());
     } finally { setLoading(false); }
-  }, [employee_no, desde, hasta]);
+    if (area !== "all" && (e.area ?? "") !== area) return false;
+
+  },
+    // [employee_no, desde, hasta]
+  );
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -67,7 +78,10 @@ export default function AsistenciaEmpleadoPage({
 
   return (
     <div className="container mx-auto px-6 py-8">
-      <Link href="/rrhh/asistencia" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4">
+      <Link
+        href="/rrhh/asistencia"
+        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4"
+      >
         <ChevronLeft className="h-4 w-4 mr-1" /> Asistencia
       </Link>
       <header className="mb-6">
@@ -78,7 +92,7 @@ export default function AsistenciaEmpleadoPage({
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
-        <Select value={origen} onValueChange={setOrigen}>
+        {/* <Select value={origen} onValueChange={setOrigen}>
           <SelectTrigger><SelectValue placeholder="Reloj" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos los relojes</SelectItem>
@@ -86,9 +100,24 @@ export default function AsistenciaEmpleadoPage({
             <SelectItem value="fabrica">fabrica</SelectItem>
             <SelectItem value="lilser">lilser</SelectItem>
           </SelectContent>
+        </Select> */}
+        <Select value={area} onValueChange={setArea}>
+          <SelectTrigger>
+            <SelectValue placeholder="Área" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas las áreas</SelectItem>
+            {areas.map((a) => (
+              <SelectItem key={a} value={a}>
+                {a}
+              </SelectItem>
+            ))}
+          </SelectContent>
         </Select>
         <Select value={tipo} onValueChange={setTipo}>
-          <SelectTrigger><SelectValue placeholder="Tipo" /></SelectTrigger>
+          <SelectTrigger>
+            <SelectValue placeholder="Tipo" />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todas</SelectItem>
             <SelectItem value="ENTRADA">ENTRADA</SelectItem>
@@ -111,19 +140,43 @@ export default function AsistenciaEmpleadoPage({
           </TableHeader>
           <TableBody>
             {loading && (
-              <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Cargando…</TableCell></TableRow>
+              <TableRow>
+                <TableCell
+                  colSpan={4}
+                  className="text-center py-8 text-muted-foreground"
+                >
+                  Cargando…
+                </TableCell>
+              </TableRow>
             )}
             {!loading && filtered.length === 0 && (
-              <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Sin marcas</TableCell></TableRow>
+              <TableRow>
+                <TableCell
+                  colSpan={4}
+                  className="text-center py-8 text-muted-foreground"
+                >
+                  Sin marcas
+                </TableCell>
+              </TableRow>
             )}
             {filtered.map((e, i) => {
               const dt = new Date(e.event_time);
               return (
                 <TableRow key={i}>
                   <TableCell>{dt.toLocaleDateString("es-AR")}</TableCell>
-                  <TableCell>{dt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</TableCell>
                   <TableCell>
-                    <Badge variant={e.tipo === "ENTRADA" ? "default" : "secondary"}>{e.tipo ?? "—"}</Badge>
+                    {dt.toLocaleTimeString("es-AR", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={e.tipo === "ENTRADA" ? "default" : "secondary"}
+                    >
+                      {e.tipo ?? "—"}
+                    </Badge>
                   </TableCell>
                   <TableCell>{e.device}</TableCell>
                 </TableRow>
