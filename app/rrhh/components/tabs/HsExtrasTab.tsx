@@ -4,7 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Clock, Zap, TrendingUp, Hourglass } from "lucide-react";
 import KpiCard from "@/app/rrhh/components/KpiCard";
 import PieChartCard from "@/app/rrhh/components/charts/PieChartCard";
-import { TabHeader, Panel, ErrMsg, Empty } from "@/app/rrhh/components/IndicadorUI";
+import {
+  TabHeader,
+  Panel,
+  ErrMsg,
+  Empty,
+} from "@/app/rrhh/components/IndicadorUI";
 import {
   computeIndicadores,
   fetchResumen,
@@ -52,18 +57,44 @@ export default function HsExtrasTab() {
       {error && <ErrMsg msg={error} />}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KpiCard label="Total horas mensual EW" value={fmt(ind.totalHoras)} icon={Clock} accent="yellow" hint="RRHH (con tope)" />
-        <KpiCard label="Total horas extras" value={fmt(ind.horasExtras)} icon={Zap} accent="blue" />
-        <KpiCard label="Ratio hs. extras" value={`${fmt(ind.ratioExtras)} %`} icon={TrendingUp} accent="green" />
-        <KpiCard label="Ratio hs. inactivas" value={`${fmt(ind.ratioInactivas)} %`} icon={Hourglass} accent="orange" />
+        <KpiCard
+          label="Total horas mensual EW"
+          value={fmt(ind.totalHoras)}
+          icon={Clock}
+          accent="yellow"
+          hint="RRHH (con tope)"
+        />
+        <KpiCard
+          label="Total horas extras"
+          value={fmt(ind.horasExtras)}
+          icon={Zap}
+          accent="blue"
+        />
+        <KpiCard
+          label="Ratio hs. extras"
+          value={`${fmt(ind.ratioExtras)} %`}
+          icon={TrendingUp}
+          accent="green"
+        />
+        <KpiCard
+          label="Ratio hs. inactivas"
+          value={`${fmt(ind.ratioInactivas)} %`}
+          icon={Hourglass}
+          accent="orange"
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Panel>
           {ind.extrasPorArea.length > 0 ? (
-            <PieChartCard title="Cantidad de Hs. extras por áreas" data={ind.extrasPorArea} />
+            <PieChartCard
+              title="Cantidad de Hs. extras por áreas"
+              data={ind.extrasPorArea}
+            />
           ) : (
-            <Empty msg={loading ? "Cargando…" : "Sin horas extra en el período."} />
+            <Empty
+              msg={loading ? "Cargando…" : "Sin horas extra en el período."}
+            />
           )}
         </Panel>
       </div>

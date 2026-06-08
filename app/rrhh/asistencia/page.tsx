@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef, memo, useDeferredValue } from "react";
+import {
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+  memo,
+  useDeferredValue,
+} from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
@@ -43,6 +51,15 @@ type Edit = {
   dias?: string;
   novedad?: string;
   horas?: string;
+  novedades?: { novedad: string; horas: number }[];
+};
+
+type NovedadItem = { novedad: string; horas: number };
+
+type Edit = {
+  estado?: string;
+  dias?: string;
+  novedades?: NovedadItem[];
 };
 
 const ESTADOS = [
@@ -472,7 +489,7 @@ export default function AsistenciaPage() {
   const [estado, setEstado] = useState<string>("all");
   const [edits, setEdits] = useState<Record<string, Edit>>({});
   const [area, setArea] = useState<string>("all");
-  
+
   // Ref para leer ediciones actuales dentro de onBlur sin closures stale.
   const editsRef = useRef(edits);
   useEffect(() => {

@@ -22,7 +22,9 @@ export function MesSelect({
         onChange={(e) => setYm(e.target.value)}
         className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-zinc-100 outline-none focus:border-yellow-400 cursor-pointer"
       />
-      {loading && <Loader2 size={15} className="animate-spin text-yellow-400" />}
+      {loading && (
+        <Loader2 size={15} className="animate-spin text-yellow-400" />
+      )}
     </label>
   );
 }
@@ -44,7 +46,9 @@ export function TabHeader({
   return (
     <div className="flex items-start justify-between gap-4 flex-wrap">
       <div>
-        <h2 className="text-yellow-400 font-bold text-xl uppercase tracking-wide">{title}</h2>
+        <h2 className="text-yellow-400 font-bold text-xl uppercase tracking-wide">
+          {title}
+        </h2>
         {sub && <p className="text-zinc-500 text-sm mt-1">{sub}</p>}
       </div>
       <MesSelect ym={ym} setYm={setYm} loading={loading} />
@@ -55,7 +59,9 @@ export function TabHeader({
 // Tarjeta contenedora para los gráficos (los ChartCard no traen fondo propio).
 export function Panel({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">{children}</div>
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+      {children}
+    </div>
   );
 }
 
@@ -67,6 +73,10 @@ export function ErrMsg({ msg }: { msg: string }) {
   );
 }
 
-export function Empty({ msg = "Sin datos para el período." }: { msg?: string }) {
+export function Empty({
+  msg = "Sin datos para el período.",
+}: {
+  msg?: string;
+}) {
   return <div className="py-12 text-center text-zinc-600 text-sm">{msg}</div>;
 }

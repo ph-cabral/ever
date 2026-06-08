@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
+type NovItem = { novedad: string; horas: number };
+
 type Row = {
   employee_no: string;
   employee_name: string | null;
@@ -15,8 +17,23 @@ type Row = {
   devices: string | null;
   estado: string | null;
   dias: number | null;
-  novedad: string | null;
-  horas: number | null;
+  novedad: string | null; // legacy: nombres unidos por ", "
+  horas: number | null; // SUMA de horas de las novedades del día
+  novedades: NovItem[]; // lista [{novedad, horas}]
+};
+
+// jsonb puede llegar ya parseado (array) o como string según el driver.
+const asItems = (v: unknown): NovItem[] => {
+  if (Array.isArray(v)) return v as NovItem[];
+  if (typeof v === "string" && v.trim()) {
+    try {
+      const p = JSON.parse(v);
+      return Array.isArray(p) ? p : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
 };
 
 export async function GET(req: NextRequest) {
@@ -46,10 +63,8 @@ export async function GET(req: NextRequest) {
         SELECT l."employeeNo" AS employee_no,
                ltrim(l."employeeNo", '0') AS emp_key,
                NULLIF(TRIM(l.nombre), '') AS employee_name,
-               a.nombre AS departamento
+               l.sector AS departamento
         FROM everwear.legajo l
-        LEFT JOIN everwear.sector s ON s.id = l."sectorId"
-        LEFT JOIN everwear.area   a ON a.id = s."areaId"
         WHERE l.estado = 'ACTIVO' AND l."employeeNo" IS NOT NULL
         ${employee_no ? `AND ltrim(l."employeeNo", '0') = ltrim($3, '0')` : ""}
       ),
@@ -82,8 +97,9 @@ export async function GET(req: NextRequest) {
         COALESCE(ev.eventos_dia, 0) AS eventos_dia,
         ed.estado AS estado,
         ed.dias   AS dias,
-        nd.novedad AS novedad,
-        nd.horas   AS horas
+        nd.novedad   AS novedad,
+        nd.horas     AS horas,
+        nd.novedades AS novedades
       FROM dias d
       CROSS JOIN act a
       LEFT JOIN ev ON ev.emp_key = a.emp_key AND ev.fecha = d.fecha
@@ -114,6 +130,7 @@ export async function GET(req: NextRequest) {
       dias: r.dias ?? null,
       novedad: r.novedad ?? null,
       horas: r.horas ?? null,
+      novedades: asItems(r.novedades),
     }));
 
     return NextResponse.json(out);

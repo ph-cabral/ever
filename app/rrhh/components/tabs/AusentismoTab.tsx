@@ -5,7 +5,12 @@ import { Percent, CalendarX, Users } from "lucide-react";
 import KpiCard from "@/app/rrhh/components/KpiCard";
 import PieChartCard from "@/app/rrhh/components/charts/PieChartCard";
 import BarChartCard from "@/app/rrhh/components/charts/BarChartCard";
-import { TabHeader, Panel, ErrMsg, Empty } from "@/app/rrhh/components/IndicadorUI";
+import {
+  TabHeader,
+  Panel,
+  ErrMsg,
+  Empty,
+} from "@/app/rrhh/components/IndicadorUI";
 import {
   computeIndicadores,
   fetchResumen,
@@ -61,16 +66,31 @@ export default function AusentismoTab() {
           accent="orange"
           hint={`${ind.diasAusencia} de ${ind.jornadasEsperadas} jornadas`}
         />
-        <KpiCard label="Días de ausencia" value={ind.diasAusencia} icon={CalendarX} accent="zinc" />
-        <KpiCard label="Personas con ausencias" value={ind.personasAusentes} icon={Users} accent="zinc" />
+        <KpiCard
+          label="Días de ausencia"
+          value={ind.diasAusencia}
+          icon={CalendarX}
+          accent="zinc"
+        />
+        <KpiCard
+          label="Personas con ausencias"
+          value={ind.personasAusentes}
+          icon={Users}
+          accent="zinc"
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Panel>
           {ind.ausenciaPorMotivo.length > 0 ? (
-            <PieChartCard title="Ausentismo por motivo" data={ind.ausenciaPorMotivo} />
+            <PieChartCard
+              title="Ausentismo por motivo"
+              data={ind.ausenciaPorMotivo}
+            />
           ) : (
-            <Empty msg={loading ? "Cargando…" : "Sin ausencias en el período."} />
+            <Empty
+              msg={loading ? "Cargando…" : "Sin ausencias en el período."}
+            />
           )}
         </Panel>
         <Panel>
@@ -83,7 +103,9 @@ export default function AusentismoTab() {
               currency={false}
             />
           ) : (
-            <Empty msg={loading ? "Cargando…" : "Sin ausencias en el período."} />
+            <Empty
+              msg={loading ? "Cargando…" : "Sin ausencias en el período."}
+            />
           )}
         </Panel>
       </div>
