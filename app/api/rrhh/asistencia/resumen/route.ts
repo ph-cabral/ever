@@ -63,8 +63,10 @@ export async function GET(req: NextRequest) {
         SELECT l."employeeNo" AS employee_no,
                ltrim(l."employeeNo", '0') AS emp_key,
                NULLIF(TRIM(l.nombre), '') AS employee_name,
-               l.sector AS departamento
+               COALESCE(ar.nombre, l.sector) AS departamento
         FROM everwear.legajo l
+        LEFT JOIN everwear.sector s ON s.id = l."sectorId"
+        LEFT JOIN everwear.area   ar ON ar.id = s."areaId"
         WHERE l.estado = 'ACTIVO' AND l."employeeNo" IS NOT NULL
         ${employee_no ? `AND ltrim(l."employeeNo", '0') = ltrim($3, '0')` : ""}
       ),
