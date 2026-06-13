@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
+const FECHA_RE = /^\d{4}-\d{2}-\d{2}([T ].*)?$/;
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const desde = searchParams.get("desde");
@@ -15,10 +17,17 @@ export async function GET(req: NextRequest) {
       { status: 400 },
     );
   }
+  if (!FECHA_RE.test(desde) || !FECHA_RE.test(hasta)) {
+    return NextResponse.json(
+      { error: "desde/hasta deben ser YYYY-MM-DD o ISO 8601" },
+      { status: 400 },
+    );
+  }
 
   const desdeTs = desde.length === 10 ? `${desde}T00:00:00-03:00` : desde;
   const hastaTs = hasta.length === 10 ? `${hasta}T23:59:59-03:00` : hasta;
 
+  try {
   const rows = await prisma.$queryRawUnsafe<any[]>(
     `
     SELECT
@@ -56,4 +65,8 @@ export async function GET(req: NextRequest) {
   }));
 
   return NextResponse.json(out);
+  } catch (e: any) {
+    console.error("[asistencia/eventos]", e);
+    return NextResponse.json({ error: e?.message ?? "error" }, { status: 500 });
+  }
 }

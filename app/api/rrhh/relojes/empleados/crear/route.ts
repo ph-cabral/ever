@@ -9,7 +9,8 @@ const RELOJES = [
 // { ip: "10.10.0.30", nombre: "Fabrica" },
 // { ip: "10.10.0.92", nombre: "Lilser" },
 const USER = process.env.HIKVISION_USER ?? "admin";
-const PASS = process.env.HIKVISION_PASS ?? "161982br";
+// Sin default hardcodeado: la credencial tiene que venir del entorno.
+const PASS = process.env.HIKVISION_PASS ?? "";
 const AUTH = "Basic " + Buffer.from(`${USER}:${PASS}`).toString("base64");
 const SEXO_MAP: Record<string, string> = {
   male: "M",

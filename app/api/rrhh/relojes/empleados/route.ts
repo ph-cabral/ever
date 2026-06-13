@@ -9,8 +9,11 @@ const RELOJES = [
 ];
 
 const USER = process.env.HIKVISION_USER ?? "admin";
-const PASS = process.env.HIKVISION_PASS ?? "161982br";
+// Sin default hardcodeado: la credencial tiene que venir del entorno.
+const PASS = process.env.HIKVISION_PASS ?? "";
 const AUTH = "Basic " + Buffer.from(`${USER}:${PASS}`).toString("base64");
+
+if (!PASS) console.warn("[relojes] HIKVISION_PASS no configurada — las llamadas a los relojes van a fallar");
 
 async function fetchEmpleadosReloj(ip: string): Promise<{
   ip: string;
@@ -20,9 +23,10 @@ async function fetchEmpleadosReloj(ip: string): Promise<{
   const empleados: any[] = [];
   let position = 0;
   const PAGE = 30;
+  const MAX_PAGES = 1000; // tope anti-loop si el firmware pagina mal
 
   try {
-    while (true) {
+    for (let page = 0; page < MAX_PAGES; page++) {
       const body = {
         UserInfoSearchCond: {
           searchID: "1",

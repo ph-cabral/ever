@@ -5,10 +5,20 @@ export const runtime = "nodejs"; // xlsx requiere Node
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
+const MAX_FILE_MB = 20;
+
 export async function POST(req: NextRequest) {
-  const form = await req.formData();
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    return NextResponse.json({ error: "Form-data inválido" }, { status: 400 });
+  }
   const file = form.get("file");
   if (!(file instanceof File)) return NextResponse.json({ error: "No se recibió archivo" }, { status: 400 });
+  if (file.size > MAX_FILE_MB * 1024 * 1024) {
+    return NextResponse.json({ error: `Archivo demasiado grande (máx ${MAX_FILE_MB}MB)` }, { status: 413 });
+  }
   try {
     const buf = Buffer.from(await file.arrayBuffer());
     const data = parseFinanzaWorkbook(buf, file.name);

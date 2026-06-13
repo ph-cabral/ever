@@ -7,10 +7,11 @@ export async function GET() {
     const res = await fetch(`${FASTAPI_URL}/indicadores/tiempos`, {
       // Sin cache — datos siempre frescos
       cache: "no-store",
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!res.ok) {
-      const error = await res.json();
+      const error = await res.json().catch(() => null);
       return NextResponse.json(
         { error: "Error en API de indicadores", detail: error },
         { status: res.status }

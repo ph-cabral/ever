@@ -14,10 +14,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const cant = Number(cantidad);
+    if (!Number.isFinite(cant) || cant <= 0) {
+      return NextResponse.json(
+        { error: "cantidad debe ser un número > 0" },
+        { status: 400 }
+      );
+    }
+
     const evento = await prisma.picking_eventos.create({
       data: {
         codigo: String(codigo),
-        cantidad: Number(cantidad),
+        cantidad: cant,
         picker_nombre: String(picker_nombre),
         estado: "pendiente",
       },
@@ -35,7 +43,8 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const estado = searchParams.get("estado") ?? "pendiente";
-    const limit = Number(searchParams.get("limit") ?? "50");
+    // NaN o valores absurdos romperían el take de Prisma
+    const limit = Math.min(500, Math.max(1, Number(searchParams.get("limit")) || 50));
 
     const eventos = await prisma.picking_eventos.findMany({
       where: estado === "todos" ? {} : { estado },

@@ -15,26 +15,34 @@ RUN npx prisma generate
 COPY . .
 
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build
 
-# Etapa 2: Producción
+# Etapa 2: Producción (next standalone → imagen mucho más chica)
 FROM node:20-alpine AS runner
 
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl curl
 
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/.next ./.next
+# standalone trae server.js + el subset de node_modules que usa la app
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/node_modules ./node_modules
+# motores de Prisma (no siempre los detecta el tracing de Next)
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/prisma ./prisma
 
-RUN npx prisma generate
+# Usuario sin privilegios (la imagen node ya trae el usuario "node")
+USER node
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD curl -fsS http://localhost:3000/api/picking/estado || exit 1
+
+CMD ["node", "server.js"]

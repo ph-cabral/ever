@@ -9,8 +9,9 @@ export async function POST(
 ) {
   const { session_id } = await params;
   try {
-    const r = await fetch(`${VICKI_URL}/cancel_employee/${session_id}`, {
+    const r = await fetch(`${VICKI_URL}/cancel_employee/${encodeURIComponent(session_id)}`, {
       method: "POST",
+      signal: AbortSignal.timeout(10000),
     });
     return new NextResponse(await r.text(), { status: r.status });
   } catch (e: any) {

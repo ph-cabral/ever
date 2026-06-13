@@ -10,7 +10,7 @@ export async function GET(
 ) {
   try {
     const { session_id } = await params;
-    const r = await fetch(`${VICKI_URL}/history/${session_id}`, {
+    const r = await fetch(`${VICKI_URL}/history/${encodeURIComponent(session_id)}`, {
       signal: AbortSignal.timeout(10000),
     });
     const txt = await r.text();

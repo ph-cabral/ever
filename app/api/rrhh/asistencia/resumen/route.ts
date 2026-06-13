@@ -49,6 +49,18 @@ export async function GET(req: NextRequest) {
         { status: 400 },
       );
     }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(desde) || !/^\d{4}-\d{2}-\d{2}$/.test(hasta)) {
+      return NextResponse.json(
+        { error: "desde y hasta deben tener formato YYYY-MM-DD" },
+        { status: 400 },
+      );
+    }
+    if (hasta < desde) {
+      return NextResponse.json(
+        { error: "hasta debe ser >= desde" },
+        { status: 400 },
+      );
+    }
 
     const rows = await prisma.$queryRawUnsafe<any[]>(
       `

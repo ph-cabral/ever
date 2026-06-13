@@ -40,17 +40,19 @@ export async function cortarMangueraAction(
   });
   if (!persona) throw new Error("Personal no encontrado");
   const cortado = Math.abs(metrosUsados);
-  if (cortado > rollo.metros) throw new Error("No hay suficientes metros");
-  const nuevosMetros = rollo.metros - cortado;
-  await prisma.corte.create({
-    data: { codigo: rollo.codigo, metros: cortado, personalId: persona.id },
-  });
-  if (nuevosMetros <= 0) await prisma.manguera.delete({ where: { id } });
-  else
-    await prisma.manguera.update({
-      where: { id },
-      data: { metros: nuevosMetros },
+  // Descuento atómico y condicional: dos cortes simultáneos ya no pueden
+  // pasar los dos el chequeo de stock (antes era read-then-write con carrera).
+  await prisma.$transaction(async (tx) => {
+    const res = await tx.manguera.updateMany({
+      where: { id, metros: { gte: cortado } },
+      data: { metros: { decrement: cortado } },
     });
+    if (res.count === 0) throw new Error("No hay suficientes metros");
+    await tx.corte.create({
+      data: { codigo: rollo.codigo, metros: cortado, personalId: persona.id },
+    });
+    await tx.manguera.deleteMany({ where: { id, metros: { lte: 0 } } });
+  });
   revalidatePath("/manguera");
 }
 
@@ -191,6 +193,7 @@ export async function createTrabajoAction(input: NuevoTrabajoInput) {
     for (const c of input.cortes) {
       const rollo = await tx.manguera.findUnique({
         where: { id: c.mangueraId },
+        select: { id: true },
       });
       if (!rollo) throw new Error(`Manguera ${c.codigo} no encontrada`);
       const usar = Math.max(0, c.metros || 0);
@@ -202,13 +205,12 @@ export async function createTrabajoAction(input: NuevoTrabajoInput) {
           trabajoId: trabajo.id,
         },
       });
-      const resto = rollo.metros - usar;
-      if (resto <= 0) await tx.manguera.delete({ where: { id: rollo.id } });
-      else
-        await tx.manguera.update({
-          where: { id: rollo.id },
-          data: { metros: resto },
-        });
+      // decremento atómico (sin carrera read-then-write); si queda en 0 o menos, se borra el rollo
+      await tx.manguera.update({
+        where: { id: rollo.id },
+        data: { metros: { decrement: usar } },
+      });
+      await tx.manguera.deleteMany({ where: { id: rollo.id, metros: { lte: 0 } } });
     }
   });
 
@@ -239,15 +241,15 @@ export async function updateCorteAction(input: {
       const rollo = await tx.manguera.findFirst({
         where: { codigo: corte.codigo },
         orderBy: { createdAt: "asc" },
+        select: { id: true },
       });
       if (rollo) {
-        const stock = rollo.metros - diff;
-        if (stock <= 0) await tx.manguera.delete({ where: { id: rollo.id } });
-        else
-          await tx.manguera.update({
-            where: { id: rollo.id },
-            data: { metros: stock },
-          });
+        // decremento/incremento atómico; si queda en 0 o menos, se borra
+        await tx.manguera.update({
+          where: { id: rollo.id },
+          data: { metros: { decrement: diff } },
+        });
+        await tx.manguera.deleteMany({ where: { id: rollo.id, metros: { lte: 0 } } });
       } else if (diff < 0) {
         // rollo se borró al llegar a 0 → recrear con lo devuelto
         await tx.manguera.create({
@@ -356,15 +358,15 @@ export async function updateTrabajoAction(
       const rollo = await tx.manguera.findFirst({
         where: { codigo: cod },
         orderBy: { createdAt: "asc" },
+        select: { id: true },
       });
       if (rollo) {
-        const stock = rollo.metros - delta;
-        if (stock <= 0) await tx.manguera.delete({ where: { id: rollo.id } });
-        else
-          await tx.manguera.update({
-            where: { id: rollo.id },
-            data: { metros: stock },
-          });
+        // ajuste atómico de stock; si queda en 0 o menos, se borra
+        await tx.manguera.update({
+          where: { id: rollo.id },
+          data: { metros: { decrement: delta } },
+        });
+        await tx.manguera.deleteMany({ where: { id: rollo.id, metros: { lte: 0 } } });
       } else if (delta < 0) {
         await tx.manguera.create({ data: { codigo: cod, metros: -delta } });
       }

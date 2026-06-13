@@ -5,10 +5,11 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
+  // parseInt puede dar NaN (?page=abc) y Prisma explota con take/skip NaN
+  const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
   const pageSize = Math.min(
     100,
-    parseInt(searchParams.get("pageSize") ?? "20", 10),
+    Math.max(1, parseInt(searchParams.get("pageSize") ?? "20", 10) || 20),
   );
   const search = (searchParams.get("search") ?? "").trim();
 
@@ -23,29 +24,34 @@ export async function GET(req: NextRequest) {
       }
     : {};
 
-  const [total, items] = await Promise.all([
-    prisma.legajo.count({ where }),
-    prisma.legajo.findMany({
-      where,
-      select: {
-        codigo: true,
-        nombre: true,
-        sector: true,
-        estado: true,
-      },
-      orderBy: [{ nombre: "asc" }],
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-  ]);
+  try {
+    const [total, items] = await Promise.all([
+      prisma.legajo.count({ where }),
+      prisma.legajo.findMany({
+        where,
+        select: {
+          codigo: true,
+          nombre: true,
+          sector: true,
+          estado: true,
+        },
+        orderBy: [{ nombre: "asc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
 
-  return NextResponse.json({
-    items,
-    page,
-    pageSize,
-    total,
-    totalPages: Math.ceil(total / pageSize),
-  });
+    return NextResponse.json({
+      items,
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize),
+    });
+  } catch (e) {
+    console.error("GET legajos error:", e);
+    return NextResponse.json({ error: "Error al listar legajos" }, { status: 500 });
+  }
 }
 
 function genCodigo() {
@@ -53,8 +59,20 @@ function genCodigo() {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { step1, step2, step3, step4, step5, step6 } = body;
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Body JSON inválido" }, { status: 400 });
+  }
+  const { step1, step2, step3, step4, step5, step6 } = body ?? {};
+
+  if (!step1?.nombre) {
+    return NextResponse.json(
+      { error: "step1.nombre es obligatorio" },
+      { status: 400 },
+    );
+  }
 
   try {
     const legajo = await prisma.legajo.create({
@@ -223,14 +241,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ legajoCodigo: legajo.codigo }, { status: 201 });
   } catch (e: any) {
     console.error("POST legajo error:", e);
+    const duplicado = e?.code === "P2002";
     return NextResponse.json(
-      {
-        error:
-          e?.code === "P2002"
-            ? "DNI o CUIL ya existe"
-            : "Error al crear legajo",
-      },
-      { status: 400 },
+      { error: duplicado ? "DNI o CUIL ya existe" : "Error al crear legajo" },
+      { status: duplicado ? 409 : 500 },
     );
   }
 }

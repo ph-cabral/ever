@@ -9,8 +9,9 @@ export async function GET(
 ) {
   const { session_id } = await params;
   try {
-    const r = await fetch(`${VICKI_URL}/draft_status/${session_id}`, {
+    const r = await fetch(`${VICKI_URL}/draft_status/${encodeURIComponent(session_id)}`, {
       cache: "no-store",
+      signal: AbortSignal.timeout(10000),
     });
     return new NextResponse(await r.text(), {
       status: r.status,
