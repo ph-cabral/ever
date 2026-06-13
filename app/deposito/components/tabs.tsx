@@ -209,7 +209,7 @@ export function ResumenTab({ d, mes }: { d: DepositoData; mes: string }) {
     : new Set(regsMes.map((x) => x.operario)).size;
   const kPeriodo = esTodos
     ? (r.nombreUltimoMes ?? "—")
-    : (pm?.nombreMes ?? mesSel);
+    : (pm?.nombreMes ?? mes);
   const recolMes = d.porMes.map((m) => ({
     mes: fmtMes(m.mes),
     recolectados: m.recolectados,

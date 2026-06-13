@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Search, UserPlus, ChevronLeft, ChevronRight } from "lucide-react";
@@ -32,6 +32,20 @@ type ApiResp = {
 const PAGE_SIZE = 20;
 
 export default function LegajosListPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="container mx-auto px-6 py-8 text-sm text-muted-foreground">
+          Cargando…
+        </div>
+      }
+    >
+      <LegajosContent />
+    </Suspense>
+  );
+}
+
+function LegajosContent() {
   const router = useRouter();
   const sp = useSearchParams();
 
@@ -148,18 +162,12 @@ export default function LegajosListPage() {
               data?.items.map((l) => (
                 <TableRow key={l.codigo} className="cursor-pointer">
                   <TableCell className="font-mono text-xs">
-                    <Link
-                      href={`/rrhh/legajos/${l.codigo}`}
-                      className="block"
-                    >
+                    <Link href={`/rrhh/legajos/${l.codigo}`} className="block">
                       {l.codigo}
                     </Link>
                   </TableCell>
                   <TableCell>
-                    <Link
-                      href={`/rrhh/legajos/${l.codigo}`}
-                      className="block"
-                    >
+                    <Link href={`/rrhh/legajos/${l.codigo}`} className="block">
                       {l.nombre}
                     </Link>
                   </TableCell>
@@ -204,3 +212,4 @@ export default function LegajosListPage() {
     </div>
   );
 }
+
