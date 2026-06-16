@@ -21,11 +21,12 @@ async function j<T>(url: string): Promise<T | null> {
 const last = <T,>(a: T[] | null): T | null => (a && a.length ? a[a.length - 1] : null);
 
 export async function GET() {
-  const [dolar, infM, infIA, pf] = await Promise.all([
+  const [dolar, infM, infIA, pf, tcHist] = await Promise.all([
     j<{ nombre: string; compra: number; venta: number }[]>(DOLAR),
     j<{ valor: number }[]>(INFL_MENS),
     j<{ valor: number }[]>(INFL_IA),
     j<{ tnaClientes: number | null }[]>(PF),
+    j<{ fecha: string; venta: number }[]>(TC_HIST),
   ]);
 
   const dolares = (dolar ?? []).map((d) => ({ nombre: d.nombre, compra: d.compra ?? null, venta: d.venta ?? null }));

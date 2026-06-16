@@ -1003,6 +1003,7 @@ export function CashTab({ d }: { d: FinanzaData["cash"] }) {
             series={[{ key: "egresos", name: "Egresos", color: PALETTE[5] }]}
           />
         </Panel>
+      </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
           <Panel title="Saldo de caja USD final" accent="(USD)">
             <ChartBar
@@ -1026,7 +1027,6 @@ export function CashTab({ d }: { d: FinanzaData["cash"] }) {
             />
           </Panel>
         </div>
-      </div>
       <SectionTitle>📋 Cash Flow Detallado</SectionTitle>
       <MatrixTable head={d.meses.map(fmtMes)} rows={rows} />
     </div>

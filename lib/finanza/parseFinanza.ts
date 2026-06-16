@@ -46,6 +46,12 @@ export interface FinanzaData {
   };
   proveedores: {
     saldos: ProvSaldo[];
+    chequesRechazadosSaldos: {
+      cliente: string;
+      magnus: number | null;
+      prueba: number | null;
+      total: number | null;
+    }[];
     plazoPonderado: number | null;
     clasificacion: Record<string, number>;
     pagos: ProvPago[];
@@ -228,15 +234,12 @@ function parseCtasCtes(wb: XLSX.WorkBook) {
     : "";
   const rechazosMensual = rechMesByYear.get(lastYear) ?? [];
   return {
-    cobranzas,
-    reciboTotal,
-    saldos,
-    chequesRechazadosSaldos,
-    plazoAll: cSum ? wSum / cSum : null,
-    plazoSinOmar: cSumNoOmar ? wSumNoOmar / cSumNoOmar : null,
     cobradoTotal,
     cobrado80,
     vendedores,
+    cobrPlazo,
+    rechazosAnual,
+    rechazosMensual,
   };
 }
 
