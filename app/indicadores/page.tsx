@@ -3,6 +3,8 @@ import { IndicadoresDashboard } from "./IndicadoresDashboard";
 const API_URL =
   process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
 
+export const dynamic = "force-dynamic"; // ← NUEVA: no prerender, mata el EACCES
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function horasAHHMM(h: number): string {
   const totalMin = Math.round(h * 60);
@@ -37,14 +39,13 @@ function mapearMes(m: any) {
   };
 }
 
-
 // ── Page (Server Component) ───────────────────────────────────────────────────
 export default async function IndicadoresPage() {
   let data;
 
   try {
     const res = await fetch(`${API_URL}/indicadores/tiempos`, {
-      next: { revalidate: 300 }, // revalida cada 5 min
+      next: "no-store", 
     });
 
     if (!res.ok) throw new Error(`API respondió ${res.status}`);
@@ -52,23 +53,28 @@ export default async function IndicadoresPage() {
     const api = await res.json();
 
     const prioridades = (api.prioridades ?? []).map((p: any) => ({
-      Prioridad:        p.Prioridad,
-      cantidad:         p.cantidad,
+      Prioridad: p.Prioridad,
+      cantidad: p.cantidad,
       "Tiempo Promedio": horasAHHMM(p.tiempo_promedio ?? 0),
     }));
 
-    const metricas_mensuales     = (api.metricas_mensuales     ?? []).map(mapearMes);
-    const metricas_por_prioridad = (api.metricas_por_prioridad ?? []).map(mapearMes);
+    const metricas_mensuales = (api.metricas_mensuales ?? []).map(mapearMes);
+    const metricas_por_prioridad = (api.metricas_por_prioridad ?? []).map(
+      mapearMes,
+    );
 
     data = { prioridades, metricas_mensuales, metricas_por_prioridad };
-
   } catch (err) {
     console.error("[IndicadoresPage] Error:", err);
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center space-y-2">
-          <p className="text-2xl font-bold text-slate-700">Sin datos disponibles</p>
-          <p className="text-slate-400 text-sm">No se pudo conectar con la API.</p>
+          <p className="text-2xl font-bold text-slate-700">
+            Sin datos disponibles
+          </p>
+          <p className="text-slate-400 text-sm">
+            No se pudo conectar con la API.
+          </p>
           <p className="text-slate-300 text-xs font-mono">{String(err)}</p>
         </div>
       </div>
@@ -77,4 +83,3 @@ export default async function IndicadoresPage() {
 
   return <IndicadoresDashboard data={data} />;
 }
-

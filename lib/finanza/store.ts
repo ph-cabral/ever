@@ -18,7 +18,7 @@ export interface MacroData {
   tcSerie?: { fecha: string; venta: number }[];
 }
 
-const KEY = "everwear_finanza_v1";
+const KEY = "everwear_finanza_v2";
 
 interface Persisted {
   data: FinanzaData | null;
@@ -29,17 +29,14 @@ function load(): Persisted {
   if (typeof window === "undefined") return { data: null, macro: null };
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as Persisted) : { data: null, macro: null };
+    if (!raw) return { data: null, macro: null };
+    const p = JSON.parse(raw) as Persisted;
+    // descarta data de schema viejo
+    if (p?.data && !p.data.ctasctes)
+      return { data: null, macro: p.macro ?? null };
+    return p;
   } catch {
     return { data: null, macro: null };
-  }
-}
-function save(p: Persisted) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(KEY, JSON.stringify(p));
-  } catch (e) {
-    console.error("finanza persist:", e);
   }
 }
 

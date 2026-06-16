@@ -12,12 +12,23 @@ services:
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3001}
       NODE_ENV: production
+      INDICADORES_API_URL: http://indicadores-api:8001
       TZ: ${TZ:-America/Argentina/Buenos_Aires}
     ports:
       - "3001:3000"
     networks:
       - ai-net
-
+      
+  indicadores-api:
+    build: ./indicadores-api
+    container_name: indicadores_api
+    env_file:
+      - ./indicadores-api/.env
+    volumes:
+      - /tmp/krb5cc_1000:/tmp/krb5cc_1000:ro
+    restart: unless-stopped
+    networks:
+      - ai-net
 networks:
   ai-net:
     external: true
