@@ -9,6 +9,8 @@ const DOLAR = "https://dolarapi.com/v1/dolares";
 const INFL_MENS = "https://api.argentinadatos.com/v1/finanzas/indices/inflacion";
 const INFL_IA = "https://api.argentinadatos.com/v1/finanzas/indices/inflacionInteranual";
 const PF = "https://api.argentinadatos.com/v1/finanzas/tasas/plazoFijo";
+const TC_HIST =
+  "https://api.argentinadatos.com/v1/cotizaciones/dolares/oficial";
 
 async function j<T>(url: string): Promise<T | null> {
   try {
@@ -29,12 +31,19 @@ export async function GET() {
   const dolares = (dolar ?? []).map((d) => ({ nombre: d.nombre, compra: d.compra ?? null, venta: d.venta ?? null }));
   const tnas = (pf ?? []).map((x) => x.tnaClientes).filter((n): n is number => typeof n === "number" && n > 0);
   const plazoFijoTNA = tnas.length ? tnas.reduce((a, b) => a + b, 0) / tnas.length : null;
-
+  const inflacionSerie = (infM ?? [])
+    .slice(-14)
+    .map((x: any) => ({ fecha: x.fecha, valor: x.valor }));
+  const tcSerie = (tcHist ?? [])
+    .slice(-30)
+    .map((x) => ({ fecha: x.fecha, venta: x.venta }));
   return NextResponse.json({
     fetchedAt: new Date().toISOString(),
     dolares,
     inflacionMensual: last(infM)?.valor ?? null,
     inflacionInteranual: last(infIA)?.valor ?? null,
     plazoFijoTNA,
+    inflacionSerie,
+    tcSerie,
   });
 }

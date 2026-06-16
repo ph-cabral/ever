@@ -139,6 +139,22 @@ export function CtasCtesTab({ d }: { d: FinanzaData["ctasctes"] }) {
     : sum(d.saldos.map((s) => s.total));
   const chRechTotal = sum(d.chequesRechazadosSaldos.map((c) => c.total));
   const vendSorted = [...d.vendedores].sort((a, b) => b.cobrado - a.cobrado);
+  const year2026 = d.cobranzas.find((c) => c.label === "2026");
+  const cobradoYTD =
+    year2026?.magnus != null ? Math.abs(year2026.magnus) : null;
+  const cobrPlazoData = d.cobrPlazo.map((b, i) => ({
+    name: b.bucket,
+    value: b.monto,
+    color: PALETTE[i],
+  }));
+  const rechMensualData = d.rechazosMensual.map((r) => ({
+    mes: fmtMes(r.mes),
+    indice: r.cobranzas ? (r.rechazado / r.cobranzas) * 100 : 0,
+  }));
+  const rechAnualData = d.rechazosAnual.map((a) => ({
+    anio: a.anio,
+    monto: a.monto,
+  }));
   const topVend = vendSorted
     .slice(0, 12)
     .map((v) => ({ vendedor: clip(v.vendedor), cobrado: v.cobrado }));
@@ -157,10 +173,21 @@ export function CtasCtesTab({ d }: { d: FinanzaData["ctasctes"] }) {
 
       <Grid cols={6}>
         <KPI
-          label="Cobrado MAGNUS"
+          label="Cobrado mes (MAGNUS)"
           value={fmtArs(d.cobradoTotal)}
           sub="hoja RECIBOS"
           accent="green"
+        />
+        <KPI
+          label="Cobrado YTD"
+          value={fmtArs(cobradoYTD)}
+          sub="año en curso"
+          accent="green"
+        />
+        <KPI
+          label="Cobranzas +80 días"
+          value={fmtArs(d.cobrado80)}
+          accent="amber"
         />
         <KPI
           label="Recibos PR"
@@ -260,6 +287,41 @@ export function CtasCtesTab({ d }: { d: FinanzaData["ctasctes"] }) {
         </div>
       </div>
 
+      <SectionTitle>📈 Cobranzas por Plazo & Índice de Rechazo</SectionTitle>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Panel title="Distribución de cobranzas por plazo" accent="($)">
+          <ChartDonut
+            data={cobrPlazoData}
+            height={260}
+            fmt={(n) => fmtShort(n)}
+          />
+        </Panel>
+        <Panel
+          title="Índice de rechazo mensual"
+          accent="(% rech/cobr · año corriente)"
+        >
+          <ChartLine
+            data={rechMensualData}
+            xKey="mes"
+            height={260}
+            series={[{ key: "indice", name: "Índice %", color: PALETTE[5] }]}
+            fmt={(n) => `${n.toFixed(2)}%`}
+          />
+        </Panel>
+      </div>
+      <div className="mt-4">
+        <Panel title="Monto rechazado anual" accent="($)">
+          <ChartBar
+            data={rechAnualData}
+            xKey="anio"
+            height={220}
+            series={[{ key: "monto", name: "Rechazado", color: PALETTE[5] }]}
+            fmt={(n) => fmtShort(n)}
+            showValues
+          />
+        </Panel>
+      </div>
+
       <SectionTitle>🔴 Cheques Rechazados — Saldos Vigentes</SectionTitle>
       <Table<FinanzaData["ctasctes"]["chequesRechazadosSaldos"][number]>
         cols={[
@@ -307,6 +369,16 @@ export function ComexTab({ d }: { d: FinanzaData["comex"] }) {
   const totNac = sum(d.resumenMensual.map((m) => m.nac));
   const totFlete = sum(d.resumenMensual.map((m) => m.flete));
   const finSaldo = sum(d.financiaciones.map((f) => f.saldo));
+  const cdiSaldo = sum(
+    d.financiaciones
+      .filter((f) => /CDI/i.test(f.tipo ?? ""))
+      .map((f) => f.saldo),
+  );
+  const fiimSaldo = sum(
+    d.financiaciones
+      .filter((f) => /FIIM/i.test(f.tipo ?? ""))
+      .map((f) => f.saldo),
+  );
   const pendientes = d.operaciones.filter(
     (o) => o.nacEstado === "pendiente",
   ).length;
@@ -342,9 +414,13 @@ export function ComexTab({ d }: { d: FinanzaData["comex"] }) {
           accent="yellow"
         />
         <KPI
-          label="Financiaciones (saldo)"
-          value={fmtUsd(finSaldo)}
-          sub={`${d.financiaciones.length} operaciones`}
+          label="Financ. CDI (saldo)"
+          value={fmtUsd(cdiSaldo)}
+          accent="red"
+        />
+        <KPI
+          label="Financ. FIIM (saldo)"
+          value={fmtUsd(fiimSaldo)}
           accent="red"
         />
         <KPI
@@ -737,30 +813,32 @@ export function ImpuestosTab({ d }: { d: FinanzaData["impuestos"] }) {
 
 // ─── PRÉSTAMOS ─────────────────────────────────────────────────────────────────
 export function PrestamosTab({ d }: { d: FinanzaData["prestamos"] }) {
+  const today = new Date();
   const saldoActual =
-    [...d.cuadro].reverse().find((r) => r.saldo != null)?.saldo ?? null;
+    [...d.cuadro]
+      .filter(
+        (r) =>
+          r.saldo != null && r.vencimiento && new Date(r.vencimiento) <= today,
+      )
+      .pop()?.saldo ??
+    [...d.cuadro].reverse().find((r) => r.saldo != null)?.saldo ??
+    null;
   const saldoLine = d.cuadro
     .filter((r) => r.saldo != null)
     .map((r) => ({ vto: fmtDate(r.vencimiento), saldo: r.saldo }));
-  const comp = d.cuadro
-    .slice(0, 12)
-    .map((r, i) => ({
-      n: `#${i + 1}`,
-      capital: r.capital ?? 0,
-      interes: r.interes ?? 0,
-      impuesto: r.impuesto ?? 0,
-    }));
+  const comp = d.cuadro.slice(0, 12).map((r, i) => ({
+    n: `#${i + 1}`,
+    capital: r.capital ?? 0,
+    interes: r.interes ?? 0,
+    impuesto: r.impuesto ?? 0,
+  }));
 
   return (
     <div>
       <PageTitle title="Préstamos" sub={d.titulo ?? "Cuadro de amortización"} />
       <Grid cols={3}>
         <KPI label="Monto original" value={fmtArs(d.monto)} accent="yellow" />
-        <KPI
-          label="Saldo (última cuota)"
-          value={fmtArs(saldoActual)}
-          accent="red"
-        />
+        <KPI label="Saldo actual" value={fmtArs(saldoActual)} accent="red" />
         <KPI label="Cuotas" value={fmtNum(d.cuadro.length)} accent="neutral" />
       </Grid>
 
@@ -854,7 +932,13 @@ export function PrestamosTab({ d }: { d: FinanzaData["prestamos"] }) {
 
 // ─── CASH FLOW ───────────────────────────────────────────────────────────────
 export function CashTab({ d }: { d: FinanzaData["cash"] }) {
-  const finalRow = d.filas.find((f) => f.kind === "final");
+  const finalRow =
+    d.filas.find((f) => f.kind === "final" && /\$/.test(f.label)) ??
+    d.filas.find((f) => f.kind === "final");
+  const finalUsdRow = d.filas.find(
+    (f) => f.kind === "final" && /USD/i.test(f.label),
+  );
+  const ingresoRow = d.filas.find((f) => /COBRANZAS CORRIENTES/i.test(f.label));
   const inicioRow = d.filas.find((f) => f.kind === "inicio");
   const egresosRow = d.filas.find((f) => f.kind === "egresos");
   const saldoBar = d.meses.map((m, i) => ({
@@ -864,6 +948,15 @@ export function CashTab({ d }: { d: FinanzaData["cash"] }) {
   }));
   const egrBar = d.meses.map((m, i) => ({
     mes: fmtMes(m),
+    egresos: egresosRow ? Math.abs(egresosRow.values[i] ?? 0) : 0,
+  }));
+  const usdBar = d.meses.map((m, i) => ({
+    mes: fmtMes(m),
+    usd: finalUsdRow?.values[i] ?? null,
+  }));
+  const ingEgrBar = d.meses.map((m, i) => ({
+    mes: fmtMes(m),
+    ingresos: ingresoRow?.values[i] ?? null,
     egresos: egresosRow ? Math.abs(egresosRow.values[i] ?? 0) : 0,
   }));
 
@@ -910,6 +1003,29 @@ export function CashTab({ d }: { d: FinanzaData["cash"] }) {
             series={[{ key: "egresos", name: "Egresos", color: PALETTE[5] }]}
           />
         </Panel>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+          <Panel title="Saldo de caja USD final" accent="(USD)">
+            <ChartBar
+              data={usdBar}
+              xKey="mes"
+              height={260}
+              series={[{ key: "usd", name: "Saldo USD", color: PALETTE[3] }]}
+              fmt={(n) => fmtShort(n, "US$")}
+              showValues
+            />
+          </Panel>
+          <Panel title="Ingresos vs Egresos" accent="($ por mes)">
+            <ChartBar
+              data={ingEgrBar}
+              xKey="mes"
+              height={260}
+              series={[
+                { key: "ingresos", name: "Ingresos", color: PALETTE[0] },
+                { key: "egresos", name: "Egresos", color: PALETTE[5] },
+              ]}
+            />
+          </Panel>
+        </div>
       </div>
       <SectionTitle>📋 Cash Flow Detallado</SectionTitle>
       <MatrixTable head={d.meses.map(fmtMes)} rows={rows} />
@@ -945,7 +1061,14 @@ export function MacroTab({
         ? (((d.venta as number) - oficial.venta) / oficial.venta) * 100
         : 0,
     }));
-
+  const tcEvoData = (macro?.tcSerie ?? []).map((x) => ({
+    fecha: x.fecha.slice(5),
+    venta: x.venta,
+  }));
+  const inflData = (macro?.inflacionSerie ?? []).map((x) => ({
+    fecha: x.fecha.slice(0, 7),
+    valor: x.valor,
+  }));
   return (
     <div>
       <div className="flex items-start justify-between">
@@ -1037,6 +1160,28 @@ export function MacroTab({
               </Panel>
             </div>
           )}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+            <Panel title="Evolución TC oficial" accent="($)">
+              <ChartLine
+                data={tcEvoData}
+                xKey="fecha"
+                height={260}
+                series={[{ key: "venta", name: "Venta", color: PALETTE[0] }]}
+                fmt={(n) => fmtShort(n)}
+              />
+            </Panel>
+            <Panel title="Inflación mensual" accent="(%)">
+              <ChartLine
+                data={inflData}
+                xKey="fecha"
+                height={260}
+                series={[
+                  { key: "valor", name: "Mensual %", color: PALETTE[5] },
+                ]}
+                fmt={(n) => `${n.toFixed(1)}%`}
+              />
+            </Panel>
+          </div>
 
           <SectionTitle>📊 Variables Macroeconómicas</SectionTitle>
           <Table<MacroData["dolares"][number]>

@@ -14,6 +14,8 @@ export interface MacroData {
   inflacionMensual: number | null;
   inflacionInteranual: number | null;
   plazoFijoTNA: number | null;
+  inflacionSerie?: { fecha: string; valor: number }[];
+  tcSerie?: { fecha: string; venta: number }[];
 }
 
 const KEY = "everwear_finanza_v1";

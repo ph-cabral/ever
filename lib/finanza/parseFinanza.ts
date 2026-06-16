@@ -27,20 +27,42 @@ export interface FinanzaData {
   parsedAt: string;
   periodo: string | null;
   ctasctes: {
-    cobranzas: PivotRow[]; reciboTotal: { magnus: number | null; pr: number | null } | null;
+    cobranzas: PivotRow[];
+    reciboTotal: { magnus: number | null; pr: number | null } | null;
     saldos: PivotRow[];
-    chequesRechazadosSaldos: { cliente: string; magnus: number | null; prueba: number | null; total: number | null }[];
-    plazoAll: number | null; plazoSinOmar: number | null; cobradoTotal: number;
+    plazoAll: number | null;
+    plazoSinOmar: number | null;
+    cobradoTotal: number;
+    cobrado80: number;
     vendedores: VendedorRow[];
+    cobrPlazo: { bucket: string; monto: number }[];
+    rechazosAnual: { anio: string; monto: number }[];
+    rechazosMensual: { mes: string; rechazado: number; cobranzas: number }[];
   };
-  comex: { operaciones: ComexOp[]; resumenMensual: ComexMes[]; financiaciones: FinanciacionRow[] };
+  comex: {
+    operaciones: ComexOp[];
+    resumenMensual: ComexMes[];
+    financiaciones: FinanciacionRow[];
+  };
   proveedores: {
-    saldos: ProvSaldo[]; plazoPonderado: number | null; clasificacion: Record<string, number>;
-    pagos: ProvPago[]; totalPagos: number; plazoPagos: number | null;
+    saldos: ProvSaldo[];
+    plazoPonderado: number | null;
+    clasificacion: Record<string, number>;
+    pagos: ProvPago[];
+    totalPagos: number;
+    plazoPagos: number | null;
   };
   presupuestos: { porArea: PresupArea[]; total: number };
-  impuestos: { meses: string[]; conceptos: { concepto: string; valores: (number | null)[] }[]; total: (number | null)[] };
-  prestamos: { titulo: string | null; monto: number | null; cuadro: AmortRow[] };
+  impuestos: {
+    meses: string[];
+    conceptos: { concepto: string; valores: (number | null)[] }[];
+    total: (number | null)[];
+  };
+  prestamos: {
+    titulo: string | null;
+    monto: number | null;
+    cuadro: AmortRow[];
+  };
   cash: { meses: string[]; filas: CashRow[] };
 }
 
@@ -79,6 +101,10 @@ function parseCtasCtes(wb: XLSX.WorkBook) {
   const cobHdr = findRow(m, 0, (s) => s.includes("ETIQUETAS DE FILA"), 0);
   const cobranzas: PivotRow[] = [];
   let reciboTotal: { magnus: number | null; pr: number | null } | null = null;
+  let pb45 = 0,
+    pb60 = 0,
+    pb75 = 0,
+    pb76 = 0;
   if (cobHdr >= 0) {
     for (let r = cobHdr + 1; r < m.length; r++) {
       const label = str(at(m, r, 0));
@@ -114,31 +140,103 @@ function parseCtasCtes(wb: XLSX.WorkBook) {
 
   // Plazos + vendedores desde RECIBOS COBROS (header en fila 3 0-based)
   const rec = sheet(wb, "RECIBOS COBROS");
-  let cobradoTotal = 0, wSum = 0, wSumNoOmar = 0, cSum = 0, cSumNoOmar = 0;
+  let cobradoTotal = 0,
+    wSum = 0,
+    wSumNoOmar = 0,
+    cSum = 0,
+    cSumNoOmar = 0,
+    cobrado80 = 0;
   const vendMap = new Map<string, number>();
   for (let r = 4; r < rec.length; r++) {
     const cobrado = num(at(rec, r, 10));
     const prom = num(at(rec, r, 11));
     const cliente = up(at(rec, r, 5));
     const vendedor = str(at(rec, r, 1));
-    if (cobrado === null && !vendedor) continue;
+    if (!vendedor) continue; // ← excluye la fila "Total general" (sin vendedor) que duplicaba el monto
     if (cobrado !== null) {
       cobradoTotal += cobrado;
-      if (vendedor) vendMap.set(vendedor, (vendMap.get(vendedor) ?? 0) + cobrado);
+      vendMap.set(vendedor, (vendMap.get(vendedor) ?? 0) + cobrado);
+      if (prom !== null && prom > 80) cobrado80 += cobrado; // ← cobranzas +80 días
       if (prom !== null && prom > 0) {
-        wSum += prom * cobrado; cSum += cobrado;
-        if (!cliente.includes("OMAR-CAR")) { wSumNoOmar += prom * cobrado; cSumNoOmar += cobrado; }
+        wSum += prom * cobrado;
+        cSum += cobrado;
+        if (!cliente.includes("OMAR-CAR")) {
+          wSumNoOmar += prom * cobrado;
+          cSumNoOmar += cobrado;
+        }
+      }
+      if (prom !== null) {
+        if (prom <= 45) pb45 += cobrado;
+        else if (prom <= 60) pb60 += cobrado;
+        else if (prom <= 75) pb75 += cobrado;
+        else pb76 += cobrado;
       }
     }
   }
   const vendedores = [...vendMap.entries()].map(([vendedor, cobrado]) => ({ vendedor, cobrado }))
     .sort((a, b) => b.cobrado - a.cobrado);
 
+  const cobrPlazo = [
+    { bucket: "≤45 d", monto: pb45 },
+    { bucket: "46–60 d", monto: pb60 },
+    { bucket: "61–75 d", monto: pb75 },
+    { bucket: ">75 d", monto: pb76 },
+  ];
+
+  const MESES = [
+    "ENERO",
+    "FEBRERO",
+    "MARZO",
+    "ABRIL",
+    "MAYO",
+    "JUNIO",
+    "JULIO",
+    "AGOSTO",
+    "SEPTIEMBRE",
+    "OCTUBRE",
+    "NOVIEMBRE",
+    "DICIEMBRE",
+  ];
+  const rechSec = findRow(m, 0, (s) => s === "CHEQUES RECHAZADOS", 0);
+  const rechazosAnual: { anio: string; monto: number }[] = [];
+  const rechMesByYear = new Map<
+    string,
+    { mes: string; rechazado: number; cobranzas: number }[]
+  >();
+  let curYear = "";
+  if (rechSec >= 0) {
+    for (let r = rechSec + 1; r < m.length; r++) {
+      const label = str(at(m, r, 0));
+      const L = up(label);
+      if (!label) continue;
+      if (L === "TOTAL GENERAL") break;
+      if (/^\d{4}$/.test(label)) {
+        curYear = label;
+        rechazosAnual.push({ anio: label, monto: num(at(m, r, 1)) ?? 0 });
+        rechMesByYear.set(label, []);
+      } else if (MESES.includes(L) && curYear) {
+        rechMesByYear.get(curYear)!.push({
+          mes: `${curYear}-${String(MESES.indexOf(L) + 1).padStart(2, "0")}`,
+          rechazado: num(at(m, r, 1)) ?? 0,
+          cobranzas: num(at(m, r, 2)) ?? 0,
+        });
+      }
+    }
+  }
+  const lastYear = rechazosAnual.length
+    ? rechazosAnual[rechazosAnual.length - 1].anio
+    : "";
+  const rechazosMensual = rechMesByYear.get(lastYear) ?? [];
   return {
-    cobranzas, reciboTotal, saldos, chequesRechazadosSaldos,
+    cobranzas,
+    reciboTotal,
+    saldos,
+    chequesRechazadosSaldos,
     plazoAll: cSum ? wSum / cSum : null,
     plazoSinOmar: cSumNoOmar ? wSumNoOmar / cSumNoOmar : null,
-    cobradoTotal, vendedores,
+    cobradoTotal,
+    cobrado80,
+    vendedores,
   };
 }
 
