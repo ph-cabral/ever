@@ -25,18 +25,28 @@ interface Persisted {
   macro: MacroData | null;
 }
 
+const KEY = "everwear_finanza_v2"; // antes _v1
+
 function load(): Persisted {
   if (typeof window === "undefined") return { data: null, macro: null };
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { data: null, macro: null };
     const p = JSON.parse(raw) as Persisted;
-    // descarta data de schema viejo
     if (p?.data && !p.data.ctasctes)
       return { data: null, macro: p.macro ?? null };
     return p;
   } catch {
     return { data: null, macro: null };
+  }
+}
+
+function save(p: Persisted) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(KEY, JSON.stringify(p));
+  } catch (e) {
+    console.error("finanza persist:", e);
   }
 }
 
