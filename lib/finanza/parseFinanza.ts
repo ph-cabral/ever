@@ -233,14 +233,20 @@ function parseCtasCtes(wb: XLSX.WorkBook) {
     ? rechazosAnual[rechazosAnual.length - 1].anio
     : "";
   const rechazosMensual = rechMesByYear.get(lastYear) ?? [];
-  return {
-    cobradoTotal,
-    cobrado80,
-    vendedores,
-    cobrPlazo,
-    rechazosAnual,
-    rechazosMensual,
-  };
+return {
+  cobranzas,
+  reciboTotal,
+  saldos,
+  chequesRechazadosSaldos,
+  plazoAll: cSum ? wSum / cSum : null,
+  plazoSinOmar: cSumNoOmar ? wSumNoOmar / cSumNoOmar : null,
+  cobradoTotal,
+  cobrado80,
+  vendedores,
+  cobrPlazo,
+  rechazosAnual,
+  rechazosMensual,
+};
 }
 
 // ─── COMERCIO EXTERIOR ────────────────────────────────────────────────────────

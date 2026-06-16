@@ -25,7 +25,6 @@ interface Persisted {
   macro: MacroData | null;
 }
 
-const KEY = "everwear_finanza_v2"; // antes _v1
 
 function load(): Persisted {
   if (typeof window === "undefined") return { data: null, macro: null };
@@ -33,7 +32,7 @@ function load(): Persisted {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { data: null, macro: null };
     const p = JSON.parse(raw) as Persisted;
-    if (p?.data && !p.data.ctasctes)
+    if (p?.data && !p.data.ctasctes?.saldos)
       return { data: null, macro: p.macro ?? null };
     return p;
   } catch {
