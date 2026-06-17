@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 const APPS = process.env.SORTEO_APPS_URL;
 
-// Proxy: marca un ganador como ya sorteado (flag FALSE) en el Sheet. Requiere clave.
 export async function POST(req: Request) {
   if (!APPS) {
     return NextResponse.json(
