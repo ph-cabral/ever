@@ -5,7 +5,7 @@ const APPS = process.env.SORTEO_APPS_URL;
 export async function GET() {
   if (!APPS) {
     return NextResponse.json(
-      { ok: false, msg: "Falta SORTEO_APPS_URL en .env.local" },
+      { ok: false, msg: "Falta SORTEO_APPS_URL en .env" },
       { status: 500 }
     );
   }
