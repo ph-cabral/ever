@@ -1,0 +1,33 @@
+# Entorno AISLADO para testear el sorteo/figurita SIN tocar producción.
+#
+#   docker compose -p ever_dev -f docker-compose.dev.yml up
+#
+# (Sin --build: reutiliza la imagen ya construida de prod. No necesita red/DNS.)
+# Abrir:  http://localhost:3100/sorteo
+# Usar el botón "Probar"  ->  NO marca nada en la planilla.
+# (No uses "Aceptar/real": SORTEO_APPS_URL apunta al mismo Apps Script de prod
+#  y el modo real SÍ marca al ganador en la planilla real.)
+
+services:
+  ever-dev:
+    image: ever-mangueras-app:latest   # imagen ya construida (la de prod); el código real viene del bind-mount de abajo
+    command: npm run dev
+    container_name: ever_dev
+    restart: unless-stopped
+    # Toma SORTEO_APPS_URL (y demás) de tu .env...
+    env_file:
+      - .env
+    # ...pero estos lo pisan, para quedar aislado:
+    environment:
+      NODE_ENV: development
+      TZ: America/Argentina/Buenos_Aires
+      # DB dummy: el sorteo no usa Postgres. Así no puede tocar n8n_sql (prod).
+      DATABASE_URL: postgresql://dev:dev@127.0.0.1:5432/dev?schema=public
+      # Caras PNG transparentes servidas por /api/foto/[dni]
+      SORTEO_FOTOS_DIR: /app/employee
+    ports:
+      - "3100:3000"   # 3001=prod, 3002=nginx; 3100 libre
+    volumes:
+      - .:/app                          # trae tu código + el node_modules que copiaste de prod
+    # .next se crea en el host (escribible por tu usuario), evita EACCES del volumen anónimo
+    # Sin networks: usa un bridge propio (ever_dev_default), NO ai-net.

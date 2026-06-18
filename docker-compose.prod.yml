@@ -14,6 +14,8 @@ services:
       NODE_ENV: production
       INDICADORES_API_URL: http://indicadores-api:8001
       TZ: ${TZ:-America/Argentina/Buenos_Aires}
+    volumes:
+      - ./employees:/app/employees:ro
     ports:
       - "3001:3000"
     networks:

@@ -1,31 +1,30 @@
-import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { promises as fs } from "fs";
+import path from "path";
 
-const APPS = process.env.SORTEO_APPS_URL;
+const DIR = process.env.SORTEO_FOTOS_DIR || path.join(process.cwd(), "employees");
+const EXTS = ["jpg", "jpeg", "png", "webp"] as const;
+const MIME: Record<string, string> = {
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp",
+};
 
-// Proxy: marca un ganador como ya sorteado (flag FALSE) en el Sheet. Requiere clave.
-export async function POST(req: Request) {
-  if (!APPS) {
-    return NextResponse.json(
-      { ok: false, msg: "Falta SORTEO_APPS_URL en .env" },
-      { status: 500 }
-    );
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ dni: string }> }
+) {
+  const { dni } = await params;
+  const safe = String(dni).replace(/\D/g, "");
+  if (!DIR || !safe) return new Response("Not found", { status: 404 });
+  for (const ext of EXTS) {
+    try {
+      const buf = await fs.readFile(path.join(DIR, `${safe}.${ext}`));
+      return new Response(new Uint8Array(buf), {
+        headers: { "Content-Type": MIME[ext], "Cache-Control": "public, max-age=3600" },
+      });
+    } catch {}
   }
-  const body = await req.json().catch(() => ({}));
-  const fila = String(body.fila ?? "");
-  const clave = String(body.clave ?? "");
-
-  const url = new URL(APPS);
-  url.searchParams.set("api", "marcar");
-  url.searchParams.set("fila", fila);
-  url.searchParams.set("clave", clave);
-
-  try {
-    const r = await fetch(url.toString(), { cache: "no-store" });
-    return NextResponse.json(await r.json());
-  } catch (e) {
-    console.error("POST /api/sorteo/marcar", e);
-    return NextResponse.json({ ok: false }, { status: 502 });
-  }
+  return new Response("Not found", { status: 404 });
 }
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
