@@ -412,3 +412,15 @@ model trabajo {
   @@index([estado])
   @@schema("fabrica")
 }
+
+model sorteo_album {
+  id        Int      @id @default(autoincrement())
+  orden     Int      @unique
+  dni       String   @unique
+  nombre    String
+  marco     String   @default("oro")
+  premio    String?
+  createdAt DateTime @default(now())
+
+  @@schema("everwear")
+}

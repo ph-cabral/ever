@@ -1,0 +1,30 @@
+<svg viewBox="0 0 660 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Ever Wear 50 años">
+  <defs>
+    <linearGradient id="plata" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset=".5" stop-color="#cfd3da"/><stop offset="1" stop-color="#8a8f99"/>
+    </linearGradient>
+    <linearGradient id="oro" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe98a"/><stop offset=".55" stop-color="#ffd23f"/><stop offset="1" stop-color="#e6a200"/>
+    </linearGradient>
+    <linearGradient id="cely" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9fd0f5"/><stop offset="1" stop-color="#6cb4ee"/></linearGradient>
+  </defs>
+  <g fill="url(#oro)">
+    <path d="M150 8l5.5 11.2 12.4 1.8-9 8.7 2.1 12.3L150 38l-11 5.8 2.1-12.3-9-8.7 12.4-1.8z"/>
+    <path d="M104 20l4.4 9 9.9 1.4-7.2 7 1.7 9.8L104 51l-8.8 4.6 1.7-9.8-7.2-7 9.9-1.4z" transform="translate(-2 -2) scale(.88) translate(16 6)"/>
+    <path d="M196 20l4.4 9 9.9 1.4-7.2 7 1.7 9.8L196 51l-8.8 4.6 1.7-9.8-7.2-7 9.9-1.4z" transform="translate(2 -2) scale(.88) translate(20 6)"/>
+  </g>
+  <text x="150" y="120" text-anchor="middle" font-size="96" font-weight="900"
+    font-family="Arial Black,Arial,sans-serif" fill="url(#plata)" stroke="#6b6f78" stroke-width="1.2">50</text>
+  <text x="171" y="108" text-anchor="middle" font-size="20" font-weight="900"
+    font-family="Arial,sans-serif" fill="url(#oro)">AÑOS</text>
+  <rect x="300" y="34" width="3" height="82" rx="1.5" fill="url(#oro)" opacity=".85"/>
+  <text x="330" y="78" font-size="42" font-weight="900" font-family="Arial Black,Arial,sans-serif" fill="url(#oro)" letter-spacing="2">EVER WEAR</text>
+  <text x="612" y="96" font-size="15" font-weight="900" font-family="Arial,sans-serif" fill="#cfd3da">S.A.</text>
+  <g fill="url(#oro)" opacity=".9"><path d="M332 92h232l10 8-10 8H332z"/></g>
+  <text x="332" y="138" font-size="20" font-weight="900" font-family="Arial,sans-serif" fill="#fff" letter-spacing="1">DESDE <tspan fill="url(#oro)">1976</tspan></text>
+  <g transform="translate(40 118)">
+    <rect x="-2" y="-7" width="64" height="9" rx="3" fill="url(#cely)"/>
+    <path d="M0 -3l-14 -9v22z" fill="#9fd0f5"/><path d="M0 -3l14 -9v22z" fill="#6cb4ee"/>
+    <circle cx="0" cy="-2.5" r="4.5" fill="#fff" stroke="#6cb4ee"/>
+  </g>
+</svg>
