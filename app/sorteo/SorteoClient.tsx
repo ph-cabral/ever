@@ -65,14 +65,14 @@ export default function SorteoClient() {
   const [modalMsg, setModalMsg] = useState("");
   const [premioIdx, setPremioIdx] = useState(0);
   const [album, setAlbum] = useState<AlbumItem[]>([]);
-  const [recienOrden, setRecienOrden] = useState(0);
+  const [reveal, setReveal] = useState<{ dni: string; nombre: string; marco: string } | null>(null);
 
   const stripRefs = useRef<(HTMLDivElement | null)[]>([]);
   const reelsRef = useRef<HTMLDivElement>(null);
   const lineasRef = useRef<SVGSVGElement>(null);
-  const bannerRef = useRef<HTMLDivElement>(null);
-  const bimgRef = useRef<HTMLImageElement>(null);
-  const bnombreRef = useRef<HTMLDivElement>(null);
+  const canchaRef = useRef<HTMLDivElement>(null);
+  const revealCardRef = useRef<HTMLDivElement>(null);
+  const revealNomRef = useRef<HTMLDivElement>(null);
 
   const cargarAlbum = useCallback(() => {
     fetch("/api/sorteo/album")
@@ -194,24 +194,18 @@ export default function SorteoClient() {
     poly.style.strokeDashoffset = "0";
   };
 
-  const jackpot = (g: P) => {
+  const jackpot = (g: P, marco: string) => {
     const wins = reelsRef.current?.querySelectorAll("[data-win]");
     if (wins) {
       wins.forEach((e) => e.classList.add(styles.win));
       dibujarConexion(wins);
     }
-    if (bimgRef.current) {
-      bimgRef.current.src = `/api/foto/${encodeURIComponent(g.dni)}`;
-      bimgRef.current.style.display = "block";
-    }
-    if (bnombreRef.current) bnombreRef.current.textContent = g.nombre;
-    bannerRef.current?.classList.add(styles.show);
+    setReveal({ dni: g.dni, nombre: g.nombre, marco }); // carta grande que palpita
     confeti();
   };
 
   const limpiarReveal = () => {
     if (lineasRef.current) lineasRef.current.innerHTML = "";
-    bannerRef.current?.classList.remove(styles.show);
   };
 
   const confeti = () => {
@@ -229,7 +223,11 @@ export default function SorteoClient() {
   };
 
   // ---- persistencia del álbum (tabla Prisma vía /api/sorteo/album) ----
-  const persistirAlbum = async (g: P, marco: string, premio: string) => {
+  const persistirAlbum = async (
+    g: P,
+    marco: string,
+    premio: string
+  ): Promise<AlbumItem | null> => {
     try {
       const r = await fetch("/api/sorteo/album", {
         method: "POST",
@@ -240,16 +238,51 @@ export default function SorteoClient() {
       if (d.ok && d.item) {
         const it = d.item as AlbumItem;
         setAlbum((prev) =>
-          prev.some((a) => a.orden === it.orden)
-            ? prev
-            : [...prev, it].sort((a, b) => a.orden - b.orden)
+          prev.some((a) => a.orden === it.orden) ? prev : [...prev, it].sort((a, b) => a.orden - b.orden)
         );
-        setRecienOrden(it.orden);
+        return it;
       }
     } catch {
       /* noop */
     }
+    return null;
   };
+
+  // Vuela la carta grande hasta el slot (índice idx) y la ubica en la cancha.
+  const volarACancha = (idx: number) =>
+    new Promise<void>((resolve) => {
+      const inner = revealCardRef.current;
+      const slot = canchaRef.current?.querySelector(`[data-idx="${idx}"]`);
+      const slotCard = slot?.querySelector("[data-card]") as HTMLElement | null;
+      if (!inner || !slotCard) {
+        resolve();
+        return;
+      }
+      if (revealNomRef.current) revealNomRef.current.style.opacity = "0";
+      inner.style.animation = "none";
+      inner.style.transition = "none";
+      inner.style.transform = "none";
+      inner.style.transformOrigin = "top left";
+      void inner.getBoundingClientRect();
+      const s = inner.getBoundingClientRect();
+      const d = slotCard.getBoundingClientRect();
+      const dx = d.left - s.left;
+      const dy = d.top - s.top;
+      const sc = s.width ? d.width / s.width : 0.3;
+      let done = false;
+      const fin = () => {
+        if (done) return;
+        done = true;
+        inner.removeEventListener("transitionend", fin);
+        resolve();
+      };
+      requestAnimationFrame(() => {
+        inner.style.transition = "transform .7s cubic-bezier(.5,0,.2,1), opacity .5s";
+        inner.style.transform = `translate(${dx}px, ${dy}px) scale(${sc})`;
+        inner.addEventListener("transitionend", fin);
+        setTimeout(fin, 850);
+      });
+    });
 
   // ---- flujo ----
   const correrSecuencia = async (todos: P[], gs: P[], real: boolean, clv: string) => {
@@ -259,18 +292,24 @@ export default function SorteoClient() {
     const premioNom = PREMIOS[premioIdx]?.nombre ?? "";
     const base = album.length;
     for (let i = 0; i < gs.length; i++) {
-      if (real && base + i >= MAX_ALBUM) break; // tope 10
+      const idx = base + i;
+      if (real && idx >= MAX_ALBUM) break; // tope 10
       await tirada(todos, gs[i]);
-      jackpot(gs[i]);
+      jackpot(gs[i], marco);     // carta grande
+      await esperar(1600);       // palpita en grande
       if (real) {
         fetch("/api/sorteo/marcar", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fila: gs[i].fila, clave: clv }),
         }).catch(() => {});
-        await persistirAlbum(gs[i], marco, premioNom);
+        await volarACancha(idx);                          // vuela al slot
+        await persistirAlbum(gs[i], marco, premioNom);    // y queda ubicada
+        await esperar(150);
+      } else {
+        await esperar(400);
       }
-      await esperar(2000);
+      setReveal(null);
       limpiarReveal();
       await esperar(250);
     }
@@ -326,7 +365,6 @@ export default function SorteoClient() {
       const d = await r.json();
       if (d.ok) {
         setAlbum([]);
-        setRecienOrden(0);
       } else {
         window.alert(d.msg || "No autorizado");
       }
@@ -353,7 +391,7 @@ export default function SorteoClient() {
             </span>
           </div>
 
-          <div className={styles.cancha}>
+          <div ref={canchaRef} className={styles.cancha}>
             <div className={`${styles.line} ${styles.lineMid}`} />
             <div className={`${styles.line} ${styles.lineCircle}`} />
             <div className={`${styles.line} ${styles.lineSpot}`} />
@@ -364,16 +402,13 @@ export default function SorteoClient() {
 
             {POS.map((p, i) => {
               const g = album[i];
-              const cls =
-                styles.slot +
-                (g ? "" : " " + styles.vacia) +
-                (g && recienOrden === g.orden ? " " + styles.recien : "");
+              const cls = styles.slot + (g ? "" : " " + styles.vacia);
               return (
-                <div key={i} className={cls} style={{ left: `${p.x}%`, top: `${p.y}%` }}>
+                <div key={i} data-idx={i} className={cls} style={{ left: `${p.x}%`, top: `${p.y}%` }}>
                   <div className={styles.dorsal}>{g ? g.orden : i + 1}</div>
                   {g ? (
                     <>
-                      <div className={styles.card}>
+                      <div className={styles.card} data-card>
                         <img className={styles.marco} src={marcoFile(g.marco)} alt="" onError={hideEl} />
                         <div className={styles.iniWin}>{iniciales(g.nombre)}</div>
                         <img
@@ -386,7 +421,7 @@ export default function SorteoClient() {
                       <div className={styles.nomCancha}>{g.nombre}</div>
                     </>
                   ) : (
-                    <div className={styles.card}>
+                    <div className={styles.card} data-card>
                       <span className={styles.rol}>{p.rol}</span>
                     </div>
                   )}
@@ -423,12 +458,6 @@ export default function SorteoClient() {
               ))}
               <svg ref={lineasRef} className={styles.lineas} />
             </div>
-          </div>
-
-          <div ref={bannerRef} className={styles.banner}>
-            <small>★ GANADOR ★</small>
-            <img ref={bimgRef} alt="" onError={hideEl} />
-            <div ref={bnombreRef} className={styles.nom} />
           </div>
 
           <div className={styles.controles}>
@@ -485,6 +514,26 @@ export default function SorteoClient() {
             <button className={styles.cerrar} onClick={() => setModalOpen(false)}>
               Cancelar
             </button>
+          </div>
+        </div>
+      )}
+
+      {reveal && (
+        <div className={styles.reveal}>
+          <div className={styles.revealStack}>
+            <div ref={revealCardRef} className={`${styles.revealInner} ${styles.card}`} data-card>
+              <img className={styles.marco} src={marcoFile(reveal.marco)} alt="" onError={hideEl} />
+              <div className={styles.iniWin}>{iniciales(reveal.nombre)}</div>
+              <img
+                className={styles.foto}
+                src={`/api/foto/${encodeURIComponent(reveal.dni)}`}
+                alt=""
+                onError={hideEl}
+              />
+            </div>
+            <div ref={revealNomRef} className={styles.revealNom}>
+              {reveal.nombre}
+            </div>
           </div>
         </div>
       )}
