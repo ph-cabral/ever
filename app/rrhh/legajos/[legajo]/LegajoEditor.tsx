@@ -12,6 +12,7 @@ import {
   type RelationDef,
 } from "@/lib/rrhh/legajoFields";
 import { legajoUpdateSchema } from "@/lib/rrhh/legajoSchema";
+import { SectorSelect } from "./SectorSelect";
 
 const ESTADO_CLASS: Record<string, string> = {
   ACTIVO: "bg-green-100 text-green-700",
@@ -205,7 +206,10 @@ export default function LegajoEditor({ id, initial }: { id: number; initial: Rec
 
   return (
     <FormProvider {...methods}>
-      <form onSubmit={methods.handleSubmit(onValid, onInvalid)} className="mx-auto max-w-5xl p-4">
+      <form
+        onSubmit={methods.handleSubmit(onValid, onInvalid)}
+        className="mx-auto max-w-5xl p-4"
+      >
         {/* cabecera */}
         <div className="sticky top-0 z-10 -mx-4 mb-4 flex items-center gap-4 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur">
           {dni ? (
@@ -214,26 +218,39 @@ export default function LegajoEditor({ id, initial }: { id: number; initial: Rec
               src={`/api/rrhh/legajos/foto/${dni}`}
               alt={nombre}
               className="h-14 w-14 rounded-full object-cover"
-              onError={(e) => ((e.currentTarget.style.display = "none"))}
+              onError={(e) => (e.currentTarget.style.display = "none")}
             />
           ) : (
-            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-200 text-slate-500">—</span>
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-200 text-slate-500">
+              —
+            </span>
           )}
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h1 className="truncate text-lg font-semibold">{nombre || "Legajo"}</h1>
+              <h1 className="truncate text-lg font-semibold">
+                {nombre || "Legajo"}
+              </h1>
               {estado && (
-                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${ESTADO_CLASS[estado] ?? "bg-slate-100 text-slate-600"}`}>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${ESTADO_CLASS[estado] ?? "bg-slate-100 text-slate-600"}`}
+                >
                   {estado}
                 </span>
               )}
             </div>
             <p className="text-xs text-slate-500">
               DNI {dni || "—"} · Legajo #{id}
-              {dirty && <span className="ml-2 text-amber-600">· cambios sin guardar</span>}
+              {dirty && (
+                <span className="ml-2 text-amber-600">
+                  · cambios sin guardar
+                </span>
+              )}
             </p>
           </div>
-          <Link href="/rrhh/legajos" className="rounded-md px-3 py-2 text-sm text-slate-600 hover:bg-slate-100">
+          <Link
+            href="/rrhh/legajos"
+            className="rounded-md px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
+          >
             Volver
           </Link>
           <button
@@ -243,23 +260,39 @@ export default function LegajoEditor({ id, initial }: { id: number; initial: Rec
           >
             {saving ? "Guardando…" : "Guardar"}
           </button>
+          <SectorSelect
+            value={(methods.watch("sectorId") as number | null) ?? null}
+            onChange={(sid) =>
+              methods.setValue("sectorId", sid, {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+            }
+          />
         </div>
 
         {/* tabs */}
         <div className="mb-4 flex flex-wrap gap-1 border-b border-slate-200">
           {tabs.map((t) => {
-            const count = t.kind === "relation" ? ((methods.watch(t.id) as unknown[])?.length ?? 0) : null;
+            const count =
+              t.kind === "relation"
+                ? ((methods.watch(t.id) as unknown[])?.length ?? 0)
+                : null;
             return (
               <button
                 key={t.id}
                 type="button"
                 onClick={() => setActive(t.id)}
                 className={`-mb-px border-b-2 px-3 py-2 text-sm ${
-                  active === t.id ? "border-blue-600 font-medium text-blue-700" : "border-transparent text-slate-500 hover:text-slate-700"
+                  active === t.id
+                    ? "border-blue-600 font-medium text-blue-700"
+                    : "border-transparent text-slate-500 hover:text-slate-700"
                 }`}
               >
                 {t.label}
-                {count !== null && count > 0 && <span className="ml-1 text-xs text-slate-400">({count})</span>}
+                {count !== null && count > 0 && (
+                  <span className="ml-1 text-xs text-slate-400">({count})</span>
+                )}
               </button>
             );
           })}

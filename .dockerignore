@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+*.log
+Dockerfile*
+docker-compose*node_modules
+.next
+.git
+*.log
+Dockerfile*
+docker-compose*

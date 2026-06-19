@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
       prisma.legajo.findMany({
         where,
         select: {
+          id: true,
           codigo: true,
           nombre: true,
           sector: true,

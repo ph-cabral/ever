@@ -48,7 +48,7 @@ export const SECTIONS: SectionDef[] = [
     label: "Estado / Identificación",
     fields: [
       { name: "estado", label: "Estado", type: "select", options: OPC.estado, required: true, max: 20 },
-      { name: "codigo", label: "Código", type: "text" },
+      // { name: "codigo", label: "Código", type: "text" },
       { name: "employeeNo", label: "N° empleado (reloj)", type: "text", max: 50 },
       { name: "anvizId", label: "ID Anviz", type: "text", max: 20 },
     ],

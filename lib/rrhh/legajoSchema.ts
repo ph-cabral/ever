@@ -1,53 +1,48 @@
-// lib/rrhh/legajoSchema.ts
-// Schema Zod derivado de la metadata de legajoFields. Lo usan el editor (RHF) y la API (PUT).
 import { z } from "zod";
-import { ALL_FIELDS, RELATIONS, type FieldDef } from "./legajoFields";
 
-const emptyToNull = (v: unknown) => (v === "" || v === undefined ? null : v);
+// Update parcial de legajo (RRHH). Solo columnas escalares.
+// Claves desconocidas (id, codigo, relaciones, createdAt…) se descartan solas.
+const str  = z.string().trim().max(300).optional().nullable();
+const bool = z.boolean().optional();
+const num  = z.coerce.number().optional().nullable();
+const int  = z.coerce.number().int().optional().nullable();
+const date = z.coerce.date().optional().nullable();
 
-function zField(f: FieldDef): z.ZodTypeAny {
-  switch (f.type) {
-    case "text":
-    case "textarea":
-    case "select": {
-      let s = z.string();
-      if (f.max) s = s.max(f.max, `Máximo ${f.max} caracteres`);
-      return f.required ? s.min(1, "Requerido") : z.preprocess(emptyToNull, s.nullable());
-    }
-    case "number":
-      return f.required
-        ? z.coerce.number({ invalid_type_error: "Número inválido" })
-        : z.preprocess(emptyToNull, z.coerce.number().nullable());
-    case "int":
-      return f.required
-        ? z.coerce.number().int()
-        : z.preprocess(emptyToNull, z.coerce.number().int().nullable());
-    case "date":
-      return f.required
-        ? z.string().min(1, "Requerido")
-        : z.preprocess(emptyToNull, z.string().nullable());
-    case "bool":
-      return z.coerce.boolean();
-  }
-}
+export const legajoUpdateSchema = z.object({
+  estado: z.string().max(20).optional(),
+  // step1
+  nombre: z.string().trim().min(1).max(100).optional(),
+  dni: str, cuil: str, fechaNacimiento: date, lugarNacimiento: str,
+  nacionalidad: str, sexo: z.string().max(2).optional(), estadoCivil: str,
+  altura: num, peso: num, manoHabil: str,
+  telefonoFijo: str, telefonoCelular: str,
+  emailPersonal: z.string().trim().max(150).optional().nullable(),
+  antecedentesPenales: bool, antecedentesDetalle: str, aceptaPsicotecnico: bool,
+  // step2
+  calle: str, numero: str, piso: str, depto: str, codigoPostal: str,
+  localidad: str, provincia: str, comprobanteUrl: str, ddjjConformidad: bool,
+  // step3
+  fechaInicio: date, fechaCese: date, modalidadContrato: str, situacionRevista: str,
+  regimen: str, convenio: str, categoria: str, puestoInterno: str, sector: str,
+  retribucionPactada: num, modalidadLiquidacion: str, obraSocial: str,
+  tipoServicio: str, actividadEconomica: str, domicilioExplotacion: str,
+  claveAltaArca: str, fechaEnvioAlta: date, banco: str, bancoOtro: str,
+  diaPago: int, percibeSeguroDesempleo: bool, ddjjArt12: bool, sectorId: int,
+  // step4
+  tieneCargasFamilia: bool, medioPagoAaff: str, medioPagoAaffOtro: str,
+  // step5
+  estatura: num, pesoSalud: num, presionMin: int, presionMax: int,
+  patologiaNervioso: bool, patologiaRespiratorio: bool, patologiaCirculatorio: bool,
+  patologiaDigestivo: bool, patologiaRenal: bool, patologiaOseo: bool,
+  patologiaSangre: bool, patologiaCancer: bool, patologiaCongenitas: bool,
+  patologiaEndocrinas: bool, patologiaGinecologicas: bool, patologiaEmbarazo: bool,
+  patologiaOtras: bool, patologiaChagas: bool, observacionesSalud: str,
+  numeroSolicitud: str, numeroPoliza: str, capitalAsegurado: num,
+  fechaIngresoEmpleo: date, artCompania: str, artNumeroContrato: str,
+  artCredencialEntregada: bool,
+  // step6
+  aceptaClausulas: bool, jurisdiccion: z.string().max(100).optional(),
+  firmaEmpleado: str, fechaFirma: date,
+}); // sin .strict(): descarta claves extra (id/codigo/relaciones)
 
-const scalarShape: Record<string, z.ZodTypeAny> = {};
-for (const f of ALL_FIELDS) scalarShape[f.name] = zField(f);
-
-function zRow(cols: FieldDef[]): z.ZodTypeAny {
-  const shape: Record<string, z.ZodTypeAny> = {};
-  for (const c of cols) shape[c.name] = zField(c);
-  shape.id = z.preprocess(emptyToNull, z.coerce.number().int().nullable());
-  return z.object(shape);
-}
-
-const relationShape: Record<string, z.ZodTypeAny> = {};
-for (const r of RELATIONS) relationShape[r.key] = z.array(zRow(r.columns)).default([]);
-
-export const legajoUpdateSchema = z.object({ ...scalarShape, ...relationShape });
-export type LegajoUpdateInput = z.infer<typeof legajoUpdateSchema>;
-
-// Nombres de campos por tipo (para normalizar en la API)
-export const SCALAR_DATE_FIELDS = ALL_FIELDS.filter((f) => f.type === "date").map((f) => f.name);
-export const SCALAR_NUMBER_FIELDS = ALL_FIELDS.filter((f) => f.type === "number" || f.type === "int").map((f) => f.name);
-export const SCALAR_NAMES = ALL_FIELDS.map((f) => f.name);
+export type LegajoUpdate = z.infer<typeof legajoUpdateSchema>;
