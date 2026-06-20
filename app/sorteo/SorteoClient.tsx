@@ -2,6 +2,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import Link from "next/link";
 import styles from "./sorteo.module.css";
 
 type P = {
@@ -17,28 +18,24 @@ type AlbumItem = {
   nombre: string;
   marco: string;
   premio?: string | null;
+  premioImg?: string | null;
+  instancia?: number;
   sector?: string | null;
 };
-
+type Prz = { file: string; nombre: string };
+type Inst = { premios: Prz[] };
+type Pend = { instIdx: number; offset: number; restante: number; premios: Prz[] };
 
 const NS = "http://www.w3.org/2000/svg";
 const COLS = 5;
 const MAX_ALBUM = 10;
 const esperar = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/* Marcos disponibles → /public/marcos/<color>.jpg */
+/* Marcos disponibles → /public/marcos/<color>.jpg ; el puesto dentro de la instancia define el color */
 const MARCOS = ["oro", "plata", "bronce", "celeste"] as const;
-
-/* Premios del evento. 'marco' = índice 0..3 (0 oro,1 plata,2 bronce,3 celeste) o nombre. */
-const PREMIOS: { nombre: string; marco: number | string }[] = [
-  { nombre: "1° Oro", marco: 0 },
-  { nombre: "2° Plata", marco: 1 },
-  { nombre: "3° Bronce", marco: 2 },
-  { nombre: "4° Celeste", marco: 3 },
-];
-const marcoName = (m: number | string) =>
-  (typeof m === "number" ? MARCOS[m] : String(m).toLowerCase()) || "oro";
+const MEDALLAS = ["🥇", "🥈", "🥉"];
 const marcoFile = (m: string) => `/marcos/${m || "oro"}.jpg`;
+const premioUrl = (f?: string | null) => (f ? `/premios/${encodeURIComponent(f)}` : "");
 
 /* Formación de la cancha (10 posiciones, se llenan por orden 1..10) */
 const POS = [
@@ -53,27 +50,35 @@ const POS = [
   { x: 36, y: 25, rol: "DEL" },
   { x: 64, y: 25, rol: "DEL" },
 ];
-const iniciales = (n: string) => {
-  const t = String(n || "").trim();
-  if (/^\d+$/.test(t)) return t.slice(-4);
-  return (
-    t.split(/\s+/).map((w) => w[0]).join("").slice(0, 3) || "?"
-  ).toUpperCase();
-};
+
 const hideEl = (e: React.SyntheticEvent<HTMLImageElement>) => {
   e.currentTarget.style.display = "none";
 };
 
+// Próxima instancia pendiente según cuántos ganadores ya hay.
+const calcPendiente = (plan: Inst[], hechos: number): Pend | null => {
+  let acc = 0;
+  for (let k = 0; k < plan.length; k++) {
+    const len = plan[k].premios.length;
+    if (len === 0) continue;
+    if (hechos < acc + len)
+      return { instIdx: k, offset: hechos - acc, restante: acc + len - hechos, premios: plan[k].premios };
+    acc += len;
+  }
+  return null;
+};
+
 export default function SorteoClient() {
   const [participantes, setParticipantes] = useState<P[]>([]);
-  const [cantidad, setCantidad] = useState(3);
   const [corriendo, setCorriendo] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [clave, setClave] = useState("");
   const [modalMsg, setModalMsg] = useState("");
-  const [premioIdx, setPremioIdx] = useState(0);
   const [album, setAlbum] = useState<AlbumItem[]>([]);
-  const [reveal, setReveal] = useState<{ dni: string; nombre: string; marco: string; sector?: string } | null>(null);
+  const [instancias, setInstancias] = useState<Inst[]>([]);
+  const [reveal, setReveal] = useState<
+    { dni: string; nombre: string; marco: string; sector?: string; premioImg?: string | null; premioNom?: string } | null
+  >(null);
 
   const stripRefs = useRef<(HTMLDivElement | null)[]>([]);
   const reelsRef = useRef<HTMLDivElement>(null);
@@ -82,11 +87,17 @@ export default function SorteoClient() {
   const revealCardRef = useRef<HTMLDivElement>(null);
   const revealNomRef = useRef<HTMLDivElement>(null);
 
-  const cargarAlbum = useCallback(() => {
-    fetch("/api/sorteo/album")
+  const cargarRonda = useCallback(() => {
+    return fetch("/api/sorteo/ronda")
       .then((r) => r.json())
       .then((d) => {
         if (Array.isArray(d.album)) setAlbum(d.album as AlbumItem[]);
+        const insts = Array.isArray(d?.ronda?.instancias) ? d.ronda.instancias : [];
+        setInstancias(
+          insts.map((i: { premios?: Prz[] }) => ({
+            premios: Array.isArray(i?.premios) ? i.premios.map((p) => ({ file: p.file, nombre: p.nombre })) : [],
+          })),
+        );
       })
       .catch(() => {});
   }, []);
@@ -96,8 +107,8 @@ export default function SorteoClient() {
       .then((r) => r.json())
       .then((d) => setParticipantes(d.participantes || []))
       .catch(() => {});
-    cargarAlbum();
-  }, [cargarAlbum]);
+    cargarRonda();
+  }, [cargarRonda]);
 
   // ---- construcción de rodillos (ruleta) ----
   const makeSym = (p: P, win: boolean) => {
@@ -121,7 +132,7 @@ export default function SorteoClient() {
     ganador: P,
     steps: number,
     esG: boolean,
-    filaObj: number
+    filaObj: number,
   ) => {
     el.style.transition = "none";
     el.style.transform = "translateY(0)";
@@ -163,7 +174,7 @@ export default function SorteoClient() {
         buildStrip(el, pool, ganador, steps, esG, filaObj);
         const ih = (el.firstChild as HTMLElement)?.offsetHeight || 90;
         return animar(el, steps * ih, dur);
-      })
+      }),
     ).then(() => {});
   };
 
@@ -202,13 +213,20 @@ export default function SorteoClient() {
     poly.style.strokeDashoffset = "0";
   };
 
-  const jackpot = (g: P, marco: string) => {
+  const jackpot = (g: P, marco: string, prz?: Prz) => {
     const wins = reelsRef.current?.querySelectorAll("[data-win]");
     if (wins) {
       wins.forEach((e) => e.classList.add(styles.win));
       dibujarConexion(wins);
     }
-    setReveal({ dni: g.dni, nombre: g.nombre, marco, sector: g.sector }); // carta grande que palpita
+    setReveal({
+      dni: g.dni,
+      nombre: g.nombre,
+      marco,
+      sector: g.sector,
+      premioImg: prz?.file ?? null,
+      premioNom: prz?.nombre ?? "",
+    });
     confeti();
   };
 
@@ -230,17 +248,19 @@ export default function SorteoClient() {
     }
   };
 
-  // ---- persistencia del álbum (tabla Prisma vía /api/sorteo/album) ----
+  // ---- persistencia (tabla Prisma vía /api/sorteo/album, scoped a la ronda activa) ----
   const persistirAlbum = async (
     g: P,
     marco: string,
-    premio: string
+    premio: string,
+    premioImg: string | null,
+    instancia: number,
   ): Promise<AlbumItem | null> => {
     try {
       const r = await fetch("/api/sorteo/album", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dni: g.dni, nombre: g.nombre, marco, premio }),
+        body: JSON.stringify({ dni: g.dni, nombre: g.nombre, marco, premio, premioImg, instancia }),
       });
       const d = await r.json();
       if (d.ok && d.item) {
@@ -293,39 +313,49 @@ export default function SorteoClient() {
       });
     });
 
-  // ---- flujo ----
   // Ubica al ganador en la cancha al instante (no depende de la DB)
-  const agregarLocal = (g: P, marco: string, premio: string, idx: number) => {
+  const agregarLocal = (
+    g: P,
+    marco: string,
+    premio: string,
+    premioImg: string | null,
+    instancia: number,
+    idx: number,
+  ) => {
     setAlbum((prev) =>
       prev.some((a) => a.dni === g.dni)
         ? prev
-        : [...prev, { orden: idx + 1, dni: g.dni, nombre: g.nombre, marco, premio }].sort(
-            (a, b) => a.orden - b.orden
-          )
+        : [...prev, { orden: idx + 1, dni: g.dni, nombre: g.nombre, marco, premio, premioImg, instancia }].sort(
+            (a, b) => a.orden - b.orden,
+          ),
     );
   };
 
-  const correrSecuencia = async (todos: P[], gs: P[], real: boolean, clv: string) => {
+  // ---- flujo ----
+  const correrSecuencia = async (todos: P[], gs: P[], pend: Pend, real: boolean, clv: string) => {
     setCorriendo(true);
     limpiarReveal();
-    const marco = marcoName(PREMIOS[premioIdx]?.marco ?? 0);
-    const premioNom = PREMIOS[premioIdx]?.nombre ?? "";
     const base = album.length;
     for (let i = 0; i < gs.length; i++) {
       const idx = base + i;
-      if (idx >= MAX_ALBUM) break; // cancha completa (10)
+      if (idx >= MAX_ALBUM) break;
+      const pos = pend.offset + i; // puesto dentro de la instancia (0 = mejor)
+      const prz = pend.premios[pos];
+      const marco = MARCOS[Math.min(pos, MARCOS.length - 1)];
+      const premioNom = prz?.nombre ?? "";
+      const premioImg = prz?.file ?? null;
       await tirada(todos, gs[i]);
-      jackpot(gs[i], marco);            // carta grande
-      await esperar(1600);              // palpita en grande
-      await volarACancha(idx);          // vuela al slot vacío
-      agregarLocal(gs[i], marco, premioNom, idx); // se ubica SIEMPRE
+      jackpot(gs[i], marco, prz);
+      await esperar(1600);
+      await volarACancha(idx);
+      agregarLocal(gs[i], marco, premioNom, premioImg, pend.instIdx, idx);
       if (real) {
         fetch("/api/sorteo/marcar", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fila: gs[i].fila, clave: clv }),
         }).catch(() => {});
-        persistirAlbum(gs[i], marco, premioNom); // persiste en DB (segundo plano)
+        await persistirAlbum(gs[i], marco, premioNom, premioImg, pend.instIdx);
       }
       await esperar(150);
       setReveal(null);
@@ -333,12 +363,23 @@ export default function SorteoClient() {
       await esperar(250);
     }
     setCorriendo(false);
+    await cargarRonda(); // sincroniza con DB (en prueba descarta lo no persistido; en real trae sector/orden)
   };
+
+  const pendActual = calcPendiente(instancias, album.length);
 
   const iniciar = () => {
     if (corriendo) return;
+    if (!pendActual) {
+      alert(
+        instancias.length === 0
+          ? "No hay premios armados. Entrá a «Armar premios»."
+          : "El sorteo está completo. Creá un nuevo sorteo para empezar otro.",
+      );
+      return;
+    }
     if (album.length >= MAX_ALBUM) {
-      alert("El álbum ya tiene los 10 ganadores. Reiniciá el álbum para un nuevo sorteo.");
+      alert("La cancha ya tiene 10. Reiniciá o creá un nuevo sorteo.");
       return;
     }
     setClave("");
@@ -347,7 +388,12 @@ export default function SorteoClient() {
   };
 
   const ejecutar = async (modo: "prueba" | "real") => {
-    const n = cantidad || 1;
+    const pend = calcPendiente(instancias, album.length);
+    if (!pend) {
+      setModalMsg("No hay instancias pendientes");
+      return;
+    }
+    const n = Math.min(pend.restante, MAX_ALBUM - album.length);
     try {
       const r = await fetch("/api/sorteo/sortear", {
         method: "POST",
@@ -365,32 +411,54 @@ export default function SorteoClient() {
       }
       setModalOpen(false);
       setModalMsg("");
-      await correrSecuencia(d.todos as P[], d.ganadores as P[], modo === "real", clave);
+      await correrSecuencia(d.todos as P[], d.ganadores as P[], pend, modo === "real", clave);
     } catch {
       setModalMsg("Error de conexión");
     }
   };
 
-  const reiniciarAlbum = async () => {
+  const reiniciarRonda = async () => {
     if (corriendo) return;
-    const clv = window.prompt("Contraseña para vaciar el álbum:");
+    const clv = window.prompt("Contraseña para vaciar la cancha (pruebas):");
     if (clv == null) return;
     try {
-      const r = await fetch("/api/sorteo/album", {
+      const r = await fetch("/api/sorteo/ronda", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clave: clv }),
       });
       const d = await r.json();
-      if (d.ok) {
-        setAlbum([]);
-      } else {
-        window.alert(d.msg || "No autorizado");
-      }
+      if (d.ok) setAlbum([]);
+      else window.alert(d.msg || "No autorizado");
     } catch {
       window.alert("Error de conexión");
     }
   };
+
+  const nuevoSorteo = async () => {
+    if (corriendo) return;
+    const clv = window.prompt("Contraseña para cerrar este sorteo y empezar otro:");
+    if (clv == null) return;
+    try {
+      const r = await fetch("/api/sorteo/ronda", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accion: "nuevo", clave: clv }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        setAlbum([]);
+        setInstancias([]);
+        window.alert("Nuevo sorteo creado. Entrá a «Armar premios».");
+      } else window.alert(d.msg || "No autorizado");
+    } catch {
+      window.alert("Error de conexión");
+    }
+  };
+
+  const totalPremios = instancias.reduce((s, i) => s + i.premios.length, 0);
+  const cupos = Math.min(totalPremios || MAX_ALBUM, MAX_ALBUM);
+  const restanteN = pendActual ? Math.min(pendActual.restante, MAX_ALBUM - album.length) : 0;
 
   return (
     <div className={styles.wrap}>
@@ -406,7 +474,7 @@ export default function SorteoClient() {
           <div className={styles.colTit}>
             🏆 Álbum de Campeones
             <span className={styles.badge}>
-              {album.length}/{MAX_ALBUM}
+              {album.length}/{cupos}
             </span>
           </div>
 
@@ -426,17 +494,20 @@ export default function SorteoClient() {
                 <div key={i} data-idx={i} className={cls} style={{ left: `${p.x}%`, top: `${p.y}%` }}>
                   <div className={styles.dorsal}>{g ? g.orden : i + 1}</div>
                   {g ? (
-                      <div className={styles.card} data-card>
-                        <img className={styles.marco} src={marcoFile(g.marco)} alt="" onError={hideEl} />
-                        <img
-                          className={styles.foto}
-                          src={`/api/sorteo/foto/${encodeURIComponent(g.dni)}`}
-                          alt=""
-                          onError={hideEl}
-                        />
-                        <div className={styles.nom}>{g.nombre}</div>
-                        {g.sector ? <div className={styles.sec}>{g.sector}</div> : null}
-                      </div>
+                    <div className={styles.card} data-card>
+                      <img className={styles.marco} src={marcoFile(g.marco)} alt="" onError={hideEl} />
+                      <img
+                        className={styles.foto}
+                        src={`/api/sorteo/foto/${encodeURIComponent(g.dni)}`}
+                        alt=""
+                        onError={hideEl}
+                      />
+                      {g.premioImg ? (
+                        <img className={styles.premioThumb} src={premioUrl(g.premioImg)} alt="" onError={hideEl} />
+                      ) : null}
+                      <div className={styles.nom}>{g.nombre}</div>
+                      {g.sector ? <div className={styles.sec}>{g.sector}</div> : null}
+                    </div>
                   ) : (
                     <div className={styles.card} data-card>
                       <span className={styles.rol}>{p.rol}</span>
@@ -449,18 +520,26 @@ export default function SorteoClient() {
 
           <div className={styles.albumFoot}>
             <span className={styles.cont}>
-              Equipo: {album.length}/{MAX_ALBUM}
-              {album.length >= MAX_ALBUM ? " ¡Completo!" : ""}
+              Equipo: {album.length}/{cupos}
+              {pendActual ? "" : album.length > 0 ? " ¡Completo!" : ""}
             </span>
-            <button className={styles.btnMini} onClick={reiniciarAlbum} disabled={corriendo}>
-              ↺ Reiniciar álbum
+            <button className={styles.btnMini} onClick={reiniciarRonda} disabled={corriendo}>
+              ↺ Reiniciar
+            </button>
+            <button className={styles.btnMini} onClick={nuevoSorteo} disabled={corriendo}>
+              ✚ Nuevo sorteo
             </button>
           </div>
         </section>
 
         {/* DERECHA: ruleta */}
         <section>
-          <div className={styles.colTit}>🎰 Ruleta</div>
+          <div className={styles.colTit}>
+            🎰 Ruleta
+            <Link href="/sorteo/armar" className={styles.armarLink}>
+              🎁 Armar premios
+            </Link>
+          </div>
           <div className={styles.machine}>
             <div ref={reelsRef} className={styles.reels}>
               {[0, 1, 2, 3, 4].map((i) => (
@@ -478,33 +557,35 @@ export default function SorteoClient() {
           </div>
 
           <div className={styles.controles}>
-            <select
-              className={styles.premioSel}
-              value={premioIdx}
-              onChange={(e) => setPremioIdx(parseInt(e.target.value) || 0)}
-              disabled={corriendo}
-              title="Premio (define el marco)"
-            >
-              {PREMIOS.map((p, i) => (
-                <option key={i} value={i}>
-                  {p.nombre}
-                </option>
-              ))}
-            </select>
-            <input
-              className={styles.cantidad}
-              type="number"
-              min={1}
-              value={cantidad}
-              onChange={(e) => setCantidad(parseInt(e.target.value) || 1)}
-            />
-            <button
-              className={styles.principal}
-              onClick={iniciar}
-              disabled={corriendo || album.length >= MAX_ALBUM}
-            >
-              Girar
-            </button>
+            {pendActual ? (
+              <>
+                <div className={styles.proxPrem}>
+                  {pendActual.premios.slice(pendActual.offset).map((p, i) => {
+                    const pos = pendActual.offset + i;
+                    return (
+                      <div key={p.file} className={styles.proxItem} title={p.nombre}>
+                        <span className={styles.proxPuesto}>{MEDALLAS[pos] ?? `${pos + 1}°`}</span>
+                        <img src={premioUrl(p.file)} alt={p.nombre} onError={hideEl} />
+                      </div>
+                    );
+                  })}
+                </div>
+                <button
+                  className={styles.principal}
+                  onClick={iniciar}
+                  disabled={corriendo || album.length >= MAX_ALBUM}
+                >
+                  Girar instancia {pendActual.instIdx + 1} · {restanteN} {restanteN === 1 ? "giro" : "giros"}
+                </button>
+              </>
+            ) : (
+              <div className={styles.sinPend}>
+                {instancias.length === 0 ? "No hay premios armados." : "Sorteo completo."}
+                <Link href="/sorteo/armar" className={styles.btnArmar}>
+                  🎁 Armar premios
+                </Link>
+              </div>
+            )}
           </div>
         </section>
       </div>
@@ -546,11 +627,15 @@ export default function SorteoClient() {
                 alt=""
                 onError={hideEl}
               />
+              {reveal.premioImg ? (
+                <img className={styles.premioThumb} src={premioUrl(reveal.premioImg)} alt="" onError={hideEl} />
+              ) : null}
               <div className={styles.nom}>{reveal.nombre}</div>
               {reveal.sector ? <div className={styles.sec}>{reveal.sector}</div> : null}
             </div>
             <div ref={revealNomRef} className={styles.revealNom}>
               {reveal.nombre}
+              {reveal.premioNom ? <span className={styles.revealPrz}>{reveal.premioNom}</span> : null}
             </div>
           </div>
         </div>

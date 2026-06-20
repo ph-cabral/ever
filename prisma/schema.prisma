@@ -413,14 +413,33 @@ model trabajo {
   @@schema("fabrica")
 }
 
-model sorteo_album {
-  id        Int      @id @default(autoincrement())
-  orden     Int      @unique
-  dni       String   @unique
-  nombre    String
-  marco     String   @default("oro")
-  premio    String?
-  createdAt DateTime @default(now())
+// Una "ronda" = un sorteo completo. Guarda el plan de instancias (drag&drop)
+// como JSON y agrupa a sus ganadores. Permite historial sin chocar entre sorteos.
+model sorteo_ronda {
+  id         Int            @id @default(autoincrement())
+  titulo     String?
+  estado     String         @default("armado") // armado | sorteando | cerrado
+  instancias Json? // [{ orden, premios: [{ file, nombre }] }]  (mejor→peor)
+  createdAt  DateTime       @default(now())
+  album      sorteo_album[]
 
+  @@schema("everwear")
+}
+
+model sorteo_album {
+  id        Int          @id @default(autoincrement())
+  rondaId   Int
+  ronda     sorteo_ronda @relation(fields: [rondaId], references: [id], onDelete: Cascade)
+  orden     Int // 1..10 = posición/puesto dentro de la ronda
+  instancia Int          @default(0) // a qué instancia del plan pertenece
+  dni       String
+  nombre    String
+  marco     String       @default("oro") // oro | plata | bronce | celeste
+  premio    String? // nombre del premio asignado
+  premioImg String? // archivo en /public/premios
+  createdAt DateTime     @default(now())
+
+  @@unique([rondaId, orden])
+  @@unique([rondaId, dni])
   @@schema("everwear")
 }

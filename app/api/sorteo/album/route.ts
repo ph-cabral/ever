@@ -1,26 +1,19 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getRondaActiva, conSector, claveOk, MAX_ALBUM } from "@/lib/sorteo";
 
-const MAX = 10;
-
-// GET: álbum ordenado (1..10)
+// GET: álbum de la ronda activa (ordenado 1..10, + sector).
 export async function GET() {
   try {
-    const album = await prisma.sorteo_album.findMany({
+    const ronda = await getRondaActiva(prisma, false);
+    if (!ronda) return NextResponse.json({ ok: true, album: [] });
+    const albumRaw = await prisma.sorteo_album.findMany({
+      where: { rondaId: ronda.id },
       orderBy: { orden: "asc" },
     });
-    const norm = (s: any) => String(s ?? "").replace(/\D/g, "");
-    const dnis = album.map((a) => norm(a.dni));
-    const l = dnis.length
-      ? await prisma.legajo.findMany({
-          where: { dni: { in: dnis } },
-          select: { dni: true, sector: true },
-        })
-      : [];
-    const m = new Map(l.map((x) => [norm(x.dni), x.sector]));
     return NextResponse.json({
       ok: true,
-      album: album.map((a) => ({ ...a, sector: m.get(norm(a.dni)) ?? null })),
+      album: await conSector(prisma, albumRaw),
     });
   } catch (e) {
     console.error("GET /api/sorteo/album", e);
@@ -31,28 +24,45 @@ export async function GET() {
   }
 }
 
-// POST: agrega un ganador con el próximo orden (tope 10, sin duplicar dni).
-// body: { dni, nombre, marco, premio }
+// POST: agrega un ganador a la ronda activa con el próximo orden (tope 10, sin duplicar dni).
+// body: { dni, nombre, marco, premio, premioImg, instancia }
 export async function POST(req: Request) {
   const b = await req.json().catch(() => ({}));
   const dni = String(b.dni ?? "").trim();
   const nombre = String(b.nombre ?? "").trim();
   const marco = String(b.marco ?? "oro").toLowerCase();
   const premio = b.premio != null ? String(b.premio) : null;
+  const premioImg = b.premioImg != null ? String(b.premioImg) : null;
+  const instancia = Number.isFinite(+b.instancia) ? Math.trunc(+b.instancia) : 0;
   if (!dni || !nombre) {
-    return NextResponse.json(
-      { ok: false, msg: "Faltan datos" },
-      { status: 400 },
-    );
+    return NextResponse.json({ ok: false, msg: "Faltan datos" }, { status: 400 });
   }
   try {
     const item = await prisma.$transaction(async (tx) => {
-      const ya = await tx.sorteo_album.findUnique({ where: { dni } });
-      if (ya) return ya; // ya está en el álbum
-      const count = await tx.sorteo_album.count();
-      if (count >= MAX) return null;
+      const ronda = await getRondaActiva(tx, true);
+      if (!ronda) return null;
+      const ya = await tx.sorteo_album.findUnique({
+        where: { rondaId_dni: { rondaId: ronda.id, dni } },
+      });
+      if (ya) return ya; // ya está en el álbum de esta ronda
+      const count = await tx.sorteo_album.count({ where: { rondaId: ronda.id } });
+      if (count >= MAX_ALBUM) return null;
+      if (ronda.estado === "armado")
+        await tx.sorteo_ronda.update({
+          where: { id: ronda.id },
+          data: { estado: "sorteando" },
+        });
       return tx.sorteo_album.create({
-        data: { orden: count + 1, dni, nombre, marco, premio },
+        data: {
+          rondaId: ronda.id,
+          orden: count + 1,
+          instancia,
+          dni,
+          nombre,
+          marco,
+          premio,
+          premioImg,
+        },
       });
     });
     if (!item)
@@ -67,20 +77,25 @@ export async function POST(req: Request) {
   }
 }
 
-// DELETE: vacía el álbum. Requiere clave === SORTEO_ALBUM_CLAVE (o SORTEO_CLAVE).
+// DELETE: vacía los ganadores de la ronda activa (para pruebas). Requiere clave.
 export async function DELETE(req: Request) {
   const b = await req.json().catch(() => ({}));
   const clave = String(b.clave ?? "");
-  const esperado =
-    process.env.SORTEO_ALBUM_CLAVE || process.env.SORTEO_CLAVE || "";
-  if (!esperado || clave !== esperado) {
+  if (!claveOk(clave))
     return NextResponse.json(
       { ok: false, msg: "No autorizado" },
       { status: 401 },
     );
-  }
   try {
-    await prisma.sorteo_album.deleteMany({});
+    const ronda = await getRondaActiva(prisma, false);
+    if (ronda) {
+      await prisma.sorteo_album.deleteMany({ where: { rondaId: ronda.id } });
+      if (ronda.estado !== "armado")
+        await prisma.sorteo_ronda.update({
+          where: { id: ronda.id },
+          data: { estado: "armado" },
+        });
+    }
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error("DELETE /api/sorteo/album", e);
