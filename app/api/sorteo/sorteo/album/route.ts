@@ -7,7 +7,18 @@ const MAX = 10;
 export async function GET() {
   try {
     const album = await prisma.sorteo_album.findMany({ orderBy: { orden: "asc" } });
-    return NextResponse.json({ ok: true, album });
+    const dnis = album.map((a) => a.dni);
+    const l = dnis.length
+      ? await prisma.legajo.findMany({
+          where: { dni: { in: dnis } },
+          select: { dni: true, sector: true },
+        })
+      : [];
+    const m = new Map(l.map((x) => [x.dni, x.sector]));
+    return NextResponse.json({
+      ok: true,
+      album: album.map((a) => ({ ...a, sector: m.get(a.dni) ?? null })),
+    });
   } catch (e) {
     console.error("GET /api/sorteo/album", e);
     return NextResponse.json({ ok: false, album: [], msg: "Error" }, { status: 500 });

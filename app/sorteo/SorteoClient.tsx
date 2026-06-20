@@ -4,14 +4,22 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import styles from "./sorteo.module.css";
 
-type P = { fila: number; dni: string; nombre: string; img?: string };
+type P = {
+  fila: number;
+  dni: string;
+  nombre: string;
+  img?: string;
+  sector?: string;
+};
 type AlbumItem = {
   orden: number;
   dni: string;
   nombre: string;
   marco: string;
   premio?: string | null;
+  sector?: string | null;
 };
+
 
 const NS = "http://www.w3.org/2000/svg";
 const COLS = 5;
@@ -65,7 +73,7 @@ export default function SorteoClient() {
   const [modalMsg, setModalMsg] = useState("");
   const [premioIdx, setPremioIdx] = useState(0);
   const [album, setAlbum] = useState<AlbumItem[]>([]);
-  const [reveal, setReveal] = useState<{ dni: string; nombre: string; marco: string } | null>(null);
+  const [reveal, setReveal] = useState<{ dni: string; nombre: string; marco: string; sector?: string } | null>(null);
 
   const stripRefs = useRef<(HTMLDivElement | null)[]>([]);
   const reelsRef = useRef<HTMLDivElement>(null);
@@ -97,7 +105,7 @@ export default function SorteoClient() {
     d.className = styles.sym;
     if (win) d.setAttribute("data-win", "1");
     const img = document.createElement("img");
-    img.src = `/api/foto/${encodeURIComponent(p.dni)}`;
+    img.src = `/api/sorteo/foto/${encodeURIComponent(p.dni)}`;
     img.alt = "";
     img.onerror = () => {
       d.classList.add(styles.noimg);
@@ -200,7 +208,7 @@ export default function SorteoClient() {
       wins.forEach((e) => e.classList.add(styles.win));
       dibujarConexion(wins);
     }
-    setReveal({ dni: g.dni, nombre: g.nombre, marco }); // carta grande que palpita
+    setReveal({ dni: g.dni, nombre: g.nombre, marco, sector: g.sector }); // carta grande que palpita
     confeti();
   };
 
@@ -236,10 +244,11 @@ export default function SorteoClient() {
       });
       const d = await r.json();
       if (d.ok && d.item) {
-        const it = d.item as AlbumItem;
-        setAlbum((prev) =>
-          prev.some((a) => a.orden === it.orden) ? prev : [...prev, it].sort((a, b) => a.orden - b.orden)
-        );
+        const it = { ...(d.item as AlbumItem), sector: (d.item.sector ?? g.sector) ?? null };
+        setAlbum((prev) => {
+          const without = prev.filter((a) => a.dni !== it.dni);
+          return [...without, it].sort((a, b) => a.orden - b.orden);
+        });
         return it;
       }
     } catch {
@@ -285,6 +294,17 @@ export default function SorteoClient() {
     });
 
   // ---- flujo ----
+  // Ubica al ganador en la cancha al instante (no depende de la DB)
+  const agregarLocal = (g: P, marco: string, premio: string, idx: number) => {
+    setAlbum((prev) =>
+      prev.some((a) => a.dni === g.dni)
+        ? prev
+        : [...prev, { orden: idx + 1, dni: g.dni, nombre: g.nombre, marco, premio }].sort(
+            (a, b) => a.orden - b.orden
+          )
+    );
+  };
+
   const correrSecuencia = async (todos: P[], gs: P[], real: boolean, clv: string) => {
     setCorriendo(true);
     limpiarReveal();
@@ -293,22 +313,21 @@ export default function SorteoClient() {
     const base = album.length;
     for (let i = 0; i < gs.length; i++) {
       const idx = base + i;
-      if (real && idx >= MAX_ALBUM) break; // tope 10
+      if (idx >= MAX_ALBUM) break; // cancha completa (10)
       await tirada(todos, gs[i]);
-      jackpot(gs[i], marco);     // carta grande
-      await esperar(1600);       // palpita en grande
+      jackpot(gs[i], marco);            // carta grande
+      await esperar(1600);              // palpita en grande
+      await volarACancha(idx);          // vuela al slot vacío
+      agregarLocal(gs[i], marco, premioNom, idx); // se ubica SIEMPRE
       if (real) {
         fetch("/api/sorteo/marcar", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fila: gs[i].fila, clave: clv }),
         }).catch(() => {});
-        await volarACancha(idx);                          // vuela al slot
-        await persistirAlbum(gs[i], marco, premioNom);    // y queda ubicada
-        await esperar(150);
-      } else {
-        await esperar(400);
+        persistirAlbum(gs[i], marco, premioNom); // persiste en DB (segundo plano)
       }
+      await esperar(150);
       setReveal(null);
       limpiarReveal();
       await esperar(250);
@@ -407,19 +426,17 @@ export default function SorteoClient() {
                 <div key={i} data-idx={i} className={cls} style={{ left: `${p.x}%`, top: `${p.y}%` }}>
                   <div className={styles.dorsal}>{g ? g.orden : i + 1}</div>
                   {g ? (
-                    <>
                       <div className={styles.card} data-card>
                         <img className={styles.marco} src={marcoFile(g.marco)} alt="" onError={hideEl} />
-                        <div className={styles.iniWin}>{iniciales(g.nombre)}</div>
                         <img
                           className={styles.foto}
                           src={`/api/foto/${encodeURIComponent(g.dni)}`}
                           alt=""
                           onError={hideEl}
                         />
+                        <div className={styles.nom}>{g.nombre}</div>
+                        {g.sector ? <div className={styles.sec}>{g.sector}</div> : null}
                       </div>
-                      <div className={styles.nomCancha}>{g.nombre}</div>
-                    </>
                   ) : (
                     <div className={styles.card} data-card>
                       <span className={styles.rol}>{p.rol}</span>
@@ -523,13 +540,14 @@ export default function SorteoClient() {
           <div className={styles.revealStack}>
             <div ref={revealCardRef} className={`${styles.revealInner} ${styles.card}`} data-card>
               <img className={styles.marco} src={marcoFile(reveal.marco)} alt="" onError={hideEl} />
-              <div className={styles.iniWin}>{iniciales(reveal.nombre)}</div>
               <img
                 className={styles.foto}
                 src={`/api/foto/${encodeURIComponent(reveal.dni)}`}
                 alt=""
                 onError={hideEl}
               />
+              <div className={styles.nom}>{reveal.nombre}</div>
+              {reveal.sector ? <div className={styles.sec}>{reveal.sector}</div> : null}
             </div>
             <div ref={revealNomRef} className={styles.revealNom}>
               {reveal.nombre}

@@ -14,8 +14,10 @@ services:
       NODE_ENV: production
       INDICADORES_API_URL: http://indicadores-api:8001
       TZ: ${TZ:-America/Argentina/Buenos_Aires}
+      SORTEO_FOTOS_DIR: /app/img_sorteo
     volumes:
       - ./employees:/app/employees:ro
+      - ./img_sorteo:/app/img_sorteo:ro
     ports:
       - "3001:3000"
     networks:

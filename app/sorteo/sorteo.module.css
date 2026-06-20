@@ -53,7 +53,7 @@
   background:linear-gradient(160deg,#13284f,#0a1a36);box-shadow:0 6px 16px rgba(0,0,0,.5)}
 .marco{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;z-index:1}
 .foto{position:absolute;left:var(--win-l);top:var(--win-t);width:var(--win-w);height:var(--win-h);
-  object-fit:cover;border-radius:var(--win-r);z-index:3;background:#dfe7f2}
+  object-fit:cover;border-radius:var(--win-r);z-index:3;}
 .iniWin{position:absolute;left:var(--win-l);top:var(--win-t);width:var(--win-w);height:var(--win-h);
   border-radius:var(--win-r);z-index:2;display:flex;align-items:center;justify-content:center;
   font-weight:900;color:#06183a;font-size:clamp(11px,3.2vw,18px);text-align:center;word-break:break-word;
@@ -105,7 +105,12 @@
 .banner.show{opacity:1;transform:scale(1)}
 .banner img{width:clamp(84px,24vw,140px);height:clamp(84px,24vw,140px);object-fit:cover;border-radius:16px;
   box-shadow:0 0 0 3px var(--gold),0 0 30px rgba(255,210,63,.6)}
-.nom{font-weight:900;color:var(--gold);font-size:clamp(20px,6vw,36px);text-shadow:0 0 22px rgba(255,210,63,.6)}
+.nom{position:absolute;left:12%;top:79%;width:62%;height:8%;z-index:4;display:flex;align-items:center;justify-content:center;
+  text-align:center;font-weight:900;color:#fff;line-height:1;font-size:clamp(7px,2.1vw,12px);padding:0 2%;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,.45)}
+.sec{position:absolute;left:12%;top:88%;width:54%;height:4.5%;z-index:4;display:flex;align-items:center;justify-content:center;
+  text-align:center;font-weight:700;color:#fff;font-size:clamp(6px,1.7vw,10px);padding:0 2%;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .banner small{font-size:13px;font-weight:700;color:var(--celeste);letter-spacing:3px}
 
 .controles{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center;max-width:420px;margin:16px auto 0}

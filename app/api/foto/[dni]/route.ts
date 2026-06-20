@@ -3,7 +3,7 @@ import { promises as fs } from "fs";
 import path from "path";
 
 const DIR = process.env.SORTEO_FOTOS_DIR || path.join(process.cwd(), "employees");
-const EXTS = ["jpg", "jpeg", "png", "webp"] as const;
+const EXTS = ["png", "webp", "jpg", "jpeg"] as const;
 const MIME: Record<string, string> = {
   jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp",
 };
