@@ -6,7 +6,6 @@ const MAX = 10;
 // GET: álbum ordenado (1..10)
 export async function GET() {
   try {
-<<<<<<< HEAD
     const album = await prisma.sorteo_album.findMany({
       orderBy: { orden: "asc" },
     });
@@ -29,13 +28,6 @@ export async function GET() {
       { ok: false, album: [], msg: "Error" },
       { status: 500 },
     );
-=======
-    const album = await prisma.sorteo_album.findMany({ orderBy: { orden: "asc" } });
-    return NextResponse.json({ ok: true, album });
-  } catch (e) {
-    console.error("GET /api/sorteo/album", e);
-    return NextResponse.json({ ok: false, album: [], msg: "Error" }, { status: 500 });
->>>>>>> d2aae8c (edit lottery)
   }
 }
 
@@ -48,14 +40,10 @@ export async function POST(req: Request) {
   const marco = String(b.marco ?? "oro").toLowerCase();
   const premio = b.premio != null ? String(b.premio) : null;
   if (!dni || !nombre) {
-<<<<<<< HEAD
     return NextResponse.json(
       { ok: false, msg: "Faltan datos" },
       { status: 400 },
     );
-=======
-    return NextResponse.json({ ok: false, msg: "Faltan datos" }, { status: 400 });
->>>>>>> d2aae8c (edit lottery)
   }
   try {
     const item = await prisma.$transaction(async (tx) => {
@@ -67,15 +55,11 @@ export async function POST(req: Request) {
         data: { orden: count + 1, dni, nombre, marco, premio },
       });
     });
-<<<<<<< HEAD
     if (!item)
       return NextResponse.json(
         { ok: false, msg: "Álbum completo" },
         { status: 409 },
       );
-=======
-    if (!item) return NextResponse.json({ ok: false, msg: "Álbum completo" }, { status: 409 });
->>>>>>> d2aae8c (edit lottery)
     return NextResponse.json({ ok: true, item });
   } catch (e) {
     console.error("POST /api/sorteo/album", e);
@@ -87,7 +71,6 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   const b = await req.json().catch(() => ({}));
   const clave = String(b.clave ?? "");
-<<<<<<< HEAD
   const esperado =
     process.env.SORTEO_ALBUM_CLAVE || process.env.SORTEO_CLAVE || "";
   if (!esperado || clave !== esperado) {
@@ -95,11 +78,6 @@ export async function DELETE(req: Request) {
       { ok: false, msg: "No autorizado" },
       { status: 401 },
     );
-=======
-  const esperado = process.env.SORTEO_ALBUM_CLAVE || process.env.SORTEO_CLAVE || "";
-  if (!esperado || clave !== esperado) {
-    return NextResponse.json({ ok: false, msg: "No autorizado" }, { status: 401 });
->>>>>>> d2aae8c (edit lottery)
   }
   try {
     await prisma.sorteo_album.deleteMany({});

@@ -244,11 +244,7 @@ export default function SorteoClient() {
       });
       const d = await r.json();
       if (d.ok && d.item) {
-<<<<<<< HEAD
         const it = { ...(d.item as AlbumItem), sector: (d.item.sector ?? g.sector) ?? null };
-=======
-        const it = d.item as AlbumItem;
->>>>>>> d2aae8c (edit lottery)
         setAlbum((prev) => {
           const without = prev.filter((a) => a.dni !== it.dni);
           return [...without, it].sort((a, b) => a.orden - b.orden);
