@@ -419,7 +419,7 @@ model sorteo_ronda {
   id         Int            @id @default(autoincrement())
   titulo     String?
   estado     String         @default("armado") // armado | sorteando | cerrado
-  instancias Json? // [{ orden, premios: [{ file, nombre }] }]  (mejor→peor)
+  instancias Json? // [{ orden, premios: [{ file, nombre, cantidad }] }]  (mejor→peor)
   createdAt  DateTime       @default(now())
   album      sorteo_album[]
 

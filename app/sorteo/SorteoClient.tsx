@@ -22,9 +22,21 @@ type AlbumItem = {
   instancia?: number;
   sector?: string | null;
 };
-type Prz = { file: string; nombre: string };
+type Prz = { file: string; nombre: string; cantidad?: number };
 type Inst = { premios: Prz[] };
 type Pend = { instIdx: number; offset: number; restante: number; premios: Prz[] };
+const qty = (p: Prz) => Math.max(1, p.cantidad ?? 1);
+const girosDe = (premios: Prz[]) => premios.reduce((s, p) => s + qty(p), 0);
+// Mapea una unidad (giro) dentro de la instancia → premio y su índice (tier).
+const premioDeUnidad = (premios: Prz[], unidad: number): { prz?: Prz; idx: number } => {
+  let acc = 0;
+  for (let j = 0; j < premios.length; j++) {
+    if (unidad < acc + qty(premios[j])) return { prz: premios[j], idx: j };
+    acc += qty(premios[j]);
+  }
+  const last = premios.length - 1;
+  return { prz: premios[last], idx: Math.max(0, last) };
+};
 
 const NS = "http://www.w3.org/2000/svg";
 const COLS = 5;
@@ -59,7 +71,7 @@ const hideEl = (e: React.SyntheticEvent<HTMLImageElement>) => {
 const calcPendiente = (plan: Inst[], hechos: number): Pend | null => {
   let acc = 0;
   for (let k = 0; k < plan.length; k++) {
-    const len = plan[k].premios.length;
+    const len = girosDe(plan[k].premios);
     if (len === 0) continue;
     if (hechos < acc + len)
       return { instIdx: k, offset: hechos - acc, restante: acc + len - hechos, premios: plan[k].premios };
@@ -95,7 +107,9 @@ export default function SorteoClient() {
         const insts = Array.isArray(d?.ronda?.instancias) ? d.ronda.instancias : [];
         setInstancias(
           insts.map((i: { premios?: Prz[] }) => ({
-            premios: Array.isArray(i?.premios) ? i.premios.map((p) => ({ file: p.file, nombre: p.nombre })) : [],
+            premios: Array.isArray(i?.premios)
+              ? i.premios.map((p) => ({ file: p.file, nombre: p.nombre, cantidad: qty(p) }))
+              : [],
           })),
         );
       })
@@ -339,9 +353,9 @@ export default function SorteoClient() {
     for (let i = 0; i < gs.length; i++) {
       const idx = base + i;
       if (idx >= MAX_ALBUM) break;
-      const pos = pend.offset + i; // puesto dentro de la instancia (0 = mejor)
-      const prz = pend.premios[pos];
-      const marco = MARCOS[Math.min(pos, MARCOS.length - 1)];
+      const unidad = pend.offset + i; // unidad (giro) dentro de la instancia (0 = mejor)
+      const { prz, idx: pIdx } = premioDeUnidad(pend.premios, unidad);
+      const marco = MARCOS[Math.min(pIdx, MARCOS.length - 1)];
       const premioNom = prz?.nombre ?? "";
       const premioImg = prz?.file ?? null;
       await tirada(todos, gs[i]);
@@ -456,9 +470,10 @@ export default function SorteoClient() {
     }
   };
 
-  const totalPremios = instancias.reduce((s, i) => s + i.premios.length, 0);
+  const totalPremios = instancias.reduce((s, i) => s + girosDe(i.premios), 0);
   const cupos = Math.min(totalPremios || MAX_ALBUM, MAX_ALBUM);
   const restanteN = pendActual ? Math.min(pendActual.restante, MAX_ALBUM - album.length) : 0;
+  const startPrize = pendActual ? premioDeUnidad(pendActual.premios, pendActual.offset).idx : 0;
 
   return (
     <div className={styles.wrap}>
@@ -560,12 +575,13 @@ export default function SorteoClient() {
             {pendActual ? (
               <>
                 <div className={styles.proxPrem}>
-                  {pendActual.premios.slice(pendActual.offset).map((p, i) => {
-                    const pos = pendActual.offset + i;
+                  {pendActual.premios.slice(startPrize).map((p, i) => {
+                    const j = startPrize + i;
                     return (
                       <div key={p.file} className={styles.proxItem} title={p.nombre}>
-                        <span className={styles.proxPuesto}>{MEDALLAS[pos] ?? `${pos + 1}°`}</span>
+                        <span className={styles.proxPuesto}>{MEDALLAS[j] ?? `${j + 1}°`}</span>
                         <img src={premioUrl(p.file)} alt={p.nombre} onError={hideEl} />
+                        {qty(p) > 1 ? <span className={styles.proxCant}>×{qty(p)}</span> : null}
                       </div>
                     );
                   })}

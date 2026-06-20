@@ -5,8 +5,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import styles from "./armar.module.css";
 
-type Prz = { file: string; nombre: string };
+type Prz = { file: string; nombre: string; cantidad?: number };
 type Inst = { premios: Prz[] };
+const qty = (p: Prz) => Math.max(1, p.cantidad ?? 1);
 
 const MAX = 10;
 const urlOf = (f: string) => `/premios/${encodeURIComponent(f)}`;
@@ -25,7 +26,7 @@ export default function ArmarClient() {
   const [msg, setMsg] = useState("");
   const [target, setTarget] = useState(0); // instancia destino para click-to-add
 
-  const drag = useRef<{ file: string; nombre: string; from: number | "paleta" } | null>(null);
+  const drag = useRef<{ file: string; nombre: string; cantidad?: number; from: number | "paleta" } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -40,7 +41,7 @@ export default function ArmarClient() {
         setInstancias(
           insts.map((i: { premios?: Prz[] }) => ({
             premios: Array.isArray(i?.premios)
-              ? i.premios.map((p) => ({ file: p.file, nombre: p.nombre }))
+              ? i.premios.map((p) => ({ file: p.file, nombre: p.nombre, cantidad: qty(p) }))
               : [],
           })),
         );
@@ -62,7 +63,11 @@ export default function ArmarClient() {
     () => paletaAll.filter((p) => !colocados.has(p.file)),
     [paletaAll, colocados],
   );
-  const total = colocados.size;
+  // total = unidades (suma de cantidades), no cantidad de imágenes
+  const total = useMemo(
+    () => instancias.reduce((s, i) => s + i.premios.reduce((a, p) => a + qty(p), 0), 0),
+    [instancias],
+  );
 
   // ---- mutaciones ----
   const colocarEn = (idx: number, prz: Prz, from: number | "paleta") => {
@@ -75,7 +80,24 @@ export default function ArmarClient() {
       if (typeof from === "number" && next[from])
         next[from].premios = next[from].premios.filter((p) => p.file !== prz.file);
       if (next[idx] && !next[idx].premios.some((p) => p.file === prz.file))
-        next[idx].premios.push({ file: prz.file, nombre: prz.nombre });
+        next[idx].premios.push({ file: prz.file, nombre: prz.nombre, cantidad: qty(prz) });
+      return next;
+    });
+    setMsg("");
+  };
+
+  const setCantidad = (idx: number, pos: number, val: number) => {
+    setInstancias((prev) => {
+      const next = prev.map((i) => ({ premios: i.premios.map((p) => ({ ...p })) }));
+      const fila = next[idx]?.premios[pos];
+      if (!fila) return prev;
+      const otros = next.reduce(
+        (s, inst, k) => s + inst.premios.reduce((a, p, j) => a + (k === idx && j === pos ? 0 : qty(p)), 0),
+        0,
+      );
+      let v = Math.max(1, Math.floor(val || 1));
+      if (otros + v > MAX) v = MAX - otros; // clamp al tope de 10
+      fila.cantidad = Math.max(1, v);
       return next;
     });
     setMsg("");
@@ -126,7 +148,7 @@ export default function ArmarClient() {
       const body = {
         instancias: instancias.map((inst, i) => ({
           orden: i + 1,
-          premios: inst.premios.map((p) => ({ file: p.file, nombre: p.nombre })),
+          premios: inst.premios.map((p) => ({ file: p.file, nombre: p.nombre, cantidad: qty(p) })),
         })),
       };
       const r = await fetch("/api/sorteo/ronda", {
@@ -255,7 +277,7 @@ export default function ArmarClient() {
                 <strong>Instancia {idx + 1}</strong>
                 <span className={styles.instInfo}>
                   {inst.premios.length} {inst.premios.length === 1 ? "premio" : "premios"} ·{" "}
-                  {inst.premios.length} giros
+                  {inst.premios.reduce((a, p) => a + qty(p), 0)} giros
                 </span>
                 <span className={styles.instBtns}>
                   <button onClick={() => moverInstancia(idx, -1)} disabled={idx === 0} title="Subir">
@@ -291,6 +313,15 @@ export default function ArmarClient() {
                     <span className={styles.puesto}>{MEDALLAS[pos] ?? `${pos + 1}°`}</span>
                     <img src={urlOf(p.file)} alt={p.nombre} onError={hideImg} />
                     <span className={styles.przNom}>{p.nombre}</span>
+                    <label className={styles.cant} title="Cantidad de este premio" onClick={(e) => e.stopPropagation()}>
+                      ×
+                      <input
+                        type="number"
+                        min={1}
+                        value={qty(p)}
+                        onChange={(e) => setCantidad(idx, pos, parseInt(e.target.value) || 1)}
+                      />
+                    </label>
                     <span className={styles.przBtns}>
                       <button onClick={() => moverPremio(idx, pos, -1)} disabled={pos === 0} title="Mejor">
                         ▲

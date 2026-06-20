@@ -156,6 +156,7 @@
   border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:6px;width:66px}
 .proxItem img{width:100%;aspect-ratio:1;object-fit:contain;border-radius:6px;background:#0e1026}
 .proxPuesto{font-size:14px;font-weight:900;line-height:1}
+.proxCant{font-size:12px;font-weight:900;color:var(--gold);line-height:1}
 
 .sinPend{display:flex;flex-direction:column;gap:10px;align-items:center;color:#cfe0ff;font-weight:700;
   text-align:center;width:100%}
