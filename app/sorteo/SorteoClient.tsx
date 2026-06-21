@@ -67,18 +67,6 @@ const hideEl = (e: React.SyntheticEvent<HTMLImageElement>) => {
   e.currentTarget.style.display = "none";
 };
 
-// Próxima instancia pendiente según cuántos ganadores ya hay.
-const calcPendiente = (plan: Inst[], hechos: number): Pend | null => {
-  let acc = 0;
-  for (let k = 0; k < plan.length; k++) {
-    const len = girosDe(plan[k].premios);
-    if (len === 0) continue;
-    if (hechos < acc + len)
-      return { instIdx: k, offset: hechos - acc, restante: acc + len - hechos, premios: plan[k].premios };
-    acc += len;
-  }
-  return null;
-};
 
 export default function SorteoClient() {
   const [participantes, setParticipantes] = useState<P[]>([]);
@@ -88,6 +76,7 @@ export default function SorteoClient() {
   const [modalMsg, setModalMsg] = useState("");
   const [album, setAlbum] = useState<AlbumItem[]>([]);
   const [instancias, setInstancias] = useState<Inst[]>([]);
+  const [instSel, setInstSel] = useState(0); // instancia elegida para sortear
   const [reveal, setReveal] = useState<
     { dni: string; nombre: string; marco: string; sector?: string; premioImg?: string | null; premioNom?: string } | null
   >(null);
@@ -103,15 +92,19 @@ export default function SorteoClient() {
     return fetch("/api/sorteo/ronda")
       .then((r) => r.json())
       .then((d) => {
-        if (Array.isArray(d.album)) setAlbum(d.album as AlbumItem[]);
-        const insts = Array.isArray(d?.ronda?.instancias) ? d.ronda.instancias : [];
-        setInstancias(
-          insts.map((i: { premios?: Prz[] }) => ({
-            premios: Array.isArray(i?.premios)
-              ? i.premios.map((p) => ({ file: p.file, nombre: p.nombre, cantidad: qty(p) }))
-              : [],
-          })),
-        );
+        const alb: AlbumItem[] = Array.isArray(d.album) ? d.album : [];
+        const raw = Array.isArray(d?.ronda?.instancias) ? d.ronda.instancias : [];
+        const insts: Inst[] = raw.map((i: { premios?: Prz[] }) => ({
+          premios: Array.isArray(i?.premios)
+            ? i.premios.map((p) => ({ file: p.file, nombre: p.nombre, cantidad: qty(p) }))
+            : [],
+        }));
+        setAlbum(alb);
+        setInstancias(insts);
+        // elegir por defecto la primera instancia no completa
+        const done = (k: number) => alb.filter((a) => (a.instancia ?? 0) === k).length;
+        const first = insts.findIndex((i, k) => girosDe(i.premios) > 0 && done(k) < girosDe(i.premios));
+        setInstSel(first >= 0 ? first : 0);
       })
       .catch(() => {});
   }, []);
@@ -380,7 +373,23 @@ export default function SorteoClient() {
     await cargarRonda(); // sincroniza con DB (en prueba descarta lo no persistido; en real trae sector/orden)
   };
 
-  const pendActual = calcPendiente(instancias, album.length);
+  const hechosDe = useCallback(
+    (k: number) => album.filter((a) => (a.instancia ?? 0) === k).length,
+    [album],
+  );
+  // Pendiente de la instancia elegida (offset = unidades de ESA instancia ya sorteadas).
+  const pendDe = useCallback(
+    (k: number): Pend | null => {
+      const ins = instancias[k];
+      if (!ins) return null;
+      const giros = girosDe(ins.premios);
+      const done = hechosDe(k);
+      if (giros === 0 || done >= giros) return null;
+      return { instIdx: k, offset: done, restante: giros - done, premios: ins.premios };
+    },
+    [instancias, hechosDe],
+  );
+  const pendActual = pendDe(instSel);
 
   const iniciar = () => {
     if (corriendo) return;
@@ -402,7 +411,7 @@ export default function SorteoClient() {
   };
 
   const ejecutar = async (modo: "prueba" | "real") => {
-    const pend = calcPendiente(instancias, album.length);
+    const pend = pendDe(instSel);
     if (!pend) {
       setModalMsg("No hay instancias pendientes");
       return;
@@ -572,36 +581,61 @@ export default function SorteoClient() {
           </div>
 
           <div className={styles.controles}>
-            {pendActual ? (
-              <>
-                <div className={styles.proxPrem}>
-                  {pendActual.premios.slice(startPrize).map((p, i) => {
-                    const j = startPrize + i;
-                    return (
-                      <div key={p.file} className={styles.proxItem} title={p.nombre}>
-                        <span className={styles.proxPuesto}>{MEDALLAS[j] ?? `${j + 1}°`}</span>
-                        <img src={premioUrl(p.file)} alt={p.nombre} onError={hideEl} />
-                        {qty(p) > 1 ? <span className={styles.proxCant}>×{qty(p)}</span> : null}
-                      </div>
-                    );
-                  })}
-                </div>
-                <button
-                  className={styles.principal}
-                  onClick={iniciar}
-                  disabled={corriendo || album.length >= MAX_ALBUM}
-                >
-                  Girar instancia {pendActual.instIdx + 1} · {restanteN} {restanteN === 1 ? "giro" : "giros"}
-                </button>
-              </>
-            ) : (
-              <div className={styles.sinPend}>
-                {instancias.length === 0 ? "No hay premios armados." : "Sorteo completo."}
-                <Link href="/sorteo/armar" className={styles.btnArmar}>
-                  🎁 Armar premios
-                </Link>
+            {instancias.length > 0 && (
+              <div className={styles.instSelRow}>
+                <span className={styles.instSelLbl}>Instancia:</span>
+                {instancias.map((ins, k) => {
+                  const giros = girosDe(ins.premios);
+                  const completa = giros > 0 && hechosDe(k) >= giros;
+                  return (
+                    <button
+                      key={k}
+                      className={styles.instChip}
+                      data-sel={instSel === k || undefined}
+                      data-done={completa || undefined}
+                      disabled={corriendo || completa || giros === 0}
+                      onClick={() => setInstSel(k)}
+                      title={`Instancia ${k + 1} · ${giros} ${giros === 1 ? "giro" : "giros"}${completa ? " (completa)" : ""}`}
+                    >
+                      {k + 1}
+                      {completa ? " ✓" : ""}
+                    </button>
+                  );
+                })}
               </div>
             )}
+            {pendActual && (
+              <div className={styles.proxPrem}>
+                {pendActual.premios.slice(startPrize).map((p, i) => {
+                  const j = startPrize + i;
+                  return (
+                    <div key={p.file} className={styles.proxItem} title={p.nombre}>
+                      <span className={styles.proxPuesto}>{MEDALLAS[j] ?? `${j + 1}°`}</span>
+                      <img src={premioUrl(p.file)} alt={p.nombre} onError={hideEl} />
+                      {qty(p) > 1 ? <span className={styles.proxCant}>×{qty(p)}</span> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <button
+              className={styles.principal}
+              onClick={iniciar}
+              disabled={corriendo || !pendActual || album.length >= MAX_ALBUM}
+            >
+              {totalPremios === 0
+                ? "▶ Iniciar sorteo"
+                : !pendActual
+                  ? "✓ Sorteo completo"
+                  : `▶ Iniciar — Instancia ${pendActual.instIdx + 1} (${restanteN} ${restanteN === 1 ? "giro" : "giros"})`}
+            </button>
+            {totalPremios === 0 ? (
+              <Link href="/sorteo/armar" className={styles.btnArmar}>
+                🎁 Armar premios
+              </Link>
+            ) : !pendActual ? (
+              <span className={styles.sinPend}>Creá un nuevo sorteo para empezar otro.</span>
+            ) : null}
           </div>
         </section>
       </div>

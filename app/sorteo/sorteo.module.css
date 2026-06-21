@@ -157,6 +157,13 @@
 .proxItem img{width:100%;aspect-ratio:1;object-fit:contain;border-radius:6px;background:#0e1026}
 .proxPuesto{font-size:14px;font-weight:900;line-height:1}
 .proxCant{font-size:12px;font-weight:900;color:var(--gold);line-height:1}
+.instSelRow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;width:100%;margin-bottom:4px}
+.instSelLbl{font-weight:800;color:#cfe0ff;font-size:13px}
+.instChip{min-width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.2);
+  background:#0a1430;color:#cfe0ff;font-weight:800;font-size:14px;cursor:pointer;padding:0 10px}
+.instChip[data-sel]{background:var(--celeste);color:#06183a;border-color:#fff}
+.instChip[data-done]{opacity:.45}
+.instChip:disabled{cursor:default}
 
 .sinPend{display:flex;flex-direction:column;gap:10px;align-items:center;color:#cfe0ff;font-weight:700;
   text-align:center;width:100%}
