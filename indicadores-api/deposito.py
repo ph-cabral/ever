@@ -96,10 +96,20 @@ def fetch_tiempo():
 # (base Magnus). Mismo filtro de comprobantes que /indicadores.
 _BASE_PEDIDO = date(1800, 12, 28)
 
+# Solo estados de facturación válidos: Abierto, Confirmado, Cerrado, Facturado.
+# Se descartan Cancelado, No Autorizado y Sin Confirmar. LIKE 'x%' tolera
+# singular/plural y espacios de relleno; collation CI ignora mayúsculas.
 SQL_INGRESADOS = """
 SELECT p.FechaPedido AS f, COUNT(*) AS pedidos
 FROM EVERWEAR.dbo.VenFer_PedidoCabecera p
+LEFT JOIN MAGNUS_SITD.dbo.Pedido_Estados e ON p.EstadoPedido = e.Ped_Estado
 WHERE p.CompCodigo NOT IN (9, 49, 208, 410)
+  AND (
+        LTRIM(e.Ped_EstadoDescripcion) LIKE 'Abierto%'
+     OR LTRIM(e.Ped_EstadoDescripcion) LIKE 'Confirmado%'
+     OR LTRIM(e.Ped_EstadoDescripcion) LIKE 'Cerrado%'
+     OR LTRIM(e.Ped_EstadoDescripcion) LIKE 'Facturado%'
+  )
   AND p.FechaPedido BETWEEN ? AND ?
 GROUP BY p.FechaPedido
 """
