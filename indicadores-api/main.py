@@ -18,6 +18,9 @@ app.add_middleware(
 
 # ── Constantes de filtro ──────────────────────────────────────────────────────
 ESTADOS_VALIDOS = ['Facturados', 'Cerrados']
+# ESTADOS_VALIDOS  = ['Abiertos', 'Facturados', 'Cerrados']
+COMP_VALIDOS     = [10, 70, 100, 210, 310]
+COMPROBANTE_DESC = 'PED.MAYOR'
 
 BASE_DATE = date(1800, 12, 28)
 
@@ -80,9 +83,11 @@ def cargar_df(meses: int = 7) -> pd.DataFrame:
     return df
 
 def filtrar(df: pd.DataFrame, meses: int = 7) -> pd.DataFrame:
-    """Filtra por estados válidos. La ventana de fechas ya viene aplicada desde SQL."""
-    df = df[df['Estado_Desc'].isin(ESTADOS_VALIDOS)].copy()
-    return df
+    return df[
+        df['CompCodigo'].isin(COMP_VALIDOS)
+        & df['Estado_Desc'].isin(ESTADOS_VALIDOS)
+        & (df['Comprobante_Desc'] == COMPROBANTE_DESC)
+    ].copy()
 
 def promedio_seguro(serie: pd.Series) -> float:
     validos = serie.dropna()

@@ -44,7 +44,12 @@ WHERE OT.OTEstado IN (2, 3, 4)
 ORDER BY OT.OTId DESC
 """
 
-SQL_TIEMPO = "SELECT * FROM dbo.TMP_TiempoDePedidos ORDER BY NroMovVenta DESC"
+SQL_TIEMPO = """
+SELECT * FROM dbo.TMP_TiempoDePedidos
+WHERE TRY_CAST(LEFT(CodComprobante, CHARINDEX(' ', CodComprobante + ' ') - 1) AS INT) IN (10, 100, 210, 310)
+  AND LTRIM(RTRIM(Estado)) IN ('Facturado', 'Cerrado')
+ORDER BY NroMovVenta DESC
+"""
 
 
 def _safe(value, colname=""):
@@ -92,45 +97,34 @@ def fetch_tiempo():
 
 
 # ── Pedidos ingresados (registrados) por día ──────────────────────────────────
-# EVERWEAR.dbo.VenFer_PedidoCabecera.FechaPedido = entero de días desde 1800-12-28
-# (base Magnus). Mismo filtro de comprobantes que /indicadores.
 _BASE_PEDIDO = date(1800, 12, 28)
 
-# Solo estados de facturación válidos: Abierto, Confirmado, Cerrado, Facturado.
-# Se descartan Cancelado, No Autorizado y Sin Confirmar. LIKE 'x%' tolera
-# singular/plural y espacios de relleno; collation CI ignora mayúsculas.
+
 SQL_INGRESADOS = """
-SELECT p.FechaPedido AS f, COUNT(DISTINCT p.NroMovVenta) AS pedidos
-FROM EVERWEAR.dbo.VenFer_PedidoCabecera p
-LEFT JOIN MAGNUS_SITD.dbo.Pedido_Estados e ON p.EstadoPedido = e.Ped_Estado
-WHERE p.CompCodigo NOT IN (9, 49, 208, 410)
-  AND (
-        LTRIM(e.Ped_EstadoDescripcion) LIKE 'Abierto%'
-     OR LTRIM(e.Ped_EstadoDescripcion) LIKE 'Confirmado%'
-     OR LTRIM(e.Ped_EstadoDescripcion) LIKE 'Cerrado%'
-     OR LTRIM(e.Ped_EstadoDescripcion) LIKE 'Facturado%'
-  )
-  AND p.FechaPedido BETWEEN ? AND ?
-GROUP BY p.FechaPedido
+SELECT TRY_CONVERT(date, LTRIM(RTRIM(t.FechaRegistracionPedido)), 103) AS f,
+       COUNT(*) AS pedidos
+FROM dbo.TMP_TiempoDePedidos t
+WHERE TRY_CONVERT(date, LTRIM(RTRIM(t.FechaRegistracionPedido)), 103) BETWEEN ? AND ?
+  AND TRY_CAST(LEFT(t.CodComprobante, CHARINDEX(' ', t.CodComprobante + ' ') - 1) AS INT) IN (10, 70, 100, 210, 310)
+  AND LTRIM(RTRIM(t.Estado)) IN ('Abierto', 'Cerrado', 'Facturado')
+  AND LTRIM(RTRIM(ISNULL(t.CodComprobante_Factura, 'SinCodigo'))) <> 'SinCodigo'
+GROUP BY TRY_CONVERT(date, LTRIM(RTRIM(t.FechaRegistracionPedido)), 103)
+ORDER BY f
 """
 
 
 def fetch_ingresados(desde, hasta):
-    """desde/hasta = datetime|date. Devuelve [{fecha 'YYYY-MM-DD', pedidos}]."""
-    dd = desde.date() if hasattr(desde, "date") else desde
-    dh = hasta.date() if hasattr(hasta, "date") else hasta
-    d0 = (dd - _BASE_PEDIDO).days
-    d1 = (dh - _BASE_PEDIDO).days
+    """desde/hasta = datetime. Pedidos mayoristas/día desde TMP_TiempoDePedidos."""
     conn = get_connection("EVERWEAR")
     try:
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd;")
-        cur.execute(SQL_INGRESADOS, (d0, d1))
+        cur.execute(SQL_INGRESADOS, (desde, hasta))
         out = []
         for f, pedidos in cur.fetchall():
             if f is None:
                 continue
-            fecha = (_BASE_PEDIDO + timedelta(days=int(f))).isoformat()
+            fecha = f.isoformat() if hasattr(f, "isoformat") else str(f)
             out.append({"fecha": fecha, "pedidos": int(pedidos)})
         return out
     finally:
