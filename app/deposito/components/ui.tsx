@@ -511,6 +511,7 @@ export function ChartBar({
   fmt = (n) => fmtShort(n),
   angle,
   showValues = false,
+  colorByIndex = false,
 }: {
   data: unknown[];
   xKey: string;
@@ -520,6 +521,7 @@ export function ChartBar({
   fmt?: (n: number) => string;
   angle?: number;
   showValues?: boolean;
+  colorByIndex?: boolean;
 }) {
   if (!data.length) return <Empty h={height} />;
   return (
@@ -598,6 +600,10 @@ export function ChartBar({
               s.stackId ? 0 : ([3, 3, 0, 0] as [number, number, number, number])
             }
           >
+            {colorByIndex && series.length === 1 &&
+              data.map((_, idx) => (
+                <Cell key={`c-${idx}`} fill={PALETTE[idx % PALETTE.length]} />
+              ))}
             {/* {showValues && (
               <LabelList
                 dataKey={s.key}

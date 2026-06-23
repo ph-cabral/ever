@@ -315,11 +315,13 @@ export default function PedidosPreparadosPage() {
               <ComboChart data={combo} hasCtrl={hasCtrl} maxEf={maxEfAxis} angle={angle} />
             </Panel>
 
-            <SectionTitle>Ranking de preparadores — OTs en el período</SectionTitle>
+            <SectionTitle>
+              Ranking de preparadores · <span className="text-yellow-400 font-bold">{fmtNum(totIng)}</span> pedidos ingresados en el período
+            </SectionTitle>
             <Panel>
               <ChartBar data={ranking.map((r) => ({ op: clip(r.op), ots: r.ots }))} xKey="op"
-                height={Math.max(220, ranking.length * 34)} horizontal
-                series={[{ key: "ots", name: "OTs", color: C.brand }]} fmt={(n) => fmtNum(n)} showValues />
+                height={Math.max(220, ranking.length * 38)} horizontal colorByIndex
+                series={[{ key: "ots", name: "OTs" }]} fmt={(n) => fmtNum(n)} showValues />
             </Panel>
 
             <SectionTitle>Detalle por preparador</SectionTitle>
