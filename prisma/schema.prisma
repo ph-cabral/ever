@@ -443,3 +443,18 @@ model sorteo_album {
   @@unique([rondaId, dni])
   @@schema("everwear")
 }
+
+// Faltantes: marca por renglón si había o no existencia (vista /deposito/faltantes).
+model faltante_existencia {
+  id             Int      @id @default(autoincrement())
+  fecha          DateTime @db.Date
+  nroPedOrigen   Int      @map("nro_ped_origen")
+  nroRengOrigen  Int      @map("nro_reng_origen")
+  codArticulo    String?  @map("cod_articulo") @db.VarChar(50)
+  existencia     Boolean
+  creado_en      DateTime @default(now())
+  actualizado_en DateTime @updatedAt
+
+  @@unique([fecha, nroPedOrigen, nroRengOrigen], name: "uniq_faltante")
+  @@schema("preparado")
+}

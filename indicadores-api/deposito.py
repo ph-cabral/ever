@@ -129,3 +129,85 @@ def fetch_ingresados(desde, hasta):
         return out
     finally:
         conn.close()
+
+
+# ── Faltantes (renglones pendientes del último día con registro < hoy) ────────
+SQL_FALTANTES = """
+SELECT
+    p.NroPedOrigen, p.NroRengOrigen,
+    CAST(p.FecRegistracion AS DATE) AS Fecha,
+    u.SecuenciaRutPicking,
+    p.CodArticu,
+    ap.Detalle      AS Patron,
+    s.DetalleMedida AS Medida,
+    s.UnidadMedida  AS Unidad,
+    p.CantPendiente,
+    p.CodCliente,
+    p.PrecioVenta,
+    ap.Nivel1       AS Linea,
+    t.Descripcion   AS TipoArticulo,
+    gp.Nombre       AS Preparador,
+    pr.RazonSocial  AS Proveedor,
+    uv.Usu_Arma_Nombre AS Vendedor
+FROM EVERWEAR.dbo.[Ven_PedRenPendientes] p
+LEFT JOIN EVERWEAR.dbo.[Ubicacion#]            u  ON u.codArticulo    = p.CodArticu AND u.ubicacion NOT LIKE '%[A-Za-z]%'
+LEFT JOIN EVERWEAR.dbo.[StkFer_Articulos]      s  ON s.CodArticulo    = p.CodArticu
+LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet]     ap ON ap.ArticuloPatron = s.ArticuloPatron
+LEFT JOIN EVERWEAR.dbo.[Stk_TiposArticulos]    t  ON t.CodigoTipo     = s.NacionalImportado
+LEFT JOIN EVERWEAR.dbo.[Com_Proveedores]       pr ON pr.CodProveed    = s.CodProveedHabitual
+LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoRengPreparacion] prep ON prep.NroMovVenta = p.NroPedOrigen AND prep.NroRenglon = p.NroRengOrigen
+LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]          gp ON gp.Numero       = prep.CodPreparador
+LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoCabecera] cab ON cab.NroMovVenta = p.NroPedOrigen
+LEFT JOIN MAGNUS_SITD.dbo.[Ped_Usu_Arma]       uv ON cab.Vendedor    = uv.Usu_Arma_Codigo
+WHERE CAST(p.FecRegistracion AS DATE) = (
+    SELECT MAX(CAST(FecRegistracion AS DATE))
+    FROM EVERWEAR.dbo.[Ven_PedRenPendientes]
+    WHERE FecRegistracion < CAST(GETDATE() AS DATE)
+)
+ORDER BY u.SecuenciaRutPicking, p.NroPedOrigen, p.NroRengOrigen
+"""
+
+
+def _txt(v):
+    return str(v).strip() if v is not None else ""
+
+
+def _int(v):
+    v = _safe(v)
+    return int(v) if v is not None else None
+
+
+def fetch_faltantes():
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_FALTANTES)
+        cols = [c[0] for c in cur.description]
+        fecha, rows = None, []
+        for r in cur.fetchall():
+            d = dict(zip(cols, r))
+            if fecha is None and d.get("Fecha") is not None:
+                f = d["Fecha"]
+                fecha = f.isoformat() if isinstance(f, (date, datetime)) else str(f)[:10]
+            nombre = " ".join(" ".join(_txt(d.get(c)) for c in ("Patron", "Medida", "Unidad")).split())
+            cant   = float(_safe(d.get("CantPendiente")) or 0)
+            precio = float(_safe(d.get("PrecioVenta")) or 0)
+            rows.append({
+                "NroPedOrigen":  _int(d.get("NroPedOrigen")),
+                "NroRengOrigen": _int(d.get("NroRengOrigen")),
+                "Ubicacion":     _safe(d.get("SecuenciaRutPicking")),
+                "CodArticulo":   _txt(d.get("CodArticu")),
+                "Nombre":        nombre,
+                "CantPend":      cant,
+                "Cliente":       _safe(d.get("CodCliente")),
+                "Importe":       round(precio * cant, 2),
+                "TipoArticulo":  _txt(d.get("TipoArticulo")).replace("Fabril", "Fabrica"),
+                "Preparador":    _txt(d.get("Preparador")),
+                "Linea":         _safe(d.get("Linea")),
+                "Proveedor":     _txt(d.get("Proveedor")),
+                "Vendedor":      _txt(d.get("Vendedor")),
+            })
+        return {"fecha": fecha, "total": len(rows), "rows": rows}
+    finally:
+        conn.close()

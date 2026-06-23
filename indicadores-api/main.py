@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from db import get_connection
 from utils import construir_timestamps, calcular_tiempos, COLUMNAS_TIEMPO
-from deposito import fetch_wms, fetch_tiempo, fetch_ingresados
+from deposito import fetch_wms, fetch_tiempo, fetch_ingresados, fetch_faltantes
 from datetime import date, datetime, timedelta
 
 app = FastAPI()
@@ -154,6 +154,14 @@ def deposito_ingresados(
         "total": sum(r["pedidos"] for r in rows),
         "rows": rows,
     }
+
+@app.get("/deposito/faltantes")
+def deposito_faltantes():
+    """Faltantes = renglones pendientes del último día con registro anterior a hoy."""
+    try:
+        return fetch_faltantes()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
 @app.get("/indicadores/tiempos")
 def get_tiempos(meses: int = Query(default=7, ge=1, le=12)):
