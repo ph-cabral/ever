@@ -135,7 +135,7 @@ def fetch_ingresados(desde, hasta):
 SQL_FALTANTES = """
 SELECT
     p.NroPedOrigen, p.NroRengOrigen,
-    CAST(p.FecRegistracion AS DATE) AS Fecha,
+    CONVERT(date, DATEADD(day, p.FecRegistracion, '1800-12-28')) AS Fecha,
     u.SecuenciaRutPicking,
     p.CodArticu,
     ap.Detalle      AS Patron,
@@ -159,10 +159,10 @@ LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoRengPreparacion] prep ON prep.NroMovVenta =
 LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]          gp ON gp.Numero       = prep.CodPreparador
 LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoCabecera] cab ON cab.NroMovVenta = p.NroPedOrigen
 LEFT JOIN MAGNUS_SITD.dbo.[Ped_Usu_Arma]       uv ON cab.Vendedor    = uv.Usu_Arma_Codigo
-WHERE CAST(p.FecRegistracion AS DATE) = (
-    SELECT MAX(CAST(FecRegistracion AS DATE))
+WHERE p.FecRegistracion = (
+    SELECT MAX(FecRegistracion)
     FROM EVERWEAR.dbo.[Ven_PedRenPendientes]
-    WHERE FecRegistracion < CAST(GETDATE() AS DATE)
+    WHERE FecRegistracion < DATEDIFF(day, '1800-12-28', CAST(GETDATE() AS date))
 )
 ORDER BY u.SecuenciaRutPicking, p.NroPedOrigen, p.NroRengOrigen
 """
