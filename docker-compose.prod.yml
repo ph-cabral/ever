@@ -28,6 +28,13 @@ services:
     container_name: indicadores_api
     env_file:
       - ./indicadores-api/.env
+    # DNS de Active Directory (DC) para resolver SRV-SQL.everwear.local y el KDC.
+    # Sin esto el contenedor cae al DNS público y no resuelve nombres internos.
+    dns:
+      - 10.10.0.232
+      - 10.10.0.254
+    dns_search:
+      - everwear.local
     volumes:
       - /tmp/krb5cc_1000:/tmp/krb5cc_1000:ro
     restart: unless-stopped
