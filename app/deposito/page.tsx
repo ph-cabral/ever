@@ -32,11 +32,11 @@ export default function DepositoPage() {
   const [operario, setOperario] = useState("__all__");
   const [tab, setTab] = useState<TabId>("resumen");
 
-  // Rango por defecto (cliente, evita mismatch SSR): últimos ~6 meses → hoy.
+  // Por defecto: hoy en ambos (cliente, evita mismatch SSR).
   useEffect(() => {
-    const t = new Date();
-    setHasta(iso(t));
-    setDesde(iso(new Date(t.getFullYear(), t.getMonth() - 6, 1)));
+    const hoy = iso(new Date());
+    setDesde(hoy);
+    setHasta(hoy);
   }, []);
 
   const { prod, tiempo, loading, error, reload } = useDepositoData(desde, hasta);
