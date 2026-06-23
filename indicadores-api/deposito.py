@@ -100,7 +100,7 @@ _BASE_PEDIDO = date(1800, 12, 28)
 # Se descartan Cancelado, No Autorizado y Sin Confirmar. LIKE 'x%' tolera
 # singular/plural y espacios de relleno; collation CI ignora mayúsculas.
 SQL_INGRESADOS = """
-SELECT p.FechaPedido AS f, COUNT(*) AS pedidos
+SELECT p.FechaPedido AS f, COUNT(DISTINCT p.NroMovVenta) AS pedidos
 FROM EVERWEAR.dbo.VenFer_PedidoCabecera p
 LEFT JOIN MAGNUS_SITD.dbo.Pedido_Estados e ON p.EstadoPedido = e.Ped_Estado
 WHERE p.CompCodigo NOT IN (9, 49, 208, 410)
