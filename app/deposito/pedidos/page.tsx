@@ -1,104 +1,69 @@
 "use client";
-
-import { useState, useMemo } from "react";
-import { Users, User, CalendarDays, CalendarRange, type LucideIcon } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
 import {
-  PageTitle,
-  SectionTitle,
-  Panel,
-  KPI,
-  Grid,
-  ChartBar,
-  ChartDonut,
-  fmtNum,
-  C,
-  type Serie,
+  Users, User, CalendarDays, CalendarRange, Calendar,
+  Loader2, RefreshCw, AlertTriangle, type LucideIcon,
+} from "lucide-react";
+import {
+  PageTitle, SectionTitle, Panel, KPI, Grid, ChartBar, ChartDonut, Table,
+  fmtNum, fmtMes, C,
 } from "../components/ui";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// MOCK — datos reales WMS (proceso Picking, OTs) dic-2025 → jun-2026.
-// "Preparados" es real; "Ingresados" se calcula como demo (ver ingDemo).
-// TODO: reemplazar este bloque por un fetch a /api/deposito/preparadores.
+// Pedidos preparados — REAL desde WMS (proceso Picking) vía /api/deposito/wms.
+// 1 fila = 1 OT. "Preparados" = OTs; "Ítems" = CANT. ITEM RECOLECTADOS.
+// Réplica de picking_semanal.html, con Día / Semana / Mes + comparativa/individual.
 // ──────────────────────────────────────────────────────────────────────────────
-type OpMap = Record<string, number>;
-interface Punto {
-  lbl: string;
-  prep: number;
-  op: OpMap;
+
+type Row = Record<string, unknown>;
+interface Rec { d: Date; op: string; items: number }
+type Gran = "dia" | "sem" | "mes";
+type Vista = "comp" | "ind";
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const fmtDM = (d: Date) => `${d.getDate()}/${d.getMonth() + 1}`;
+const clip = (s: string, n = 18) => (s.length > n ? s.slice(0, n) + "…" : s);
+const iso = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
+// ISO-8601 week (lun→dom), igual que picking_semanal.html
+function isoWeek(d: Date) {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = (t.getUTCDay() + 6) % 7;
+  t.setUTCDate(t.getUTCDate() - day + 3);
+  const firstThu = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+  const w = 1 + Math.round((+t - +firstThu) / 86400000 / 7);
+  return { year: t.getUTCFullYear(), week: w };
 }
-interface OpInfo {
-  op: string;
-  ots: number;
-  items: number;
-  horas: number;
-  iph: number;
-  otsdia: number;
+function mondayOf(d: Date) {
+  const x = new Date(d);
+  const day = (x.getDay() + 6) % 7;
+  x.setDate(x.getDate() - day);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+function bucketOf(d: Date, g: Gran): { key: string; sort: string; label: string } {
+  if (g === "dia") { const k = iso(d); return { key: k, sort: k, label: fmtDM(d) }; }
+  if (g === "mes") { const k = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; return { key: k, sort: k, label: fmtMes(k) }; }
+  const iw = isoWeek(d);
+  const k = `${iw.year}-W${pad2(iw.week)}`;
+  return { key: k, sort: k, label: `Sem ${iw.week} · ${fmtDM(mondayOf(d))}` };
 }
 
-const TOP: string[] = [
-  "Caceres Nicolas",
-  "Rios Ivan",
-  "Maidana Maximiliano",
-  "Aramayo Marcelo",
-  "Ortiz Ariel",
-  "Scarpello Rodolfo",
-  "Corzo Agustin",
-  "Boscacci Vladimir",
-];
-
-const OPERARIOS: OpInfo[] = [
-  { op: "Caceres Nicolas", ots: 2372, items: 34401, horas: 9438.9, iph: 3.6, otsdia: 22.6 },
-  { op: "Rios Ivan", ots: 2304, items: 50416, horas: 11631.7, iph: 4.3, otsdia: 18.6 },
-  { op: "Maidana Maximiliano", ots: 1776, items: 44489, horas: 9779.3, iph: 4.5, otsdia: 14.7 },
-  { op: "Aramayo Marcelo", ots: 1681, items: 45919, horas: 12287.9, iph: 3.7, otsdia: 12.9 },
-  { op: "Ortiz Ariel", ots: 1347, items: 17849, horas: 2800.8, iph: 6.4, otsdia: 11.6 },
-  { op: "Scarpello Rodolfo", ots: 1203, items: 8874, horas: 3609.0, iph: 2.5, otsdia: 13.7 },
-  { op: "Corzo Agustin", ots: 469, items: 4974, horas: 1651.6, iph: 3.0, otsdia: 13.0 },
-  { op: "Boscacci Vladimir", ots: 442, items: 7991, horas: 2181.1, iph: 3.7, otsdia: 13.8 },
-];
-
-const MESES: Punto[] = [
-  { lbl: "Dic 25", prep: 1727, op: { "Caceres Nicolas": 0, "Rios Ivan": 289, "Maidana Maximiliano": 345, "Aramayo Marcelo": 319, "Ortiz Ariel": 221, "Scarpello Rodolfo": 34, "Corzo Agustin": 62, "Boscacci Vladimir": 306 } },
-  { lbl: "Ene 26", prep: 1747, op: { "Caceres Nicolas": 219, "Rios Ivan": 425, "Maidana Maximiliano": 210, "Aramayo Marcelo": 271, "Ortiz Ariel": 206, "Scarpello Rodolfo": 254, "Corzo Agustin": 19, "Boscacci Vladimir": 136 } },
-  { lbl: "Feb 26", prep: 1511, op: { "Caceres Nicolas": 311, "Rios Ivan": 334, "Maidana Maximiliano": 134, "Aramayo Marcelo": 230, "Ortiz Ariel": 144, "Scarpello Rodolfo": 167, "Corzo Agustin": 130, "Boscacci Vladimir": 0 } },
-  { lbl: "Mar 26", prep: 1884, op: { "Caceres Nicolas": 475, "Rios Ivan": 318, "Maidana Maximiliano": 256, "Aramayo Marcelo": 297, "Ortiz Ariel": 188, "Scarpello Rodolfo": 223, "Corzo Agustin": 102, "Boscacci Vladimir": 0 } },
-  { lbl: "Abr 26", prep: 1952, op: { "Caceres Nicolas": 547, "Rios Ivan": 352, "Maidana Maximiliano": 338, "Aramayo Marcelo": 233, "Ortiz Ariel": 244, "Scarpello Rodolfo": 220, "Corzo Agustin": 13, "Boscacci Vladimir": 0 } },
-  { lbl: "May 26", prep: 1866, op: { "Caceres Nicolas": 411, "Rios Ivan": 363, "Maidana Maximiliano": 253, "Aramayo Marcelo": 200, "Ortiz Ariel": 253, "Scarpello Rodolfo": 246, "Corzo Agustin": 140, "Boscacci Vladimir": 0 } },
-  { lbl: "Jun 26", prep: 1156, op: { "Caceres Nicolas": 409, "Rios Ivan": 223, "Maidana Maximiliano": 240, "Aramayo Marcelo": 131, "Ortiz Ariel": 91, "Scarpello Rodolfo": 59, "Corzo Agustin": 3, "Boscacci Vladimir": 0 } },
-];
-
-const DIAS: Punto[] = [
-  { lbl: "02/06", prep: 90, op: { "Caceres Nicolas": 23, "Rios Ivan": 23, "Maidana Maximiliano": 14, "Aramayo Marcelo": 10, "Ortiz Ariel": 2, "Scarpello Rodolfo": 18, "Corzo Agustin": 0, "Boscacci Vladimir": 0 } },
-  { lbl: "03/06", prep: 82, op: { "Caceres Nicolas": 35, "Rios Ivan": 15, "Maidana Maximiliano": 13, "Aramayo Marcelo": 14, "Ortiz Ariel": 1, "Scarpello Rodolfo": 3, "Corzo Agustin": 1, "Boscacci Vladimir": 0 } },
-  { lbl: "04/06", prep: 72, op: { "Caceres Nicolas": 24, "Rios Ivan": 19, "Maidana Maximiliano": 14, "Aramayo Marcelo": 14, "Ortiz Ariel": 1, "Scarpello Rodolfo": 0, "Corzo Agustin": 0, "Boscacci Vladimir": 0 } },
-  { lbl: "05/06", prep: 58, op: { "Caceres Nicolas": 24, "Rios Ivan": 13, "Maidana Maximiliano": 13, "Aramayo Marcelo": 8, "Ortiz Ariel": 0, "Scarpello Rodolfo": 0, "Corzo Agustin": 0, "Boscacci Vladimir": 0 } },
-  { lbl: "08/06", prep: 83, op: { "Caceres Nicolas": 39, "Rios Ivan": 0, "Maidana Maximiliano": 12, "Aramayo Marcelo": 16, "Ortiz Ariel": 13, "Scarpello Rodolfo": 3, "Corzo Agustin": 0, "Boscacci Vladimir": 0 } },
-  { lbl: "09/06", prep: 80, op: { "Caceres Nicolas": 38, "Rios Ivan": 0, "Maidana Maximiliano": 18, "Aramayo Marcelo": 16, "Ortiz Ariel": 8, "Scarpello Rodolfo": 0, "Corzo Agustin": 0, "Boscacci Vladimir": 0 } },
-  { lbl: "10/06", prep: 100, op: { "Caceres Nicolas": 27, "Rios Ivan": 0, "Maidana Maximiliano": 26, "Aramayo Marcelo": 14, "Ortiz Ariel": 15, "Scarpello Rodolfo": 18, "Corzo Agustin": 0, "Boscacci Vladimir": 0 } },
-  { lbl: "11/06", prep: 80, op: { "Caceres Nicolas": 18, "Rios Ivan": 20, "Maidana Maximiliano": 19, "Aramayo Marcelo": 11, "Ortiz Ariel": 10, "Scarpello Rodolfo": 2, "Corzo Agustin": 0, "Boscacci Vladimir": 0 } },
-  { lbl: "12/06", prep: 57, op: { "Caceres Nicolas": 17, "Rios Ivan": 12, "Maidana Maximiliano": 10, "Aramayo Marcelo": 11, "Ortiz Ariel": 7, "Scarpello Rodolfo": 0, "Corzo Agustin": 0, "Boscacci Vladimir": 0 } },
-  { lbl: "16/06", prep: 68, op: { "Caceres Nicolas": 20, "Rios Ivan": 20, "Maidana Maximiliano": 20, "Aramayo Marcelo": 0, "Ortiz Ariel": 8, "Scarpello Rodolfo": 0, "Corzo Agustin": 0, "Boscacci Vladimir": 0 } },
-  { lbl: "17/06", prep: 75, op: { "Caceres Nicolas": 30, "Rios Ivan": 26, "Maidana Maximiliano": 17, "Aramayo Marcelo": 1, "Ortiz Ariel": 1, "Scarpello Rodolfo": 0, "Corzo Agustin": 0, "Boscacci Vladimir": 0 } },
-  { lbl: "18/06", prep: 63, op: { "Caceres Nicolas": 37, "Rios Ivan": 17, "Maidana Maximiliano": 6, "Aramayo Marcelo": 2, "Ortiz Ariel": 1, "Scarpello Rodolfo": 0, "Corzo Agustin": 0, "Boscacci Vladimir": 0 } },
-  { lbl: "19/06", prep: 71, op: { "Caceres Nicolas": 24, "Rios Ivan": 21, "Maidana Maximiliano": 26, "Aramayo Marcelo": 0, "Ortiz Ariel": 0, "Scarpello Rodolfo": 0, "Corzo Agustin": 0, "Boscacci Vladimir": 0 } },
-  { lbl: "22/06", prep: 70, op: { "Caceres Nicolas": 16, "Rios Ivan": 23, "Maidana Maximiliano": 22, "Aramayo Marcelo": 0, "Ortiz Ariel": 9, "Scarpello Rodolfo": 0, "Corzo Agustin": 0, "Boscacci Vladimir": 0 } },
-];
-
-// Ingresados demo (placeholder). En producción saldrá de Magnos (pedidos registrados).
-const ingDemo = (p: number, i: number) => Math.round(p * (1.05 + ((i * 3 + 2) % 9) / 100));
-
-const ZINC = "#9ca3af";
+function parseRow(r: Row): Rec | null {
+  const raw = String(r["FECHA EJECUCION"] ?? "").trim().split(" ")[0];
+  const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(raw);
+  if (!m) return null;
+  const d = new Date(+m[3], +m[2] - 1, +m[1]);
+  if (isNaN(d.getTime())) return null;
+  const op = String(r["OPERARIO"] ?? "").trim() || "(sin operario)";
+  const items = parseInt(String(r["CANT. ITEM RECOLECTADOS"] ?? "0").replace(/[^0-9]/g, ""), 10) || 0;
+  return { d, op, items };
+}
 
 // ─── Toggle de botones (estética EVER WEAR) ───────────────────────────────────
 function Seg<T extends string>({
-  opts,
-  val,
-  onChange,
-}: {
-  opts: { v: T; label: string; icon: LucideIcon }[];
-  val: T;
-  onChange: (v: T) => void;
-}) {
+  opts, val, onChange,
+}: { opts: { v: T; label: string; icon: LucideIcon }[]; val: T; onChange: (v: T) => void }) {
   return (
     <div className="inline-flex rounded-lg border border-zinc-700 overflow-hidden">
       {opts.map((o) => {
@@ -109,9 +74,7 @@ function Seg<T extends string>({
             key={o.v}
             onClick={() => onChange(o.v)}
             className={`flex items-center gap-1.5 px-3.5 py-1.5 text-sm transition-colors ${
-              active
-                ? "bg-yellow-400 text-black font-semibold"
-                : "bg-[#1f1f1f] text-zinc-400 hover:text-zinc-100"
+              active ? "bg-yellow-400 text-black font-semibold" : "bg-[#1f1f1f] text-zinc-400 hover:text-zinc-100"
             }`}
           >
             <Icon size={15} />
@@ -123,192 +86,238 @@ function Seg<T extends string>({
   );
 }
 
+interface RankRow { op: string; ots: number; items: number }
+interface BucketRow { lbl: string; ots: number; items: number }
+
 export default function PedidosPreparadosPage() {
-  const [vista, setVista] = useState<"comp" | "ind">("comp");
-  const [gran, setGran] = useState<"dia" | "mes">("mes");
-  const [op, setOp] = useState<string>(TOP[0]);
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const [vista, setVista] = useState<Vista>("comp");
+  const [gran, setGran] = useState<Gran>("sem");
+  const [op, setOp] = useState("");
+  const [rows, setRows] = useState<Row[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const serie = gran === "mes" ? MESES : DIAS;
-  const granLabel = gran === "mes" ? "mes" : "día";
+  // Default: últimas ~10 semanas → hoy (cliente, evita mismatch SSR).
+  useEffect(() => {
+    const t = new Date();
+    setHasta(iso(t));
+    setDesde(iso(new Date(t.getFullYear(), t.getMonth(), t.getDate() - 70)));
+  }, []);
 
-  // Ranking de preparadores en el rango visible
-  const ranking = useMemo(() => {
-    return TOP.map((name) => ({
-      op: name,
-      v: serie.reduce((a, p) => a + (p.op[name] ?? 0), 0),
-    }))
-      .filter((r) => r.v > 0)
-      .sort((a, b) => b.v - a.v);
-  }, [serie]);
+  useEffect(() => {
+    if (!desde || !hasta) return;
+    let cancel = false;
+    (async () => {
+      setLoading(true); setError(null);
+      try {
+        const r = await fetch(`/api/deposito/wms?desde=${desde}&hasta=${hasta}`, { cache: "no-store" });
+        const j = (await r.json().catch(() => ({}))) as { rows?: Row[]; error?: string };
+        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        if (!cancel) setRows((j.rows ?? []).filter((x) => String(x["PROCESO"] ?? "") === "Picking"));
+      } catch (e) {
+        if (!cancel) { setError(e instanceof Error ? e.message : "Error al cargar"); setRows([]); }
+      } finally {
+        if (!cancel) setLoading(false);
+      }
+    })();
+    return () => { cancel = true; };
+  }, [desde, hasta]);
 
-  const totPrep = useMemo(() => serie.reduce((a, p) => a + p.prep, 0), [serie]);
-  const totIng = useMemo(
-    () => serie.reduce((a, p, i) => a + ingDemo(p.prep, i), 0),
-    [serie],
-  );
-  const pct = totIng > 0 ? Math.round((totPrep / totIng) * 100) : 0;
+  const recs = useMemo(() => (rows ?? []).map(parseRow).filter((x): x is Rec => x !== null), [rows]);
+  const granLabel = gran === "mes" ? "mes" : gran === "sem" ? "semana" : "día";
 
-  // Serie temporal: ingresados vs preparados
-  const temporal = serie.map((p, i) => ({
-    lbl: p.lbl,
-    prep: p.prep,
-    ing: ingDemo(p.prep, i),
-  }));
-  const tSeries: Serie[] = [
-    { key: "prep", name: "Preparados", color: C.brand },
-    { key: "ing", name: "Ingresados (demo)", color: ZINC },
-  ];
+  // Agregados
+  const { ranking, buckets, perOpBucket, totOts, totItems } = useMemo(() => {
+    const opTot = new Map<string, { ots: number; items: number }>();
+    const bk = new Map<string, { label: string; sort: string; ots: number; items: number }>();
+    const opBk = new Map<string, Map<string, { ots: number; items: number }>>();
+    for (const r of recs) {
+      const b = bucketOf(r.d, gran);
+      const ot = opTot.get(r.op) ?? { ots: 0, items: 0 }; ot.ots++; ot.items += r.items; opTot.set(r.op, ot);
+      const bb = bk.get(b.key) ?? { label: b.label, sort: b.sort, ots: 0, items: 0 }; bb.ots++; bb.items += r.items; bk.set(b.key, bb);
+      let m = opBk.get(r.op); if (!m) { m = new Map(); opBk.set(r.op, m); }
+      const c = m.get(b.key) ?? { ots: 0, items: 0 }; c.ots++; c.items += r.items; m.set(b.key, c);
+    }
+    const ranking: RankRow[] = [...opTot.entries()].map(([o, v]) => ({ op: o, ots: v.ots, items: v.items })).sort((a, b) => b.ots - a.ots);
+    const buckets = [...bk.values()].sort((a, b) => a.sort.localeCompare(b.sort));
+    return { ranking, buckets, perOpBucket: opBk, totOts: recs.length, totItems: recs.reduce((a, r) => a + r.items, 0) };
+  }, [recs, gran]);
+
+  // Mantener un operario válido seleccionado
+  useEffect(() => {
+    if (ranking.length && !ranking.some((r) => r.op === op)) setOp(ranking[0].op);
+  }, [ranking, op]);
+
+  const angle = gran === "mes" ? 0 : -35;
+  const reload = () => { const h = hasta; setHasta(""); setTimeout(() => setHasta(h), 0); };
+
+  // Comparativa
+  const bucketSerie: BucketRow[] = buckets.map((b) => ({ lbl: b.label, ots: b.ots, items: b.items }));
+  const rankingData = ranking.map((r) => ({ op: clip(r.op), ots: r.ots }));
 
   // Individual
-  const info = OPERARIOS.find((o) => o.op === op) ?? OPERARIOS[0];
-  const suSerie = serie.map((p) => ({ lbl: p.lbl, v: p.op[op] ?? 0 }));
-  const suTot = suSerie.reduce((a, p) => a + p.v, 0);
-  const prom = Math.round((suTot / serie.length) * 10) / 10;
+  const suBuckets: BucketRow[] = buckets.map((b) => {
+    const c = perOpBucket.get(op)?.get(b.key);
+    return { lbl: b.label, ots: c?.ots ?? 0, items: c?.items ?? 0 };
+  });
+  const suOts = suBuckets.reduce((a, x) => a + x.ots, 0);
+  const suItems = suBuckets.reduce((a, x) => a + x.items, 0);
+  const promOts = buckets.length ? suOts / buckets.length : 0;
   const puesto = ranking.findIndex((r) => r.op === op) + 1;
   const aporte = [
-    { name: op, value: suTot, color: C.brand },
-    { name: "Resto del equipo", value: Math.max(0, totPrep - suTot), color: "#3f3f46" },
+    { name: clip(op), value: suOts, color: C.brand },
+    { name: "Resto del equipo", value: Math.max(0, totOts - suOts), color: "#3f3f46" },
   ];
 
-  const angle = gran === "dia" ? -35 : 0;
+  const hayDatos = recs.length > 0;
 
   return (
     <div className="min-h-screen bg-[#111111] text-white">
+      {(loading || error) && (
+        <div className="fixed bottom-6 right-6 z-[110] flex flex-col gap-2">
+          {loading && (
+            <div className="flex items-center gap-3 bg-[#1A1A1A] border border-yellow-400/40 rounded-xl px-5 py-3 text-sm text-zinc-200">
+              <Loader2 size={16} className="animate-spin text-yellow-400" /> Consultando la base…
+            </div>
+          )}
+          {error && (
+            <div className="flex items-center gap-3 bg-[#1A1A1A] border border-red-400/40 rounded-xl px-5 py-3 text-sm text-red-300">
+              <AlertTriangle size={16} className="text-red-400" /> {error}
+            </div>
+          )}
+        </div>
+      )}
+
       <main className="max-w-7xl mx-auto px-4 py-6">
         <div className="flex items-start justify-between gap-4 flex-wrap mb-1">
           <PageTitle
             title="Pedidos preparados"
-            sub="Productividad de preparadores — proceso Picking · Depósito Central"
+            sub="Productividad de preparadores — proceso Picking · OTs e ítems · Depósito Central"
           />
-          <div className="flex items-center gap-2 flex-wrap mt-1">
-            <Seg<"comp" | "ind">
-              val={vista}
-              onChange={setVista}
-              opts={[
-                { v: "comp", label: "Comparativa", icon: Users },
-                { v: "ind", label: "Individual", icon: User },
-              ]}
-            />
-            <Seg<"dia" | "mes">
-              val={gran}
-              onChange={setGran}
-              opts={[
-                { v: "dia", label: "Diario", icon: CalendarDays },
-                { v: "mes", label: "Mensual", icon: CalendarRange },
-              ]}
-            />
-            {vista === "ind" && (
-              <select
-                value={op}
-                onChange={(e) => setOp(e.target.value)}
-                className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer"
-              >
-                {OPERARIOS.map((o) => (
-                  <option key={o.op} value={o.op}>
-                    {o.op}
-                  </option>
-                ))}
-              </select>
-            )}
+          <div className="flex items-center gap-2 flex-wrap mt-1 text-sm">
+            <label className="flex items-center gap-1.5 text-zinc-400">
+              Desde
+              <input type="date" value={desde} max={hasta || undefined}
+                onChange={(e) => setDesde(e.target.value)}
+                className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer" />
+            </label>
+            <label className="flex items-center gap-1.5 text-zinc-400">
+              Hasta
+              <input type="date" value={hasta} min={desde || undefined}
+                onChange={(e) => setHasta(e.target.value)}
+                className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer" />
+            </label>
+            <button onClick={reload} title="Refrescar" disabled={loading}
+              className="text-zinc-400 hover:text-yellow-400 transition-colors p-2 disabled:opacity-40">
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            </button>
           </div>
         </div>
 
-        {vista === "comp" ? (
+        <div className="flex items-center gap-2 flex-wrap mb-4">
+          <Seg<Vista> val={vista} onChange={setVista}
+            opts={[{ v: "comp", label: "Comparativa", icon: Users }, { v: "ind", label: "Individual", icon: User }]} />
+          <Seg<Gran> val={gran} onChange={setGran}
+            opts={[
+              { v: "dia", label: "Diario", icon: CalendarDays },
+              { v: "sem", label: "Semanal", icon: CalendarRange },
+              { v: "mes", label: "Mensual", icon: Calendar },
+            ]} />
+          {vista === "ind" && (
+            <select value={op} onChange={(e) => setOp(e.target.value)}
+              className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer max-w-[200px]">
+              {ranking.map((r) => <option key={r.op} value={r.op}>{r.op}</option>)}
+            </select>
+          )}
+        </div>
+
+        {!hayDatos ? (
+          <div className="flex flex-col items-center justify-center py-28 gap-3 text-center">
+            {loading ? <Loader2 size={40} className="text-yellow-400 animate-spin" />
+              : <CalendarRange size={44} className="text-zinc-700" />}
+            <p className="text-zinc-400 font-medium">
+              {loading ? "Consultando la base…" : "Sin OTs de Picking en el rango seleccionado"}
+            </p>
+            {!loading && <p className="text-zinc-600 text-sm">Ajustá Desde / Hasta y reintentá.</p>}
+          </div>
+        ) : vista === "comp" ? (
           <>
             <Grid cols={4}>
-              <KPI
-                label="Preparados (OTs)"
-                value={fmtNum(totPrep)}
-                sub={gran === "mes" ? `${serie.length} meses` : `${serie.length} días`}
-                accent="yellow"
-              />
-              <KPI label="Ingresados (demo)" value={fmtNum(totIng)} sub="provisorio" accent="neutral" />
-              <KPI
-                label="% cumplido"
-                value={`${pct} %`}
-                sub="preparado / ingresado"
-                accent={pct >= 95 ? "green" : "amber"}
-              />
-              <KPI label="Preparadores" value={fmtNum(ranking.length)} sub="activos en el período" accent="amber" />
+              <KPI label="OTs preparadas" value={fmtNum(totOts)} sub={`${buckets.length} ${granLabel}s`} accent="yellow" />
+              <KPI label="Ítems recolectados" value={fmtNum(totItems)} accent="green" />
+              <KPI label="Preparadores" value={fmtNum(ranking.length)} sub="activos en el período" accent="neutral" />
+              <KPI label={`Prom. OTs / ${granLabel}`} value={fmtNum(buckets.length ? totOts / buckets.length : 0, 1)} accent="amber" />
             </Grid>
 
             <SectionTitle>Ranking de preparadores — OTs en el período</SectionTitle>
             <Panel>
-              <ChartBar
-                data={ranking}
-                xKey="op"
-                height={320}
-                horizontal
-                series={[{ key: "v", name: "OTs preparadas", color: C.brand }]}
-                fmt={(n) => fmtNum(n)}
-                showValues
-              />
+              <ChartBar data={rankingData} xKey="op" height={Math.max(220, ranking.length * 34)} horizontal
+                series={[{ key: "ots", name: "OTs", color: C.brand }]} fmt={(n) => fmtNum(n)} showValues />
             </Panel>
 
-            <SectionTitle>Ingresados vs preparados por {granLabel}</SectionTitle>
+            <SectionTitle>OTs por {granLabel} (todo el equipo)</SectionTitle>
             <Panel>
-              <ChartBar
-                data={temporal}
-                xKey="lbl"
-                height={300}
-                series={tSeries}
-                fmt={(n) => fmtNum(n)}
-                angle={angle}
-              />
+              <ChartBar data={bucketSerie} xKey="lbl" height={300}
+                series={[{ key: "ots", name: "OTs", color: C.brand }]} fmt={(n) => fmtNum(n)} angle={angle} showValues />
             </Panel>
+
+            <SectionTitle>Detalle por preparador</SectionTitle>
+            <Table<RankRow>
+              cols={[
+                { key: "op", label: "Preparador" },
+                { key: "ots", label: "OTs", num: true, render: (r) => fmtNum(r.ots) },
+                { key: "items", label: "Ítems", num: true, render: (r) => fmtNum(r.items) },
+                { key: "otsb", label: `OTs/${granLabel}`, num: true, render: (r) => fmtNum(buckets.length ? r.ots / buckets.length : 0, 1) },
+                { key: "ipo", label: "Ítems/OT", num: true, render: (r) => fmtNum(r.ots ? r.items / r.ots : 0, 1) },
+              ]}
+              rows={ranking} max={50} maxH={460}
+            />
           </>
         ) : (
           <>
             <Grid cols={4}>
-              <KPI
-                label={`OTs en el período`}
-                value={fmtNum(suTot)}
-                sub={gran === "mes" ? `${serie.length} meses` : `${serie.length} días`}
-                accent="yellow"
-              />
-              <KPI label={`Promedio por ${granLabel}`} value={fmtNum(prom, 1)} accent="green" />
-              <KPI label="Ítems / hora" value={fmtNum(info.iph, 1)} sub="histórico" accent="neutral" />
-              <KPI
-                label="Puesto en ranking"
-                value={puesto > 0 ? `${puesto}º` : "—"}
-                sub={`de ${ranking.length}`}
-                accent="amber"
-              />
+              <KPI label="OTs en el período" value={fmtNum(suOts)} sub={`${buckets.length} ${granLabel}s`} accent="yellow" />
+              <KPI label="Ítems recolectados" value={fmtNum(suItems)} accent="green" />
+              <KPI label={`Prom. OTs / ${granLabel}`} value={fmtNum(promOts, 1)} accent="neutral" />
+              <KPI label="Puesto en ranking" value={puesto > 0 ? `${puesto}º` : "—"} sub={`de ${ranking.length}`} accent="amber" />
             </Grid>
 
             <SectionTitle>Progreso de {op} — OTs por {granLabel}</SectionTitle>
             <Panel>
-              <ChartBar
-                data={suSerie}
-                xKey="lbl"
-                height={300}
-                series={[{ key: "v", name: "OTs", color: C.brand }]}
-                fmt={(n) => fmtNum(n)}
-                angle={angle}
-                showValues
-              />
+              <ChartBar data={suBuckets} xKey="lbl" height={300}
+                series={[{ key: "ots", name: "OTs", color: C.brand }]} fmt={(n) => fmtNum(n)} angle={angle} showValues />
+            </Panel>
+
+            <SectionTitle>Ítems recolectados por {granLabel}</SectionTitle>
+            <Panel>
+              <ChartBar data={suBuckets} xKey="lbl" height={240}
+                series={[{ key: "items", name: "Ítems", color: C.green }]} fmt={(n) => fmtNum(n)} angle={angle} showValues />
             </Panel>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
-              <Panel title="Aporte al total del período" accent={`(${op})`}>
+              <Panel title="Aporte al total del período" accent={`(${clip(op)})`}>
                 <ChartDonut data={aporte} height={280} fmt={(n) => fmtNum(n)} />
               </Panel>
-              <Panel title="Resumen histórico" accent={`(${op})`}>
-                <div className="grid grid-cols-2 gap-3">
-                  <KPI label="OTs totales" value={fmtNum(info.ots)} accent="yellow" />
-                  <KPI label="Ítems totales" value={fmtNum(info.items)} accent="green" />
-                  <KPI label="Horas trabajadas" value={fmtNum(info.horas, 0)} accent="neutral" />
-                  <KPI label="OTs por día" value={fmtNum(info.otsdia, 1)} accent="amber" />
-                </div>
+              <Panel title={`Detalle por ${granLabel}`} accent={`(${clip(op)})`}>
+                <Table<BucketRow>
+                  cols={[
+                    { key: "lbl", label: granLabel },
+                    { key: "ots", label: "OTs", num: true, render: (r) => fmtNum(r.ots) },
+                    { key: "items", label: "Ítems", num: true, render: (r) => fmtNum(r.items) },
+                    { key: "ipo", label: "Ítems/OT", num: true, render: (r) => fmtNum(r.ots ? r.items / r.ots : 0, 1) },
+                  ]}
+                  rows={suBuckets} max={60} maxH={320}
+                />
               </Panel>
             </div>
           </>
         )}
 
         <p className="text-[11px] text-zinc-600 mt-6 leading-relaxed">
-          Preparados = datos reales del WMS (proceso Picking, OTs). Ingresados = valor provisorio de
-          demostración; en producción saldrá de Magnos (pedidos registrados ese día). Reemplazar el bloque MOCK
-          por un fetch al endpoint de datos.
+          Datos reales del WMS (proceso Picking) vía SQL en vivo. 1 OT = 1 fila; «Ítems» = ítems recolectados.
+          Semanas lunes→domingo (ISO).
         </p>
       </main>
     </div>
