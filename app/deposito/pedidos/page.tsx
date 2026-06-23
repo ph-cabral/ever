@@ -5,18 +5,26 @@ import {
   Loader2, RefreshCw, AlertTriangle, type LucideIcon,
 } from "lucide-react";
 import {
+  ResponsiveContainer, ComposedChart, Bar, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+} from "recharts";
+import {
   PageTitle, SectionTitle, Panel, KPI, Grid, ChartBar, ChartDonut, Table,
   fmtNum, fmtMes, C,
 } from "../components/ui";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Pedidos preparados — REAL desde WMS (proceso Picking) vía /api/deposito/wms.
-// 1 fila = 1 OT. "Preparados" = OTs; "Ítems" = CANT. ITEM RECOLECTADOS.
-// Réplica de picking_semanal.html, con Día / Semana / Mes + comparativa/individual.
+// Pedidos preparados — REAL (WMS Picking) vs Ingresados (pedidos registrados).
+//   Preparado (OT) = filas de Picking de /api/deposito/wms (1 fila = 1 OT)
+//   Ingresados     = pedidos registrados/día de /api/deposito/ingresados
+//   Controlado     = 3ª barra, lista para cuando exista la fuente (ver TODO)
+//   % Eficiencia   = preparado / ingresado
+// Día / Semana (lun→dom ISO) / Mes · Comparativa / Individual.
 // ──────────────────────────────────────────────────────────────────────────────
 
 type Row = Record<string, unknown>;
 interface Rec { d: Date; op: string; items: number }
+interface IngRec { d: Date; pedidos: number }
 type Gran = "dia" | "sem" | "mes";
 type Vista = "comp" | "ind";
 
@@ -25,7 +33,6 @@ const fmtDM = (d: Date) => `${d.getDate()}/${d.getMonth() + 1}`;
 const clip = (s: string, n = 18) => (s.length > n ? s.slice(0, n) + "…" : s);
 const iso = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
-// ISO-8601 week (lun→dom), igual que picking_semanal.html
 function isoWeek(d: Date) {
   const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
   const day = (t.getUTCDay() + 6) % 7;
@@ -59,8 +66,43 @@ function parseRow(r: Row): Rec | null {
   const items = parseInt(String(r["CANT. ITEM RECOLECTADOS"] ?? "0").replace(/[^0-9]/g, ""), 10) || 0;
   return { d, op, items };
 }
+function parseIng(r: Row): IngRec | null {
+  const m = /(\d{4})-(\d{2})-(\d{2})/.exec(String(r["fecha"] ?? ""));
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  if (isNaN(d.getTime())) return null;
+  return { d, pedidos: Number(r["pedidos"]) || 0 };
+}
 
-// ─── Toggle de botones (estética EVER WEAR) ───────────────────────────────────
+const tooltipStyle = { background: "#0d0d0d", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12, color: C.text } as const;
+
+// ─── Combinado: barras (Ingresados/Preparado/Controlado) + línea % Eficiencia ──
+interface ComboRow { lbl: string; ing: number; prep: number; ctrl: number; ef: number }
+function ComboChart({ data, hasCtrl, maxEf, angle }: { data: ComboRow[]; hasCtrl: boolean; maxEf: number; angle: number }) {
+  if (!data.length) return <div className="h-[340px] flex items-center justify-center text-zinc-700 text-xs">Sin datos</div>;
+  return (
+    <ResponsiveContainer width="100%" height={360}>
+      <ComposedChart data={data} margin={{ top: 24, right: 8, left: 0, bottom: angle ? 52 : 20 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+        <XAxis dataKey="lbl" stroke={C.border} tick={{ fontSize: 11, fill: C.muted }}
+          angle={angle} textAnchor={angle ? "end" : "middle"} height={angle ? 60 : 24} interval={0} />
+        <YAxis yAxisId="left" stroke={C.border} width={46} tick={{ fontSize: 11, fill: C.muted }} />
+        <YAxis yAxisId="right" orientation="right" domain={[0, maxEf]} stroke={C.border} width={44}
+          tick={{ fontSize: 11, fill: C.muted }} tickFormatter={(v) => `${v}%`} />
+        <Tooltip contentStyle={tooltipStyle}
+          formatter={(value: number | string, name: string) =>
+            name === "% Eficiencia" ? `${value}%` : fmtNum(Number(value))} />
+        <Legend wrapperStyle={{ fontSize: 11, color: C.muted, paddingBottom: 6 }} />
+        <Bar yAxisId="left" dataKey="ing" name="Pedidos Ingresados" fill="#d4d4d8" radius={[3, 3, 0, 0]} maxBarSize={46} />
+        <Bar yAxisId="left" dataKey="prep" name="Preparado (OT)" fill={C.green} radius={[3, 3, 0, 0]} maxBarSize={46} />
+        {hasCtrl && <Bar yAxisId="left" dataKey="ctrl" name="Controlado" fill={C.brand} radius={[3, 3, 0, 0]} maxBarSize={46} />}
+        <Line yAxisId="right" type="monotone" dataKey="ef" name="% Eficiencia" stroke={C.red} strokeWidth={2} dot={{ r: 3 }} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─── Toggle de botones ────────────────────────────────────────────────────────
 function Seg<T extends string>({
   opts, val, onChange,
 }: { opts: { v: T; label: string; icon: LucideIcon }[]; val: T; onChange: (v: T) => void }) {
@@ -70,15 +112,11 @@ function Seg<T extends string>({
         const active = o.v === val;
         const Icon = o.icon;
         return (
-          <button
-            key={o.v}
-            onClick={() => onChange(o.v)}
+          <button key={o.v} onClick={() => onChange(o.v)}
             className={`flex items-center gap-1.5 px-3.5 py-1.5 text-sm transition-colors ${
               active ? "bg-yellow-400 text-black font-semibold" : "bg-[#1f1f1f] text-zinc-400 hover:text-zinc-100"
-            }`}
-          >
-            <Icon size={15} />
-            {o.label}
+            }`}>
+            <Icon size={15} />{o.label}
           </button>
         );
       })}
@@ -96,10 +134,10 @@ export default function PedidosPreparadosPage() {
   const [gran, setGran] = useState<Gran>("sem");
   const [op, setOp] = useState("");
   const [rows, setRows] = useState<Row[] | null>(null);
+  const [ingRows, setIngRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Default: últimas ~10 semanas → hoy (cliente, evita mismatch SSR).
   useEffect(() => {
     const t = new Date();
     setHasta(iso(t));
@@ -111,24 +149,34 @@ export default function PedidosPreparadosPage() {
     let cancel = false;
     (async () => {
       setLoading(true); setError(null);
+      const errs: string[] = [];
       try {
-        const r = await fetch(`/api/deposito/wms?desde=${desde}&hasta=${hasta}`, { cache: "no-store" });
-        const j = (await r.json().catch(() => ({}))) as { rows?: Row[]; error?: string };
-        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-        if (!cancel) setRows((j.rows ?? []).filter((x) => String(x["PROCESO"] ?? "") === "Picking"));
+        const [wRes, iRes] = await Promise.all([
+          fetch(`/api/deposito/wms?desde=${desde}&hasta=${hasta}`, { cache: "no-store" }),
+          fetch(`/api/deposito/ingresados?desde=${desde}&hasta=${hasta}`, { cache: "no-store" }),
+        ]);
+        const wj = (await wRes.json().catch(() => ({}))) as { rows?: Row[]; error?: string };
+        if (!wRes.ok) throw new Error(wj.error || `WMS HTTP ${wRes.status}`);
+        if (!cancel) setRows((wj.rows ?? []).filter((x) => String(x["PROCESO"] ?? "") === "Picking"));
+        const ij = (await iRes.json().catch(() => ({}))) as { rows?: Row[]; error?: string };
+        if (!iRes.ok) errs.push("Ingresados: " + (ij.error || `HTTP ${iRes.status}`));
+        else if (!cancel) setIngRows(ij.rows ?? []);
       } catch (e) {
-        if (!cancel) { setError(e instanceof Error ? e.message : "Error al cargar"); setRows([]); }
+        errs.push(e instanceof Error ? e.message : "Error al cargar");
+        if (!cancel) setRows([]);
       } finally {
-        if (!cancel) setLoading(false);
+        if (!cancel) { setError(errs.length ? errs.join(" · ") : null); setLoading(false); }
       }
     })();
     return () => { cancel = true; };
   }, [desde, hasta]);
 
   const recs = useMemo(() => (rows ?? []).map(parseRow).filter((x): x is Rec => x !== null), [rows]);
+  const ingRecs = useMemo(() => ingRows.map(parseIng).filter((x): x is IngRec => x !== null), [ingRows]);
   const granLabel = gran === "mes" ? "mes" : gran === "sem" ? "semana" : "día";
+  const angle = gran === "mes" ? 0 : -35;
 
-  // Agregados
+  // Preparados: ranking + buckets + por operario/bucket
   const { ranking, buckets, perOpBucket, totOts, totItems } = useMemo(() => {
     const opTot = new Map<string, { ots: number; items: number }>();
     const bk = new Map<string, { label: string; sort: string; ots: number; items: number }>();
@@ -145,17 +193,32 @@ export default function PedidosPreparadosPage() {
     return { ranking, buckets, perOpBucket: opBk, totOts: recs.length, totItems: recs.reduce((a, r) => a + r.items, 0) };
   }, [recs, gran]);
 
-  // Mantener un operario válido seleccionado
+  // Combinado Ingresados vs Preparado (+ Controlado a futuro) por bucket
+  const combo = useMemo<ComboRow[]>(() => {
+    const map = new Map<string, { label: string; sort: string; ing: number; prep: number; ctrl: number }>();
+    const get = (k: string, label: string, sort: string) => {
+      let o = map.get(k); if (!o) { o = { label, sort, ing: 0, prep: 0, ctrl: 0 }; map.set(k, o); } return o;
+    };
+    for (const r of recs) { const b = bucketOf(r.d, gran); get(b.key, b.label, b.sort).prep++; }
+    for (const r of ingRecs) { const b = bucketOf(r.d, gran); get(b.key, b.label, b.sort).ing += r.pedidos; }
+    // TODO Controlado: cuando haya fuente (pedidos controlados/día), sumar get(...).ctrl
+    return [...map.values()].sort((a, b) => a.sort.localeCompare(b.sort)).map((o) => ({
+      lbl: o.label, ing: o.ing, prep: o.prep, ctrl: o.ctrl,
+      ef: o.ing > 0 ? Math.round((o.prep / o.ing) * 1000) / 10 : 0,
+    }));
+  }, [recs, ingRecs, gran]);
+
+  const totIng = ingRecs.reduce((a, r) => a + r.pedidos, 0);
+  const efGlobal = totIng > 0 ? Math.round((totOts / totIng) * 1000) / 10 : 0;
+  const hasCtrl = combo.some((c) => c.ctrl > 0);
+  const maxEf = Math.max(100, ...combo.map((c) => c.ef));
+  const maxEfAxis = Math.ceil(maxEf / 10) * 10;
+
   useEffect(() => {
     if (ranking.length && !ranking.some((r) => r.op === op)) setOp(ranking[0].op);
   }, [ranking, op]);
 
-  const angle = gran === "mes" ? 0 : -35;
   const reload = () => { const h = hasta; setHasta(""); setTimeout(() => setHasta(h), 0); };
-
-  // Comparativa
-  const bucketSerie: BucketRow[] = buckets.map((b) => ({ lbl: b.label, ots: b.ots, items: b.items }));
-  const rankingData = ranking.map((r) => ({ op: clip(r.op), ots: r.ots }));
 
   // Individual
   const suBuckets: BucketRow[] = buckets.map((b) => {
@@ -171,7 +234,7 @@ export default function PedidosPreparadosPage() {
     { name: "Resto del equipo", value: Math.max(0, totOts - suOts), color: "#3f3f46" },
   ];
 
-  const hayDatos = recs.length > 0;
+  const hayDatos = recs.length > 0 || ingRecs.length > 0;
 
   return (
     <div className="min-h-screen bg-[#111111] text-white">
@@ -192,21 +255,17 @@ export default function PedidosPreparadosPage() {
 
       <main className="max-w-7xl mx-auto px-4 py-6">
         <div className="flex items-start justify-between gap-4 flex-wrap mb-1">
-          <PageTitle
-            title="Pedidos preparados"
-            sub="Productividad de preparadores — proceso Picking · OTs e ítems · Depósito Central"
-          />
+          <PageTitle title="Pedidos preparados"
+            sub="Ingresados vs preparados (Picking) y productividad por preparador · Depósito Central" />
           <div className="flex items-center gap-2 flex-wrap mt-1 text-sm">
             <label className="flex items-center gap-1.5 text-zinc-400">
               Desde
-              <input type="date" value={desde} max={hasta || undefined}
-                onChange={(e) => setDesde(e.target.value)}
+              <input type="date" value={desde} max={hasta || undefined} onChange={(e) => setDesde(e.target.value)}
                 className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer" />
             </label>
             <label className="flex items-center gap-1.5 text-zinc-400">
               Hasta
-              <input type="date" value={hasta} min={desde || undefined}
-                onChange={(e) => setHasta(e.target.value)}
+              <input type="date" value={hasta} min={desde || undefined} onChange={(e) => setHasta(e.target.value)}
                 className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer" />
             </label>
             <button onClick={reload} title="Refrescar" disabled={loading}
@@ -238,29 +297,29 @@ export default function PedidosPreparadosPage() {
             {loading ? <Loader2 size={40} className="text-yellow-400 animate-spin" />
               : <CalendarRange size={44} className="text-zinc-700" />}
             <p className="text-zinc-400 font-medium">
-              {loading ? "Consultando la base…" : "Sin OTs de Picking en el rango seleccionado"}
+              {loading ? "Consultando la base…" : "Sin datos en el rango seleccionado"}
             </p>
             {!loading && <p className="text-zinc-600 text-sm">Ajustá Desde / Hasta y reintentá.</p>}
           </div>
         ) : vista === "comp" ? (
           <>
             <Grid cols={4}>
-              <KPI label="OTs preparadas" value={fmtNum(totOts)} sub={`${buckets.length} ${granLabel}s`} accent="yellow" />
+              <KPI label="Preparado (OTs)" value={fmtNum(totOts)} sub={`${buckets.length} ${granLabel}s`} accent="yellow" />
+              <KPI label="Pedidos ingresados" value={fmtNum(totIng)} accent="neutral" />
+              <KPI label="% Eficiencia" value={`${fmtNum(efGlobal, 1)} %`} sub="preparado / ingresado" accent={efGlobal >= 90 ? "green" : "amber"} />
               <KPI label="Ítems recolectados" value={fmtNum(totItems)} accent="green" />
-              <KPI label="Preparadores" value={fmtNum(ranking.length)} sub="activos en el período" accent="neutral" />
-              <KPI label={`Prom. OTs / ${granLabel}`} value={fmtNum(buckets.length ? totOts / buckets.length : 0, 1)} accent="amber" />
             </Grid>
+
+            <SectionTitle>Ingresos vs Preparados — por {granLabel}</SectionTitle>
+            <Panel>
+              <ComboChart data={combo} hasCtrl={hasCtrl} maxEf={maxEfAxis} angle={angle} />
+            </Panel>
 
             <SectionTitle>Ranking de preparadores — OTs en el período</SectionTitle>
             <Panel>
-              <ChartBar data={rankingData} xKey="op" height={Math.max(220, ranking.length * 34)} horizontal
+              <ChartBar data={ranking.map((r) => ({ op: clip(r.op), ots: r.ots }))} xKey="op"
+                height={Math.max(220, ranking.length * 34)} horizontal
                 series={[{ key: "ots", name: "OTs", color: C.brand }]} fmt={(n) => fmtNum(n)} showValues />
-            </Panel>
-
-            <SectionTitle>OTs por {granLabel} (todo el equipo)</SectionTitle>
-            <Panel>
-              <ChartBar data={bucketSerie} xKey="lbl" height={300}
-                series={[{ key: "ots", name: "OTs", color: C.brand }]} fmt={(n) => fmtNum(n)} angle={angle} showValues />
             </Panel>
 
             <SectionTitle>Detalle por preparador</SectionTitle>
@@ -316,8 +375,8 @@ export default function PedidosPreparadosPage() {
         )}
 
         <p className="text-[11px] text-zinc-600 mt-6 leading-relaxed">
-          Datos reales del WMS (proceso Picking) vía SQL en vivo. 1 OT = 1 fila; «Ítems» = ítems recolectados.
-          Semanas lunes→domingo (ISO).
+          Preparado (OT) = WMS Picking (1 fila = 1 OT). Ingresados = pedidos registrados/día (Magnus, mismo filtro de comprobantes
+          que Indicadores). Controlado: 3ª barra lista para cuando se defina la fuente. Semanas lunes→domingo (ISO). SQL en vivo.
         </p>
       </main>
     </div>

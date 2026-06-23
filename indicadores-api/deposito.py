@@ -11,7 +11,7 @@ OJO compatibilidad con lib/deposito/parseDeposito.ts:
   * FECHA EJECUCION en dd/mm/yyyy (CONVERT 103) para que parseFecha() use el
     regex local y no haya corrimiento por timezone (ART = UTC-3).
 """
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 from db import get_connection
 
@@ -87,5 +87,41 @@ def fetch_tiempo():
         cur.execute("SET DATEFORMAT ymd;")
         cur.execute(SQL_TIEMPO)
         return _rows(cur)
+    finally:
+        conn.close()
+
+
+# ── Pedidos ingresados (registrados) por día ──────────────────────────────────
+# EVERWEAR.dbo.VenFer_PedidoCabecera.FechaPedido = entero de días desde 1800-12-28
+# (base Magnus). Mismo filtro de comprobantes que /indicadores.
+_BASE_PEDIDO = date(1800, 12, 28)
+
+SQL_INGRESADOS = """
+SELECT p.FechaPedido AS f, COUNT(*) AS pedidos
+FROM EVERWEAR.dbo.VenFer_PedidoCabecera p
+WHERE p.CompCodigo NOT IN (9, 49, 208, 410)
+  AND p.FechaPedido BETWEEN ? AND ?
+GROUP BY p.FechaPedido
+"""
+
+
+def fetch_ingresados(desde, hasta):
+    """desde/hasta = datetime|date. Devuelve [{fecha 'YYYY-MM-DD', pedidos}]."""
+    dd = desde.date() if hasattr(desde, "date") else desde
+    dh = hasta.date() if hasattr(hasta, "date") else hasta
+    d0 = (dd - _BASE_PEDIDO).days
+    d1 = (dh - _BASE_PEDIDO).days
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd;")
+        cur.execute(SQL_INGRESADOS, (d0, d1))
+        out = []
+        for f, pedidos in cur.fetchall():
+            if f is None:
+                continue
+            fecha = (_BASE_PEDIDO + timedelta(days=int(f))).isoformat()
+            out.append({"fecha": fecha, "pedidos": int(pedidos)})
+        return out
     finally:
         conn.close()

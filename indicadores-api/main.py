@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from db import get_connection
 from utils import construir_timestamps, calcular_tiempos, COLUMNAS_TIEMPO
-from deposito import fetch_wms, fetch_tiempo
+from deposito import fetch_wms, fetch_tiempo, fetch_ingresados
 from datetime import date, datetime, timedelta
 
 app = FastAPI()
@@ -131,6 +131,24 @@ def deposito_tiempo():
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
     return {"total": len(rows), "rows": rows}
+
+@app.get("/deposito/ingresados")
+def deposito_ingresados(
+    desde: str | None = Query(default=None),
+    hasta: str | None = Query(default=None),
+):
+    """Pedidos registrados por día (lo que ingresó) en el rango."""
+    try:
+        d, h = _parse_rango(desde, hasta)
+        rows = fetch_ingresados(d, h)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+    return {
+        "desde": d.date().isoformat(),
+        "hasta": h.date().isoformat(),
+        "total": sum(r["pedidos"] for r in rows),
+        "rows": rows,
+    }
 
 @app.get("/indicadores/tiempos")
 def get_tiempos(meses: int = Query(default=7, ge=1, le=12)):
