@@ -4,7 +4,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from db import get_connection
 from utils import construir_timestamps, calcular_tiempos, COLUMNAS_TIEMPO
-from datetime import date
+from deposito import fetch_wms, fetch_tiempo
+from datetime import date, datetime, timedelta
 
 app = FastAPI()
 
@@ -92,6 +93,44 @@ def promedio_seguro(serie: pd.Series) -> float:
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+# ── Depósito (reemplazo de los Excel de /deposito) ────────────────────────────
+
+def _parse_rango(desde: str | None, hasta: str | None):
+    """desde/hasta = 'YYYY-MM-DD'. Default: últimos 6 meses hasta hoy."""
+    hoy = date.today()
+    h = datetime.strptime(hasta, "%Y-%m-%d") if hasta else datetime(hoy.year, hoy.month, hoy.day)
+    d = datetime.strptime(desde, "%Y-%m-%d") if desde else (h - timedelta(days=180))
+    d = d.replace(hour=0, minute=0, second=0, microsecond=0)
+    h = h.replace(hour=23, minute=59, second=59, microsecond=0)
+    return d, h
+
+@app.get("/deposito/wms")
+def deposito_wms(
+    desde: str | None = Query(default=None),
+    hasta: str | None = Query(default=None),
+):
+    """Productividad de Operarios (WMS) por rango de OTFechaHoraEjecucion."""
+    try:
+        d, h = _parse_rango(desde, hasta)
+        rows = fetch_wms(d, h)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+    return {
+        "desde": d.date().isoformat(),
+        "hasta": h.date().isoformat(),
+        "total": len(rows),
+        "rows": rows,
+    }
+
+@app.get("/deposito/tiempo")
+def deposito_tiempo():
+    """Tiempo de Pedidos = EVERWEAR.dbo.TMP_TiempoDePedidos (snapshot ~90 días)."""
+    try:
+        rows = fetch_tiempo()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+    return {"total": len(rows), "rows": rows}
 
 @app.get("/indicadores/tiempos")
 def get_tiempos(meses: int = Query(default=7, ge=1, le=12)):

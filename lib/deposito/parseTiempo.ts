@@ -84,7 +84,13 @@ function etapa(regs: Reg[], clave: string): EtapaRow {
   };
 }
 
-export function parseTiempo(rows: Row[], fileName: string): TiempoData {
+export function parseTiempo(
+  rows: Row[],
+  fileName: string,
+  opts?: { desde?: string; hasta?: string },
+): TiempoData {
+  const lo = opts?.desde ? new Date(`${opts.desde}T00:00:00`) : null;
+  const hi = opts?.hasta ? new Date(`${opts.hasta}T23:59:59`) : null;
   const filtrados: Reg[] = [];
   for (const row of rows) {
     if (!PEDIDOS.has(s(row[COL.cod]))) continue;
@@ -92,6 +98,8 @@ export function parseTiempo(rows: Row[], fileName: string): TiempoData {
     if (!ESTADOS.has(s(row[COL.estado]))) continue;
     const fecha = parseFecha(row[COL.fecha]);
     if (!fecha) continue;
+    if (lo && fecha < lo) continue;
+    if (hi && fecha > hi) continue;
     const mm = String(fecha.getMonth() + 1).padStart(2, "0");
     filtrados.push({
       mes: `${fecha.getFullYear()}-${mm}`,

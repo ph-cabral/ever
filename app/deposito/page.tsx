@@ -1,18 +1,17 @@
 "use client";
-import { useState, useRef, useCallback, useMemo } from "react";
-import { fmtNum, fmtMes } from "./components/ui";
+import { useState, useEffect, useMemo } from "react";
 import {
   ResumenTab,
   ProcesoTab,
   OperariosTab,
   TiempoTab,
-  MesSelect,
 } from "./components/tabs";
 import {
   LayoutDashboard, PackageSearch, Repeat, MapPin, Users, Clock,
-  UploadCloud, Loader2, Trash2, FileSpreadsheet, AlertTriangle,
+  Loader2, RefreshCw, AlertTriangle, FileSpreadsheet,
 } from "lucide-react";
 import { useDepositoData } from "@/lib/deposito/store";
+import { filterDepositoByOperario } from "@/lib/deposito/parseDeposito";
 
 const TABS = [
   { id: "resumen", label: "Resumen", icon: LayoutDashboard, needs: "prod" },
@@ -24,68 +23,52 @@ const TABS = [
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
-export default function DepositoPage() {
-  const { prod, tiempo, hydrated, uploading, error, upload, clear } = useDepositoData();
-  const [tab, setTab] = useState<TabId>("resumen");
-  const [dragging, setDragging] = useState(false);
-  const [mes, setMes] = useState("__all__");
-  const mesesAll = useMemo(
-    () =>
-      [...new Set([...(prod?.meses ?? []), ...(tiempo?.meses ?? [])])].sort(),
-    [prod, tiempo],
-  );
-  const dragCount = useRef(0);
+const iso = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault(); dragCount.current = 0; setDragging(false);
-    const f = Array.from(e.dataTransfer.files).find((x) => x.name.match(/\.(csv|xlsx|xls)$/i));
-    if (f) upload(f);
-  }, [upload]);
+export default function DepositoPage() {
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const [operario, setOperario] = useState("__all__");
+  const [tab, setTab] = useState<TabId>("resumen");
+
+  // Rango por defecto (cliente, evita mismatch SSR): últimos ~6 meses → hoy.
+  useEffect(() => {
+    const t = new Date();
+    setHasta(iso(t));
+    setDesde(iso(new Date(t.getFullYear(), t.getMonth() - 6, 1)));
+  }, []);
+
+  const { prod, tiempo, loading, error, reload } = useDepositoData(desde, hasta);
+
+  // Filtro por operario (cliente): recalcula agregados sin re-consultar SQL.
+  const viewProd = useMemo(
+    () => (prod ? filterDepositoByOperario(prod, operario) : null),
+    [prod, operario],
+  );
+
+  // Si el operario elegido ya no está en el nuevo rango, volver a "Todos".
+  useEffect(() => {
+    if (operario !== "__all__" && prod && !prod.operarios.includes(operario)) {
+      setOperario("__all__");
+    }
+  }, [prod, operario]);
 
   const current = TABS.find((t) => t.id === tab)!;
   const needs = current.needs;
-  const ready = needs === "tiempo" ? !!tiempo : !!prod;
+  const ready = needs === "tiempo" ? !!tiempo : !!viewProd;
 
   return (
-    <div
-      className="min-h-screen bg-[#111111] text-white relative"
-      onDragEnter={(e) => {
-        e.preventDefault();
-        dragCount.current++;
-        setDragging(true);
-      }}
-      onDragOver={(e) => e.preventDefault()}
-      onDragLeave={(e) => {
-        e.preventDefault();
-        dragCount.current--;
-        if (dragCount.current <= 0) setDragging(false);
-      }}
-      onDrop={onDrop}
-    >
-      {dragging && (
-        <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-          <div className="flex flex-col items-center gap-4 border-2 border-dashed border-yellow-400 rounded-2xl px-16 py-12">
-            <UploadCloud size={56} className="text-yellow-400" />
-            <p className="text-lg font-semibold text-zinc-100">
-              Soltá el archivo para actualizar
-            </p>
-            <p className="text-sm text-zinc-500">
-              Producción (prod.csv) o Tiempo de Pedidos (.xlsx) — se detecta
-              solo
-            </p>
-          </div>
-        </div>
-      )}
-
-      {(uploading || error) && (
-        <div className="fixed bottom-6 right-6 z-[110]">
-          {uploading && (
+    <div className="min-h-screen bg-[#111111] text-white relative">
+      {/* Toasts */}
+      {(loading || error) && (
+        <div className="fixed bottom-6 right-6 z-[110] flex flex-col gap-2">
+          {loading && (
             <div className="flex items-center gap-3 bg-[#1A1A1A] border border-yellow-400/40 rounded-xl px-5 py-3 text-sm text-zinc-200">
-              <Loader2 size={16} className="animate-spin text-yellow-400" />{" "}
-              Procesando archivo…
+              <Loader2 size={16} className="animate-spin text-yellow-400" /> Consultando la base…
             </div>
           )}
-          {!uploading && error && (
+          {error && (
             <div className="flex items-center gap-3 bg-[#1A1A1A] border border-red-400/40 rounded-xl px-5 py-3 text-sm text-red-300">
               <AlertTriangle size={16} className="text-red-400" /> {error}
             </div>
@@ -94,62 +77,64 @@ export default function DepositoPage() {
       )}
 
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 flex items-center justify-between px-8 h-16">
-        <div className="flex items-center gap-4">
+      <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 flex items-center justify-between px-8 h-16 gap-4">
+        <div className="flex items-center gap-4 shrink-0">
           <span className="font-bold text-yellow-400 text-2xl tracking-wide uppercase">
-            EVER WEAR{" "}
-            <span className="text-sm tracking-[3px] font-normal">S.A.</span>
+            EVER WEAR <span className="text-sm tracking-[3px] font-normal">S.A.</span>
           </span>
           <div className="w-px h-7 bg-yellow-400/30" />
-          <span className="text-zinc-500 text-sm">
+          <span className="text-zinc-500 text-sm hidden lg:inline">
             Depósito · Producción WMS
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2">
-            {mesesAll.length > 0 && (
-              <MesSelect
-                meses={["__all__", ...mesesAll]}
-                value={mes}
-                onChange={setMes}
-                nombre={(m) => (m === "__all__" ? "Todos" : fmtMes(m))}
-              />
-            )}
-            {(prod || tiempo) && (
-              <button
-                onClick={clear}
-                title="Limpiar datos"
-                className="text-zinc-600 hover:text-red-400 transition-colors p-2"
-              >
-                <Trash2 size={16} />
-              </button>
-            )}
-          </div>
-          {/* {prod?.resumen.nombreUltimoMes && (
-            <span className="text-xs text-zinc-300 bg-zinc-800 border border-zinc-700 rounded-full px-4 py-1.5">
-              Prod.:{" "}
-              <span className="text-yellow-400 font-semibold">
-                {prod.resumen.nombreUltimoMes}
-              </span>
-            </span>
-          )}
-          {tiempo?.mesReciente && (
-            <span className="text-xs text-zinc-300 bg-zinc-800 border border-zinc-700 rounded-full px-4 py-1.5">
-              Tiempos:{" "}
-              <span className="text-yellow-400 font-semibold">
-                {tiempo.mesReciente}
-              </span>
-            </span>
-          )} */}
-          {/* {(prod || tiempo) && (
-            <button
-              onClick={clear}
-              title="Limpiar datos"
-              className="text-zinc-600 hover:text-red-400 transition-colors p-2"
+
+        <div className="flex items-center gap-3 text-sm">
+          <label className="flex items-center gap-1.5 text-zinc-400">
+            Desde
+            <input
+              type="date"
+              value={desde}
+              max={hasta || undefined}
+              onChange={(e) => {
+                setDesde(e.target.value);
+                setHasta(e.target.value); // al elegir inicio, fin = inicio
+              }}
+              className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer"
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-zinc-400">
+            Hasta
+            <input
+              type="date"
+              value={hasta}
+              min={desde || undefined}
+              onChange={(e) => setHasta(e.target.value)}
+              className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer"
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-zinc-400">
+            Operario
+            <select
+              value={operario}
+              onChange={(e) => setOperario(e.target.value)}
+              className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer max-w-[180px]"
             >
-              <Trash2 size={16} />
-            </button>
-          )} */}
+              <option value="__all__">Todos</option>
+              {(prod?.operarios ?? []).map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            onClick={reload}
+            title="Refrescar"
+            disabled={loading}
+            className="text-zinc-400 hover:text-yellow-400 transition-colors p-2 disabled:opacity-40"
+          >
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+          </button>
         </div>
       </header>
 
@@ -172,36 +157,43 @@ export default function DepositoPage() {
 
       {/* Contenido */}
       <main className="max-w-[1400px] mx-auto px-8 py-8">
-        {!hydrated ? null : !ready ? (
+        {!ready ? (
           <div className="flex flex-col items-center justify-center py-28 gap-4 text-center">
-            <FileSpreadsheet size={48} className="text-zinc-700" />
-            <div>
-              <p className="text-zinc-400 font-medium">
-                {needs === "tiempo"
-                  ? "No hay datos de tiempos cargados"
-                  : "No hay datos de producción cargados"}
-              </p>
-              <p className="text-zinc-600 text-sm mt-1">
-                {needs === "tiempo"
-                  ? "Arrastrá el Excel «SITD_Tiempo de pedidos.xlsx» a cualquier parte de esta sección."
-                  : "Arrastrá el CSV de producción (prod.csv) a cualquier parte de esta sección."}
-              </p>
-            </div>
+            {loading ? (
+              <>
+                <Loader2 size={40} className="text-yellow-400 animate-spin" />
+                <p className="text-zinc-400 font-medium">Consultando la base…</p>
+              </>
+            ) : (
+              <>
+                <FileSpreadsheet size={48} className="text-zinc-700" />
+                <div>
+                  <p className="text-zinc-400 font-medium">
+                    {needs === "tiempo"
+                      ? "Sin datos de tiempos en el rango seleccionado"
+                      : "Sin datos de producción en el rango seleccionado"}
+                  </p>
+                  <p className="text-zinc-600 text-sm mt-1">
+                    Ajustá las fechas o el operario, o tocá refrescar.
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         ) : (
           <>
-            {tab === "resumen" && prod && <ResumenTab d={prod} mes={mes} />}
-            {tab === "picking" && prod && (
-              <ProcesoTab d={prod} proceso="Picking" mes={mes} />
+            {tab === "resumen" && viewProd && <ResumenTab d={viewProd} mes="__all__" />}
+            {tab === "picking" && viewProd && (
+              <ProcesoTab d={viewProd} proceso="Picking" mes="__all__" />
             )}
-            {tab === "librepo" && prod && (
-              <ProcesoTab d={prod} proceso="Libre + Reposicion" mes={mes} />
+            {tab === "librepo" && viewProd && (
+              <ProcesoTab d={viewProd} proceso="Libre + Reposicion" mes="__all__" />
             )}
-            {tab === "reub" && prod && (
-              <ProcesoTab d={prod} proceso="Re-Ubicacion" mes={mes} />
+            {tab === "reub" && viewProd && (
+              <ProcesoTab d={viewProd} proceso="Re-Ubicacion" mes="__all__" />
             )}
-            {tab === "operarios" && prod && <OperariosTab d={prod} />}
-            {tab === "tiempo" && tiempo && <TiempoTab d={tiempo} mes={mes} />}
+            {tab === "operarios" && viewProd && <OperariosTab d={viewProd} />}
+            {tab === "tiempo" && tiempo && <TiempoTab d={tiempo} mes="__all__" />}
           </>
         )}
       </main>

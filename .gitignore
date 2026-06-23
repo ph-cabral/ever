@@ -57,3 +57,7 @@ package.json
 img_sorteo/
 employees/
 emp/
+
+# python (indicadores-api)
+__pycache__/
+*.pyc

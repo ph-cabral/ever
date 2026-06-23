@@ -1,50 +1,55 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { DepositoData } from "./parseDeposito";
-import type { TiempoData } from "./parseTiempo";
+import { parseDepositoRows, type DepositoData } from "./parseDeposito";
+import { parseTiempo, type TiempoData } from "./parseTiempo";
 
-const KEY = "everwear_deposito_v2";
-
-interface Persisted { prod: DepositoData | null; tiempo: TiempoData | null }
-
-function load(): Persisted {
-  if (typeof window === "undefined") return { prod: null, tiempo: null };
-  try {
-    const raw = localStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as Persisted) : { prod: null, tiempo: null };
-  } catch { return { prod: null, tiempo: null }; }
-}
-function save(p: Persisted) {
-  if (typeof window === "undefined") return;
-  try { localStorage.setItem(KEY, JSON.stringify(p)); } catch (e) { console.error("deposito persist:", e); }
+interface ApiResp {
+  rows?: Record<string, unknown>[];
+  error?: string;
 }
 
-export function useDepositoData() {
+// Trae los datos de /deposito EN VIVO desde SQL Server (vía indicadores-api):
+//  - Productividad WMS filtrada por rango [desde, hasta] (en SQL)
+//  - Tiempo de Pedidos (tabla TMP), filtrada por el mismo rango (en cliente)
+// El filtro por operario se aplica en el cliente (ver page.tsx) para no re-consultar.
+export function useDepositoData(desde: string, hasta: string) {
   const [prod, setProd] = useState<DepositoData | null>(null);
   const [tiempo, setTiempo] = useState<TiempoData | null>(null);
-  const [hydrated, setHydrated] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { const p = load(); setProd(p.prod); setTiempo(p.tiempo); setHydrated(true); }, []);
-  useEffect(() => { if (hydrated) save({ prod, tiempo }); }, [prod, tiempo, hydrated]);
+  const reload = useCallback(async () => {
+    if (!desde || !hasta) return;
+    setLoading(true);
+    setError(null);
+    const errs: string[] = [];
 
-  const upload = useCallback(async (file: File) => {
-    if (!file.name.match(/\.(csv|xlsx|xls)$/i)) { setError("El archivo debe ser .csv o .xlsx"); return; }
-    setUploading(true); setError(null);
     try {
-      const fd = new FormData(); fd.append("file", file);
-      const res = await fetch("/api/deposito/parse", { method: "POST", body: fd });
-      if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error || `HTTP ${res.status}`);
-      const out = (await res.json()) as { kind: "produccion" | "tiempo"; data: DepositoData | TiempoData };
-      if (out.kind === "tiempo") setTiempo(out.data as TiempoData);
-      else setProd(out.data as DepositoData);
-    } catch (e) { setError(e instanceof Error ? e.message : "Error al procesar"); }
-    finally { setUploading(false); }
-  }, []);
+      const r = await fetch(`/api/deposito/wms?desde=${desde}&hasta=${hasta}`, { cache: "no-store" });
+      const j = (await r.json().catch(() => ({}))) as ApiResp;
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setProd(parseDepositoRows(j.rows ?? [], "WMS en vivo"));
+    } catch (e) {
+      errs.push("Productividad: " + (e instanceof Error ? e.message : "error"));
+    }
 
-  const clear = useCallback(() => { setProd(null); setTiempo(null); }, []);
+    try {
+      const r = await fetch(`/api/deposito/tiempo`, { cache: "no-store" });
+      const j = (await r.json().catch(() => ({}))) as ApiResp;
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setTiempo(parseTiempo(j.rows ?? [], "Tiempo en vivo", { desde, hasta }));
+    } catch (e) {
+      errs.push("Tiempo: " + (e instanceof Error ? e.message : "error"));
+    }
 
-  return { prod, tiempo, hydrated, uploading, error, upload, clear };
+    setError(errs.length ? errs.join(" · ") : null);
+    setLoading(false);
+  }, [desde, hasta]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  return { prod, tiempo, loading, error, reload };
 }
