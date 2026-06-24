@@ -1,4 +1,3 @@
-
 services:
   mangueras-app:
     build:
@@ -35,15 +34,16 @@ services:
       - 10.10.0.254
     dns_search:
       - everwear.local
-    volumes:
-      # - /tmp/krb5cc_1000:/tmp/krb5cc_1000:ro
-      - /opt/krb5cc:/krb:ro
     environment:
-      KRB5CCNAME: FILE:/krb/cc
+      # db.py lee KRB5_CCNAME (con guion bajo) y de ahi setea KRB5CCNAME.
+      KRB5_CCNAME: /opt/krb5cc/cc
+    volumes:
+      # Montar el DIRECTORIO del ccache (no el archivo): cuando kinit/-R reescribe
+      # /opt/krb5cc/cc el container ve el ticket renovado sin reiniciar (sin inode stale).
+      - /opt/krb5cc:/opt/krb5cc:ro
     restart: unless-stopped
     networks:
       - ai-net
 networks:
   ai-net:
     external: true
-
