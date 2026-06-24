@@ -7,7 +7,8 @@ load_dotenv()
 def get_connection(database: str | None = None):
     server   = os.getenv("SQL_SERVER")
     database = database or os.getenv("SQL_DATABASE")
-    ccname   = os.getenv("KRB5_CCNAME", "/tmp/krb5cc_1000")
+    # ccname   = os.getenv("KRB5_CCNAME", "/tmp/krb5cc_1000")
+    ccname   = os.getenv("KRB5_CCNAME", "/opt/krb5cc/cc")
 
     os.environ["KRB5CCNAME"] = ccname
 

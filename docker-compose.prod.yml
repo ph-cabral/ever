@@ -36,7 +36,10 @@ services:
     dns_search:
       - everwear.local
     volumes:
-      - /tmp/krb5cc_1000:/tmp/krb5cc_1000:ro
+      # - /tmp/krb5cc_1000:/tmp/krb5cc_1000:ro
+      - /opt/krb5cc:/krb:ro
+    environment:
+      KRB5CCNAME: FILE:/krb/cc
     restart: unless-stopped
     networks:
       - ai-net
