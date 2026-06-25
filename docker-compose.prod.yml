@@ -8,7 +8,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      AUTH_SECRET: ${AUTH_SECRET}   # firma la cookie de sesión (lib/auth/session.ts) — OBLIGATORIO en prod
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3001}
       NODE_ENV: production
       INDICADORES_API_URL: http://indicadores-api:8001
