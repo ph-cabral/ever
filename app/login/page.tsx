@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LogIn, Loader2 } from "lucide-react";
+import { LogIn, Loader2, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [checking, setChecking] = useState(true);
   const [bootstrap, setBootstrap] = useState(false);
+  const [setupError, setSetupError] = useState(false);
   const [dni, setDni] = useState("");
   const [password, setPassword] = useState("");
   const [entrando, setEntrando] = useState(false);
@@ -29,14 +30,19 @@ export default function LoginPage() {
     (async () => {
       try {
         const r = await fetch("/api/auth/me");
-        const data = await r.json();
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || data.dbReady === false) {
+          // La tabla everwear.usuario no existe o falta `prisma generate`.
+          setSetupError(true);
+          return;
+        }
         if (data.usuario) {
           router.replace(returnTo());
           return;
         }
         setBootstrap(!data.hasUsers);
       } catch {
-        /* mostramos el form igual */
+        setSetupError(true);
       } finally {
         setChecking(false);
       }
@@ -74,18 +80,45 @@ export default function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="text-lg">
-            {bootstrap ? "Crear primer usuario" : "EverWear · Ingresar"}
+            {setupError
+              ? "Falta configurar la base"
+              : bootstrap
+                ? "Crear primer usuario"
+                : "EverWear · Ingresar"}
           </CardTitle>
           <CardDescription>
-            {bootstrap
-              ? "No hay usuarios todavía. El primero queda como administrador."
-              : "Ingresá con tu DNI y contraseña."}
+            {setupError
+              ? "No se puede leer la tabla de usuarios."
+              : bootstrap
+                ? "No hay usuarios todavía. El primero queda como administrador."
+                : "Ingresá con tu DNI y contraseña."}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {checking ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground">
               <Loader2 className="size-5 animate-spin" />
+            </div>
+          ) : setupError ? (
+            <div className="flex flex-col gap-3 text-sm">
+              <div className="flex items-start gap-2 text-destructive">
+                <AlertCircle className="size-4 mt-0.5 shrink-0" />
+                <span>
+                  La tabla <code>everwear.usuario</code> no existe o el cliente de Prisma no
+                  está generado.
+                </span>
+              </div>
+              <ol className="list-decimal pl-5 text-muted-foreground space-y-1">
+                <li>
+                  Aplicá el SQL: <code>psql &quot;$DATABASE_URL&quot; -f sql/usuario_auth.sql</code>
+                </li>
+                <li>
+                  Regenerá Prisma: <code>npx prisma generate</code> (y reiniciá/redeployá la app)
+                </li>
+              </ol>
+              <Button variant="outline" onClick={() => location.reload()}>
+                Reintentar
+              </Button>
             </div>
           ) : bootstrap ? (
             <CrearUsuarioForm

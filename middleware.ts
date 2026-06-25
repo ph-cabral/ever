@@ -56,9 +56,30 @@ async function verifyToken(token: string | undefined): Promise<SessionPayload | 
   }
 }
 
+// Rutas públicas: NO requieren sesión (el picker entra sin credenciales).
+// Alcance mínimo a propósito: sólo la página del picker y los POST que esa
+// página usa. El resto de /picking, /api/picking y /api/chat (incluido
+// /picking/picker/responder y los GET/PATCH) sigue protegido.
+function esRutaPublica(pathname: string, method: string): boolean {
+  // Página del picker (coincidencia exacta).
+  if (pathname === "/picking/picker") return true;
+  // APIs que el picker necesita, sólo en POST.
+  if (
+    method === "POST" &&
+    (pathname === "/api/picking/eventos" || pathname === "/api/chat")
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
   const isApi = pathname.startsWith("/api/");
+
+  // 0) Rutas públicas: el picker entra sin credenciales.
+  if (esRutaPublica(pathname, req.method)) return NextResponse.next();
+
   const session = await verifyToken(req.cookies.get(SESSION_COOKIE)?.value);
 
   // 1) Sin sesión válida
