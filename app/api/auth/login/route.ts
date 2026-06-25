@@ -7,6 +7,17 @@ import { modulosForUsuario } from "@/lib/auth/permissions";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
+  // En producción AUTH_SECRET es obligatorio para firmar la sesión.
+  if (
+    process.env.NODE_ENV === "production" &&
+    (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 16)
+  ) {
+    return NextResponse.json(
+      { error: "Falta AUTH_SECRET en el .env del servidor (ver AUTENTICACION.md)." },
+      { status: 503 },
+    );
+  }
+
   let body: any;
   try {
     body = await req.json();
