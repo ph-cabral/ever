@@ -1,15 +1,17 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
-  Loader2, RefreshCw, AlertTriangle, ChevronDown, PackageCheck,
+  Loader2, RefreshCw, AlertTriangle, PackageCheck,
   Check, X, CalendarDays,
 } from "lucide-react";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Control de faltantes — solo renglones marcados "sin existencia" en /faltantes.
-//   Se agrupan por NroPedOrigen (más nuevo arriba), acordeón por pedido.
+//   Se agrupan por NroPedOrigen (más nuevo arriba). Cada pedido es una tabla
+//   siempre visible (sin acordeón). Solo se ven los renglones SIN fecha de
+//   arribo (al cargarla, el renglón se oculta al instante).
 //   Header del grupo: pedido · cliente · vendedor · preparador.
-//   Al abrir: tabla de artículos (cód, nombre, cant, importe) + por renglón:
+//   Tabla de artículos: línea (renglón), cód, nombre, cant, importe + por renglón:
 //     · Fecha de arribo (input date)
 //     · ¿El cliente lo sigue queriendo?  Sí / No
 //   Cada cambio se guarda al instante en preparado.faltante_control.
@@ -58,7 +60,6 @@ export default function ControlFaltantesPage() {
   const [grupos, setGrupos] = useState<Grupo[]>([]);
   const [fecha, setFecha] = useState("");
   const [ctrl, setCtrl] = useState<Record<string, Ctrl>>({});
-  const [open, setOpen] = useState<Record<number, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -99,11 +100,10 @@ export default function ControlFaltantesPage() {
         }
       }
 
-      // Solo "sin existencia" y SIN fecha de arribo cargada, agrupado por pedido.
-      // (los que ya tienen fecha de arribo se consideran resueltos y no se muestran)
-      const faltan = rows.filter(
-        (r) => sin.has(keyOf(r)) && !ctrlMap[keyOf(r)]?.fechaArribo,
-      );
+      // Solo "sin existencia", agrupado por pedido. El ocultar los que ya tienen
+      // fecha de arribo se hace en el render (vis): se ocultan al instante al
+      // cargar la fecha y las estadísticas siguen contando el total.
+      const faltan = rows.filter((r) => sin.has(keyOf(r)));
       const byPed = new Map<number, Grupo>();
       for (const it of faltan) {
         let g = byPed.get(it.NroPedOrigen);
@@ -127,7 +127,6 @@ export default function ControlFaltantesPage() {
 
       setCtrl(ctrlMap);
       setGrupos(grp);
-      setOpen({});
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al cargar");
       setGrupos([]);
@@ -168,19 +167,35 @@ export default function ControlFaltantesPage() {
     [fecha],
   );
 
+  // Visibles: solo renglones SIN fecha de arribo (se ocultan al instante al
+  // cargarla). Los pedidos que quedan sin renglones desaparecen.
+  const vis = useMemo(
+    () =>
+      grupos
+        .map((g) => ({
+          ...g,
+          items: g.items.filter((it) => !ctrl[keyOf(it)]?.fechaArribo),
+        }))
+        .filter((g) => g.items.length > 0),
+    [grupos, ctrl],
+  );
+
   const tot = useMemo(() => {
     let art = 0, arribo = 0, noQ = 0;
     for (const g of grupos)
       for (const it of g.items) {
-        art++;
         const c = ctrl[keyOf(it)];
-        if (c?.fechaArribo) arribo++;
+        if (c?.fechaArribo) {
+          arribo++;
+          continue; // ya tiene arribo → resuelto, no es pendiente
+        }
+        art++;
         if (c?.clienteQuiere === false) noQ++;
       }
-    return { ped: grupos.length, art, arribo, noQ };
-  }, [grupos, ctrl]);
+    return { ped: vis.length, art, arribo, noQ };
+  }, [grupos, vis, ctrl]);
 
-  const hay = grupos.length > 0;
+  const hay = vis.length > 0;
 
   return (
     <div className="min-h-screen bg-[#111111] text-white">
@@ -238,7 +253,7 @@ export default function ControlFaltantesPage() {
             <p className="text-zinc-400 font-medium">
               {loading
                 ? "Consultando la base…"
-                : "No hay faltantes marcados como “sin existencia”."}
+                : "No hay faltantes “sin existencia” pendientes de arribo."}
             </p>
             {!loading && (
               <a
@@ -251,15 +266,8 @@ export default function ControlFaltantesPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            {grupos.map((g) => (
-              <GrupoCard
-                key={g.ped}
-                g={g}
-                abierto={!!open[g.ped]}
-                onToggle={() => setOpen((o) => ({ ...o, [g.ped]: !o[g.ped] }))}
-                ctrl={ctrl}
-                onSave={save}
-              />
+            {vis.map((g) => (
+              <GrupoCard key={g.ped} g={g} ctrl={ctrl} onSave={save} />
             ))}
           </div>
         )}
@@ -269,24 +277,15 @@ export default function ControlFaltantesPage() {
 }
 
 function GrupoCard({
-  g, abierto, onToggle, ctrl, onSave,
+  g, ctrl, onSave,
 }: {
   g: Grupo;
-  abierto: boolean;
-  onToggle: () => void;
   ctrl: Record<string, Ctrl>;
   onSave: (it: Item, patch: Partial<Ctrl>) => void;
 }) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-[#161616] overflow-hidden">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-4 px-4 py-3 text-left hover:bg-zinc-900/50 transition-colors"
-      >
-        <ChevronDown
-          size={18}
-          className={`shrink-0 text-zinc-500 transition-transform ${abierto ? "rotate-180" : ""}`}
-        />
+      <div className="flex items-center gap-4 px-4 py-3 bg-[#1A1A1A] border-b border-zinc-800">
         <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-1 min-w-0">
           <Campo label="Pedido" value={<span className="font-mono text-yellow-400">{g.ped}</span>} />
           <Campo label="Cliente" value={g.cliente ?? "—"} />
@@ -297,78 +296,78 @@ function GrupoCard({
           <div className="text-xs text-zinc-500">{g.items.length} art.</div>
           <div className="text-sm tabular-nums text-zinc-200">${fmtNum(g.importe)}</div>
         </div>
-      </button>
+      </div>
 
-      {abierto && (
-        <div className="border-t border-zinc-800 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-[#1A1A1A] text-zinc-400">
-              <tr className="text-left">
-                <th className="px-3 py-2 font-medium">Cód.</th>
-                <th className="px-3 py-2 font-medium">Artículo</th>
-                <th className="px-3 py-2 font-medium text-right">Cant.</th>
-                <th className="px-3 py-2 font-medium text-right">Importe</th>
-                <th className="px-3 py-2 font-medium">Fecha de arribo</th>
-                <th className="px-3 py-2 font-medium text-center">¿Cliente lo quiere?</th>
-              </tr>
-            </thead>
-            <tbody>
-              {g.items.map((it) => {
-                const c = ctrl[keyOf(it)] ?? { fechaArribo: null, clienteQuiere: null };
-                return (
-                  <tr key={keyOf(it)} className="border-t border-zinc-800/70">
-                    <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{it.CodArticulo}</td>
-                    <td className="px-3 py-2 text-zinc-100">{it.Nombre}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{fmtNum(it.CantPend)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-zinc-300">${fmtNum(it.Importe)}</td>
-                    <td className="px-3 py-2">
-                      <div className="relative">
-                        <CalendarDays size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
-                        <input
-                          type="date"
-                          value={c.fechaArribo ?? ""}
-                          onChange={(e) => onSave(it, { fechaArribo: e.target.value || null })}
-                          className="bg-[#111] border border-zinc-700 rounded-md pl-7 pr-2 py-1 text-sm text-zinc-100 focus:border-yellow-400 outline-none [color-scheme:dark]"
-                        />
-                      </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <button
-                          onClick={() =>
-                            onSave(it, { clienteQuiere: c.clienteQuiere === true ? null : true })
-                          }
-                          title="Lo quiere"
-                          className={`px-2.5 py-1 rounded-md border text-xs font-medium flex items-center gap-1 ${
-                            c.clienteQuiere === true
-                              ? "bg-green-600 border-green-600 text-white"
-                              : "border-zinc-700 text-green-500 hover:bg-green-600/20"
-                          }`}
-                        >
-                          <Check size={13} /> Sí
-                        </button>
-                        <button
-                          onClick={() =>
-                            onSave(it, { clienteQuiere: c.clienteQuiere === false ? null : false })
-                          }
-                          title="No lo quiere"
-                          className={`px-2.5 py-1 rounded-md border text-xs font-medium flex items-center gap-1 ${
-                            c.clienteQuiere === false
-                              ? "bg-red-600 border-red-600 text-white"
-                              : "border-zinc-700 text-red-500 hover:bg-red-600/20"
-                          }`}
-                        >
-                          <X size={13} /> No
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-[#141414] text-zinc-400">
+            <tr className="text-left">
+              <th className="px-3 py-2 font-medium">Línea</th>
+              <th className="px-3 py-2 font-medium">Cód.</th>
+              <th className="px-3 py-2 font-medium">Artículo</th>
+              <th className="px-3 py-2 font-medium text-right">Cant.</th>
+              <th className="px-3 py-2 font-medium text-right">Importe</th>
+              <th className="px-3 py-2 font-medium">Fecha de arribo</th>
+              <th className="px-3 py-2 font-medium text-center">¿Cliente lo quiere?</th>
+            </tr>
+          </thead>
+          <tbody>
+            {g.items.map((it) => {
+              const c = ctrl[keyOf(it)] ?? { fechaArribo: null, clienteQuiere: null };
+              return (
+                <tr key={keyOf(it)} className="border-t border-zinc-800/70">
+                  <td className="px-3 py-2 font-mono text-zinc-400 whitespace-nowrap">{it.NroRengOrigen}</td>
+                  <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{it.CodArticulo}</td>
+                  <td className="px-3 py-2 text-zinc-100">{it.Nombre}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmtNum(it.CantPend)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-zinc-300">${fmtNum(it.Importe)}</td>
+                  <td className="px-3 py-2">
+                    <div className="relative">
+                      <CalendarDays size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                      <input
+                        type="date"
+                        value={c.fechaArribo ?? ""}
+                        onChange={(e) => onSave(it, { fechaArribo: e.target.value || null })}
+                        className="bg-[#111] border border-zinc-700 rounded-md pl-7 pr-2 py-1 text-sm text-zinc-100 focus:border-yellow-400 outline-none [color-scheme:dark]"
+                      />
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <button
+                        onClick={() =>
+                          onSave(it, { clienteQuiere: c.clienteQuiere === true ? null : true })
+                        }
+                        title="Lo quiere"
+                        className={`px-2.5 py-1 rounded-md border text-xs font-medium flex items-center gap-1 ${
+                          c.clienteQuiere === true
+                            ? "bg-green-600 border-green-600 text-white"
+                            : "border-zinc-700 text-green-500 hover:bg-green-600/20"
+                        }`}
+                      >
+                        <Check size={13} /> Sí
+                      </button>
+                      <button
+                        onClick={() =>
+                          onSave(it, { clienteQuiere: c.clienteQuiere === false ? null : false })
+                        }
+                        title="No lo quiere"
+                        className={`px-2.5 py-1 rounded-md border text-xs font-medium flex items-center gap-1 ${
+                          c.clienteQuiere === false
+                            ? "bg-red-600 border-red-600 text-white"
+                            : "border-zinc-700 text-red-500 hover:bg-red-600/20"
+                        }`}
+                      >
+                        <X size={13} /> No
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

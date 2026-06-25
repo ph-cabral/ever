@@ -195,6 +195,7 @@ model legajo {
   sectorId               Int?
   sectorRel              sector?   @relation(fields: [sectorId], references: [id])
   trabajos               trabajo[]
+  usuario                usuario?
   anvizId                String?         @unique @db.VarChar(20)
   @@index([estado])
   @@schema("everwear")
@@ -457,4 +458,36 @@ model faltante_existencia {
 
   @@unique([fecha, nroPedOrigen, nroRengOrigen], name: "uniq_faltante")
   @@schema("preparado")
+}
+
+// Login de la app. Cada usuario se vincula a un legajo existente de everwear.
+// El login es por DNI + contraseña; los permisos salen del sector (ver sector_permiso).
+model usuario {
+  id           Int       @id @default(autoincrement())
+  legajoId     Int       @unique
+  dni          String    @unique @db.VarChar(20)
+  nombre       String    @db.VarChar(100)
+  passwordHash String
+  rol          String    @default("USUARIO") @db.VarChar(20) // ADMIN | USUARIO
+  sector       String?   @db.VarChar(80)
+  activo       Boolean   @default(true)
+  ultimoAcceso DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  legajo       legajo    @relation(fields: [legajoId], references: [id])
+
+  @@index([dni])
+  @@schema("everwear")
+}
+
+// Mapa editable: qué módulos de la app habilita cada sector.
+// `modulos` es un array JSON de claves de módulo (ver lib/auth/modules.ts).
+model sector_permiso {
+  id        Int      @id @default(autoincrement())
+  sector    String   @unique @db.VarChar(80)
+  modulos   Json     @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@schema("everwear")
 }

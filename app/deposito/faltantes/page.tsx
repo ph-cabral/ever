@@ -345,7 +345,7 @@ export default function FaltantesPage() {
           ) : (
             <div className="overflow-x-auto rounded-xl border border-zinc-800">
               <table className="w-full text-sm">
-                <thead className="bg-[#1A1A1A] text-zinc-400 sticky top-0">
+                <thead className="bg-[#1A1A1A] text-zinc-400 sticky">
                   <tr className="text-left">
                     <th className="px-3 py-2.5 font-medium">Estado</th>
                     <th className="px-3 py-2.5 font-medium text-right">
