@@ -54,6 +54,7 @@ export default function FaltantesPage() {
   >([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [filtro, setFiltro] = useState<"todos" | "si" | "no">("todos");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -162,6 +163,14 @@ export default function FaltantesPage() {
       body: JSON.stringify(body.payload),
     }).catch(() => setError("No se pudo deshacer"));
   }, [undoStack, fecha]);
+
+  const itemsFiltrados = useMemo(
+    () =>
+      filtro === "todos"
+        ? items
+        : items.filter((it: Item) => (estados[keyOf(it)] ?? "pendiente") === filtro),
+    [items, estados, filtro],
+  );
 
   const counts = useMemo(() => {
     let si = 0, no = 0;
@@ -299,6 +308,43 @@ export default function FaltantesPage() {
         </header>
 
         <main className="max-w-[1500px] mx-auto px-8 py-6">
+          {hay && (
+            <div className="flex items-center gap-2 mb-4">
+              <button
+                onClick={() => setFiltro("todos")}
+                className={[
+                  "px-3 py-1.5 rounded-md border text-sm font-medium transition-colors",
+                  filtro === "todos"
+                    ? "bg-zinc-600 border-zinc-500 text-white"
+                    : "border-zinc-700 text-zinc-400 hover:text-zinc-200",
+                ].join(" ")}
+              >
+                Todos
+              </button>
+              <button
+                onClick={() => setFiltro("si")}
+                className={[
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-sm font-medium transition-colors",
+                  filtro === "si"
+                    ? "bg-green-600 border-green-600 text-white"
+                    : "border-zinc-700 text-green-500 hover:bg-green-600/20",
+                ].join(" ")}
+              >
+                <Check size={14} /> En existencia
+              </button>
+              <button
+                onClick={() => setFiltro("no")}
+                className={[
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-sm font-medium transition-colors",
+                  filtro === "no"
+                    ? "bg-red-600 border-red-600 text-white"
+                    : "border-zinc-700 text-red-500 hover:bg-red-600/20",
+                ].join(" ")}
+              >
+                <X size={14} /> Sin existencia
+              </button>
+            </div>
+          )}
           {!hay ? (
             <div className="flex flex-col items-center justify-center py-28 gap-3 text-center">
               {loading ? (
@@ -313,25 +359,19 @@ export default function FaltantesPage() {
           ) : (
             <div className="overflow-x-auto rounded-xl border border-zinc-800">
               <table className="w-full text-sm">
-                <thead className="bg-[#1A1A1A] text-zinc-400 sticky top-16">
+                <thead className="bg-[#1A1A1A] text-zinc-400 sticky top-10">
                   <tr className="text-left">
                     <th className="px-3 py-2.5 font-medium">Estado</th>
                     <th className="px-3 py-2.5 font-medium text-right">Ubic.</th>
                     <th className="px-3 py-2.5 font-medium">Cód.</th>
                     <th className="px-3 py-2.5 font-medium">Nombre</th>
                     <th className="px-3 py-2.5 font-medium text-right">Cant.</th>
-                    <th className="px-3 py-2.5 font-medium">Cliente</th>
-                    <th className="px-3 py-2.5 font-medium">Vendedor</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Importe</th>
-                    <th className="px-3 py-2.5 font-medium">Tipo</th>
-                    <th className="px-3 py-2.5 font-medium">Línea</th>
                     <th className="px-3 py-2.5 font-medium">Preparador</th>
-                    <th className="px-3 py-2.5 font-medium">Proveedor</th>
                     <th className="px-3 py-2.5 font-medium text-center">Acción</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((it) => {
+                  {itemsFiltrados.map((it) => {
                     const e = estados[keyOf(it)] ?? "pendiente";
                     return (
                       <tr
@@ -353,15 +393,7 @@ export default function FaltantesPage() {
                         <td className="px-3 py-2 font-mono text-zinc-300">{it.CodArticulo}</td>
                         <td className="px-3 py-2 text-zinc-100">{it.Nombre}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{fmtNum(it.CantPend)}</td>
-                        <td className="px-3 py-2 text-zinc-300">{it.Cliente ?? "—"}</td>
-                        <td className="px-3 py-2 text-zinc-300">{it.Vendedor || "—"}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
-                          ${fmtNum(it.Importe)}
-                        </td>
-                        <td className="px-3 py-2 text-zinc-400">{it.TipoArticulo || "—"}</td>
-                        <td className="px-3 py-2 text-zinc-400">{it.Linea ?? "—"}</td>
                         <td className="px-3 py-2 text-zinc-400">{it.Preparador || "—"}</td>
-                        <td className="px-3 py-2 text-zinc-400">{it.Proveedor || "—"}</td>
                         <td className="px-3 py-2">
                           <div className="flex items-center justify-center gap-1.5">
                             <button

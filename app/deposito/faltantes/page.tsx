@@ -1,7 +1,13 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
-  Loader2, RefreshCw, AlertTriangle, Undo2, Check, X, PackageCheck,
+  Loader2,
+  RefreshCw,
+  AlertTriangle,
+  Undo2,
+  Check,
+  X,
+  PackageCheck,
 } from "lucide-react";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -59,7 +65,9 @@ export default function FaltantesPage() {
     setLoading(true);
     setError(null);
     try {
-      const fRes = await fetch("/api/deposito/faltantes", { cache: "no-store" });
+      const fRes = await fetch("/api/deposito/faltantes", {
+        cache: "no-store",
+      });
       const fj = await fRes.json().catch(() => ({}));
       if (!fRes.ok) throw new Error(fj.error || `HTTP ${fRes.status}`);
       const rows: Item[] = fj.rows ?? [];
@@ -69,14 +77,15 @@ export default function FaltantesPage() {
 
       const est: Record<string, Estado> = {};
       if (fch) {
-        const cRes = await fetch(
-          `/api/deposito/faltantes/check?fecha=${fch}`,
-          { cache: "no-store" },
-        );
+        const cRes = await fetch(`/api/deposito/faltantes/check?fecha=${fch}`, {
+          cache: "no-store",
+        });
         if (cRes.ok) {
           const cj = await cRes.json().catch(() => ({ rows: [] }));
           for (const m of (cj.rows ?? []) as Mark[])
-            est[`${m.nroPedOrigen}-${m.nroRengOrigen}`] = m.existencia ? "si" : "no";
+            est[`${m.nroPedOrigen}-${m.nroRengOrigen}`] = m.existencia
+              ? "si"
+              : "no";
         }
       }
       setEstados(est);
@@ -115,7 +124,10 @@ export default function FaltantesPage() {
   const mark = useCallback(
     (it: Item, existencia: boolean) => {
       const k = keyOf(it);
-      setUndoStack((u) => [...u, { key: k, prev: estados[k] ?? "pendiente", idx }]);
+      setUndoStack((u) => [
+        ...u,
+        { key: k, prev: estados[k] ?? "pendiente", idx },
+      ]);
       setEstados((s) => ({ ...s, [k]: existencia ? "si" : "no" }));
       setIdx((i) => Math.min(i + 1, items.length));
       void persist(it, existencia);
@@ -127,7 +139,10 @@ export default function FaltantesPage() {
   const markRow = useCallback(
     (it: Item, existencia: boolean) => {
       const k = keyOf(it);
-      setUndoStack((u) => [...u, { key: k, prev: estados[k] ?? "pendiente", idx }]);
+      setUndoStack((u) => [
+        ...u,
+        { key: k, prev: estados[k] ?? "pendiente", idx },
+      ]);
       setEstados((s) => ({ ...s, [k]: existencia ? "si" : "no" }));
       void persist(it, existencia);
     },
@@ -148,12 +163,18 @@ export default function FaltantesPage() {
     const [ped, reng] = last.key.split("-").map(Number);
     const body =
       last.prev === "pendiente"
-        ? { method: "DELETE", payload: { fecha, nroPedOrigen: ped, nroRengOrigen: reng } }
+        ? {
+            method: "DELETE",
+            payload: { fecha, nroPedOrigen: ped, nroRengOrigen: reng },
+          }
         : {
             method: "POST",
             payload: {
-              fecha, nroPedOrigen: ped, nroRengOrigen: reng,
-              codArticulo: "", existencia: last.prev === "si",
+              fecha,
+              nroPedOrigen: ped,
+              nroRengOrigen: reng,
+              codArticulo: "",
+              existencia: last.prev === "si",
             },
           };
     fetch("/api/deposito/faltantes/check", {
@@ -164,7 +185,8 @@ export default function FaltantesPage() {
   }, [undoStack, fecha]);
 
   const counts = useMemo(() => {
-    let si = 0, no = 0;
+    let si = 0,
+      no = 0;
     for (const it of items) {
       const e = estados[keyOf(it)];
       if (e === "si") si++;
@@ -191,7 +213,8 @@ export default function FaltantesPage() {
           </button>
           <div className="text-right leading-tight">
             <div className="text-sm font-semibold text-yellow-400">
-              {Math.min(counts.si + counts.no + 1, counts.total)} / {counts.total}
+              {Math.min(counts.si + counts.no + 1, counts.total)} /{" "}
+              {counts.total}
             </div>
             <div className="text-[11px] text-zinc-500">{fmtAr(fecha)}</div>
           </div>
@@ -200,7 +223,8 @@ export default function FaltantesPage() {
         <div className="flex-1 overflow-y-auto">
           {loading && !hay ? (
             <div className="h-full flex flex-col items-center justify-center gap-3 text-zinc-400">
-              <Loader2 size={36} className="animate-spin text-yellow-400" /> Cargando…
+              <Loader2 size={36} className="animate-spin text-yellow-400" />{" "}
+              Cargando…
             </div>
           ) : !hay ? (
             <div className="h-full flex flex-col items-center justify-center gap-3 px-8 text-center text-zinc-400">
@@ -212,7 +236,8 @@ export default function FaltantesPage() {
               <PackageCheck size={56} className="text-green-500" />
               <p className="text-lg font-semibold">Revisión completa</p>
               <p className="text-sm text-zinc-400">
-                {counts.si} en existencia · {counts.no} sin existencia · {counts.total} total
+                {counts.si} en existencia · {counts.no} sin existencia ·{" "}
+                {counts.total} total
               </p>
               <button
                 onClick={undo}
@@ -223,7 +248,10 @@ export default function FaltantesPage() {
               </button>
             </div>
           ) : (
-            <CardDetalle it={current} estado={estados[keyOf(current)] ?? "pendiente"} />
+            <CardDetalle
+              it={current}
+              estado={estados[keyOf(current)] ?? "pendiente"}
+            />
           )}
         </div>
 
@@ -251,7 +279,8 @@ export default function FaltantesPage() {
           <div className="fixed bottom-6 right-6 z-[110] flex flex-col gap-2">
             {loading && (
               <div className="flex items-center gap-3 bg-[#1A1A1A] border border-yellow-400/40 rounded-xl px-5 py-3 text-sm text-zinc-200">
-                <Loader2 size={16} className="animate-spin text-yellow-400" /> Consultando la base…
+                <Loader2 size={16} className="animate-spin text-yellow-400" />{" "}
+                Consultando la base…
               </div>
             )}
             {error && (
@@ -265,7 +294,8 @@ export default function FaltantesPage() {
         <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 flex items-center justify-between px-8 h-16 gap-4">
           <div className="flex items-center gap-4">
             <span className="font-bold text-yellow-400 text-2xl tracking-wide uppercase">
-              EVER WEAR <span className="text-sm tracking-[3px] font-normal">S.A.</span>
+              EVER WEAR{" "}
+              <span className="text-sm tracking-[3px] font-normal">S.A.</span>
             </span>
             <div className="w-px h-7 bg-yellow-400/30" />
             <span className="text-zinc-500 text-sm">
@@ -307,27 +337,35 @@ export default function FaltantesPage() {
                 <PackageCheck size={44} className="text-zinc-700" />
               )}
               <p className="text-zinc-400 font-medium">
-                {loading ? "Consultando la base…" : "No hay faltantes para revisar."}
+                {loading
+                  ? "Consultando la base…"
+                  : "No hay faltantes para revisar."}
               </p>
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-zinc-800">
               <table className="w-full text-sm">
-                <thead className="bg-[#1A1A1A] text-zinc-400 sticky top-16">
+                <thead className="bg-[#1A1A1A] text-zinc-400 sticky top-0">
                   <tr className="text-left">
                     <th className="px-3 py-2.5 font-medium">Estado</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Ubic.</th>
+                    <th className="px-3 py-2.5 font-medium text-right">
+                      Ubic.
+                    </th>
                     <th className="px-3 py-2.5 font-medium">Cód.</th>
                     <th className="px-3 py-2.5 font-medium">Nombre</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Cant.</th>
-                    <th className="px-3 py-2.5 font-medium">Cliente</th>
-                    <th className="px-3 py-2.5 font-medium">Vendedor</th>
-                    <th className="px-3 py-2.5 font-medium text-right">Importe</th>
-                    <th className="px-3 py-2.5 font-medium">Tipo</th>
-                    <th className="px-3 py-2.5 font-medium">Línea</th>
+                    <th className="px-3 py-2.5 font-medium text-right">
+                      Cant.
+                    </th>
+                    {/* <th className="px-3 py-2.5 font-medium">Cliente</th> */}
+                    {/* <th className="px-3 py-2.5 font-medium">Vendedor</th> */}
+                    {/* <th className="px-3 py-2.5 font-medium text-right">Importe</th> */}
+                    {/* <th className="px-3 py-2.5 font-medium">Tipo</th> */}
+                    {/* <th className="px-3 py-2.5 font-medium">Línea</th> */}
                     <th className="px-3 py-2.5 font-medium">Preparador</th>
-                    <th className="px-3 py-2.5 font-medium">Proveedor</th>
-                    <th className="px-3 py-2.5 font-medium text-center">Acción</th>
+                    {/* <th className="px-3 py-2.5 font-medium">Proveedor</th> */}
+                    <th className="px-3 py-2.5 font-medium text-center">
+                      Acción
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -336,7 +374,7 @@ export default function FaltantesPage() {
                     return (
                       <tr
                         key={keyOf(it)}
-                        className={`border-t border-zinc-800/70 ${
+                        className={`border-t border-zinc-800/70 mt-5${
                           e === "si"
                             ? "bg-green-950/30"
                             : e === "no"
@@ -350,18 +388,24 @@ export default function FaltantesPage() {
                         <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
                           {it.Ubicacion ?? "—"}
                         </td>
-                        <td className="px-3 py-2 font-mono text-zinc-300">{it.CodArticulo}</td>
-                        <td className="px-3 py-2 text-zinc-100">{it.Nombre}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmtNum(it.CantPend)}</td>
-                        <td className="px-3 py-2 text-zinc-300">{it.Cliente ?? "—"}</td>
-                        <td className="px-3 py-2 text-zinc-300">{it.Vendedor || "—"}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
-                          ${fmtNum(it.Importe)}
+                        <td className="px-3 py-2 font-mono text-zinc-300">
+                          {it.CodArticulo}
                         </td>
-                        <td className="px-3 py-2 text-zinc-400">{it.TipoArticulo || "—"}</td>
-                        <td className="px-3 py-2 text-zinc-400">{it.Linea ?? "—"}</td>
-                        <td className="px-3 py-2 text-zinc-400">{it.Preparador || "—"}</td>
-                        <td className="px-3 py-2 text-zinc-400">{it.Proveedor || "—"}</td>
+                        <td className="px-3 py-2 text-zinc-100">{it.Nombre}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {fmtNum(it.CantPend)}
+                        </td>
+                        {/* <td className="px-3 py-2 text-zinc-300">{it.Cliente ?? "—"}</td> */}
+                        {/* <td className="px-3 py-2 text-zinc-300">{it.Vendedor || "—"}</td> */}
+                        {/* <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                          ${fmtNum(it.Importe)}
+                        </td> */}
+                        {/* <td className="px-3 py-2 text-zinc-400">{it.TipoArticulo || "—"}</td> */}
+                        {/* <td className="px-3 py-2 text-zinc-400">{it.Linea ?? "—"}</td> */}
+                        <td className="px-3 py-2 text-zinc-400">
+                          {it.Preparador || "—"}
+                        </td>
+                        {/* <td className="px-3 py-2 text-zinc-400">{it.Proveedor || "—"}</td> */}
                         <td className="px-3 py-2">
                           <div className="flex items-center justify-center gap-1.5">
                             <button
@@ -421,11 +465,23 @@ function Pill({ e }: { e: Estado }) {
   );
 }
 
-function Row({ label, value, big }: { label: string; value: React.ReactNode; big?: boolean }) {
+function Row({
+  label,
+  value,
+  big,
+}: {
+  label: string;
+  value: React.ReactNode;
+  big?: boolean;
+}) {
   return (
     <div className="flex items-baseline justify-between gap-4 border-b border-zinc-800/70 py-2.5">
-      <span className="text-xs uppercase tracking-wide text-zinc-500">{label}</span>
-      <span className={`text-right ${big ? "text-2xl font-bold" : "text-base"} text-zinc-100`}>
+      <span className="text-xs uppercase tracking-wide text-zinc-500">
+        {label}
+      </span>
+      <span
+        className={`text-right ${big ? "text-2xl font-bold" : "text-base"} text-zinc-100`}
+      >
         {value}
       </span>
     </div>
@@ -440,7 +496,9 @@ function CardDetalle({ it, estado }: { it: Item; estado: Estado }) {
           <Pill e={estado} />
         </div>
       )}
-      <h2 className="text-2xl font-bold leading-tight text-white mb-1">{it.Nombre || "—"}</h2>
+      <h2 className="text-2xl font-bold leading-tight text-white mb-1">
+        {it.Nombre || "—"}
+      </h2>
       <p className="font-mono text-sm text-yellow-400 mb-3">{it.CodArticulo}</p>
       <Row label="Ubicación" value={it.Ubicacion ?? "—"} big />
       <Row label="Cant. pendiente" value={fmtNum(it.CantPend)} big />
