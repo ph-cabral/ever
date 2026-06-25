@@ -99,8 +99,11 @@ export default function ControlFaltantesPage() {
         }
       }
 
-      // Solo "sin existencia", agrupado por pedido
-      const faltan = rows.filter((r) => sin.has(keyOf(r)));
+      // Solo "sin existencia" y SIN fecha de arribo cargada, agrupado por pedido.
+      // (los que ya tienen fecha de arribo se consideran resueltos y no se muestran)
+      const faltan = rows.filter(
+        (r) => sin.has(keyOf(r)) && !ctrlMap[keyOf(r)]?.fechaArribo,
+      );
       const byPed = new Map<number, Grupo>();
       for (const it of faltan) {
         let g = byPed.get(it.NroPedOrigen);
