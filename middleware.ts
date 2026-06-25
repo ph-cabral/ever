@@ -116,6 +116,12 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
+  // Runtime Node.js (estable desde Next 15.5): el middleware lee process.env.AUTH_SECRET
+  // EN RUNTIME. Con el runtime edge (default) las env se "inlinean" en build, y como
+  // AUTH_SECRET no existe durante `next build` (ver Dockerfile.prod) quedaba undefined ->
+  // secret() caía al valor dev y rechazaba TODAS las cookies firmadas en Node (session.ts),
+  // generando el loop /login <-> / (el login "entraba" pero volvía a /login).
+  runtime: "nodejs",
   // Protege todo salvo /login, /api/auth/*, internos de Next y archivos estáticos.
   matcher: [
     "/((?!login|api/auth|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|css|js|map|txt|json|woff|woff2|ttf)$).*)",
