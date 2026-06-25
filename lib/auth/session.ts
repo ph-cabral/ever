@@ -68,7 +68,11 @@ export function sessionCookieOptions(maxAge: number) {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
+    // El server interno se sirve por HTTP (http://10.10.0.159:3001). Una cookie `Secure`
+    // NO se guarda en orígenes que no sean HTTPS, así que la sesión nunca persistía y el
+    // login rebotaba a /login en loop. Por defecto va SIN Secure; poné AUTH_COOKIE_SECURE=true
+    // en el .env cuando la app quede detrás de HTTPS.
+    secure: process.env.AUTH_COOKIE_SECURE === "true",
     path: "/",
     maxAge,
   };
