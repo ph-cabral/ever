@@ -32,7 +32,13 @@ export async function POST(req: NextRequest) {
 
   const legajo = await prisma.legajo.findUnique({
     where: { dni },
-    select: { id: true, nombre: true, sector: true, usuario: { select: { id: true } } },
+    select: {
+      id: true,
+      nombre: true,
+      sector: true,
+      sectorRel: { select: { nombre: true } },
+      usuario: { select: { id: true } },
+    },
   });
   if (!legajo) {
     return NextResponse.json(
@@ -46,6 +52,8 @@ export async function POST(req: NextRequest) {
 
   // En bootstrap el primer usuario siempre es ADMIN.
   const rol = g.bootstrap ? "ADMIN" : rolPedido;
+  // Sector efectivo: la relación (tabla sector) manda; si no, el string libre.
+  const sector = legajo.sectorRel?.nombre ?? legajo.sector ?? null;
 
   try {
     const usuario = await prisma.usuario.create({
@@ -55,7 +63,7 @@ export async function POST(req: NextRequest) {
         nombre: legajo.nombre,
         passwordHash: hashPassword(password),
         rol,
-        sector: legajo.sector ?? null,
+        sector,
       },
       select: { id: true, nombre: true, rol: true, sector: true },
     });

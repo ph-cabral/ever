@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
       id: true,
       nombre: true,
       sector: true,
+      sectorRel: { select: { nombre: true } },
       estado: true,
       usuario: { select: { id: true } },
     },
@@ -26,13 +27,15 @@ export async function GET(req: NextRequest) {
 
   if (!legajo) return NextResponse.json({ found: false, bootstrap: g.bootstrap });
 
-  const modulos = await modulosForSector(legajo.sector);
+  // Sector efectivo: la relación (tabla sector) manda; si no, el string libre.
+  const sector = legajo.sectorRel?.nombre ?? legajo.sector ?? null;
+  const modulos = await modulosForSector(sector);
   return NextResponse.json({
     found: true,
     bootstrap: g.bootstrap,
     legajoId: legajo.id,
     nombre: legajo.nombre,
-    sector: legajo.sector,
+    sector,
     estado: legajo.estado,
     yaTieneUsuario: !!legajo.usuario,
     modulos,
