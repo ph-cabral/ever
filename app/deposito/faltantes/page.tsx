@@ -412,7 +412,7 @@ export default function FaltantesPage() {
                     <th className="px-3 py-2.5 font-medium text-right">
                       Cant.
                     </th>
-                    {/* <th className="px-3 py-2.5 font-medium">Cliente</th> */}
+                    <th className="px-3 py-2.5 font-medium">Cliente</th>
                     {/* <th className="px-3 py-2.5 font-medium">Vendedor</th> */}
                     {/* <th className="px-3 py-2.5 font-medium text-right">Importe</th> */}
                     {/* <th className="px-3 py-2.5 font-medium">Tipo</th> */}
@@ -452,7 +452,7 @@ export default function FaltantesPage() {
                         <td className="px-3 py-2 text-right tabular-nums">
                           {fmtNum(it.CantPend)}
                         </td>
-                        {/* <td className="px-3 py-2 text-zinc-300">{it.Cliente ?? "—"}</td> */}
+                        <td className="px-3 py-2 text-zinc-300">{it.Cliente ?? "—"}</td>
                         {/* <td className="px-3 py-2 text-zinc-300">{it.Vendedor || "—"}</td> */}
                         {/* <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
                           ${fmtNum(it.Importe)}

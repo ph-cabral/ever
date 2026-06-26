@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import {
-  Users, User, CalendarDays, CalendarRange, Calendar,
+  Users, User, CalendarDays, CalendarRange, Calendar, LayoutGrid,
   Loader2, RefreshCw, AlertTriangle, type LucideIcon,
 } from "lucide-react";
 import {
@@ -26,7 +26,7 @@ type Row = Record<string, unknown>;
 interface Rec { d: Date; op: string; items: number }
 interface IngRec { d: Date; pedidos: number }
 type Gran = "dia" | "sem" | "mes";
-type Vista = "comp" | "ind";
+type Vista = "comp" | "ind" | "mat";
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const fmtDM = (d: Date) => `${d.getDate()}/${d.getMonth() + 1}`;
@@ -124,6 +124,67 @@ function Seg<T extends string>({
   );
 }
 
+// ─── Matriz Ítems × operario (filas = operarios, columnas = día/semana/mes) ────
+interface MatRow { op: string; vals: number[]; total: number }
+function MatrixItems({
+  cols, rows, gShort,
+}: { cols: { key: string; label: string }[]; rows: MatRow[]; gShort: string }) {
+  const max = Math.max(1, ...rows.flatMap((r) => r.vals));
+  const colTot = cols.map((_, i) => rows.reduce((a, r) => a + (r.vals[i] ?? 0), 0));
+  const grand = rows.reduce((a, r) => a + r.total, 0);
+  const nb = cols.length || 1;
+  const thBase = "px-2.5 py-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 whitespace-nowrap border-b border-zinc-800";
+  return (
+    <div className="rounded-lg bg-[#171717] border border-zinc-800 overflow-auto" style={{ maxHeight: 560 }}>
+      <table className="text-[12px] border-separate" style={{ borderSpacing: 0 }}>
+        <thead className="sticky top-0 z-20">
+          <tr className="bg-[#1f1f1f]">
+            <th className={`sticky left-0 z-30 bg-[#1f1f1f] text-left ${thBase}`}>Operario</th>
+            {cols.map((c) => (
+              <th key={c.key} className={`text-right ${thBase}`}>{c.label}</th>
+            ))}
+            <th className={`text-right bg-[#1f1f1f] text-yellow-500 ${thBase}`}>Total</th>
+            <th className={`text-right bg-[#1f1f1f] ${thBase}`}>Ítems/{gShort}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.op} className="hover:bg-[#1f1f1f] transition-colors">
+              <td className="sticky left-0 z-10 bg-[#171717] px-2.5 py-1.5 text-zinc-300 whitespace-nowrap border-b border-zinc-800/60">{r.op}</td>
+              {r.vals.map((v, i) => (
+                <td key={i} className="px-2.5 py-1.5 text-right tabular-nums border-b border-zinc-800/60"
+                  style={{
+                    background: v > 0 ? `rgba(250,204,21,${(0.06 + 0.34 * (v / max)).toFixed(3)})` : undefined,
+                    color: v > 0 ? "#e6edf3" : "#3f3f46",
+                  }}>
+                  {v > 0 ? fmtNum(v) : "·"}
+                </td>
+              ))}
+              <td className="px-2.5 py-1.5 text-right tabular-nums font-bold text-yellow-400 bg-[#171717] border-b border-zinc-800/60">{fmtNum(r.total)}</td>
+              <td className="px-2.5 py-1.5 text-right tabular-nums text-zinc-400 bg-[#171717] border-b border-zinc-800/60">{fmtNum(r.total / nb, 1)}</td>
+            </tr>
+          ))}
+          {!rows.length && (
+            <tr><td colSpan={cols.length + 3} className="px-4 py-10 text-center text-zinc-600 text-sm">Sin datos de Picking en el rango</td></tr>
+          )}
+        </tbody>
+        {rows.length > 0 && (
+          <tfoot>
+            <tr className="bg-[#1f1f1f]">
+              <td className="sticky left-0 z-10 bg-[#1f1f1f] px-2.5 py-2 text-left font-semibold text-zinc-200 border-t border-zinc-700">TOTAL</td>
+              {colTot.map((t, i) => (
+                <td key={i} className="px-2.5 py-2 text-right tabular-nums font-semibold text-zinc-200 border-t border-zinc-700">{fmtNum(t)}</td>
+              ))}
+              <td className="px-2.5 py-2 text-right tabular-nums font-bold text-yellow-400 bg-[#1f1f1f] border-t border-zinc-700">{fmtNum(grand)}</td>
+              <td className="px-2.5 py-2 text-right tabular-nums text-zinc-400 bg-[#1f1f1f] border-t border-zinc-700">{fmtNum(grand / nb, 1)}</td>
+            </tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
+  );
+}
+
 interface RankRow { op: string; ots: number; items: number }
 interface BucketRow { lbl: string; ots: number; items: number }
 
@@ -174,17 +235,18 @@ export default function PedidosPreparadosPage() {
   const recs = useMemo(() => (rows ?? []).map(parseRow).filter((x): x is Rec => x !== null), [rows]);
   const ingRecs = useMemo(() => ingRows.map(parseIng).filter((x): x is IngRec => x !== null), [ingRows]);
   const granLabel = gran === "mes" ? "mes" : gran === "sem" ? "semana" : "día";
+  const gShort = gran === "mes" ? "mes" : gran === "sem" ? "sem" : "día";
   const angle = gran === "mes" ? 0 : -35;
 
   // Preparados: ranking + buckets + por operario/bucket
   const { ranking, buckets, perOpBucket, totOts, totItems } = useMemo(() => {
     const opTot = new Map<string, { ots: number; items: number }>();
-    const bk = new Map<string, { label: string; sort: string; ots: number; items: number }>();
+    const bk = new Map<string, { key: string; label: string; sort: string; ots: number; items: number }>();
     const opBk = new Map<string, Map<string, { ots: number; items: number }>>();
     for (const r of recs) {
       const b = bucketOf(r.d, gran);
       const ot = opTot.get(r.op) ?? { ots: 0, items: 0 }; ot.ots++; ot.items += r.items; opTot.set(r.op, ot);
-      const bb = bk.get(b.key) ?? { label: b.label, sort: b.sort, ots: 0, items: 0 }; bb.ots++; bb.items += r.items; bk.set(b.key, bb);
+      const bb = bk.get(b.key) ?? { key: b.key, label: b.label, sort: b.sort, ots: 0, items: 0 }; bb.ots++; bb.items += r.items; bk.set(b.key, bb);
       let m = opBk.get(r.op); if (!m) { m = new Map(); opBk.set(r.op, m); }
       const c = m.get(b.key) ?? { ots: 0, items: 0 }; c.ots++; c.items += r.items; m.set(b.key, c);
     }
@@ -219,6 +281,15 @@ export default function PedidosPreparadosPage() {
   }, [ranking, op]);
 
   const reload = () => { const h = hasta; setHasta(""); setTimeout(() => setHasta(h), 0); };
+
+  // Matriz: ítems por operario × período (todos los operarios, ordenados por ítems)
+  const matRows: MatRow[] = ranking
+    .map((r) => {
+      const m = perOpBucket.get(r.op);
+      const vals = buckets.map((b) => m?.get(b.key)?.items ?? 0);
+      return { op: r.op, vals, total: vals.reduce((a, v) => a + v, 0) };
+    })
+    .sort((a, b) => b.total - a.total);
 
   // Individual
   const suBuckets: BucketRow[] = buckets.map((b) => {
@@ -277,7 +348,11 @@ export default function PedidosPreparadosPage() {
 
         <div className="flex items-center gap-2 flex-wrap mb-4">
           <Seg<Vista> val={vista} onChange={setVista}
-            opts={[{ v: "comp", label: "Comparativa", icon: Users }, { v: "ind", label: "Individual", icon: User }]} />
+            opts={[
+              { v: "comp", label: "Comparativa", icon: Users },
+              { v: "mat", label: "Ítems", icon: LayoutGrid },
+              { v: "ind", label: "Individual", icon: User },
+            ]} />
           <Seg<Gran> val={gran} onChange={setGran}
             opts={[
               { v: "dia", label: "Diario", icon: CalendarDays },
@@ -336,7 +411,7 @@ export default function PedidosPreparadosPage() {
               rows={ranking} max={50} maxH={460}
             />
           </>
-        ) : (
+        ) : vista === "ind" ? (
           <>
             <Grid cols={4}>
               <KPI label="OTs en el período" value={fmtNum(suOts)} sub={`${buckets.length} ${granLabel}s`} accent="yellow" />
@@ -373,6 +448,22 @@ export default function PedidosPreparadosPage() {
                 />
               </Panel>
             </div>
+          </>
+        ) : (
+          <>
+            <Grid cols={4}>
+              <KPI label="Ítems recolectados" value={fmtNum(totItems)} sub={`${buckets.length} ${granLabel}s`} accent="green" />
+              <KPI label="Operarios" value={fmtNum(ranking.length)} accent="yellow" />
+              <KPI label="Ítems / operario" value={fmtNum(ranking.length ? totItems / ranking.length : 0)} accent="neutral" />
+              <KPI label={`Ítems / ${granLabel}`} value={fmtNum(buckets.length ? totItems / buckets.length : 0)} accent="amber" />
+            </Grid>
+
+            <SectionTitle>Ítems por operario · desglose por {granLabel}</SectionTitle>
+            <MatrixItems cols={buckets} rows={matRows} gShort={gShort} />
+            <p className="text-[11px] text-zinc-600 mt-3 leading-relaxed">
+              Cada celda = ítems recolectados por ese operario en el {granLabel} (intensidad proporcional a la cantidad).
+              Filas ordenadas por total de ítems. Cambiá Diario / Semanal / Mensual para ajustar el desglose, o Desde / Hasta para el rango.
+            </p>
           </>
         )}
 
