@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth/guard";
+import { hashPassword } from "@/lib/auth/password";
 
 export const dynamic = "force-dynamic";
 
@@ -18,9 +19,22 @@ export async function PATCH(
   }
 
   const body = await req.json().catch(() => ({}));
-  const data: { activo?: boolean; rol?: string } = {};
+  const data: { activo?: boolean; rol?: string; passwordHash?: string } = {};
   if (typeof body?.activo === "boolean") data.activo = body.activo;
   if (body?.rol === "ADMIN" || body?.rol === "USUARIO") data.rol = body.rol;
+
+  // Reseteo de contraseña: el admin asigna una nueva (mín. 6 caracteres).
+  if (body?.password !== undefined) {
+    const password = String(body.password);
+    if (password.length < 6) {
+      return NextResponse.json(
+        { error: "La contraseña debe tener al menos 6 caracteres" },
+        { status: 400 },
+      );
+    }
+    data.passwordHash = hashPassword(password);
+  }
+
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ error: "Nada para actualizar" }, { status: 400 });
   }

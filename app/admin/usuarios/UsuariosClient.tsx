@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2, RefreshCw, UserPlus, ShieldCheck, ShieldOff } from "lucide-react";
+import { Loader2, RefreshCw, UserPlus, ShieldCheck, ShieldOff, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type U = {
   id: number;
@@ -24,6 +26,12 @@ export function UsuariosClient() {
   const [items, setItems] = useState<U[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<number | null>(null);
+  const [resetUser, setResetUser] = useState<U | null>(null);
+  const [pwd, setPwd] = useState("");
+  const [pwd2, setPwd2] = useState("");
+  const [savingPwd, setSavingPwd] = useState(false);
+
+  const puedeResetear = pwd.length >= 6 && pwd === pwd2;
 
   async function load() {
     setLoading(true);
@@ -59,6 +67,38 @@ export function UsuariosClient() {
       toast.error(e?.message ?? "No se pudo actualizar");
     } finally {
       setBusy(null);
+    }
+  }
+
+  function openReset(u: U) {
+    setResetUser(u);
+    setPwd("");
+    setPwd2("");
+  }
+
+  function closeReset() {
+    setResetUser(null);
+    setPwd("");
+    setPwd2("");
+  }
+
+  async function resetPassword() {
+    if (!resetUser || !puedeResetear) return;
+    setSavingPwd(true);
+    try {
+      const r = await fetch(`/api/admin/usuarios/${resetUser.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pwd }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error ?? "Error");
+      toast.success(`Contraseña de ${resetUser.nombre} actualizada`);
+      closeReset();
+    } catch (e: any) {
+      toast.error(e?.message ?? "No se pudo actualizar la contraseña");
+    } finally {
+      setSavingPwd(false);
     }
   }
 
@@ -134,6 +174,14 @@ export function UsuariosClient() {
                         variant="outline"
                         size="xs"
                         disabled={busy === u.id}
+                        onClick={() => openReset(u)}
+                      >
+                        <KeyRound /> Contraseña
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        disabled={busy === u.id}
                         onClick={() => patch(u.id, { rol: u.rol === "ADMIN" ? "USUARIO" : "ADMIN" })}
                       >
                         {u.rol === "ADMIN" ? <ShieldOff /> : <ShieldCheck />}
@@ -158,6 +206,66 @@ export function UsuariosClient() {
       <p className="text-xs text-muted-foreground">
         Nota: los cambios de rol o de permisos se aplican la próxima vez que la persona inicia sesión.
       </p>
+
+      {resetUser && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => !savingPwd && closeReset()}
+        >
+          <div
+            className="w-full max-w-sm rounded-lg bg-background p-4 shadow-lg ring-1 ring-foreground/10 flex flex-col gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h2 className="flex items-center gap-1.5 text-base font-medium">
+                <KeyRound className="size-4" /> Cambiar contraseña
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {resetUser.nombre} · DNI {resetUser.dni}
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="newpass">Nueva contraseña</Label>
+              <Input
+                id="newpass"
+                type="password"
+                autoFocus
+                placeholder="mín. 6 caracteres"
+                value={pwd}
+                onChange={(e) => setPwd(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="newpass2">Repetir contraseña</Label>
+              <Input
+                id="newpass2"
+                type="password"
+                value={pwd2}
+                onChange={(e) => setPwd2(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && puedeResetear && resetPassword()}
+              />
+            </div>
+            {pwd2.length > 0 && pwd !== pwd2 && (
+              <p className="text-xs text-destructive">Las contraseñas no coinciden.</p>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" size="sm" onClick={closeReset} disabled={savingPwd}>
+                Cancelar
+              </Button>
+              <Button size="sm" onClick={resetPassword} disabled={!puedeResetear || savingPwd}>
+                {savingPwd ? "Guardando…" : "Guardar"}
+              </Button>
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              La persona ingresa con esta contraseña en su próximo inicio de sesión.
+              Comunicásela de forma segura.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -211,3 +211,119 @@ def fetch_faltantes():
         return {"fecha": fecha, "total": len(rows), "rows": rows}
     finally:
         conn.close()
+
+
+# ── Tablero EN VIVO del depósito (/deposito/vivo) ─────────────────────────────
+# Cuántos pedidos (OT) hay EN ESPERA, cuántos EN PROCESO y la carga por operario
+# AHORA mismo. Se lee en vivo del WMS (READ UNCOMMITTED, igual que la productividad),
+# nunca se escribe. No se filtra por fecha: una OT "viva" es la que todavía no está
+# terminada, sin importar cuándo entró.
+#
+# Lógica del estado (OT.OTEstado). La productividad usa IN (2,3,4) = trabajo ya
+# ejecutado/terminado; por descarte 0/1 son "todavía no ejecutadas":
+#   · EN ESPERA  -> OTEstado en ESTADOS_EN_ESPERA  (generada/pendiente, sin arrancar)
+#   · EN PROCESO -> OTEstado en ESTADOS_EN_PROCESO (arrancada, sin cerrar)
+#   · (3, 4 = terminada/cerrada -> NO se cuentan acá)
+#
+# IMPORTANTE: estos códigos son la mejor inferencia (mismo criterio que la
+# productividad). Si no cuadran con la realidad, MIRÁ el bloque "diagnostico" que
+# devuelve este endpoint (cuenta las OT por OTEstado en la ventana viva) y ajustá
+# las dos tuplas de abajo. Es el único lugar a tocar.
+PROCESOS_VIVO: tuple[int, ...] = (4,)          # 4 = Picking ("pedidos"). Ampliar si hace falta.
+ESTADOS_EN_ESPERA: tuple[int, ...] = (0, 1)    # generada / pendiente, sin ejecutar
+ESTADOS_EN_PROCESO: tuple[int, ...] = (2,)     # en ejecución, sin cerrar
+
+# Carga viva por estado + operario (solo OT no terminadas).
+SQL_VIVO = """
+SELECT
+    OT.OTEstado              AS Estado,
+    P.PersonalNombre         AS Operario,
+    COUNT(*)                 AS Cantidad
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+LEFT JOIN Personal P ON OT.OTUsuarioGUID_Repositor = P.PersonalId
+WHERE Codot.CodotProcesoNegocio IN ({procesos})
+  AND OT.OTEstado IN ({estados})
+GROUP BY OT.OTEstado, P.PersonalNombre
+"""
+
+# Diagnóstico: TODAS las OT de Picking sin ejecutar o ejecutadas en los últimos
+# 2 días, contadas por OTEstado. Sirve para confirmar qué código es cada cosa
+# (las "en espera" suelen tener SinEjecucion = total). Acotado para que sea barato.
+SQL_VIVO_DIAG = """
+SELECT
+    OT.OTEstado AS Estado,
+    SUM(CASE WHEN OT.OTFechaHoraEjecucion IS NULL THEN 1 ELSE 0 END) AS SinEjecucion,
+    COUNT(*) AS Cantidad
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+WHERE Codot.CodotProcesoNegocio IN ({procesos})
+  AND (OT.OTFechaHoraEjecucion IS NULL
+       OR OT.OTFechaHoraEjecucion >= DATEADD(day, -2, CAST(GETDATE() AS date)))
+GROUP BY OT.OTEstado
+ORDER BY OT.OTEstado
+"""
+
+
+def fetch_vivo(procesos: tuple[int, ...] = PROCESOS_VIVO):
+    """Estado del depósito EN VIVO: pedidos (OT) en espera / en proceso y por operario."""
+    proc_in = ",".join(str(int(p)) for p in procesos)
+    est_in = ",".join(str(int(e)) for e in (ESTADOS_EN_ESPERA + ESTADOS_EN_PROCESO))
+
+    conn = get_connection("WMS")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+
+        cur.execute(SQL_VIVO.format(procesos=proc_in, estados=est_in))
+        en_espera = 0
+        en_proceso = 0
+        por_op: dict[str, dict] = {}
+        sin_asignar = {"en_espera": 0, "en_proceso": 0}
+        for estado, operario, cant in cur.fetchall():
+            cant = int(cant or 0)
+            bucket = "en_espera" if int(estado) in ESTADOS_EN_ESPERA else "en_proceso"
+            if bucket == "en_espera":
+                en_espera += cant
+            else:
+                en_proceso += cant
+            nombre = (str(operario).strip() if operario is not None else "")
+            if not nombre:
+                sin_asignar[bucket] += cant
+            else:
+                o = por_op.setdefault(nombre, {"en_espera": 0, "en_proceso": 0})
+                o[bucket] += cant
+
+        operarios = [
+            {
+                "operario": k,
+                "en_espera": v["en_espera"],
+                "en_proceso": v["en_proceso"],
+                "total": v["en_espera"] + v["en_proceso"],
+            }
+            for k, v in por_op.items()
+        ]
+        operarios.sort(key=lambda x: (-x["en_proceso"], -x["total"], x["operario"]))
+
+        cur.execute(SQL_VIVO_DIAG.format(procesos=proc_in))
+        diag = [
+            {"estado": int(e), "sin_ejecucion": int(se or 0), "cantidad": int(c or 0)}
+            for e, se, c in cur.fetchall()
+        ]
+
+        return {
+            "generado_en": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "en_espera": en_espera,
+            "en_proceso": en_proceso,
+            "operarios_activos": sum(1 for o in operarios if o["en_proceso"] > 0),
+            "sin_asignar": sin_asignar,
+            "por_operario": operarios,
+            "config": {
+                "procesos": list(procesos),
+                "estados_en_espera": list(ESTADOS_EN_ESPERA),
+                "estados_en_proceso": list(ESTADOS_EN_PROCESO),
+            },
+            "diagnostico": {"por_estado": diag},
+        }
+    finally:
+        conn.close()

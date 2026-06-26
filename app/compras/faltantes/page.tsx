@@ -31,6 +31,7 @@ interface Item {
   Preparador: string | null;
   Vendedor: string | null;
   Proveedor: string | null;
+  Linea: string | number | null;
 }
 interface Mark {
   nroPedOrigen: number;
@@ -54,6 +55,7 @@ type Filtro = "todos" | Estado;
 interface ArtRow {
   CodArticulo: string;
   Nombre: string;
+  Linea: string | number | null;
   Proveedor: string | null;
   faltan: number;
   importe: number;
@@ -158,6 +160,7 @@ export default function ComprasFaltantesPage() {
           a = {
             CodArticulo: cod,
             Nombre: it.Nombre,
+            Linea: it.Linea ?? null,
             Proveedor: it.Proveedor,
             faltan: 0,
             importe: 0,
@@ -176,6 +179,8 @@ export default function ComprasFaltantesPage() {
         a.renglones += 1;
         a.pedidos.add(it.NroPedOrigen);
         if (!a.Proveedor && it.Proveedor) a.Proveedor = it.Proveedor;
+        if ((a.Linea === null || a.Linea === "") && it.Linea != null && it.Linea !== "")
+          a.Linea = it.Linea;
       }
 
       // Cruce con OC
@@ -330,6 +335,7 @@ export default function ComprasFaltantesPage() {
                 <tr className="text-left">
                   <th className="px-3 py-2 font-medium">Cód.</th>
                   <th className="px-3 py-2 font-medium">Artículo</th>
+                  <th className="px-3 py-2 font-medium">Línea</th>
                   <th className="px-3 py-2 font-medium text-right">Faltan</th>
                   <th className="px-3 py-2 font-medium text-right">Llegarán</th>
                   <th className="px-3 py-2 font-medium">Entrega</th>
@@ -353,6 +359,9 @@ export default function ComprasFaltantesPage() {
                           {a.pedidos.size} pedidos
                         </span>
                       )}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
+                      {a.Linea ?? "—"}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-zinc-100">
                       {fmtNum(a.faltan)}

@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from db import get_connection
 from utils import construir_timestamps, calcular_tiempos, COLUMNAS_TIEMPO
-from deposito import fetch_wms, fetch_tiempo, fetch_ingresados, fetch_faltantes
+from deposito import fetch_wms, fetch_tiempo, fetch_ingresados, fetch_faltantes, fetch_vivo
 from compras import fetch_ordenes_pendientes
 from datetime import date, datetime, timedelta
 
@@ -155,6 +155,14 @@ def deposito_ingresados(
         "total": sum(r["pedidos"] for r in rows),
         "rows": rows,
     }
+
+@app.get("/deposito/vivo")
+def deposito_vivo():
+    """Tablero EN VIVO: pedidos (OT) en espera / en proceso y carga por operario AHORA."""
+    try:
+        return fetch_vivo()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
 @app.get("/deposito/faltantes")
 def deposito_faltantes():

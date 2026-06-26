@@ -10,7 +10,8 @@ export type ModuleKey =
   | "rrhh"
   | "indicadores"
   | "sorteo"
-  | "vicki";
+  | "vicki"
+  | "buscador";
 
 export interface ModuleDef {
   key: ModuleKey;
@@ -28,6 +29,7 @@ export const MODULES: ModuleDef[] = [
   { key: "indicadores", label: "Indicadores", href: "/indicadores", color: "bg-blue-700 hover:bg-blue-600" },
   { key: "sorteo",      label: "Sorteo",      href: "/sorteo",      color: "bg-pink-700 hover:bg-pink-600" },
   { key: "vicki",       label: "Vicki",       href: "/vicki",       color: "bg-slate-700 hover:bg-slate-600" },
+  { key: "buscador",    label: "Buscador",    href: "/buscador",    color: "bg-cyan-700 hover:bg-cyan-600" },
 ];
 
 export const ALL_MODULE_KEYS: ModuleKey[] = MODULES.map((m) => m.key);
@@ -71,6 +73,8 @@ const ROUTE_MODULE: { prefix: string; mod: ModuleKey }[] = [
   { prefix: "/api/sorteo",      mod: "sorteo" },
   { prefix: "/vicki",           mod: "vicki" },
   { prefix: "/api/vicki",       mod: "vicki" },
+  { prefix: "/buscador",        mod: "buscador" },
+  { prefix: "/api/buscador",    mod: "buscador" },
 ];
 
 /** Módulo requerido por una ruta, o null si no exige un módulo en particular. */
@@ -104,9 +108,11 @@ export const DEFAULT_SECTOR_MODULOS: Record<string, ModuleKey[]> = {
   "producción":        ["manguera"],
   "rrhh":              ["rrhh"],
   "recursos humanos":  ["rrhh"],
-  "administracion":    ["finanza", "indicadores", "rrhh"],
-  "administración":    ["finanza", "indicadores", "rrhh"],
+  "administracion":    ["finanza", "indicadores", "rrhh", "buscador"],
+  "administración":    ["finanza", "indicadores", "rrhh", "buscador"],
   "finanzas":          ["finanza", "indicadores"],
+  "comercial":         ["buscador"],
+  "ventas":            ["buscador"],
   "gerencia":          ALL_MODULE_KEYS,
   "direccion":         ALL_MODULE_KEYS,
   "dirección":         ALL_MODULE_KEYS,

@@ -40,6 +40,12 @@ interface Mark {
   codArticulo: string;
   existencia: boolean;
 }
+// Catálogo de novedades (preparado.faltante_novedad_tipo). Llega en la 1ra carga:
+// se muestra el nombre, se guarda el id.
+interface Tipo {
+  id: number;
+  nombre: string;
+}
 
 const keyOf = (it: { NroPedOrigen: number; NroRengOrigen: number }) =>
   `${it.NroPedOrigen}-${it.NroRengOrigen}`;
@@ -54,6 +60,8 @@ export default function FaltantesPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [fecha, setFecha] = useState("");
   const [estados, setEstados] = useState<Record<string, Estado>>({});
+  const [tipos, setTipos] = useState<Tipo[]>([]); // catálogo de novedades
+  const [novedades, setNovedades] = useState<Record<string, number | null>>({}); // novedad por renglón (id)
   const [idx, setIdx] = useState(0); // puntero del flujo móvil
   const [undoStack, setUndoStack] = useState<
     { key: string; prev: Estado; idx: number }[]
@@ -75,11 +83,26 @@ export default function FaltantesPage() {
       setItems(rows);
       setFecha(fch);
 
+      // Catálogo de novedades (no depende de la fecha).
+      const tRes = await fetch("/api/deposito/faltantes/novedades", {
+        cache: "no-store",
+      });
+      if (tRes.ok) {
+        const tj = await tRes.json().catch(() => ({ tipos: [] }));
+        setTipos((tj.tipos ?? []) as Tipo[]);
+      }
+
       const est: Record<string, Estado> = {};
+      const nov: Record<string, number | null> = {};
       if (fch) {
-        const cRes = await fetch(`/api/deposito/faltantes/check?fecha=${fch}`, {
-          cache: "no-store",
-        });
+        const [cRes, nRes] = await Promise.all([
+          fetch(`/api/deposito/faltantes/check?fecha=${fch}`, {
+            cache: "no-store",
+          }),
+          fetch(`/api/deposito/faltantes/novedad?fecha=${fch}`, {
+            cache: "no-store",
+          }),
+        ]);
         if (cRes.ok) {
           const cj = await cRes.json().catch(() => ({ rows: [] }));
           for (const m of (cj.rows ?? []) as Mark[])
@@ -87,8 +110,18 @@ export default function FaltantesPage() {
               ? "si"
               : "no";
         }
+        if (nRes.ok) {
+          const nj = await nRes.json().catch(() => ({ rows: [] }));
+          for (const r of (nj.rows ?? []) as {
+            nroPedOrigen: number;
+            nroRengOrigen: number;
+            novedadId: number | null;
+          }[])
+            nov[`${r.nroPedOrigen}-${r.nroRengOrigen}`] = r.novedadId;
+        }
       }
       setEstados(est);
+      setNovedades(nov);
       setUndoStack([]);
       const first = rows.findIndex((r) => !est[keyOf(r)]);
       setIdx(first < 0 ? rows.length : first);
@@ -117,6 +150,26 @@ export default function FaltantesPage() {
           existencia,
         }),
       }).catch(() => setError("No se pudo guardar la marca")),
+    [fecha],
+  );
+
+  // Novedad por renglón (id del catálogo, o null = sin novedad). Guarda al instante.
+  const saveNovedad = useCallback(
+    (it: Item, novedadId: number | null) => {
+      const k = keyOf(it);
+      setNovedades((m) => ({ ...m, [k]: novedadId }));
+      fetch("/api/deposito/faltantes/novedad", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fecha,
+          nroPedOrigen: it.NroPedOrigen,
+          nroRengOrigen: it.NroRengOrigen,
+          codArticulo: it.CodArticulo,
+          novedadId,
+        }),
+      }).catch(() => setError("No se pudo guardar la novedad"));
+    },
     [fecha],
   );
 
@@ -251,6 +304,9 @@ export default function FaltantesPage() {
             <CardDetalle
               it={current}
               estado={estados[keyOf(current)] ?? "pendiente"}
+              tipos={tipos}
+              novedadId={novedades[keyOf(current)] ?? null}
+              onNovedad={(id) => saveNovedad(current, id)}
             />
           )}
         </div>
@@ -363,6 +419,7 @@ export default function FaltantesPage() {
                     {/* <th className="px-3 py-2.5 font-medium">Línea</th> */}
                     <th className="px-3 py-2.5 font-medium">Preparador</th>
                     {/* <th className="px-3 py-2.5 font-medium">Proveedor</th> */}
+                    <th className="px-3 py-2.5 font-medium">Novedad</th>
                     <th className="px-3 py-2.5 font-medium text-center">
                       Acción
                     </th>
@@ -406,6 +463,13 @@ export default function FaltantesPage() {
                           {it.Preparador || "—"}
                         </td>
                         {/* <td className="px-3 py-2 text-zinc-400">{it.Proveedor || "—"}</td> */}
+                        <td className="px-3 py-2">
+                          <NovedadSelect
+                            tipos={tipos}
+                            value={novedades[keyOf(it)] ?? null}
+                            onChange={(id) => saveNovedad(it, id)}
+                          />
+                        </td>
                         <td className="px-3 py-2">
                           <div className="flex items-center justify-center gap-1.5">
                             <button
@@ -465,6 +529,39 @@ function Pill({ e }: { e: Estado }) {
   );
 }
 
+// Select de novedad: muestra el nombre, devuelve el id (o null = sin novedad).
+function NovedadSelect({
+  tipos,
+  value,
+  onChange,
+  className,
+}: {
+  tipos: Tipo[];
+  value: number | null;
+  onChange: (id: number | null) => void;
+  className?: string;
+}) {
+  return (
+    <select
+      value={value ?? ""}
+      onChange={(e) =>
+        onChange(e.target.value === "" ? null : Number(e.target.value))
+      }
+      className={
+        className ??
+        "w-full max-w-[210px] bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer"
+      }
+    >
+      <option value="">— Sin novedad —</option>
+      {tipos.map((t) => (
+        <option key={t.id} value={t.id}>
+          {t.nombre}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function Row({
   label,
   value,
@@ -488,7 +585,19 @@ function Row({
   );
 }
 
-function CardDetalle({ it, estado }: { it: Item; estado: Estado }) {
+function CardDetalle({
+  it,
+  estado,
+  tipos,
+  novedadId,
+  onNovedad,
+}: {
+  it: Item;
+  estado: Estado;
+  tipos: Tipo[];
+  novedadId: number | null;
+  onNovedad: (id: number | null) => void;
+}) {
   return (
     <div className="px-5 py-4">
       {estado !== "pendiente" && (
@@ -500,6 +609,17 @@ function CardDetalle({ it, estado }: { it: Item; estado: Estado }) {
         {it.Nombre || "—"}
       </h2>
       <p className="font-mono text-sm text-yellow-400 mb-3">{it.CodArticulo}</p>
+      <div className="mb-4">
+        <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1.5">
+          Novedad
+        </div>
+        <NovedadSelect
+          tipos={tipos}
+          value={novedadId}
+          onChange={onNovedad}
+          className="w-full bg-[#1f1f1f] border border-zinc-700 rounded-lg px-3 py-3 text-base text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer"
+        />
+      </div>
       <Row label="Ubicación" value={it.Ubicacion ?? "—"} big />
       <Row label="Cant. pendiente" value={fmtNum(it.CantPend)} big />
       <Row label="Vendedor" value={it.Vendedor || "—"} />

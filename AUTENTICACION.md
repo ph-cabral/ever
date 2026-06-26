@@ -8,6 +8,9 @@ Login por **DNI + contraseña**; los permisos salen del **sector** del legajo.
 - **Login** en `/login` (DNI + contraseña).
 - **Alta de usuarios**: sólo un **admin**, desde `/admin/usuarios/nuevo`. Se escribe el DNI,
   el sistema busca el legajo y completa el nombre; si existe, se asigna una contraseña.
+- **Reseteo de contraseña**: si alguien la olvida, un **admin** se la cambia desde
+  `/admin/usuarios` (botón "Contraseña" en la fila): escribe la nueva (mín. 6) y la persona
+  entra con esa en su próximo ingreso. No hay autoservicio por email (el login es por DNI).
 - **Bootstrap**: si todavía no hay ningún usuario, `/login` muestra "Crear primer usuario"
   y ese primero queda como **administrador** (no hace falta seed manual).
 - **Permisos por sector**: editables en `/admin/permisos` (mapa sector → módulos).
