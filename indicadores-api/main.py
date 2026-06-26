@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from db import get_connection
 from utils import construir_timestamps, calcular_tiempos, COLUMNAS_TIEMPO
 from deposito import fetch_wms, fetch_tiempo, fetch_ingresados, fetch_faltantes
+from compras import fetch_ordenes_pendientes
 from datetime import date, datetime, timedelta
 
 app = FastAPI()
@@ -160,6 +161,16 @@ def deposito_faltantes():
     """Faltantes = renglones pendientes del último día con registro anterior a hoy."""
     try:
         return fetch_faltantes()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+# ── Compras: OC pendientes de recibir por artículo (lo que "va a llegar") ─────
+@app.get("/compras/ordenes-pendientes")
+def compras_ordenes_pendientes():
+    """OC abiertas, pendiente de recibir (Pedida - Recibida) agregado por artículo.
+    Solo lectura sobre Magnus; se cruza con faltantes en /compras/faltantes."""
+    try:
+        return fetch_ordenes_pendientes()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

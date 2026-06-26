@@ -1,0 +1,16 @@
+[Unit]
+Description=Renovar ticket Kerberos para indicadores-api (auth SQL Server)
+Documentation=file:/opt/krb5cc
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/krb5-renew.sh
+Nice=10
+
+# Descomenta para fijar valores en vez de usar los defaults del script:
+#Environment=KEYTAB=/etc/krb5-renew/svc.keytab
+#Environment=CCACHE=/opt/krb5cc/cc
+#Environment=PRINCIPAL=svcsql@EVERWEAR.LOCAL
+#Environment=LIFETIME=10h

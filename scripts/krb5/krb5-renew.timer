@@ -1,0 +1,22 @@
+[Unit]
+Description=Renueva el ticket Kerberos periodicamente (indicadores-api)
+
+[Timer]
+# Cada 6 horas. El ticket de AD vive tipicamente ~10h, asi que renovar cada 6h
+# deja margen y tolera que se saltee una corrida. NO uses solo "1/dia": si el
+# ticket dura menos de 24h la API queda sin auth varias horas hasta la proxima.
+OnCalendar=*-*-* 00,06,12,18:00:00
+
+# Si la maquina estuvo apagada a la hora programada, corre apenas arranca.
+Persistent=true
+
+# Y tambien poco despues del boot, por si el ccache quedo vacio/vencido.
+OnBootSec=2min
+
+# Evita que todos los timers disparen exactamente en punto.
+RandomizedDelaySec=3min
+
+Unit=krb5-renew.service
+
+[Install]
+WantedBy=timers.target

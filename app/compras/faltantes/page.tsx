@@ -1,18 +1,23 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
-  Loader2, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, PackageCheck,
-  CheckSquare, Square, ArrowDownWideNarrow,
+  Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck,
 } from "lucide-react";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/faltantes — items "sin existencia" (preparado.faltante_existencia,
-//   existencia=false; mismo universo que /deposito/faltantes/control) para que
-//   el sector compras decida qué encargar.
-//   Siempre ordenado por Importe (desc). Checks arriba permiten agrupar
-//   (combinables) por Cliente, Pedido y/o Fecha de arribo. Sin checks → lista
-//   plana. Solo lectura: la edición de fecha de arribo / "¿lo quiere?" se hace
-//   en /deposito/faltantes/control.
+//   existencia=false; mismo universo que /deposito/faltantes/control) AGRUPADOS
+//   POR ARTÍCULO. A cada artículo se le suma la cantidad faltante y se le cruza
+//   lo que ya está "por llegar" en Órdenes de Compra (Magnus, solo lectura, vía
+//   /api/compras/ordenes → indicadores-api). Columna "Llegarán".
+//
+//   Color de fila (igual criterio que /faltantes):
+//     · verde  → lo por llegar CUBRE el faltante (llegarán ≥ faltan)
+//     · rojo   → está ordenado pero NO alcanza (0 < llegarán < faltan)
+//     · neutro → no hay ninguna OC (llegarán = 0) → queda como antes
+//
+//   Filtro: Todos / Ordenados completos / Ordenados incompletos / Sin orden.
+//   Solo lectura. La marca de existencia se hace en /deposito/faltantes/control.
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface Item {
@@ -27,105 +32,88 @@ interface Item {
   Vendedor: string | null;
   Proveedor: string | null;
 }
-interface Ctrl {
-  fechaArribo: string | null;
-  clienteQuiere: boolean | null;
-}
 interface Mark {
   nroPedOrigen: number;
   nroRengOrigen: number;
   existencia: boolean;
 }
-type CtrlRow = Ctrl & { nroPedOrigen: number; nroRengOrigen: number };
+// Fila de OC agregada por artículo que devuelve /api/compras/ordenes
+interface OcRow {
+  CodArticulo: string;
+  PorLlegar: number;
+  Proveedor: string | null;
+  FechaEntrega: string | null; // ISO yyyy-mm-dd o null
+  Importacion: boolean;
+  NroOCs: string[];
+}
 
-type GroupKey = "cliente" | "pedido" | "fecha";
-const GROUP_ORDER: GroupKey[] = ["cliente", "pedido", "fecha"];
-const GROUP_LABELS: Record<GroupKey, string> = {
-  cliente: "Cliente",
-  pedido: "Pedido",
-  fecha: "Fecha de arribo",
-};
+type Estado = "completo" | "incompleto" | "sin_orden";
+type Filtro = "todos" | Estado;
 
-interface Node {
-  path: string;
-  label: string;
-  items: Item[];
+// Fila agregada por artículo
+interface ArtRow {
+  CodArticulo: string;
+  Nombre: string;
+  Proveedor: string | null;
+  faltan: number;
   importe: number;
-  children: Node[] | null; // null = nodo hoja (tabla de artículos)
+  renglones: number;
+  pedidos: Set<number>;
+  llegaran: number;
+  fechaEntrega: string | null;
+  importacion: boolean;
+  ocs: string[];
+  estado: Estado;
 }
 
 const keyOf = (it: { NroPedOrigen: number; NroRengOrigen: number }) =>
   `${it.NroPedOrigen}-${it.NroRengOrigen}`;
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(n || 0);
-const fmtAr = (s: string) => {
+const fmtAr = (s: string | null) => {
   const m = /(\d{4})-(\d{2})-(\d{2})/.exec(s || "");
   return m ? `${m[3]}/${m[2]}/${m[1]}` : s || "—";
 };
-const sumImporte = (items: Item[]) =>
-  items.reduce((acc, it) => acc + (it.Importe || 0), 0);
-const byImporteDesc = (a: Item, b: Item) => (b.Importe || 0) - (a.Importe || 0);
 
-function groupValue(k: GroupKey, it: Item, ctrl: Record<string, Ctrl>): string {
-  if (k === "cliente") return it.Cliente != null ? String(it.Cliente) : "Sin cliente";
-  if (k === "pedido") return String(it.NroPedOrigen);
-  const f = ctrl[keyOf(it)]?.fechaArribo ?? null;
-  return f ? fmtAr(f) : "Sin fecha de arribo";
+function estadoDe(faltan: number, llegaran: number): Estado {
+  if (llegaran <= 0) return "sin_orden";
+  if (llegaran >= faltan) return "completo";
+  return "incompleto";
 }
 
-function buildTree(
-  items: Item[],
-  keys: GroupKey[],
-  ctrl: Record<string, Ctrl>,
-  pathPrefix = "",
-): Node[] {
-  if (keys.length === 0) {
-    return [
-      {
-        path: pathPrefix || "_flat",
-        label: "",
-        items: [...items].sort(byImporteDesc),
-        importe: sumImporte(items),
-        children: null,
-      },
-    ];
-  }
-  const [head, ...rest] = keys;
-  const byVal = new Map<string, Item[]>();
-  for (const it of items) {
-    const v = groupValue(head, it, ctrl);
-    const arr = byVal.get(v);
-    if (arr) arr.push(it);
-    else byVal.set(v, [it]);
-  }
-  const nodes: Node[] = [...byVal.entries()].map(([v, its]) => {
-    const path = `${pathPrefix}/${head}:${v}`;
-    return {
-      path,
-      label: v,
-      items: its,
-      importe: sumImporte(its),
-      children: rest.length ? buildTree(its, rest, ctrl, path) : null,
-    };
-  });
-  nodes.sort((a, b) => b.importe - a.importe);
-  if (!rest.length) for (const n of nodes) n.items.sort(byImporteDesc);
-  return nodes;
-}
+const FILTROS: { key: Filtro; label: string }[] = [
+  { key: "todos", label: "Todos" },
+  { key: "completo", label: "Ordenados completos" },
+  { key: "incompleto", label: "Ordenados incompletos" },
+  { key: "sin_orden", label: "Sin orden" },
+];
 
-export default function EncargarFaltantesPage() {
-  const [base, setBase] = useState<Item[]>([]);
+// Clases de color de fila por estado
+const rowCls: Record<Estado, string> = {
+  completo: "bg-green-500/10 hover:bg-green-500/[0.16]",
+  incompleto: "bg-red-500/10 hover:bg-red-500/[0.16]",
+  sin_orden: "hover:bg-zinc-900/50",
+};
+const llegaranCls: Record<Estado, string> = {
+  completo: "text-green-400",
+  incompleto: "text-red-400",
+  sin_orden: "text-zinc-600",
+};
+
+export default function ComprasFaltantesPage() {
+  const [arts, setArts] = useState<ArtRow[]>([]);
   const [fecha, setFecha] = useState("");
-  const [ctrl, setCtrl] = useState<Record<string, Ctrl>>({});
-  const [groupBy, setGroupBy] = useState<GroupKey[]>([]);
-  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [filtro, setFiltro] = useState<Filtro>("todos");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ocWarn, setOcWarn] = useState(false); // OC no disponible (backend pendiente)
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setOcWarn(false);
     try {
+      // 1) faltantes del día
       const fRes = await fetch("/api/deposito/faltantes", { cache: "no-store" });
       const fj = await fRes.json().catch(() => ({}));
       if (!fRes.ok) throw new Error(fj.error || `HTTP ${fRes.status}`);
@@ -133,36 +121,81 @@ export default function EncargarFaltantesPage() {
       const fch: string = fj.fecha ?? "";
       setFecha(fch);
 
+      // 2) marcas "sin existencia" + 3) órdenes de compra (por llegar), en paralelo
       const sin = new Set<string>();
-      const ctrlMap: Record<string, Ctrl> = {};
-      if (fch) {
-        const [cRes, kRes] = await Promise.all([
-          fetch(`/api/deposito/faltantes/check?fecha=${fch}`, { cache: "no-store" }),
-          fetch(`/api/deposito/faltantes/control?fecha=${fch}`, { cache: "no-store" }),
-        ]);
-        if (cRes.ok) {
-          const cj = await cRes.json().catch(() => ({ rows: [] }));
-          for (const m of (cj.rows ?? []) as Mark[])
-            if (!m.existencia) sin.add(`${m.nroPedOrigen}-${m.nroRengOrigen}`);
-        }
-        if (kRes.ok) {
-          const kj = await kRes.json().catch(() => ({ rows: [] }));
-          for (const r of (kj.rows ?? []) as CtrlRow[])
-            ctrlMap[`${r.nroPedOrigen}-${r.nroRengOrigen}`] = {
-              fechaArribo: r.fechaArribo ?? null,
-              clienteQuiere: r.clienteQuiere ?? null,
-            };
-        }
+      const oc = new Map<string, OcRow>();
+
+      const [cRes, oRes] = await Promise.all([
+        fch
+          ? fetch(`/api/deposito/faltantes/check?fecha=${fch}`, { cache: "no-store" })
+          : Promise.resolve(null),
+        fetch("/api/compras/ordenes", { cache: "no-store" }).catch(() => null),
+      ]);
+
+      if (cRes && cRes.ok) {
+        const cj = await cRes.json().catch(() => ({ rows: [] }));
+        for (const m of (cj.rows ?? []) as Mark[])
+          if (!m.existencia) sin.add(`${m.nroPedOrigen}-${m.nroRengOrigen}`);
       }
 
-      // Solo "sin existencia" (preparado.faltante_existencia, existencia=false)
+      if (oRes && oRes.ok) {
+        const oj = await oRes.json().catch(() => ({ rows: [] }));
+        for (const r of (oj.rows ?? []) as OcRow[]) {
+          const cod = String(r.CodArticulo ?? "").trim();
+          if (cod) oc.set(cod, r);
+        }
+      } else {
+        setOcWarn(true); // la vista sigue: todo queda "sin orden"
+      }
+
+      // Solo "sin existencia", agregado por artículo
       const sinExistencia = rows.filter((r) => sin.has(keyOf(r)));
-      setCtrl(ctrlMap);
-      setBase(sinExistencia);
-      setOpen({});
+      const byArt = new Map<string, ArtRow>();
+      for (const it of sinExistencia) {
+        const cod = String(it.CodArticulo ?? "").trim();
+        let a = byArt.get(cod);
+        if (!a) {
+          a = {
+            CodArticulo: cod,
+            Nombre: it.Nombre,
+            Proveedor: it.Proveedor,
+            faltan: 0,
+            importe: 0,
+            renglones: 0,
+            pedidos: new Set<number>(),
+            llegaran: 0,
+            fechaEntrega: null,
+            importacion: false,
+            ocs: [],
+            estado: "sin_orden",
+          };
+          byArt.set(cod, a);
+        }
+        a.faltan += it.CantPend || 0;
+        a.importe += it.Importe || 0;
+        a.renglones += 1;
+        a.pedidos.add(it.NroPedOrigen);
+        if (!a.Proveedor && it.Proveedor) a.Proveedor = it.Proveedor;
+      }
+
+      // Cruce con OC
+      for (const a of byArt.values()) {
+        const r = oc.get(a.CodArticulo);
+        if (r) {
+          a.llegaran = r.PorLlegar || 0;
+          a.fechaEntrega = r.FechaEntrega ?? null;
+          a.importacion = !!r.Importacion;
+          a.ocs = r.NroOCs ?? [];
+          if (!a.Proveedor && r.Proveedor) a.Proveedor = r.Proveedor;
+        }
+        a.estado = estadoDe(a.faltan, a.llegaran);
+      }
+
+      const lista = [...byArt.values()].sort((x, y) => y.importe - x.importe);
+      setArts(lista);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al cargar");
-      setBase([]);
+      setArts([]);
     } finally {
       setLoading(false);
     }
@@ -172,25 +205,28 @@ export default function EncargarFaltantesPage() {
     load();
   }, [load]);
 
-  const toggleGroup = (k: GroupKey) =>
-    setGroupBy((g) => (g.includes(k) ? g.filter((x) => x !== k) : [...g, k]));
+  const conteo = useMemo(() => {
+    const c = { todos: arts.length, completo: 0, incompleto: 0, sin_orden: 0 };
+    for (const a of arts) c[a.estado]++;
+    return c as Record<Filtro, number>;
+  }, [arts]);
 
-  const activeKeys = useMemo(
-    () => GROUP_ORDER.filter((k) => groupBy.includes(k)),
-    [groupBy],
+  const visibles = useMemo(
+    () => (filtro === "todos" ? arts : arts.filter((a) => a.estado === filtro)),
+    [arts, filtro],
   );
 
-  const tree = useMemo(
-    () => buildTree(base, activeKeys, ctrl),
-    [base, activeKeys, ctrl],
-  );
+  const tot = useMemo(() => {
+    let faltan = 0, llegaran = 0, importe = 0;
+    for (const a of visibles) {
+      faltan += a.faltan;
+      llegaran += a.llegaran;
+      importe += a.importe;
+    }
+    return { art: visibles.length, faltan, llegaran, importe };
+  }, [visibles]);
 
-  const tot = useMemo(
-    () => ({ art: base.length, imp: sumImporte(base) }),
-    [base],
-  );
-
-  const hay = base.length > 0;
+  const hay = arts.length > 0;
 
   return (
     <div className="min-h-screen bg-[#111111] text-white">
@@ -222,7 +258,8 @@ export default function EncargarFaltantesPage() {
         <div className="flex items-center gap-4 text-sm">
           <span className="hidden sm:inline text-zinc-400">
             <b className="text-yellow-400">{tot.art}</b> art. ·{" "}
-            <b className="text-zinc-200">${fmtNum(tot.imp)}</b>
+            <b className="text-zinc-200">faltan {fmtNum(tot.faltan)}</b> ·{" "}
+            <b className="text-green-400">llegan {fmtNum(tot.llegaran)}</b>
           </span>
           <button
             onClick={load}
@@ -236,26 +273,33 @@ export default function EncargarFaltantesPage() {
       </header>
 
       <main className="max-w-[1200px] mx-auto px-3 md:px-8 py-6">
+        {/* Filtros por estado de orden */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
-          <span className="flex items-center gap-1.5 text-xs text-zinc-500 mr-1">
-            <ArrowDownWideNarrow size={14} /> Ordenado por importe
-          </span>
-          <span className="text-zinc-600">·</span>
-          <span className="text-xs text-zinc-500 mr-1">Agrupar por:</span>
-          {GROUP_ORDER.map((k) => (
+          {FILTROS.map((f) => (
             <button
-              key={k}
-              onClick={() => toggleGroup(k)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
-                groupBy.includes(k)
+              key={f.key}
+              onClick={() => setFiltro(f.key)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+                filtro === f.key
                   ? "bg-yellow-400/15 border-yellow-400 text-yellow-300"
                   : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
               }`}
             >
-              {groupBy.includes(k) ? <CheckSquare size={14} /> : <Square size={14} />}
-              {GROUP_LABELS[k]}
+              {f.label}
+              <span
+                className={`tabular-nums ${
+                  filtro === f.key ? "text-yellow-200/80" : "text-zinc-500"
+                }`}
+              >
+                {conteo[f.key] ?? 0}
+              </span>
             </button>
           ))}
+          {ocWarn && (
+            <span className="flex items-center gap-1.5 text-xs text-amber-400/80 ml-1">
+              <AlertTriangle size={13} /> OC no disponible — todo figura sin orden
+            </span>
+          )}
         </div>
 
         {!hay ? (
@@ -279,102 +323,70 @@ export default function EncargarFaltantesPage() {
               </a>
             )}
           </div>
-        ) : activeKeys.length === 0 ? (
-          <ItemsTable items={tree[0].items} />
         ) : (
-          <div className="flex flex-col gap-2">
-            {tree.map((n) => (
-              <GroupNode
-                key={n.path}
-                node={n}
-                depth={0}
-                open={open}
-                onToggle={(p) => setOpen((o) => ({ ...o, [p]: !o[p] }))}
-              />
-            ))}
+          <div className="overflow-x-auto rounded-xl border border-zinc-800">
+            <table className="w-full text-sm">
+              <thead className="bg-[#1A1A1A] text-zinc-400">
+                <tr className="text-left">
+                  <th className="px-3 py-2 font-medium">Cód.</th>
+                  <th className="px-3 py-2 font-medium">Artículo</th>
+                  <th className="px-3 py-2 font-medium text-right">Faltan</th>
+                  <th className="px-3 py-2 font-medium text-right">Llegarán</th>
+                  <th className="px-3 py-2 font-medium">Entrega</th>
+                  <th className="px-3 py-2 font-medium">Proveedor</th>
+                  <th className="px-3 py-2 font-medium text-right">Importe</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibles.map((a) => (
+                  <tr
+                    key={a.CodArticulo}
+                    className={`border-t border-zinc-800/70 transition-colors ${rowCls[a.estado]}`}
+                  >
+                    <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">
+                      {a.CodArticulo}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-100">
+                      <span>{a.Nombre}</span>
+                      {a.pedidos.size > 1 && (
+                        <span className="ml-2 text-[11px] text-zinc-500">
+                          {a.pedidos.size} pedidos
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-zinc-100">
+                      {fmtNum(a.faltan)}
+                    </td>
+                    <td
+                      className={`px-3 py-2 text-right tabular-nums font-medium ${llegaranCls[a.estado]}`}
+                    >
+                      {a.llegaran > 0 ? (
+                        <span className="inline-flex items-center gap-1 justify-end">
+                          <Truck size={13} className="opacity-70" />
+                          {fmtNum(a.llegaran)}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
+                      {a.llegaran > 0
+                        ? a.importacion
+                          ? <span className="text-amber-400/80">Importación</span>
+                          : fmtAr(a.fechaEntrega)
+                        : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-400">{a.Proveedor || "—"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                      ${fmtNum(a.importe)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </main>
-    </div>
-  );
-}
-
-function GroupNode({
-  node, depth, open, onToggle,
-}: {
-  node: Node;
-  depth: number;
-  open: Record<string, boolean>;
-  onToggle: (path: string) => void;
-}) {
-  const abierto = !!open[node.path];
-  return (
-    <div
-      className="rounded-xl border border-zinc-800 bg-[#161616] overflow-hidden"
-      style={depth > 0 ? { marginLeft: depth * 16 } : undefined}
-    >
-      <button
-        onClick={() => onToggle(node.path)}
-        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-zinc-900/50 transition-colors"
-      >
-        {abierto ? (
-          <ChevronDown size={16} className="shrink-0 text-zinc-500" />
-        ) : (
-          <ChevronRight size={16} className="shrink-0 text-zinc-500" />
-        )}
-        <span className="flex-1 text-sm font-medium text-zinc-100 truncate">
-          {node.label}
-        </span>
-        <span className="shrink-0 text-xs text-zinc-500">
-          {node.items.length} art.
-        </span>
-        <span className="shrink-0 text-sm tabular-nums text-zinc-200 w-24 text-right">
-          ${fmtNum(node.importe)}
-        </span>
-      </button>
-
-      {abierto && (
-        <div className="border-t border-zinc-800 px-2 py-2 flex flex-col gap-2">
-          {node.children
-            ? node.children.map((c) => (
-                <GroupNode key={c.path} node={c} depth={depth + 1} open={open} onToggle={onToggle} />
-              ))
-            : <ItemsTable items={node.items} />}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ItemsTable({ items }: { items: Item[] }) {
-  return (
-    <div className="overflow-x-auto rounded-xl border border-zinc-800">
-      <table className="w-full text-sm">
-        <thead className="bg-[#1A1A1A] text-zinc-400">
-          <tr className="text-left">
-            <th className="px-3 py-2 font-medium">Cód.</th>
-            <th className="px-3 py-2 font-medium">Artículo</th>
-            <th className="px-3 py-2 font-medium text-right">Cant.</th>
-            <th className="px-3 py-2 font-medium">Cliente</th>
-            <th className="px-3 py-2 font-medium">Pedido</th>
-            <th className="px-3 py-2 font-medium">Proveedor</th>
-            <th className="px-3 py-2 font-medium text-right">Importe</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((it) => (
-            <tr key={keyOf(it)} className="border-t border-zinc-800/70">
-              <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{it.CodArticulo}</td>
-              <td className="px-3 py-2 text-zinc-100">{it.Nombre}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{fmtNum(it.CantPend)}</td>
-              <td className="px-3 py-2 text-zinc-300">{it.Cliente ?? "—"}</td>
-              <td className="px-3 py-2 font-mono text-yellow-400/90">{it.NroPedOrigen}</td>
-              <td className="px-3 py-2 text-zinc-400">{it.Proveedor || "—"}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-zinc-300">${fmtNum(it.Importe)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
