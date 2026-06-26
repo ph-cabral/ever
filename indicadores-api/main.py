@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from db import get_connection
 from utils import construir_timestamps, calcular_tiempos, COLUMNAS_TIEMPO
-from deposito import fetch_wms, fetch_tiempo, fetch_ingresados, fetch_faltantes, fetch_vivo
+from deposito import fetch_wms, fetch_tiempo, fetch_ingresados, fetch_faltantes, fetch_faltantes_fechas, fetch_vivo
 from compras import fetch_ordenes_pendientes
 from datetime import date, datetime, timedelta
 
@@ -165,10 +165,24 @@ def deposito_vivo():
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
 @app.get("/deposito/faltantes")
-def deposito_faltantes():
-    """Faltantes = renglones pendientes del último día con registro anterior a hoy."""
+def deposito_faltantes(
+    desde: str | None = Query(default=None),
+    hasta: str | None = Query(default=None),
+):
+    """Faltantes (renglones pendientes 'sin existencia' por controlar).
+    · Sin params  → último snapshot con registro < hoy (comportamiento original).
+    · desde/hasta → todos los snapshots del rango, deduplicados por renglón, con
+      'PrimerDia' (primera aparición) para poder restar la OC por día."""
     try:
-        return fetch_faltantes()
+        return fetch_faltantes(desde, hasta)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/faltantes/fechas")
+def deposito_faltantes_fechas():
+    """Snapshots disponibles (fechas con registro < hoy) para el selector de la vista."""
+    try:
+        return fetch_faltantes_fechas()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

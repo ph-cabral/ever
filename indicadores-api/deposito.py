@@ -167,6 +167,103 @@ WHERE p.FecRegistracion = (
 ORDER BY u.SecuenciaRutPicking, p.NroPedOrigen, p.NroRengOrigen
 """
 
+# Mismo universo, pero por RANGO de snapshots. Cada día de Ven_PedRenPendientes es
+# una foto del backlog completo: la misma línea (ped, reng) se repite en la foto de
+# cada día hasta que se entrega. Para NO doble contar al ampliar el rango:
+#   · se deduplica por (ped, reng) quedándose con la fila más nueva (rn=1) para la
+#     CantPendiente / datos actuales, y
+#   · PrimerDia = MIN(FecRegistracion) en el rango = primer día que ese faltante
+#     aparece. Así "el faltante de cada día" es lo que recién aparece ese día, y la
+#     OC se puede restar por día (FIFO) sin contar dos veces lo que ya venía.
+# Params: ? = desde_num, ? = hasta_num (días Magnus, ya capados a < hoy en Python).
+SQL_FALTANTES_RANGO = """
+WITH base AS (
+    SELECT
+        p.NroPedOrigen, p.NroRengOrigen, p.CodArticu,
+        p.CantPendiente, p.CodCliente, p.PrecioVenta, p.FecRegistracion,
+        ROW_NUMBER() OVER (
+            PARTITION BY p.NroPedOrigen, p.NroRengOrigen
+            ORDER BY p.FecRegistracion DESC
+        ) AS rn,
+        MIN(p.FecRegistracion) OVER (
+            PARTITION BY p.NroPedOrigen, p.NroRengOrigen
+        ) AS PrimerDiaNum,
+        MAX(p.FecRegistracion) OVER (
+            PARTITION BY p.NroPedOrigen, p.NroRengOrigen
+        ) AS UltimoDiaNum
+    FROM EVERWEAR.dbo.[Ven_PedRenPendientes] p
+    WHERE p.FecRegistracion BETWEEN ? AND ?
+)
+SELECT
+    b.NroPedOrigen, b.NroRengOrigen,
+    CONVERT(date, DATEADD(day, b.FecRegistracion, '1800-12-28')) AS Fecha,
+    CONVERT(date, DATEADD(day, b.PrimerDiaNum,   '1800-12-28')) AS PrimerDia,
+    u.SecuenciaRutPicking,
+    b.CodArticu,
+    ap.Detalle      AS Patron,
+    s.DetalleMedida AS Medida,
+    s.UnidadMedida  AS Unidad,
+    b.CantPendiente,
+    b.CodCliente,
+    b.PrecioVenta,
+    ap.Nivel1       AS Linea,
+    t.Descripcion   AS TipoArticulo,
+    gp.Nombre       AS Preparador,
+    pr.RazonSocial  AS Proveedor,
+    uv.Usu_Arma_Nombre AS Vendedor
+FROM base b
+LEFT JOIN EVERWEAR.dbo.[Ubicacion#]            u  ON u.codArticulo    = b.CodArticu AND u.ubicacion NOT LIKE '%[A-Za-z]%'
+LEFT JOIN EVERWEAR.dbo.[StkFer_Articulos]      s  ON s.CodArticulo    = b.CodArticu
+LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet]     ap ON ap.ArticuloPatron = s.ArticuloPatron
+LEFT JOIN EVERWEAR.dbo.[Stk_TiposArticulos]    t  ON t.CodigoTipo     = s.NacionalImportado
+LEFT JOIN EVERWEAR.dbo.[Com_Proveedores]       pr ON pr.CodProveed    = s.CodProveedHabitual
+LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoRengPreparacion] prep ON prep.NroMovVenta = b.NroPedOrigen AND prep.NroRenglon = b.NroRengOrigen
+LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]          gp ON gp.Numero       = prep.CodPreparador
+LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoCabecera] cab ON cab.NroMovVenta = b.NroPedOrigen
+LEFT JOIN MAGNUS_SITD.dbo.[Ped_Usu_Arma]       uv ON cab.Vendedor    = uv.Usu_Arma_Codigo
+WHERE b.rn = 1
+  -- Solo lo que sigue pendiente en la foto más nueva del rango: si un renglón se
+  -- entregó a mitad del rango (no llega al último snapshot) NO es demanda viva.
+  AND b.UltimoDiaNum = (
+      SELECT MAX(FecRegistracion)
+      FROM EVERWEAR.dbo.[Ven_PedRenPendientes]
+      WHERE FecRegistracion BETWEEN ? AND ?
+  )
+ORDER BY PrimerDia, u.SecuenciaRutPicking, b.NroPedOrigen, b.NroRengOrigen
+"""
+
+# Snapshots disponibles (para el selector de fechas de la vista). Solo < hoy.
+SQL_FALTANTES_FECHAS = """
+SELECT DISTINCT TOP (180)
+       CONVERT(date, DATEADD(day, FecRegistracion, '1800-12-28')) AS Fecha
+FROM EVERWEAR.dbo.[Ven_PedRenPendientes]
+WHERE FecRegistracion < DATEDIFF(day, '1800-12-28', CAST(GETDATE() AS date))
+ORDER BY Fecha DESC
+"""
+
+
+def _rango_dias(desde, hasta):
+    """desde/hasta = date | 'YYYY-MM-DD' | None → (desde_num, hasta_num) en días
+    Magnus. hasta se capa a < hoy (igual que el default) y el span máx a 180 días."""
+    today_num = (date.today() - _BASE_PEDIDO).days
+
+    def _to_date(v, default):
+        if v is None:
+            return default
+        if isinstance(v, date):
+            return v
+        return datetime.strptime(str(v)[:10], "%Y-%m-%d").date()
+
+    h_date = _to_date(hasta, date.today())
+    h_num = min((h_date - _BASE_PEDIDO).days, today_num - 1)
+    d_date = _to_date(desde, h_date)
+    d_num = (d_date - _BASE_PEDIDO).days
+    if d_num > h_num:
+        d_num = h_num
+    if d_num < h_num - 180:
+        d_num = h_num - 180
+    return d_num, h_num
+
 
 def _txt(v):
     return str(v).strip() if v is not None else ""
@@ -177,19 +274,40 @@ def _int(v):
     return int(v) if v is not None else None
 
 
-def fetch_faltantes():
+def _iso(v):
+    """date/datetime/str → 'YYYY-MM-DD' o None."""
+    if v is None:
+        return None
+    if isinstance(v, (date, datetime)):
+        return v.isoformat()[:10]
+    return str(v)[:10]
+
+
+def fetch_faltantes(desde=None, hasta=None):
+    """Sin rango (desde/hasta None): último snapshot con registro < hoy
+    (comportamiento original, sin cambios para /deposito/faltantes).
+
+    Con rango: todos los snapshots de [desde, hasta] deduplicados por renglón.
+    Cada fila trae además 'Fecha' (snapshot más nuevo del renglón en el rango) y
+    'PrimerDia' (primera aparición del faltante en el rango)."""
     conn = get_connection("EVERWEAR")
     try:
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
-        cur.execute(SQL_FALTANTES)
+        if desde is None and hasta is None:
+            cur.execute(SQL_FALTANTES)
+        else:
+            d_num, h_num = _rango_dias(desde, hasta)
+            # params: BETWEEN del CTE (d,h) + BETWEEN de la subconsulta del último snapshot (d,h)
+            cur.execute(SQL_FALTANTES_RANGO, (d_num, h_num, d_num, h_num))
         cols = [c[0] for c in cur.description]
         fecha, rows = None, []
         for r in cur.fetchall():
             d = dict(zip(cols, r))
-            if fecha is None and d.get("Fecha") is not None:
-                f = d["Fecha"]
-                fecha = f.isoformat() if isinstance(f, (date, datetime)) else str(f)[:10]
+            fila_fecha = _iso(d.get("Fecha"))
+            if fecha is None and fila_fecha is not None:
+                fecha = fila_fecha
+            primer = _iso(d.get("PrimerDia")) or fila_fecha
             nombre = " ".join(" ".join(_txt(d.get(c)) for c in ("Patron", "Medida", "Unidad")).split())
             cant   = float(_safe(d.get("CantPendiente")) or 0)
             precio = float(_safe(d.get("PrecioVenta")) or 0)
@@ -207,8 +325,27 @@ def fetch_faltantes():
                 "Linea":         _safe(d.get("Linea")),
                 "Proveedor":     _txt(d.get("Proveedor")),
                 "Vendedor":      _txt(d.get("Vendedor")),
+                "Fecha":         fila_fecha,
+                "PrimerDia":     primer,
             })
         return {"fecha": fecha, "total": len(rows), "rows": rows}
+    finally:
+        conn.close()
+
+
+def fetch_faltantes_fechas():
+    """Lista de snapshots disponibles (fechas con registro < hoy), nuevo→viejo."""
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_FALTANTES_FECHAS)
+        out = []
+        for row in cur.fetchall():
+            f = _iso(row[0])
+            if f:
+                out.append(f)
+        return {"total": len(out), "fechas": out}
     finally:
         conn.close()
 

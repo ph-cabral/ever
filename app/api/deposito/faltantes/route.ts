@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 const API_URL =
   process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
@@ -6,11 +6,20 @@ const API_URL =
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Proxy → FastAPI indicadores-api: faltantes (renglones pendientes del último
-// día con registro anterior a hoy). Sin params.
-export async function GET() {
+// Proxy → FastAPI indicadores-api: faltantes (renglones pendientes 'sin existencia').
+// Sin params → último snapshot (comportamiento original, usado por /deposito/faltantes).
+// Con ?desde&hasta (YYYY-MM-DD) → todos los snapshots del rango, deduplicados, con
+// PrimerDia (lo consume /compras/faltantes para restar la OC por día).
+export async function GET(req: NextRequest) {
   try {
-    const res = await fetch(`${API_URL}/deposito/faltantes`, {
+    const sp = req.nextUrl.searchParams;
+    const qs = new URLSearchParams();
+    const desde = sp.get("desde");
+    const hasta = sp.get("hasta");
+    if (desde) qs.set("desde", desde);
+    if (hasta) qs.set("hasta", hasta);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    const res = await fetch(`${API_URL}/deposito/faltantes${suffix}`, {
       cache: "no-store",
       signal: AbortSignal.timeout(45000),
     });

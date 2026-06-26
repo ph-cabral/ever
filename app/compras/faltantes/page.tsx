@@ -1,75 +1,51 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
-  Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck,
+  Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck, CalendarRange,
 } from "lucide-react";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// /compras/faltantes — items "sin existencia" (preparado.faltante_existencia,
-//   existencia=false; mismo universo que /deposito/faltantes/control) AGRUPADOS
-//   POR ARTÍCULO. A cada artículo se le suma la cantidad faltante y se le cruza
-//   lo que ya está "por llegar" en Órdenes de Compra (Magnus, solo lectura, vía
-//   /api/compras/ordenes → indicadores-api). Columna "Llegarán".
+// /compras/faltantes — faltantes "sin existencia" por (artículo, día) con la OC
+//   restada por día.
 //
-//   Color de fila (igual criterio que /faltantes):
-//     · verde  → lo por llegar CUBRE el faltante (llegarán ≥ faltan)
-//     · rojo   → está ordenado pero NO alcanza (0 < llegarán < faltan)
-//     · neutro → no hay ninguna OC (llegarán = 0) → queda como antes
+//   · Default: solo el último snapshot (como antes).
+//   · Filtro "Desde": amplía el rango hacia atrás. Cada renglón cuenta una sola
+//     vez, en su DÍA DE APARICIÓN (no se doble-cuenta el backlog que se repite).
+//   · La OC "por llegar" (Magnus, en vivo) se reparte FIFO por fecha: cubre primero
+//     el día más viejo y se va agotando. Una misma OC ya no figura cubriendo varios
+//     días.
 //
-//   Filtro: Todos / Ordenados completos / Ordenados incompletos / Sin orden.
+//   Color de fila por estado del DÍA:
+//     · verde  → la OC que llegó a ese día cubre el faltante (descubierto = 0)
+//     · rojo   → la OC alcanzó en parte (0 < cubierto < faltan)
+//     · neutro → a ese día no le llegó OC (cubierto = 0)
+//
 //   Solo lectura. La marca de existencia se hace en /deposito/faltantes/control.
+//   El consumo por día se guarda solo (preparado.faltante_oc_consumo).
 // ──────────────────────────────────────────────────────────────────────────────
-
-interface Item {
-  NroPedOrigen: number;
-  NroRengOrigen: number;
-  CodArticulo: string;
-  Nombre: string;
-  CantPend: number;
-  Cliente: number | string | null;
-  Importe: number;
-  Preparador: string | null;
-  Vendedor: string | null;
-  Proveedor: string | null;
-  Linea: string | number | null;
-}
-interface Mark {
-  nroPedOrigen: number;
-  nroRengOrigen: number;
-  existencia: boolean;
-}
-// Fila de OC agregada por artículo que devuelve /api/compras/ordenes
-interface OcRow {
-  CodArticulo: string;
-  PorLlegar: number;
-  Proveedor: string | null;
-  FechaEntrega: string | null; // ISO yyyy-mm-dd o null
-  Importacion: boolean;
-  NroOCs: string[];
-}
 
 type Estado = "completo" | "incompleto" | "sin_orden";
 type Filtro = "todos" | Estado;
 
-// Fila agregada por artículo
-interface ArtRow {
+interface Row {
   CodArticulo: string;
   Nombre: string;
   Linea: string | number | null;
   Proveedor: string | null;
+  fecha: string; // día del faltante (primera aparición)
   faltan: number;
+  cubierto: number;
+  descubierto: number;
   importe: number;
   renglones: number;
-  pedidos: Set<number>;
-  llegaran: number;
+  pedidos: number;
+  ocTotal: number;
   fechaEntrega: string | null;
   importacion: boolean;
   ocs: string[];
   estado: Estado;
 }
 
-const keyOf = (it: { NroPedOrigen: number; NroRengOrigen: number }) =>
-  `${it.NroPedOrigen}-${it.NroRengOrigen}`;
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(n || 0);
 const fmtAr = (s: string | null) => {
@@ -77,161 +53,100 @@ const fmtAr = (s: string | null) => {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : s || "—";
 };
 
-function estadoDe(faltan: number, llegaran: number): Estado {
-  if (llegaran <= 0) return "sin_orden";
-  if (llegaran >= faltan) return "completo";
-  return "incompleto";
-}
-
 const FILTROS: { key: Filtro; label: string }[] = [
   { key: "todos", label: "Todos" },
-  { key: "completo", label: "Ordenados completos" },
-  { key: "incompleto", label: "Ordenados incompletos" },
-  { key: "sin_orden", label: "Sin orden" },
+  { key: "completo", label: "Cubiertos" },
+  { key: "incompleto", label: "Parciales" },
+  { key: "sin_orden", label: "Sin OC" },
 ];
 
-// Clases de color de fila por estado
 const rowCls: Record<Estado, string> = {
   completo: "bg-green-500/10 hover:bg-green-500/[0.16]",
   incompleto: "bg-red-500/10 hover:bg-red-500/[0.16]",
   sin_orden: "hover:bg-zinc-900/50",
 };
-const llegaranCls: Record<Estado, string> = {
+const cubiertoCls: Record<Estado, string> = {
   completo: "text-green-400",
-  incompleto: "text-red-400",
+  incompleto: "text-amber-400",
   sin_orden: "text-zinc-600",
 };
 
 export default function ComprasFaltantesPage() {
-  const [arts, setArts] = useState<ArtRow[]>([]);
-  const [fecha, setFecha] = useState("");
+  const [rows, setRows] = useState<Row[]>([]);
+  const [fecha, setFecha] = useState<string | null>(null);
+  const [desdeResp, setDesdeResp] = useState<string | null>(null);
+  const [hastaResp, setHastaResp] = useState<string | null>(null);
+  const [desde, setDesde] = useState(""); // "" = solo último día
+  const [fechasDisp, setFechasDisp] = useState<string[]>([]);
   const [filtro, setFiltro] = useState<Filtro>("todos");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [ocWarn, setOcWarn] = useState(false); // OC no disponible (backend pendiente)
+  const [ocWarn, setOcWarn] = useState(false);
+
+  // Snapshots disponibles (para el selector "Desde")
+  useEffect(() => {
+    fetch("/api/deposito/faltantes/fechas", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { fechas: [] }))
+      .then((j) => setFechasDisp(j.fechas ?? []))
+      .catch(() => setFechasDisp([]));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     setOcWarn(false);
     try {
-      // 1) faltantes del día
-      const fRes = await fetch("/api/deposito/faltantes", { cache: "no-store" });
-      const fj = await fRes.json().catch(() => ({}));
-      if (!fRes.ok) throw new Error(fj.error || `HTTP ${fRes.status}`);
-      const rows: Item[] = fj.rows ?? [];
-      const fch: string = fj.fecha ?? "";
-      setFecha(fch);
-
-      // 2) marcas "sin existencia" + 3) órdenes de compra (por llegar), en paralelo
-      const sin = new Set<string>();
-      const oc = new Map<string, OcRow>();
-
-      const [cRes, oRes] = await Promise.all([
-        fch
-          ? fetch(`/api/deposito/faltantes/check?fecha=${fch}`, { cache: "no-store" })
-          : Promise.resolve(null),
-        fetch("/api/compras/ordenes", { cache: "no-store" }).catch(() => null),
-      ]);
-
-      if (cRes && cRes.ok) {
-        const cj = await cRes.json().catch(() => ({ rows: [] }));
-        for (const m of (cj.rows ?? []) as Mark[])
-          if (!m.existencia) sin.add(`${m.nroPedOrigen}-${m.nroRengOrigen}`);
-      }
-
-      if (oRes && oRes.ok) {
-        const oj = await oRes.json().catch(() => ({ rows: [] }));
-        for (const r of (oj.rows ?? []) as OcRow[]) {
-          const cod = String(r.CodArticulo ?? "").trim();
-          if (cod) oc.set(cod, r);
-        }
-      } else {
-        setOcWarn(true); // la vista sigue: todo queda "sin orden"
-      }
-
-      // Solo "sin existencia", agregado por artículo
-      const sinExistencia = rows.filter((r) => sin.has(keyOf(r)));
-      const byArt = new Map<string, ArtRow>();
-      for (const it of sinExistencia) {
-        const cod = String(it.CodArticulo ?? "").trim();
-        let a = byArt.get(cod);
-        if (!a) {
-          a = {
-            CodArticulo: cod,
-            Nombre: it.Nombre,
-            Linea: it.Linea ?? null,
-            Proveedor: it.Proveedor,
-            faltan: 0,
-            importe: 0,
-            renglones: 0,
-            pedidos: new Set<number>(),
-            llegaran: 0,
-            fechaEntrega: null,
-            importacion: false,
-            ocs: [],
-            estado: "sin_orden",
-          };
-          byArt.set(cod, a);
-        }
-        a.faltan += it.CantPend || 0;
-        a.importe += it.Importe || 0;
-        a.renglones += 1;
-        a.pedidos.add(it.NroPedOrigen);
-        if (!a.Proveedor && it.Proveedor) a.Proveedor = it.Proveedor;
-        if ((a.Linea === null || a.Linea === "") && it.Linea != null && it.Linea !== "")
-          a.Linea = it.Linea;
-      }
-
-      // Cruce con OC
-      for (const a of byArt.values()) {
-        const r = oc.get(a.CodArticulo);
-        if (r) {
-          a.llegaran = r.PorLlegar || 0;
-          a.fechaEntrega = r.FechaEntrega ?? null;
-          a.importacion = !!r.Importacion;
-          a.ocs = r.NroOCs ?? [];
-          if (!a.Proveedor && r.Proveedor) a.Proveedor = r.Proveedor;
-        }
-        a.estado = estadoDe(a.faltan, a.llegaran);
-      }
-
-      const lista = [...byArt.values()].sort((x, y) => y.importe - x.importe);
-      setArts(lista);
+      const qs = desde ? `?desde=${desde}` : "";
+      const res = await fetch(`/api/compras/faltantes-consumo${qs}`, { cache: "no-store" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setRows(j.rows ?? []);
+      setFecha(j.fecha ?? null);
+      setDesdeResp(j.desde ?? null);
+      setHastaResp(j.hasta ?? null);
+      setOcWarn(!!j.ocWarn);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al cargar");
-      setArts([]);
+      setRows([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [desde]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const conteo = useMemo(() => {
-    const c = { todos: arts.length, completo: 0, incompleto: 0, sin_orden: 0 };
-    for (const a of arts) c[a.estado]++;
+    const c = { todos: rows.length, completo: 0, incompleto: 0, sin_orden: 0 };
+    for (const r of rows) c[r.estado]++;
     return c as Record<Filtro, number>;
-  }, [arts]);
+  }, [rows]);
 
   const visibles = useMemo(
-    () => (filtro === "todos" ? arts : arts.filter((a) => a.estado === filtro)),
-    [arts, filtro],
+    () => (filtro === "todos" ? rows : rows.filter((r) => r.estado === filtro)),
+    [rows, filtro],
   );
 
   const tot = useMemo(() => {
-    let faltan = 0, llegaran = 0, importe = 0;
-    for (const a of visibles) {
-      faltan += a.faltan;
-      llegaran += a.llegaran;
-      importe += a.importe;
+    let faltan = 0, cubierto = 0, descubierto = 0, importe = 0;
+    const arts = new Set<string>();
+    for (const r of visibles) {
+      faltan += r.faltan;
+      cubierto += r.cubierto;
+      descubierto += r.descubierto;
+      importe += r.importe;
+      arts.add(r.CodArticulo);
     }
-    return { art: visibles.length, faltan, llegaran, importe };
+    return { art: arts.size, dias: visibles.length, faltan, cubierto, descubierto, importe };
   }, [visibles]);
 
-  const hay = arts.length > 0;
+  const rango =
+    desdeResp && hastaResp && desdeResp !== hastaResp
+      ? `${fmtAr(desdeResp)} – ${fmtAr(hastaResp)}`
+      : fmtAr(fecha);
+
+  const hay = rows.length > 0;
 
   return (
     <div className="min-h-screen bg-[#111111] text-white">
@@ -257,14 +172,15 @@ export default function ComprasFaltantesPage() {
           </span>
           <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
           <span className="hidden md:inline text-zinc-500 text-sm">
-            Faltantes a encargar · {fmtAr(fecha)}
+            Faltantes a encargar · {rango}
           </span>
         </div>
         <div className="flex items-center gap-4 text-sm">
           <span className="hidden sm:inline text-zinc-400">
             <b className="text-yellow-400">{tot.art}</b> art. ·{" "}
             <b className="text-zinc-200">faltan {fmtNum(tot.faltan)}</b> ·{" "}
-            <b className="text-green-400">llegan {fmtNum(tot.llegaran)}</b>
+            <b className="text-green-400">cubren {fmtNum(tot.cubierto)}</b> ·{" "}
+            <b className="text-red-400">faltan OC {fmtNum(tot.descubierto)}</b>
           </span>
           <button
             onClick={load}
@@ -278,8 +194,35 @@ export default function ComprasFaltantesPage() {
       </header>
 
       <main className="max-w-[1200px] mx-auto px-3 md:px-8 py-6">
-        {/* Filtros por estado de orden */}
+        {/* Selector de rango + filtros por estado */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mr-2">
+            <CalendarRange size={15} className="text-zinc-500" />
+            <select
+              value={desde}
+              onChange={(e) => setDesde(e.target.value)}
+              className="bg-[#1A1A1A] border border-zinc-700 rounded-md px-2 py-1.5 text-xs text-zinc-200 focus:border-yellow-400 outline-none"
+            >
+              <option value="">Solo último día</option>
+              {fechasDisp.map((f, i) => (
+                <option key={f} value={f}>
+                  Desde {fmtAr(f)}
+                  {i === 0 ? " (último)" : ""}
+                </option>
+              ))}
+            </select>
+            {desde && (
+              <button
+                onClick={() => setDesde("")}
+                className="text-xs text-zinc-500 hover:text-yellow-400 underline underline-offset-2"
+              >
+                volver al último día
+              </button>
+            )}
+          </div>
+
+          <div className="w-px h-5 bg-zinc-800 hidden sm:block" />
+
           {FILTROS.map((f) => (
             <button
               key={f.key}
@@ -335,62 +278,81 @@ export default function ComprasFaltantesPage() {
                 <tr className="text-left">
                   <th className="px-3 py-2 font-medium">Cód.</th>
                   <th className="px-3 py-2 font-medium">Artículo</th>
-                  <th className="px-3 py-2 font-medium">Línea</th>
+                  <th className="px-3 py-2 font-medium">Día</th>
                   <th className="px-3 py-2 font-medium text-right">Faltan</th>
-                  <th className="px-3 py-2 font-medium text-right">Llegarán</th>
+                  <th className="px-3 py-2 font-medium text-right">Cubre OC</th>
+                  <th className="px-3 py-2 font-medium text-right">Falta OC</th>
                   <th className="px-3 py-2 font-medium">Entrega</th>
                   <th className="px-3 py-2 font-medium">Proveedor</th>
                   <th className="px-3 py-2 font-medium text-right">Importe</th>
                 </tr>
               </thead>
               <tbody>
-                {visibles.map((a) => (
-                  <tr
-                    key={a.CodArticulo}
-                    className={`border-t border-zinc-800/70 transition-colors ${rowCls[a.estado]}`}
-                  >
-                    <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">
-                      {a.CodArticulo}
-                    </td>
-                    <td className="px-3 py-2 text-zinc-100">
-                      <span>{a.Nombre}</span>
-                      {a.pedidos.size > 1 && (
-                        <span className="ml-2 text-[11px] text-zinc-500">
-                          {a.pedidos.size} pedidos
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
-                      {a.Linea ?? "—"}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-zinc-100">
-                      {fmtNum(a.faltan)}
-                    </td>
-                    <td
-                      className={`px-3 py-2 text-right tabular-nums font-medium ${llegaranCls[a.estado]}`}
+                {visibles.map((r, i) => {
+                  const prev = visibles[i - 1];
+                  const nuevoArt = !prev || prev.CodArticulo !== r.CodArticulo;
+                  return (
+                    <tr
+                      key={`${r.CodArticulo}-${r.fecha}`}
+                      className={`transition-colors ${rowCls[r.estado]} ${
+                        nuevoArt ? "border-t-2 border-zinc-700/80" : "border-t border-zinc-800/50"
+                      }`}
                     >
-                      {a.llegaran > 0 ? (
-                        <span className="inline-flex items-center gap-1 justify-end">
-                          <Truck size={13} className="opacity-70" />
-                          {fmtNum(a.llegaran)}
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
-                      {a.llegaran > 0
-                        ? a.importacion
-                          ? <span className="text-amber-400/80">Importación</span>
-                          : fmtAr(a.fechaEntrega)
-                        : "—"}
-                    </td>
-                    <td className="px-3 py-2 text-zinc-400">{a.Proveedor || "—"}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
-                      ${fmtNum(a.importe)}
-                    </td>
-                  </tr>
-                ))}
+                      <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">
+                        {nuevoArt ? r.CodArticulo : ""}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-100">
+                        {nuevoArt ? (
+                          <span>
+                            {r.Nombre}
+                            {r.ocTotal > 0 && (
+                              <span className="ml-2 text-[11px] text-zinc-500">
+                                OC total {fmtNum(r.ocTotal)}
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          ""
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">
+                        {fmtAr(r.fecha)}
+                        {r.pedidos > 1 && (
+                          <span className="ml-2 text-[11px] text-zinc-600">{r.pedidos} ped.</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-zinc-100">
+                        {fmtNum(r.faltan)}
+                      </td>
+                      <td
+                        className={`px-3 py-2 text-right tabular-nums font-medium ${cubiertoCls[r.estado]}`}
+                      >
+                        {r.cubierto > 0 ? (
+                          <span className="inline-flex items-center gap-1 justify-end">
+                            <Truck size={13} className="opacity-70" />
+                            {fmtNum(r.cubierto)}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-red-300/90">
+                        {r.descubierto > 0 ? fmtNum(r.descubierto) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
+                        {r.cubierto > 0
+                          ? r.importacion
+                            ? <span className="text-amber-400/80">Importación</span>
+                            : fmtAr(r.fechaEntrega)
+                          : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-400">{nuevoArt ? r.Proveedor || "—" : ""}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                        ${fmtNum(r.importe)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
