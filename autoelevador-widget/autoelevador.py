@@ -23,12 +23,20 @@ import math
 import time
 import threading
 import webbrowser
-from urllib import request
+import http.cookiejar
+from urllib import request, error
 
 # ----------------------------- CONFIG ---------------------------------------
 API_URL      = "http://10.10.0.159:3001/api/picking/estado"
 PICKING_URL  = "http://10.10.0.159:3001/picking"
+LOGIN_URL    = "http://10.10.0.159:3001/api/auth/login"
 POLL_SECONDS = 5            # cada cuanto consulta la API
+# Credenciales embebidas para el login automatico (asi el .exe es autocontenido).
+# Quedan dentro del codigo (git) y del .exe; para un widget interno de planta es
+# aceptable. Se pueden sobreescribir por PC con credenciales.json o las variables
+# de entorno PICKING_DNI / PICKING_PASS (tienen prioridad sobre estas constantes).
+LOGIN_DNI    = "35307009"
+LOGIN_PASS   = "a35307009."
 APP_NAME     = "AutoelevadorPicking"
 
 TRANSPARENT  = "#ff00ff"    # color "magenta" que se vuelve transparente (no usar en el dibujo)
@@ -136,17 +144,75 @@ def enable_dpi_awareness():
 
 
 # ------------------------------ polling -------------------------------------
+# Mantiene la cookie de sesion (ever_session) entre requests.
+_cookies = http.cookiejar.CookieJar()
+_opener = request.build_opener(request.HTTPCookieProcessor(_cookies))
+
+
+def load_credentials():
+    """DNI/contrasena para el login automatico. Prioridad: variables de
+    entorno -> credenciales.json (junto al exe o en %APPDATA%) -> constantes."""
+    dni = os.environ.get("PICKING_DNI", "").strip()
+    pwd = os.environ.get("PICKING_PASS", "")
+    if dni and pwd:
+        return dni, pwd
+    for ruta in (os.path.join(os.path.dirname(exe_path()), "credenciales.json"),
+                 os.path.join(config_dir(), "credenciales.json")):
+        try:
+            with open(ruta, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if d.get("dni") and d.get("password"):
+                return str(d["dni"]).strip(), str(d["password"])
+        except Exception:
+            pass
+    return LOGIN_DNI, LOGIN_PASS
+
+
+def do_login():
+    dni, pwd = load_credentials()
+    if not dni or not pwd:
+        log("Sin credenciales: configura credenciales.json o PICKING_DNI/PICKING_PASS")
+        return False
+    payload = json.dumps({"dni": dni, "password": pwd}).encode("utf-8")
+    req = request.Request(LOGIN_URL, data=payload,
+                          headers={"Content-Type": "application/json",
+                                   "User-Agent": APP_NAME})
+    try:
+        with _opener.open(req, timeout=6) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        if body.get("ok"):
+            log("Login OK como %s" % body.get("usuario", {}).get("nombre", dni))
+            return True
+        log("Login rechazado: %s" % body)
+        return False
+    except error.HTTPError as e:
+        log("Login HTTP %s: %s" % (e.code, e.reason))
+        return False
+    except Exception as e:
+        log("Login error: %s" % e)
+        return False
+
+
 def poll_loop():
     global pendientes, api_ok
     last = None
+    logged = False
     while not stop_event.is_set():
         try:
+            if not logged:
+                logged = do_login()
             req = request.Request(API_URL, headers={"User-Agent": APP_NAME})
-            with request.urlopen(req, timeout=4) as resp:
+            with _opener.open(req, timeout=4) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                pendientes = int(data.get("pendientes", 0) or 0)
-                api_ok = True
-                estado = ("ok", pendientes)
+            pendientes = int(data.get("pendientes", 0) or 0)
+            api_ok = True
+            estado = ("ok", pendientes)
+        except error.HTTPError as e:
+            if e.code in (401, 403):
+                logged = False        # cookie vencida o sin permiso -> re-login
+            pendientes = 0
+            api_ok = False
+            estado = ("error", "HTTP %s" % e.code)
         except Exception as e:
             pendientes = 0
             api_ok = False
