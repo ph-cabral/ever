@@ -15,6 +15,20 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal
 from db import get_connection
 
+# ── Faltantes por OT (fuente NUEVA de /deposito/faltantes) ────────────────────
+# Columna de la cabecera OT (base WMS) que guarda el N° de pedido de venta de
+# Magnus = VenFer_PedidoCabecera.NroMovVenta. Es lo único que el código no puede
+# confirmar solo: si el nombre real es otro, la consulta de faltantes-OT falla.
+# CONFIRMAR contra el server con GET /deposito/faltantes-ot/diag (lista las
+# columnas reales de OT) y, si hace falta, cambiar SOLO esta constante.
+OT_COL_PEDIDO = "OTNroMovVenta"
+
+# Un pedido/factura "descartado" se reconoce por la DESCRIPCIÓN de su estado en
+# MAGNUS_SITD.dbo.Pedido_Estados (Ped_EstadoDescripcion). Se excluye todo pedido
+# cuya descripción contenga alguno de estos patrones (case-insensitive, LIKE %x%).
+# El diagnóstico lista los estados presentes con su conteo para ajustar esto.
+PATRONES_DESCARTADO: tuple[str, ...] = ("DESCART", "ANULAD")
+
 # ── Productividad WMS (lean) ──────────────────────────────────────────────────
 SQL_WMS = """
 SELECT
@@ -348,6 +362,239 @@ def fetch_faltantes_fechas():
         return {"total": len(out), "fechas": out}
     finally:
         conn.close()
+
+
+# ── Faltantes por OT (NUEVA fuente de /deposito/faltantes) ────────────────────
+# En vez de leer el snapshot Ven_PedRenPendientes, se mira el armado real: por cada
+# OT de Picking ejecutada se cuentan los renglones (OTItem tipo 1) que se
+# RECOLECTARON (CantCumplida > 0 = "cumplido") y los que NO (CantCumplida = 0 =
+# "faltante", el operario no encontró el artículo). Se agrupa por OT y se queda
+# solo con las OT que tienen al menos un faltante.
+#
+# OJO "cumplido" es binario (se recolectó algo / nada), igual que la productividad
+# (parseDeposito.ts). Un renglón parcial (pidió 10, recolectó 4) cuenta como
+# cumplido; para tratar parciales como faltante haría falta la columna de cantidad
+# PEDIDA del OTItem (confirmar nombre con el diagnóstico) y comparar contra
+# CantCumplida.
+#
+# La exclusión de "facturas descartadas" se hace por el ESTADO del pedido en
+# Magnus: se trae OT.{OT_COL_PEDIDO} = NroMovVenta, se cruza con
+# VenFer_PedidoCabecera/Pedido_Estados (conexión EVERWEAR, como el resto) y se
+# descarta todo pedido cuyo estado matchee PATRONES_DESCARTADO.
+SQL_FALTANTES_OT = """
+WITH it AS (
+    SELECT OTId,
+        SUM(CASE WHEN OTItemTipo = 1 THEN 1 ELSE 0 END)                              AS ItemsTotal,
+        SUM(CASE WHEN OTItemTipo = 1 AND OTItemCantCumplida > 0 THEN 1 ELSE 0 END)   AS ItemsCumplidos,
+        SUM(CASE WHEN OTItemTipo = 1 AND ISNULL(OTItemCantCumplida, 0) = 0 THEN 1 ELSE 0 END) AS ItemsFaltantes
+    FROM OTItem
+    GROUP BY OTId
+)
+SELECT
+    OT.OTId,
+    CONVERT(varchar(10), OT.OTFechaHoraEjecucion, 23) AS Fecha,
+    OT.{col_pedido}            AS NroMovVenta,
+    P_Repositor.PersonalNombre AS Operario,
+    it.ItemsTotal,
+    it.ItemsCumplidos,
+    it.ItemsFaltantes
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+INNER JOIN it    ON it.OTId        = OT.OTId
+LEFT JOIN Personal P_Repositor ON OT.OTUsuarioGUID_Repositor = P_Repositor.PersonalId
+WHERE Codot.CodotProcesoNegocio = 4            -- Picking
+  AND OT.OTEstado IN (2, 3, 4)                 -- ejecutada / terminada
+  AND OT.OTFechaHoraEjecucion >= ?
+  AND OT.OTFechaHoraEjecucion <= ?
+  AND it.ItemsFaltantes > 0                    -- solo OT con faltante
+ORDER BY it.ItemsFaltantes DESC, OT.OTId DESC
+"""
+
+# Último día con Picking ejecutado (< mañana). Default de la vista cuando no se
+# pasa rango: muestra el armado del día más reciente.
+SQL_OT_ULTIMO_DIA = """
+SELECT MAX(CONVERT(date, OT.OTFechaHoraEjecucion)) AS f
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+WHERE Codot.CodotProcesoNegocio = 4
+  AND OT.OTEstado IN (2, 3, 4)
+  AND OT.OTFechaHoraEjecucion < DATEADD(day, 1, CAST(GETDATE() AS date))
+"""
+
+# Estado/cliente/vendedor del pedido (Magnus) para enriquecer y excluir descartados.
+SQL_PEDIDOS_INFO = """
+SELECT cab.NroMovVenta, cab.CodCliente,
+       est.Ped_EstadoDescripcion AS Estado,
+       uv.Usu_Arma_Nombre        AS Vendedor
+FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
+LEFT JOIN MAGNUS_SITD.dbo.Pedido_Estados est ON cab.EstadoPedido = est.Ped_Estado
+LEFT JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma   uv  ON cab.Vendedor     = uv.Usu_Arma_Codigo
+WHERE cab.NroMovVenta IN ({ph})
+"""
+
+
+def _rango_ot(desde, hasta):
+    """desde/hasta = 'YYYY-MM-DD' | None → (datetime inicio, datetime fin).
+    Si falta uno, se usa el otro (rango de un día). Default ambos = None lo maneja
+    fetch_faltantes_ot con el último día con armado."""
+    hoy = date.today()
+    h_d = datetime.strptime(hasta, "%Y-%m-%d").date() if hasta else (
+          datetime.strptime(desde, "%Y-%m-%d").date() if desde else hoy)
+    d_d = datetime.strptime(desde, "%Y-%m-%d").date() if desde else h_d
+    if d_d > h_d:
+        d_d = h_d
+    d = datetime(d_d.year, d_d.month, d_d.day, 0, 0, 0)
+    h = datetime(h_d.year, h_d.month, h_d.day, 23, 59, 59)
+    return d, h
+
+
+def _es_descartado(estado_desc) -> bool:
+    s = str(estado_desc or "").upper()
+    return any(p in s for p in PATRONES_DESCARTADO)
+
+
+def _info_pedidos(pedidos):
+    """Mapa NroMovVenta -> Cliente / Estado / Vendedor para la lista dada (chunked)."""
+    out: dict[int, dict] = {}
+    if not pedidos:
+        return out
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        CH = 1000
+        for i in range(0, len(pedidos), CH):
+            chunk = pedidos[i:i + CH]
+            ph = ",".join("?" for _ in chunk)
+            cur.execute(SQL_PEDIDOS_INFO.format(ph=ph), chunk)
+            for r in cur.fetchall():
+                out[int(r[0])] = {
+                    "Cliente": _safe(r[1]),
+                    "Estado":  _txt(r[2]),
+                    "Vendedor": _txt(r[3]),
+                }
+        return out
+    finally:
+        conn.close()
+
+
+def fetch_faltantes_ot(desde=None, hasta=None):
+    """Faltantes agrupados por OT de Picking. Cumplido = renglón recolectado,
+    faltante = renglón sin recolectar. Excluye pedidos descartados (estado Magnus).
+
+    Sin params → último día con armado. Con desde/hasta (YYYY-MM-DD) → ese rango
+    por OTFechaHoraEjecucion."""
+    conn = get_connection("WMS")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        if desde is None and hasta is None:
+            cur.execute(SQL_OT_ULTIMO_DIA)
+            row = cur.fetchone()
+            dia = row[0] if row else None
+            if dia is None:
+                return {"fecha": None, "desde": None, "hasta": None,
+                        "total": 0, "rows": [],
+                        "resumen": {"ot": 0, "itemsTotal": 0, "itemsCumplidos": 0,
+                                    "itemsFaltantes": 0, "otDescartadas": 0}}
+            d = datetime(dia.year, dia.month, dia.day, 0, 0, 0)
+            h = datetime(dia.year, dia.month, dia.day, 23, 59, 59)
+        else:
+            d, h = _rango_ot(desde, hasta)
+        cur.execute(SQL_FALTANTES_OT.format(col_pedido=OT_COL_PEDIDO), (d, h))
+        cols = [c[0] for c in cur.description]
+        ots = [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    pedidos = sorted({int(o["NroMovVenta"]) for o in ots if o.get("NroMovVenta") is not None})
+    info = _info_pedidos(pedidos)
+
+    rows, excluidas = [], 0
+    for o in ots:
+        nro = int(o["NroMovVenta"]) if o.get("NroMovVenta") is not None else None
+        meta = info.get(nro, {})
+        estado = meta.get("Estado")
+        if _es_descartado(estado):
+            excluidas += 1
+            continue
+        rows.append({
+            "OTId":           _int(o.get("OTId")),
+            "NroMovVenta":    nro,
+            "Fecha":          _iso(o.get("Fecha")),
+            "Operario":       _txt(o.get("Operario")),
+            "Cliente":        meta.get("Cliente"),
+            "Vendedor":       _txt(meta.get("Vendedor")),
+            "EstadoPedido":   _txt(estado),
+            "ItemsTotal":     _int(o.get("ItemsTotal")) or 0,
+            "ItemsCumplidos": _int(o.get("ItemsCumplidos")) or 0,
+            "ItemsFaltantes": _int(o.get("ItemsFaltantes")) or 0,
+        })
+
+    resumen = {
+        "ot":             len(rows),
+        "itemsTotal":     sum(r["ItemsTotal"] for r in rows),
+        "itemsCumplidos": sum(r["ItemsCumplidos"] for r in rows),
+        "itemsFaltantes": sum(r["ItemsFaltantes"] for r in rows),
+        "otDescartadas":  excluidas,
+    }
+    return {
+        "fecha": _iso(d),
+        "desde": _iso(d),
+        "hasta": _iso(h),
+        "total": len(rows),
+        "rows":  rows,
+        "resumen": resumen,
+    }
+
+
+# Diagnóstico: confirmar el nombre real de la columna pedido en OT y qué estados
+# de Magnus aparecen (para ajustar OT_COL_PEDIDO y PATRONES_DESCARTADO).
+SQL_COLS_TABLA = """
+SELECT COLUMN_NAME, DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = ?
+ORDER BY ORDINAL_POSITION
+"""
+
+
+def fetch_faltantes_ot_diag():
+    """Lista columnas de OT y OTItem (WMS) y, si se puede, los estados de pedido
+    presentes en el último día de armado (EVERWEAR). Para confirmar el mapeo."""
+    out: dict = {"ot_col_pedido_actual": OT_COL_PEDIDO,
+                 "patrones_descartado": list(PATRONES_DESCARTADO)}
+    conn = get_connection("WMS")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_COLS_TABLA, ("OT",))
+        ot_cols = [{"col": r[0], "tipo": r[1]} for r in cur.fetchall()]
+        cur.execute(SQL_COLS_TABLA, ("OTItem",))
+        oti_cols = [{"col": r[0], "tipo": r[1]} for r in cur.fetchall()]
+        out["OT_columnas"] = ot_cols
+        out["OTItem_columnas"] = oti_cols
+        # candidatos a "columna del pedido" en OT
+        out["OT_candidatos_pedido"] = [
+            c["col"] for c in ot_cols
+            if any(k in c["col"].upper() for k in ("MOVVENTA", "PEDIDO", "COMPROB", "NROMOV"))
+        ]
+        # candidatos a "cantidad PEDIDA" en OTItem (columnas de cantidad que NO son la
+        # cumplida): una de estas es la que hay que comparar contra OTItemCantCumplida
+        # para medir el faltante por unidades (pedida − cumplida).
+        out["OTItem_candidatos_cantidad"] = [
+            c["col"] for c in oti_cols
+            if "CANT" in c["col"].upper() and "CUMPL" not in c["col"].upper()
+        ]
+        # muestra de renglones de Picking (tipo 1): mirando los valores se ve cuál
+        # columna trae lo PEDIDO (debería ser >= OTItemCantCumplida).
+        cur.execute("SELECT TOP 5 * FROM OTItem WHERE OTItemTipo = 1 ORDER BY OTId DESC")
+        scols = [c[0] for c in cur.description]
+        out["OTItem_muestra"] = [
+            {c: _safe(v) for c, v in zip(scols, row)} for row in cur.fetchall()
+        ]
+    finally:
+        conn.close()
+    return out
 
 
 # ── Tablero EN VIVO del depósito (/deposito/vivo) ─────────────────────────────

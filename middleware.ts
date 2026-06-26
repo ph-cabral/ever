@@ -63,6 +63,9 @@ async function verifyToken(token: string | undefined): Promise<SessionPayload | 
 function esRutaPublica(pathname: string, method: string): boolean {
   // Página del picker (coincidencia exacta).
   if (pathname === "/picking/picker") return true;
+  // Estado del picking para el widget de escritorio (autoelevador):
+  // sólo lectura del conteo de pendientes, GET exacto, sin datos sensibles.
+  if (method === "GET" && pathname === "/api/picking/estado") return true;
   // APIs que el picker necesita, sólo en POST.
   if (
     method === "POST" &&

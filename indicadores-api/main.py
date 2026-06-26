@@ -4,8 +4,12 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from db import get_connection
 from utils import construir_timestamps, calcular_tiempos, COLUMNAS_TIEMPO
-from deposito import fetch_wms, fetch_tiempo, fetch_ingresados, fetch_faltantes, fetch_faltantes_fechas, fetch_vivo
+from deposito import (
+    fetch_wms, fetch_tiempo, fetch_ingresados, fetch_faltantes,
+    fetch_faltantes_fechas, fetch_vivo, fetch_faltantes_ot, fetch_faltantes_ot_diag,
+)
 from compras import fetch_ordenes_pendientes
+from finanza import fetch_facturacion_dia, fetch_descubrir
 from datetime import date, datetime, timedelta
 
 app = FastAPI()
@@ -186,6 +190,30 @@ def deposito_faltantes_fechas():
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
+@app.get("/deposito/faltantes-ot")
+def deposito_faltantes_ot(
+    desde: str | None = Query(default=None),
+    hasta: str | None = Query(default=None),
+):
+    """Faltantes agrupados por OT (NUEVA fuente de /deposito/faltantes): por cada
+    OT de Picking, renglones cumplidos (recolectados) vs faltantes (sin recolectar).
+    Excluye pedidos descartados/anulados por estado de Magnus.
+    · Sin params  → último día con armado.
+    · desde/hasta → ese rango por OTFechaHoraEjecucion."""
+    try:
+        return fetch_faltantes_ot(desde, hasta)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/faltantes-ot/diag")
+def deposito_faltantes_ot_diag():
+    """Diagnóstico: columnas reales de OT/OTItem (WMS) para confirmar OT_COL_PEDIDO
+    y los estados de pedido presentes (para ajustar PATRONES_DESCARTADO)."""
+    try:
+        return fetch_faltantes_ot_diag()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
 # ── Compras: OC pendientes de recibir por artículo (lo que "va a llegar") ─────
 @app.get("/compras/ordenes-pendientes")
 def compras_ordenes_pendientes():
@@ -193,6 +221,27 @@ def compras_ordenes_pendientes():
     Solo lectura sobre Magnus; se cruza con faltantes en /compras/faltantes."""
     try:
         return fetch_ordenes_pendientes()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+# ── Finanza: facturación del día (calculadora) ───────────────────────────────
+@app.get("/finanza/facturacion-dia")
+def finanza_facturacion_dia(fecha: str | None = Query(default=None)):
+    """Facturación del día: ENTRA (cód 11) − SALE (cód 22/23/24/25).
+    Devuelve neto con y sin IVA (21%). `fecha`='YYYY-MM-DD' (default: hoy).
+    Solo lectura sobre Magnus."""
+    try:
+        return fetch_facturacion_dia(fecha)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/finanza/descubrir")
+def finanza_descubrir():
+    """Introspección de Magnus para ubicar la tabla de facturación (códigos,
+    tablas candidatas y tablas con código+importe+fecha). Apoyo para configurar
+    finanza.py. Ver también descubrir_facturacion.sql."""
+    try:
+        return fetch_descubrir()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
