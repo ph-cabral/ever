@@ -241,7 +241,8 @@ export default function PickerPage() {
         )}
       </div>
 
-      {/* Bloque ntfy
+      {/* Bloque ntfy */}
+      
       <div className="mt-8 bg-gray-900 border border-gray-700 rounded-xl p-4 space-y-2">
         <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">
           Notificaciones
@@ -264,7 +265,7 @@ export default function PickerPage() {
         <p className="text-xs text-gray-500">
           Cuando depósito responda, te llega una notificación.
         </p>
-      </div> */}
+      </div>
     </div>
   );
 }
