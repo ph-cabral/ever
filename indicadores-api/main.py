@@ -7,7 +7,7 @@ from utils import construir_timestamps, calcular_tiempos, COLUMNAS_TIEMPO
 from deposito import (
     fetch_wms, fetch_tiempo, fetch_ingresados, fetch_faltantes,
     fetch_faltantes_fechas, fetch_vivo, fetch_faltantes_ot, fetch_faltantes_ot_diag,
-    fetch_wms_estados,
+    fetch_wms_estados, fetch_wms_estados_diag,
 )
 from compras import fetch_ordenes_pendientes
 from finanza import fetch_facturacion_dia, fetch_descubrir
@@ -144,6 +144,15 @@ def deposito_wms_estados(
     desglosada por estado. Sin params → último día con OT ejecutada."""
     try:
         return fetch_wms_estados(desde, hasta)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/wms-estados/diag")
+def deposito_wms_estados_diag():
+    """Diagnóstico: OTEstado reales (Picking) + tablas de descripción de estado +
+    columnas de fecha de OT. Para confirmar el mapeo de /deposito/wms."""
+    try:
+        return fetch_wms_estados_diag()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

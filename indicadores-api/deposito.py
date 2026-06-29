@@ -753,12 +753,46 @@ ORDER BY OT.OTEstado
 
 # ── Tablero por RANGO: OT por estado + carga por preparador (/deposito/wms) ───
 # A diferencia de /deposito/vivo (foto de AHORA, sin fecha), acá se mira un RANGO
-# de OTFechaHoraEjecucion y se cuenta cada OT por su OTEstado, además de la carga
-# por operario (preparador) desglosada por estado. Solo lectura (READ UNCOMMITTED).
+# por FECHA DE REGISTRACIÓN de la OT (= la columna "Registración" de la app WMS) y
+# se cuenta cada OT por su OTEstado, además de la carga por operario (preparador)
+# desglosada por estado. Solo lectura (READ UNCOMMITTED).
 #
-# Filtro: OT de Picking (proceso 4 por defecto) cuya OTFechaHoraEjecucion cae en el
-# rango. Esto muestra lo TRABAJADO en ese período (mayormente estados en proceso /
-# terminada / cerrada). Las OT puras "en espera" sin ejecutar las cubre /deposito/vivo.
+# IMPORTANTE: se filtra por OTFechaHoraRegistracion (no por ejecución) para NO perder
+# las OT que todavía no se ejecutaron (Pendiente / En proceso): esas no tienen fecha
+# de ejecución pero sí de registración. Así el conteo coincide con la grilla del WMS.
+#
+# WMS_COL_FECHA es la única cosa que el código no puede confirmar solo. Si el nombre
+# real de la columna de "Registración" en OT es otro, ajustar SOLO esta constante
+# (ver candidatos en GET /deposito/wms-estados/diag).
+WMS_COL_FECHA = "OTFechaHoraRegistracion"
+
+# Etiquetas de OTEstado para ESTA vista (la app muestra: Pendiente, En Proceso,
+# Cumplido, En Despacho, En Tránsito). Mapeo de códigos = MEJOR INFERENCIA; confirmar
+# con GET /deposito/wms-estados/diag (lista los OTEstado reales con su conteo y, si
+# existe, la tabla de descripciones). Ajustar SOLO este diccionario.
+# bucket: solo para el color en la vista (espera / proceso / fin / otro).
+WMS_ESTADO_LABELS: dict[int, dict] = {
+    0: {"label": "Pendiente",   "bucket": "espera"},
+    1: {"label": "Pendiente",   "bucket": "espera"},
+    2: {"label": "En proceso",  "bucket": "proceso"},
+    3: {"label": "Cumplido",    "bucket": "fin"},
+    4: {"label": "En despacho", "bucket": "fin"},
+    5: {"label": "En tránsito", "bucket": "fin"},
+}
+
+
+def _wms_estado_meta(estado) -> dict:
+    """{estado, label, bucket} de un OTEstado para la vista WMS, con fallback."""
+    try:
+        e = int(estado)
+    except (TypeError, ValueError):
+        return {"estado": None, "label": "Sin estado", "bucket": "otro"}
+    m = WMS_ESTADO_LABELS.get(e)
+    if m:
+        return {"estado": e, "label": m["label"], "bucket": m["bucket"]}
+    return {"estado": e, "label": f"Estado {e}", "bucket": "otro"}
+
+
 SQL_WMS_ESTADOS = """
 SELECT
     OT.OTEstado      AS Estado,
@@ -768,25 +802,25 @@ FROM OT
 INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
 LEFT JOIN Personal P ON OT.OTUsuarioGUID_Repositor = P.PersonalId
 WHERE Codot.CodotProcesoNegocio IN ({procesos})
-  AND OT.OTFechaHoraEjecucion >= ?
-  AND OT.OTFechaHoraEjecucion <= ?
+  AND OT.{col_fecha} >= ?
+  AND OT.{col_fecha} <= ?
 GROUP BY OT.OTEstado, P.PersonalNombre
 """
 
-# Último día con OT ejecutada (para el default del tablero). Parametrizado por proceso.
+# Último día con OT registrada (para el default del tablero). Parametrizado por proceso.
 SQL_WMS_ULTIMO_DIA = """
-SELECT MAX(CONVERT(date, OT.OTFechaHoraEjecucion)) AS f
+SELECT MAX(CONVERT(date, OT.{col_fecha})) AS f
 FROM OT
 INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
 WHERE Codot.CodotProcesoNegocio IN ({procesos})
-  AND OT.OTFechaHoraEjecucion < DATEADD(day, 1, CAST(GETDATE() AS date))
+  AND OT.{col_fecha} < DATEADD(day, 1, CAST(GETDATE() AS date))
 """
 
 
 def fetch_wms_estados(desde=None, hasta=None, procesos: tuple[int, ...] = PROCESOS_VIVO):
-    """OT por estado y carga por preparador en un rango (OTFechaHoraEjecucion).
+    """OT por estado y carga por preparador en un rango (OTFechaHoraRegistracion).
 
-    Sin desde/hasta → último día con OT ejecutada. Devuelve:
+    Sin desde/hasta → último día con OT registrada. Devuelve:
       · estados      = [{estado, label, bucket, cantidad}] (todos los presentes)
       · por_operario = [{operario, total, por_estado: {<cod>: n}}] con ≥1 OT
       · resumen      = {total_ot, operarios, en_proceso, terminadas, ...}"""
@@ -796,7 +830,7 @@ def fetch_wms_estados(desde=None, hasta=None, procesos: tuple[int, ...] = PROCES
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         if desde is None and hasta is None:
-            cur.execute(SQL_WMS_ULTIMO_DIA.format(procesos=proc_in))
+            cur.execute(SQL_WMS_ULTIMO_DIA.format(procesos=proc_in, col_fecha=WMS_COL_FECHA))
             row = cur.fetchone()
             dia = row[0] if row else None
             if dia is None:
@@ -809,7 +843,7 @@ def fetch_wms_estados(desde=None, hasta=None, procesos: tuple[int, ...] = PROCES
             h = datetime(dia.year, dia.month, dia.day, 23, 59, 59)
         else:
             d, h = _rango_ot(desde, hasta)
-        cur.execute(SQL_WMS_ESTADOS.format(procesos=proc_in), (d, h))
+        cur.execute(SQL_WMS_ESTADOS.format(procesos=proc_in, col_fecha=WMS_COL_FECHA), (d, h))
         filas = cur.fetchall()
     finally:
         conn.close()
@@ -819,7 +853,7 @@ def fetch_wms_estados(desde=None, hasta=None, procesos: tuple[int, ...] = PROCES
     sin_asignar = {"operario": "— Sin asignar", "total": 0, "por_estado": {}}
     for estado, operario, cant in filas:
         cant = int(cant or 0)
-        meta = _estado_meta(estado)
+        meta = _wms_estado_meta(estado)
         ecode = meta["estado"]
         por_estado[ecode] = por_estado.get(ecode, 0) + cant
         nombre = str(operario).strip() if operario is not None else ""
@@ -829,14 +863,14 @@ def fetch_wms_estados(desde=None, hasta=None, procesos: tuple[int, ...] = PROCES
         dst["por_estado"][str(ecode)] = dst["por_estado"].get(str(ecode), 0) + cant
 
     estados = [
-        {**_estado_meta(e), "cantidad": c}
+        {**_wms_estado_meta(e), "cantidad": c}
         for e, c in sorted(por_estado.items(), key=lambda kv: (kv[0] is None, kv[0]))
     ]
     operarios = sorted(por_op.values(), key=lambda x: (-x["total"], x["operario"]))
     if sin_asignar["total"] > 0:
         operarios.append(sin_asignar)
 
-    buckets = {e: _estado_meta(e)["bucket"] for e in por_estado}
+    buckets = {e: _wms_estado_meta(e)["bucket"] for e in por_estado}
     def _suma(bucket):
         return sum(c for e, c in por_estado.items() if buckets.get(e) == bucket)
 
@@ -855,6 +889,74 @@ def fetch_wms_estados(desde=None, hasta=None, procesos: tuple[int, ...] = PROCES
             "terminadas": _suma("fin"),
         },
     }
+
+
+# Diagnóstico para clavar el mapeo de la vista /deposito/wms:
+#   · OTEstado reales (con conteo) en los últimos N días → confirma qué código es cada
+#     estado de la app (Pendiente / En Proceso / Cumplido / En Despacho / En Tránsito).
+#   · Si el WMS tiene una tabla de descripciones de estado, la lista (candidatas) con
+#     sus columnas → para reemplazar el mapeo hardcodeado por un JOIN si conviene.
+#   · Columnas de OT con "Fecha"/"Registr" → confirma WMS_COL_FECHA (Registración).
+SQL_WMS_DIAG_ESTADOS = """
+SELECT OT.OTEstado AS Estado,
+       COUNT(*)    AS Cantidad,
+       CONVERT(varchar(19), MIN(OT.{col_fecha}), 120) AS PrimeraReg,
+       CONVERT(varchar(19), MAX(OT.{col_fecha}), 120) AS UltimaReg
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+WHERE Codot.CodotProcesoNegocio = 4
+  AND OT.{col_fecha} >= DATEADD(day, -{dias}, CAST(GETDATE() AS date))
+GROUP BY OT.OTEstado
+ORDER BY OT.OTEstado
+"""
+
+SQL_WMS_DIAG_TABLAS_ESTADO = """
+SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME LIKE '%Estado%' OR COLUMN_NAME LIKE '%EstadoDescrip%'
+ORDER BY TABLE_NAME, ORDINAL_POSITION
+"""
+
+
+def fetch_wms_estados_diag(dias: int = 120):
+    """Diagnóstico de la vista WMS: OTEstado reales + posibles tablas de descripción
+    de estado + columnas de fecha de OT. Para confirmar WMS_ESTADO_LABELS y WMS_COL_FECHA."""
+    out: dict = {"col_fecha_actual": WMS_COL_FECHA,
+                 "labels_actuales": WMS_ESTADO_LABELS}
+    conn = get_connection("WMS")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        # OTEstado reales (Picking) con conteo
+        try:
+            cur.execute(SQL_WMS_DIAG_ESTADOS.format(col_fecha=WMS_COL_FECHA, dias=int(dias)))
+            out["ot_estados"] = [
+                {"estado": int(e), "cantidad": int(c or 0),
+                 "primera_reg": pr, "ultima_reg": ur}
+                for e, c, pr, ur in cur.fetchall()
+            ]
+        except Exception as ex:
+            out["ot_estados_error"] = str(ex)
+        # Columnas de OT (para confirmar la columna de Registración)
+        cur.execute(SQL_COLS_TABLA, ("OT",))
+        ot_cols = [{"col": r[0], "tipo": r[1]} for r in cur.fetchall()]
+        out["OT_columnas_fecha"] = [c for c in ot_cols if "FECHA" in c["col"].upper()]
+        out["OT_candidatos_registracion"] = [
+            c["col"] for c in ot_cols
+            if any(k in c["col"].upper() for k in ("REGISTR", "ALTA", "CREAC", "GENER"))
+        ]
+        out["OT_columnas_estado"] = [c for c in ot_cols if "ESTADO" in c["col"].upper()]
+        # Tablas/columnas candidatas a "descripción de estado"
+        try:
+            cur.execute(SQL_WMS_DIAG_TABLAS_ESTADO)
+            out["tablas_estado_candidatas"] = [
+                {"tabla": r[0], "col": r[1], "tipo": r[2]} for r in cur.fetchall()
+            ]
+        except Exception as ex:
+            out["tablas_estado_error"] = str(ex)
+    finally:
+        conn.close()
+    return out
 
 
 def fetch_vivo(procesos: tuple[int, ...] = PROCESOS_VIVO):
