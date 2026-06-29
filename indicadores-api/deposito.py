@@ -796,10 +796,15 @@ SQL_WMS_ESTADOS = """
 SELECT
     OT.OTEstado      AS Estado,
     P.PersonalNombre AS Operario,
-    COUNT(*)         AS Cantidad
+    COUNT(*)              AS Cantidad,
+    ISNULL(SUM(it.Items), 0) AS Items
 FROM OT
 INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
 LEFT JOIN Personal P ON OT.OTUsuarioGUID_Repositor = P.PersonalId
+LEFT JOIN (
+    SELECT OTId, SUM(CASE WHEN OTItemTipo = 1 THEN 1 ELSE 0 END) AS Items
+    FROM OTItem GROUP BY OTId
+) it ON it.OTId = OT.OTId
 WHERE Codot.CodotProcesoNegocio IN ({procesos})
   AND OT.{col_fecha} >= ?
   AND OT.{col_fecha} <= ?
@@ -820,9 +825,11 @@ def fetch_wms_estados(desde=None, hasta=None, procesos: tuple[int, ...] = PROCES
     """OT por estado y carga por preparador en un rango (OTFechaHoraRegist).
 
     Sin desde/hasta → último día con OT registrada. Devuelve:
-      · estados      = [{estado, label, bucket, cantidad}] (todos los presentes)
-      · por_operario = [{operario, total, por_estado: {<cod>: n}}] con ≥1 OT
-      · resumen      = {total_ot, operarios, en_proceso, terminadas, ...}"""
+      · estados      = [{estado, label, bucket, cantidad, items}] (todos los presentes)
+      · por_operario = [{operario, total, total_items, por_estado: {<cod>: n},
+                         items_por_estado: {<cod>: items}}] con ≥1 OT
+      · resumen      = {total_ot, total_items, operarios, en_proceso, terminadas, ...}
+    items = renglones de recolección (OTItem tipo 1) sumados sobre las OT."""
     proc_in = ",".join(str(int(p)) for p in procesos)
     conn = get_connection("WMS")
     try:
@@ -836,7 +843,7 @@ def fetch_wms_estados(desde=None, hasta=None, procesos: tuple[int, ...] = PROCES
                 return {"fecha": None, "desde": None, "hasta": None,
                         "procesos": list(procesos), "estados": [],
                         "por_operario": [],
-                        "resumen": {"total_ot": 0, "operarios": 0,
+                        "resumen": {"total_ot": 0, "total_items": 0, "operarios": 0,
                                     "en_espera": 0, "en_proceso": 0, "terminadas": 0}}
             d = datetime(dia.year, dia.month, dia.day, 0, 0, 0)
             h = datetime(dia.year, dia.month, dia.day, 23, 59, 59)
@@ -848,21 +855,30 @@ def fetch_wms_estados(desde=None, hasta=None, procesos: tuple[int, ...] = PROCES
         conn.close()
 
     por_estado: dict[int, int] = {}
+    items_estado: dict[int, int] = {}
     por_op: dict[str, dict] = {}
-    sin_asignar = {"operario": "— Sin asignar", "total": 0, "por_estado": {}}
-    for estado, operario, cant in filas:
+
+    def _nuevo(nombre):
+        return {"operario": nombre, "total": 0, "total_items": 0,
+                "por_estado": {}, "items_por_estado": {}}
+
+    sin_asignar = _nuevo("— Sin asignar")
+    for estado, operario, cant, items in filas:
         cant = int(cant or 0)
-        meta = _wms_estado_meta(estado)
-        ecode = meta["estado"]
+        items = int(items or 0)
+        ecode = _wms_estado_meta(estado)["estado"]
         por_estado[ecode] = por_estado.get(ecode, 0) + cant
+        items_estado[ecode] = items_estado.get(ecode, 0) + items
         nombre = str(operario).strip() if operario is not None else ""
-        dst = sin_asignar if not nombre else por_op.setdefault(
-            nombre, {"operario": nombre, "total": 0, "por_estado": {}})
+        dst = sin_asignar if not nombre else por_op.setdefault(nombre, _nuevo(nombre))
         dst["total"] += cant
-        dst["por_estado"][str(ecode)] = dst["por_estado"].get(str(ecode), 0) + cant
+        dst["total_items"] += items
+        k = str(ecode)
+        dst["por_estado"][k] = dst["por_estado"].get(k, 0) + cant
+        dst["items_por_estado"][k] = dst["items_por_estado"].get(k, 0) + items
 
     estados = [
-        {**_wms_estado_meta(e), "cantidad": c}
+        {**_wms_estado_meta(e), "cantidad": c, "items": items_estado.get(e, 0)}
         for e, c in sorted(por_estado.items(), key=lambda kv: (kv[0] is None, kv[0]))
     ]
     operarios = sorted(por_op.values(), key=lambda x: (-x["total"], x["operario"]))
@@ -881,11 +897,12 @@ def fetch_wms_estados(desde=None, hasta=None, procesos: tuple[int, ...] = PROCES
         "estados": estados,
         "por_operario": operarios,
         "resumen": {
-            "total_ot":   sum(por_estado.values()),
-            "operarios":  len(por_op),
-            "en_espera":  _suma("espera"),
-            "en_proceso": _suma("proceso"),
-            "terminadas": _suma("fin"),
+            "total_ot":    sum(por_estado.values()),
+            "total_items": sum(items_estado.values()),
+            "operarios":   len(por_op),
+            "en_espera":   _suma("espera"),
+            "en_proceso":  _suma("proceso"),
+            "terminadas":  _suma("fin"),
         },
     }
 

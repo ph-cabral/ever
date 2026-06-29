@@ -1,6 +1,10 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Loader2, RefreshCw, AlertTriangle, PackageSearch, Users } from "lucide-react";
+import {
+  Loader2, RefreshCw, AlertTriangle, PackageSearch, Users, Pause, Play,
+} from "lucide-react";
+
+const REFRESH_MS = 60_000;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Depósito WMS — OT (pedidos de Picking) por estado en un rango + carta por
@@ -12,21 +16,35 @@ import { Loader2, RefreshCw, AlertTriangle, PackageSearch, Users } from "lucide-
 interface EstadoAgg {
   estado: number | null;
   label: string;
-  bucket: "espera" | "proceso" | "fin" | "otro";
+  bucket: string;
   cantidad: number;
+  items: number;
 }
 interface OperarioAgg {
   operario: string;
   total: number;
+  total_items: number;
   por_estado: Record<string, number>;
+  items_por_estado: Record<string, number>;
 }
 interface Resumen {
   total_ot: number;
+  total_items: number;
   operarios: number;
   en_espera: number;
   en_proceso: number;
   terminadas: number;
 }
+
+// Orden de visualización pedido: Pendiente → En proceso → Cumplido → Despacho → Tránsito.
+const BUCKET_RANK: Record<string, number> = {
+  espera: 0,
+  proceso: 1,
+  fin: 2,
+  despacho: 3,
+  transito: 4,
+  otro: 5,
+};
 interface WmsData {
   fecha: string | null;
   desde: string | null;
@@ -85,6 +103,9 @@ export default function DepositoWmsPage() {
   const [hasta, setHasta] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [auto, setAuto] = useState(true);
+  const [lastFetch, setLastFetch] = useState<Date | null>(null);
+  const [, setTick] = useState(0); // re-render del "hace Xs"
 
   const load = useCallback(async (d: string, h: string) => {
     setLoading(true);
@@ -99,6 +120,7 @@ export default function DepositoWmsPage() {
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       setData(j as WmsData);
+      setLastFetch(new Date());
       // Sin rango elegido: fija los inputs al día que devolvió el backend.
       if (!d && j.desde) setDesde(j.desde as string);
       if (!h && j.hasta) setHasta(j.hasta as string);
@@ -110,10 +132,27 @@ export default function DepositoWmsPage() {
     }
   }, []);
 
-  // Primera carga: sin rango → backend devuelve el último día con OT ejecutada.
+  // Primera carga: sin rango → backend devuelve el último día con OT registrada.
   useEffect(() => {
     load("", "");
   }, [load]);
+
+  // Auto-refresh cada minuto (si está activado), con el rango actual.
+  useEffect(() => {
+    if (!auto) return;
+    const id = setInterval(() => load(desde, hasta), REFRESH_MS);
+    return () => clearInterval(id);
+  }, [auto, desde, hasta, load]);
+
+  // Ticker de 1 s para el "actualizado hace Xs".
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const secsAgo = lastFetch
+    ? Math.floor((Date.now() - lastFetch.getTime()) / 1000)
+    : null;
 
   const hoy = isoLocal(new Date());
   const ayer = isoLocal(new Date(Date.now() - 864e5));
@@ -133,7 +172,15 @@ export default function DepositoWmsPage() {
   }, [data]);
 
   const r = data?.resumen;
-  const ordenEstados = data?.estados ?? [];
+  const ordenEstados = useMemo(
+    () =>
+      [...(data?.estados ?? [])].sort(
+        (a, b) =>
+          (BUCKET_RANK[a.bucket] ?? 9) - (BUCKET_RANK[b.bucket] ?? 9) ||
+          (a.estado ?? 99) - (b.estado ?? 99),
+      ),
+    [data],
+  );
   const hayOps = (data?.por_operario?.length ?? 0) > 0;
   const primeraCarga = data === null && loading;
   const rangoLabel =
@@ -212,9 +259,34 @@ export default function DepositoWmsPage() {
           >
             7 días
           </button>
+          <span
+            className="flex items-center gap-1.5 text-zinc-500 text-[12px] tabular-nums"
+            title={lastFetch ? `Última actualización: ${lastFetch.toLocaleTimeString("es-AR")}` : ""}
+          >
+            <span className="relative flex h-2 w-2">
+              {auto && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400/70" />
+              )}
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${auto ? "bg-green-400" : "bg-zinc-500"}`}
+              />
+            </span>
+            {secsAgo === null
+              ? "—"
+              : secsAgo < 2
+                ? "recién"
+                : `hace ${secsAgo}s`}
+          </span>
+          <button
+            onClick={() => setAuto((a) => !a)}
+            title={auto ? "Pausar actualización automática" : "Reanudar (cada 60s)"}
+            className="flex items-center gap-1.5 text-zinc-400 hover:text-yellow-400 transition-colors px-2 py-1.5 rounded-md border border-zinc-700"
+          >
+            {auto ? <Pause size={14} /> : <Play size={14} />}
+          </button>
           <button
             onClick={() => load(desde, hasta)}
-            title="Refrescar"
+            title="Refrescar ahora"
             disabled={loading}
             className="text-zinc-400 hover:text-yellow-400 transition-colors p-2 disabled:opacity-40"
           >
@@ -227,12 +299,19 @@ export default function DepositoWmsPage() {
       {r && (
         <div className="max-w-[1500px] mx-auto px-4 md:px-8 pt-5">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            <Stat label="Total OT" value={fmtNum(r.total_ot)} tone="yellow" big />
+            <Stat
+              label="Total OT"
+              value={fmtNum(r.total_ot)}
+              items={r.total_items}
+              tone="yellow"
+              big
+            />
             {ordenEstados.map((e) => (
               <Stat
                 key={String(e.estado)}
                 label={e.label}
                 value={fmtNum(e.cantidad)}
+                items={e.items}
                 tone={bucketTone(e.bucket)}
               />
             ))}
@@ -293,15 +372,21 @@ export default function DepositoWmsPage() {
                       .filter((e) => (op.por_estado[String(e.estado)] ?? 0) > 0)
                       .map((e) => {
                         const tone = bucketTone(e.bucket);
+                        const k = String(e.estado);
                         return (
                           <div
-                            key={String(e.estado)}
+                            key={k}
                             className={`rounded-md border px-2.5 py-1.5 ${TONE_BG[tone]}`}
                           >
-                            <div
-                              className={`text-lg font-bold tabular-nums ${TONE_TEXT[tone]}`}
-                            >
-                              {fmtNum(op.por_estado[String(e.estado)] ?? 0)}
+                            <div className="flex items-baseline gap-1">
+                              <span
+                                className={`text-lg font-bold tabular-nums ${TONE_TEXT[tone]}`}
+                              >
+                                {fmtNum(op.por_estado[k] ?? 0)}
+                              </span>
+                              <span className="text-[11px] text-zinc-500 tabular-nums">
+                                / {fmtNum(op.items_por_estado[k] ?? 0)} items
+                              </span>
                             </div>
                             <div className="text-[10px] text-zinc-500 leading-tight">
                               {e.label}
@@ -331,11 +416,13 @@ export default function DepositoWmsPage() {
 function Stat({
   label,
   value,
+  items,
   tone = "neutral",
   big = false,
 }: {
   label: string;
   value: string;
+  items?: number;
   tone?: Tone;
   big?: boolean;
 }) {
@@ -344,10 +431,17 @@ function Stat({
       <div className="text-[11px] uppercase tracking-wide text-zinc-500 truncate">
         {label}
       </div>
-      <div
-        className={`${big ? "text-3xl" : "text-2xl"} font-bold tabular-nums ${TONE_TEXT[tone]}`}
-      >
-        {value}
+      <div className="flex items-baseline gap-1.5">
+        <span
+          className={`${big ? "text-3xl" : "text-2xl"} font-bold tabular-nums ${TONE_TEXT[tone]}`}
+        >
+          {value}
+        </span>
+        {items !== undefined && (
+          <span className="text-[12px] text-zinc-500 tabular-nums">
+            / {fmtNum(items)} items
+          </span>
+        )}
       </div>
     </div>
   );
