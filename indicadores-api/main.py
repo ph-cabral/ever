@@ -10,6 +10,7 @@ from deposito import (
 )
 from compras import fetch_ordenes_pendientes
 from finanza import fetch_facturacion_dia, fetch_descubrir
+from clientes import fetch_cliente
 from datetime import date, datetime, timedelta
 
 app = FastAPI()
@@ -244,6 +245,19 @@ def finanza_descubrir():
         return fetch_descubrir()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+# ── Clientes: lookup por número desde Magnus (para /manguera/corte) ───────────
+@app.get("/clientes/{numero}")
+def clientes_get(numero: int):
+    """Cliente por número desde Magnus (CodCliente, Cliente_Nombre).
+    Solo lectura. 404 si no existe."""
+    try:
+        cli = fetch_cliente(numero)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+    if not cli:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    return cli
 
 @app.get("/indicadores/tiempos")
 def get_tiempos(meses: int = Query(default=7, ge=1, le=12)):

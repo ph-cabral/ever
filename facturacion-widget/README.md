@@ -31,12 +31,14 @@ encontrarla:
 
 ## Credenciales (login del widget)
 
-La facturación es sensible, así que el endpoint pide sesión. Usar un usuario
-**con permiso del módulo «finanza»**. Tres formas (de mayor a menor prioridad):
+Vienen **embebidas** en `facturacion.py` (constantes `LOGIN_DNI` / `LOGIN_PASS`),
+así el `.exe` es **un solo archivo** autocontenido (no hace falta mover
+`credenciales.json`). El usuario debe tener el módulo **«finanza»**. Si alguna PC
+necesita otras credenciales, tienen prioridad (de mayor a menor):
 
 1. Variables de entorno `FACT_DNI` y `FACT_PASS`.
 2. `credenciales.json` al lado del `.exe` (copiar de `credenciales.example.json`).
-3. Constantes `LOGIN_DNI` / `LOGIN_PASS` en `facturacion.py` (no recomendado).
+3. Las constantes embebidas en `facturacion.py`.
 
 ## Controles
 
@@ -52,7 +54,7 @@ En una PC con **Python 3** instalado:
 
 1. Doble clic en **`build.bat`** (o ejecutar desde una consola).
 2. Queda en **`dist\Facturacion.exe`** (autocontenido, no instala nada).
-3. Copiar el `.exe` **y** `credenciales.json` a la PC destino.
+3. Copiar **solo** el `.exe` a la PC destino (las credenciales ya van adentro).
 
 ## Iniciar con Windows
 

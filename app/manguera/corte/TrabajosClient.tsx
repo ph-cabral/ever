@@ -20,7 +20,7 @@ type Trabajo = {
   estado: string;
   legajo: { nombre: string } | null;
   sector: { nombre: string } | null;
-  cliente: { nombre: string } | null;
+  clienteNombre: string | null;
   _count: { cortes: number };
   cortes: Corte[];
 };
@@ -35,7 +35,7 @@ export function TrabajosClient({ trabajos }: { trabajos: Trabajo[] }) {
     (t) =>
       (t.ordenTrabajo || "").toLowerCase().includes(f) ||
       (t.legajo?.nombre || "").toLowerCase().includes(f) ||
-      (t.cliente?.nombre || "").toLowerCase().includes(f),
+      (t.clienteNombre || "").toLowerCase().includes(f),
   );
   const incompletos = filtrados.filter((t) => t.estado !== "CUMPLIDO");
 
@@ -152,7 +152,7 @@ export function TrabajosClient({ trabajos }: { trabajos: Trabajo[] }) {
                       {t.legajo?.nombre || "-"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
-                      {t.cliente?.nombre || "-"}
+                      {t.clienteNombre || "-"}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
                       {t._count.cortes}
@@ -235,7 +235,7 @@ export function TrabajosClient({ trabajos }: { trabajos: Trabajo[] }) {
                             {t.sector?.nombre || "-"}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
-                            {t.cliente?.nombre || "-"}
+                            {t.clienteNombre || "-"}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-left text-gray-900">
                             {t._count.cortes}

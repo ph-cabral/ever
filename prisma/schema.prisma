@@ -6,7 +6,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["asistencia", "everwear", "fabrica", "preparado"]
+  schemas  = ["asistencia", "everwear", "fabrica", "preparado", "sistema"]
 }
 
 model personal {
@@ -378,11 +378,12 @@ model sector {
   @@schema("everwear")
 }
 
+// Tabla legada: los clientes ahora se leen en vivo de Magnus
+// (MAGNUS_SITD.dbo.Clientes) desde /manguera/corte. Queda sin uso/relaciones.
 model cliente {
-  numero    Int       @id
-  nombre    String    @db.VarChar(150)
-  createdAt DateTime  @default(now())
-  trabajos  trabajo[]
+  numero    Int      @id
+  nombre    String   @db.VarChar(150)
+  createdAt DateTime @default(now())
 
   @@schema("everwear")
 }
@@ -400,13 +401,13 @@ model trabajo {
   legajoId            Int
   sectorId            Int?
   clienteNumero       Int?
+  clienteNombre       String?   @db.VarChar(150)
   inicio              DateTime  @default(now())
   fin                 DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   legajo              legajo    @relation(fields: [legajoId], references: [id])
   sector              sector?   @relation(fields: [sectorId], references: [id])
-  cliente             cliente?  @relation(fields: [clienteNumero], references: [numero])
   cortes              corte[]
 
   @@index([legajoId])
@@ -490,4 +491,44 @@ model sector_permiso {
   updatedAt DateTime @updatedAt
 
   @@schema("everwear")
+}
+
+// ===== Módulo "sistema": tablero tipo Trello (casos internos / Softech / Buren) =====
+// NOTA: este bloque es de referencia. El flujo real es: correr sql/sistema_init.sql
+// contra la base y después `prisma db pull` (multi-schema no soporta `migrate dev`,
+// ver nota en sql/sistema_init.sql) — eso reescribe este bloque a partir de la DB real.
+model sistema_tablero {
+  id        Int               @id @default(autoincrement())
+  clave     String            @unique @db.VarChar(40) // sistema | softech | buren
+  nombre    String            @db.VarChar(100)
+  createdAt DateTime          @default(now())
+  columnas  sistema_columna[]
+
+  @@schema("sistema")
+}
+
+model sistema_columna {
+  id        Int               @id @default(autoincrement())
+  tableroId Int
+  nombre    String            @db.VarChar(100)
+  orden     Int               @default(0)
+  createdAt DateTime          @default(now())
+  tablero   sistema_tablero   @relation(fields: [tableroId], references: [id], onDelete: Cascade)
+  tarjetas  sistema_tarjeta[]
+
+  @@index([tableroId])
+  @@schema("sistema")
+}
+
+model sistema_tarjeta {
+  id        Int             @id @default(autoincrement())
+  columnaId Int
+  orden     Int             @default(0)
+  campos    Json            @default("{}") // {problema, fecha, solucion, ubicacion, categoria, inicio, fin, sistema, origen, accion, tiempo} según tablero
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  columna   sistema_columna @relation(fields: [columnaId], references: [id], onDelete: Cascade)
+
+  @@index([columnaId])
+  @@schema("sistema")
 }

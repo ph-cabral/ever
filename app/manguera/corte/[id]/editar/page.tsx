@@ -29,7 +29,7 @@ export default async function EditarTrabajo({
         id: trabajo.id,
         legajoId: trabajo.legajoId,
         clienteNumero: trabajo.clienteNumero,
-        clienteNombre: trabajo.cliente?.nombre ?? null,
+        clienteNombre: trabajo.clienteNombre ?? null,
         ordenTrabajo: trabajo.ordenTrabajo,
         prioridad: trabajo.prioridad,
         producto: trabajo.producto,

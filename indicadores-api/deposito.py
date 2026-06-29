@@ -603,47 +603,81 @@ def fetch_faltantes_ot_diag():
 # nunca se escribe. No se filtra por fecha: una OT "viva" es la que todavía no está
 # terminada, sin importar cuándo entró.
 #
-# Lógica del estado (OT.OTEstado). La productividad usa IN (2,3,4) = trabajo ya
-# ejecutado/terminado; por descarte 0/1 son "todavía no ejecutadas":
-#   · EN ESPERA  -> OTEstado en ESTADOS_EN_ESPERA  (generada/pendiente, sin arrancar)
-#   · EN PROCESO -> OTEstado en ESTADOS_EN_PROCESO (arrancada, sin cerrar)
-#   · (3, 4 = terminada/cerrada -> NO se cuentan acá)
+# Lógica del estado (OT.OTEstado). ESTADO_LABELS es la ÚNICA fuente de verdad para
+# nombrar y clasificar cada OTEstado. Cada estado cae en un "bucket":
+#   espera | proceso | fin | otro
+#   · "En espera"  = estado en bucket 'espera'  (generada/pendiente, sin arrancar)
+#   · "En proceso" = estado en bucket 'proceso' (arrancada, sin cerrar)
+#   · "vivas"      = bucket espera o proceso (lo que sigue en juego)
+#   · fin / otro   = terminada/cerrada/anulada u otros (se muestran, no suman a los KPI)
 #
-# IMPORTANTE: estos códigos son la mejor inferencia (mismo criterio que la
-# productividad). Si no cuadran con la realidad, MIRÁ el bloque "diagnostico" que
-# devuelve este endpoint (cuenta las OT por OTEstado en la ventana viva) y ajustá
-# las dos tuplas de abajo. Es el único lugar a tocar.
-PROCESOS_VIVO: tuple[int, ...] = (4,)          # 4 = Picking ("pedidos"). Ampliar si hace falta.
-ESTADOS_EN_ESPERA: tuple[int, ...] = (0, 1)    # generada / pendiente, sin ejecutar
-ESTADOS_EN_PROCESO: tuple[int, ...] = (2,)     # en ejecución, sin cerrar
+# IMPORTANTE: los códigos de abajo son la mejor inferencia. Para confirmarlos contra
+# la realidad usá GET /deposito/vivo/estados (lista TODOS los OTEstado existentes con
+# su conteo). Si algún código no cuadra, ajustá SOLO este diccionario.
+PROCESOS_VIVO: tuple[int, ...] = (4,)  # 4 = Picking ("pedidos"). Ampliar si hace falta.
 
-# Carga viva por estado + operario (solo OT no terminadas).
+ESTADO_LABELS: dict[int, dict] = {
+    0: {"label": "Generada",   "bucket": "espera"},
+    1: {"label": "Pendiente",  "bucket": "espera"},
+    2: {"label": "En proceso", "bucket": "proceso"},
+    3: {"label": "Terminada",  "bucket": "fin"},
+    4: {"label": "Cerrada",    "bucket": "fin"},
+}
+
+# Días hacia atrás que mira el descubrimiento de estados (/deposito/vivo/estados).
+VIVO_ESTADOS_VENTANA_DIAS = 365
+
+
+def _estado_meta(estado) -> dict:
+    """{estado, label, bucket} de un OTEstado, con fallback para códigos no mapeados."""
+    try:
+        e = int(estado)
+    except (TypeError, ValueError):
+        return {"estado": None, "label": "Sin estado", "bucket": "otro"}
+    m = ESTADO_LABELS.get(e)
+    if m:
+        return {"estado": e, "label": m["label"], "bucket": m["bucket"]}
+    return {"estado": e, "label": f"Estado {e}", "bucket": "otro"}
+
+
+def _estados_de_bucket(*buckets: str) -> tuple[int, ...]:
+    return tuple(e for e, m in ESTADO_LABELS.items() if m["bucket"] in buckets)
+
+
+ESTADOS_EN_ESPERA: tuple[int, ...] = _estados_de_bucket("espera")
+ESTADOS_EN_PROCESO: tuple[int, ...] = _estados_de_bucket("proceso")
+ESTADOS_VIVOS: tuple[int, ...] = _estados_de_bucket("espera", "proceso")
+
+# Matriz operario × estado. Universo = "hoy + vivas":
+#   · vivas = OT con estado en bucket espera/proceso (sin filtrar por fecha), y
+#   · hoy   = OT con OTFechaHoraEjecucion >= hoy 00:00 (incluye terminadas hoy).
+# Param: ? = hoy 00:00 (datetime).
 SQL_VIVO = """
 SELECT
-    OT.OTEstado              AS Estado,
-    P.PersonalNombre         AS Operario,
-    COUNT(*)                 AS Cantidad
+    OT.OTEstado      AS Estado,
+    P.PersonalNombre AS Operario,
+    COUNT(*)         AS Cantidad
 FROM OT
 INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
 LEFT JOIN Personal P ON OT.OTUsuarioGUID_Repositor = P.PersonalId
 WHERE Codot.CodotProcesoNegocio IN ({procesos})
-  AND OT.OTEstado IN ({estados})
+  AND ( OT.OTEstado IN ({vivos})
+        OR OT.OTFechaHoraEjecucion >= ? )
 GROUP BY OT.OTEstado, P.PersonalNombre
 """
 
-# Diagnóstico: TODAS las OT de Picking sin ejecutar o ejecutadas en los últimos
-# 2 días, contadas por OTEstado. Sirve para confirmar qué código es cada cosa
-# (las "en espera" suelen tener SinEjecucion = total). Acotado para que sea barato.
-SQL_VIVO_DIAG = """
+# Descubrimiento: TODOS los OTEstado existentes (cualquier proceso) en la ventana,
+# con su conteo y cuántas no tienen ejecución. Responde "qué estados puede tener
+# una OT". Param vía .format(dias=...).
+SQL_VIVO_TODOS_ESTADOS = """
 SELECT
     OT.OTEstado AS Estado,
+    COUNT(*)    AS Cantidad,
     SUM(CASE WHEN OT.OTFechaHoraEjecucion IS NULL THEN 1 ELSE 0 END) AS SinEjecucion,
-    COUNT(*) AS Cantidad
+    CONVERT(varchar(19), MAX(OT.OTFechaHoraEjecucion), 120)          AS UltimaEjecucion
 FROM OT
-INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
-WHERE Codot.CodotProcesoNegocio IN ({procesos})
-  AND (OT.OTFechaHoraEjecucion IS NULL
-       OR OT.OTFechaHoraEjecucion >= DATEADD(day, -2, CAST(GETDATE() AS date)))
+WHERE OT.OTFechaHoraEjecucion IS NULL
+   OR OT.OTFechaHoraEjecucion >= DATEADD(day, -{dias}, CAST(GETDATE() AS date))
 GROUP BY OT.OTEstado
 ORDER BY OT.OTEstado
 """

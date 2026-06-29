@@ -3,6 +3,10 @@
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 
+// Los clientes se leen en vivo de Magnus vía indicadores-api (no de Postgres).
+const INDICADORES_API_URL =
+  process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
+
 export async function getPersonalAction() {
   return prisma.personal.findMany({
     orderBy: { nombre: "asc" },
@@ -80,10 +84,20 @@ export async function getLegajosMangueraAction() {
 
 export async function getClienteAction(numero: number) {
   if (numero == null || isNaN(numero)) return null;
-  return prisma.cliente.findUnique({
-    where: { numero },
-    select: { numero: true, nombre: true },
-  });
+  try {
+    const res = await fetch(`${INDICADORES_API_URL}/clientes/${numero}`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return null; // 404 (no existe) o 503 (Magnus caído)
+    const cli = await res.json();
+    return {
+      numero: Number(cli.numero),
+      nombre: cli.nombre != null ? String(cli.nombre) : "",
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function getTrabajosAction() {
@@ -96,7 +110,7 @@ export async function getTrabajosAction() {
       estado: true,
       legajo: { select: { nombre: true } },
       sector: { select: { nombre: true } },
-      cliente: { select: { nombre: true } },
+      clienteNombre: true,
       _count: { select: { cortes: true } },
       cortes: {
         orderBy: { fecha: "desc" },
@@ -122,6 +136,7 @@ type NuevoCorte = {
 type NuevoTrabajoInput = {
   legajoId: number;
   clienteNumero: number | null;
+  clienteNombre?: string | null;
   ordenTrabajo?: string | null;
   prioridad?: string | null;
   producto?: string | null;
@@ -151,6 +166,24 @@ function calcEstado(
   return finalizar ? "CUMPLIDO" : "EN_PROCESO";
 }
 
+// Resuelve número + nombre del cliente para denormalizar en el trabajo.
+// El nombre suele venir del form (ya resuelto contra Magnus); si falta, se
+// intenta completar best-effort desde Magnus. No hay FK: nunca bloquea el guardado.
+async function resolveCliente(input: {
+  clienteNumero: number | null;
+  clienteNombre?: string | null;
+}): Promise<{ clienteNumero: number | null; clienteNombre: string | null }> {
+  if (input.clienteNumero == null || isNaN(input.clienteNumero)) {
+    return { clienteNumero: null, clienteNombre: null };
+  }
+  let clienteNombre = input.clienteNombre?.trim() || null;
+  if (!clienteNombre) {
+    const cli = await getClienteAction(input.clienteNumero);
+    clienteNombre = cli?.nombre || null;
+  }
+  return { clienteNumero: input.clienteNumero, clienteNombre };
+}
+
 export async function createTrabajoAction(input: NuevoTrabajoInput) {
   if (!input.legajoId) throw new Error("Elegí un operario");
   if (!input.cortes?.length) throw new Error("Agregá al menos un corte");
@@ -161,14 +194,7 @@ export async function createTrabajoAction(input: NuevoTrabajoInput) {
   });
   if (!legajo) throw new Error("Operario no encontrado");
 
-  let clienteNumero: number | null = null;
-  if (input.clienteNumero != null && !isNaN(input.clienteNumero)) {
-    const cli = await prisma.cliente.findUnique({
-      where: { numero: input.clienteNumero },
-    });
-    if (!cli) throw new Error(`Cliente ${input.clienteNumero} no existe`);
-    clienteNumero = cli.numero;
-  }
+  const { clienteNumero, clienteNombre } = await resolveCliente(input);
 
   // const estado = calcEstado(input.cantidadAProducir, input.cortes.length);
   const estado = calcEstado(!!input.finalizar, input.cortes);
@@ -179,6 +205,7 @@ export async function createTrabajoAction(input: NuevoTrabajoInput) {
         legajoId: legajo.id,
         sectorId: legajo.sectorId,
         clienteNumero,
+        clienteNombre,
         ordenTrabajo: input.ordenTrabajo?.trim() || null,
         prioridad: input.prioridad || null,
         producto: input.producto?.trim() || null,
@@ -298,7 +325,7 @@ export async function getTrabajoAction(id: number) {
       observaciones: true,
       fechaPedido: true,
       estado: true,
-      cliente: { select: { nombre: true } },
+      clienteNombre: true,
       cortes: {
         orderBy: { fecha: "asc" },
         select: { id: true, codigo: true, metros: true, observacion: true },
@@ -320,14 +347,7 @@ export async function updateTrabajoAction(
   });
   if (!legajo) throw new Error("Operario no encontrado");
 
-  let clienteNumero: number | null = null;
-  if (input.clienteNumero != null && !isNaN(input.clienteNumero)) {
-    const cli = await prisma.cliente.findUnique({
-      where: { numero: input.clienteNumero },
-    });
-    if (!cli) throw new Error(`Cliente ${input.clienteNumero} no existe`);
-    clienteNumero = cli.numero;
-  }
+  const { clienteNumero, clienteNombre } = await resolveCliente(input);
 
   const estado = calcEstado(!!input.finalizar, input.cortes);
 
@@ -391,6 +411,7 @@ export async function updateTrabajoAction(
         legajoId: legajo.id,
         sectorId: legajo.sectorId,
         clienteNumero,
+        clienteNombre,
         ordenTrabajo: input.ordenTrabajo?.trim() || null,
         prioridad: input.prioridad || null,
         producto: input.producto?.trim() || null,

@@ -37,9 +37,9 @@ COL_CODIGO       = "CompCodigo"          # tipo de comprobante (11 / 22 / 23 / 2
 COL_IMPORTE      = "Total"               # total CON IVA del comprobante
 COL_FECHA        = "FecMovim"            # entero Magnus (días desde 1800-12-28)
 FECHA_ES_ENTERO  = True                  # FecMovim es entero
-COL_TASA_IVA     = ""                    # OJO: TasaIVA vino 0 en TODAS las filas de esta tabla →
-                                         #      no sirve para netear. Con "" se usa 1.21 plano.
-COL_NETO         = ""                    # si aparece una col de neto gravado real, poné su nombre acá (prioridad)
+COL_IVA          = "IVA"                 # columna del IVA → neto sin IVA = Total − IVA (EXACTO)
+COL_TASA_IVA     = ""                    # TasaIVA vino 0 en toda la tabla; no se usa
+COL_NETO         = ""                    # alternativa: neto gravado puro (excluye NoGravado). Para usarla, poné "Neto"
 # ─────────────────────────────────────────────────────────────────────────────
 
 CONFIGURADO = bool(FACT_TABLA and COL_CODIGO and COL_IMPORTE and COL_FECHA)
@@ -92,14 +92,17 @@ def fetch_facturacion_dia(fecha: str | None = None) -> dict:
         }
 
     # NETO de cada fila (sin IVA), por orden de preferencia:
-    #  1) columna de neto gravado si existe (COL_NETO);
-    #  2) netear por la TasaIVA de cada comprobante  → Total / (1 + tasa).
-    #     La tasa puede venir en % (21) o en fracción (0.21); el CASE lo cubre.
-    #     TasaIVA = 0 (p.ej. bonificaciones) ⇒ no se le saca IVA (divisor 1).
-    #  3) si no hay TasaIVA, /1.21 plano.
+    #  1) COL_NETO     → columna de neto gravado puro (excluye NoGravado);
+    #  2) COL_IVA      → Total − IVA  (exacto: saca sólo el IVA real del comprobante;
+    #                    si IVA=0, p.ej. bonificaciones, el importe queda entero);
+    #  3) COL_TASA_IVA → Total / (1 + tasa)  (la tasa puede venir 21 ó 0.21);
+    #  4) si no hay nada, /1.21 plano.
     if COL_NETO:
         neto_expr = COL_NETO
-        metodo = "columna-neto"
+        metodo = "columna-neto-gravado"
+    elif COL_IVA:
+        neto_expr = f"({COL_IMPORTE} - {COL_IVA})"
+        metodo = "total-menos-iva"
     elif COL_TASA_IVA:
         neto_expr = (f"({COL_IMPORTE} / (1 + CASE WHEN {COL_TASA_IVA} > 1 "
                      f"THEN {COL_TASA_IVA} / 100.0 ELSE {COL_TASA_IVA} END))")

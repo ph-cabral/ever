@@ -16,9 +16,10 @@ Consulta http://10.10.0.159:3001/api/finanza/facturacion cada 30s.
 Empaquetar con build.bat (PyInstaller --onefile --noconsole) -> dist/Facturacion.exe
 Ese .exe es autocontenido: se copia a cualquier PC Windows y corre sin instalar nada.
 
-IMPORTANTE: la facturacion es informacion sensible, asi que el endpoint pide
-login. Configura un usuario CON permiso del modulo "finanza" en credenciales.json
-(o en las variables de entorno FACT_DNI / FACT_PASS). Ver README.md.
+IMPORTANTE: la facturacion es informacion sensible, el endpoint pide login. Las
+credenciales (usuario con modulo "finanza") van EMBEBIDAS en CONFIG, asi el .exe
+es un solo archivo. Se pueden sobreescribir con credenciales.json o las variables
+FACT_DNI / FACT_PASS. Ver README.md.
 """
 
 import os
@@ -38,11 +39,12 @@ LOGIN_URL    = API_BASE + "/api/auth/login"
 POLL_SECONDS = 30           # cada cuanto consulta la API
 APP_NAME     = "FacturacionCalculadora"
 
-# Credenciales del login automatico. DEJAR VACIO aca y cargarlas por PC en
-# credenciales.json o en las variables de entorno FACT_DNI / FACT_PASS (tienen
-# prioridad). El usuario debe tener habilitado el modulo "finanza".
-LOGIN_DNI    = ""           # p.ej. "30111222"   (REEMPLAZAR o usar credenciales.json)
-LOGIN_PASS   = ""           # p.ej. "tu-clave"   (REEMPLAZAR o usar credenciales.json)
+# Credenciales del login automatico EMBEBIDAS: el .exe queda autocontenido
+# (un solo archivo, sin credenciales.json al lado). Usuario con modulo "finanza".
+# Se pueden sobreescribir por PC con FACT_DNI / FACT_PASS o credenciales.json
+# (tienen prioridad sobre estas constantes).
+LOGIN_DNI    = "35307009"
+LOGIN_PASS   = "a35307009."
 
 # Tamano del panel
 PANEL_W, PANEL_H = 260, 188

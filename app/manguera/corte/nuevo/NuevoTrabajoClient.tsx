@@ -237,6 +237,7 @@ export function NuevoTrabajoClient({
     const base = {
       legajoId: operarioId as number,
       clienteNumero: clienteNumero ? parseInt(clienteNumero, 10) : null,
+      clienteNombre: clienteNombre || null,
       ordenTrabajo: numInterno,
       prioridad,
       producto,
