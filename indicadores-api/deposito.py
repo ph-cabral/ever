@@ -757,14 +757,12 @@ ORDER BY OT.OTEstado
 # se cuenta cada OT por su OTEstado, además de la carga por operario (preparador)
 # desglosada por estado. Solo lectura (READ UNCOMMITTED).
 #
-# IMPORTANTE: se filtra por OTFechaHoraRegistracion (no por ejecución) para NO perder
-# las OT que todavía no se ejecutaron (Pendiente / En proceso): esas no tienen fecha
-# de ejecución pero sí de registración. Así el conteo coincide con la grilla del WMS.
-#
-# WMS_COL_FECHA es la única cosa que el código no puede confirmar solo. Si el nombre
-# real de la columna de "Registración" en OT es otro, ajustar SOLO esta constante
-# (ver candidatos en GET /deposito/wms-estados/diag).
-WMS_COL_FECHA = "OTFechaHoraRegistracion"
+# IMPORTANTE: se filtra por OTFechaHoraRegist (= "Registración" de la app WMS, no por
+# ejecución) para NO perder las OT que todavía no se ejecutaron (Pendiente / En proceso):
+# esas no tienen fecha de ejecución pero sí de registración. Así coincide con la grilla.
+# (confirmado vía /deposito/wms-estados/diag: las columnas de fecha de OT son
+#  OTFechaHoraRegist, OTFechaHoraEjecucion, OTFechaHoraPickIni, OTFechaHoraPickFin)
+WMS_COL_FECHA = "OTFechaHoraRegist"
 
 # Etiquetas de OTEstado para ESTA vista (la app muestra: Pendiente, En Proceso,
 # Cumplido, En Despacho, En Tránsito). Mapeo de códigos = MEJOR INFERENCIA; confirmar
