@@ -764,18 +764,19 @@ ORDER BY OT.OTEstado
 #  OTFechaHoraRegist, OTFechaHoraEjecucion, OTFechaHoraPickIni, OTFechaHoraPickFin)
 WMS_COL_FECHA = "OTFechaHoraRegist"
 
-# Etiquetas de OTEstado para ESTA vista (la app muestra: Pendiente, En Proceso,
-# Cumplido, En Despacho, En Tránsito). Mapeo de códigos = MEJOR INFERENCIA; confirmar
-# con GET /deposito/wms-estados/diag (lista los OTEstado reales con su conteo y, si
-# existe, la tabla de descripciones). Ajustar SOLO este diccionario.
-# bucket: solo para el color en la vista (espera / proceso / fin / otro).
+# Etiquetas de OTEstado para ESTA vista. CONFIRMADO vía /deposito/wms-estados/diag:
+# el orden del desplegable de la app (Pendiente, Cumplido, En Despacho, En Tránsito,
+# En Proceso) = códigos 1..5, y los conteos lo respaldan (2=Cumplido es la mayoría;
+# 5=En Proceso pocos y recientes; 1=Pendiente backlog). 3/4 no aparecen en Picking.
+# bucket: solo para el color en la vista. Si algún día aparece un código nuevo, cae en
+# "Estado N" (bucket otro) y se agrega acá.
 WMS_ESTADO_LABELS: dict[int, dict] = {
     0: {"label": "Pendiente",   "bucket": "espera"},
     1: {"label": "Pendiente",   "bucket": "espera"},
-    2: {"label": "En proceso",  "bucket": "proceso"},
-    3: {"label": "Cumplido",    "bucket": "fin"},
-    4: {"label": "En despacho", "bucket": "fin"},
-    5: {"label": "En tránsito", "bucket": "fin"},
+    2: {"label": "Cumplido",    "bucket": "fin"},
+    3: {"label": "En despacho", "bucket": "despacho"},
+    4: {"label": "En tránsito", "bucket": "transito"},
+    5: {"label": "En proceso",  "bucket": "proceso"},
 }
 
 
@@ -816,7 +817,7 @@ WHERE Codot.CodotProcesoNegocio IN ({procesos})
 
 
 def fetch_wms_estados(desde=None, hasta=None, procesos: tuple[int, ...] = PROCESOS_VIVO):
-    """OT por estado y carga por preparador en un rango (OTFechaHoraRegistracion).
+    """OT por estado y carga por preparador en un rango (OTFechaHoraRegist).
 
     Sin desde/hasta → último día con OT registrada. Devuelve:
       · estados      = [{estado, label, bucket, cantidad}] (todos los presentes)

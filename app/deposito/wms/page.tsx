@@ -37,20 +37,34 @@ interface WmsData {
   resumen: Resumen;
 }
 
-type Tone = "amber" | "yellow" | "green" | "neutral";
+type Tone = "amber" | "yellow" | "green" | "orange" | "sky" | "neutral";
 const bucketTone = (b: string): Tone =>
-  b === "espera" ? "amber" : b === "proceso" ? "yellow" : b === "fin" ? "green" : "neutral";
+  b === "espera"
+    ? "amber"
+    : b === "proceso"
+      ? "yellow"
+      : b === "fin"
+        ? "green"
+        : b === "despacho"
+          ? "orange"
+          : b === "transito"
+            ? "sky"
+            : "neutral";
 
 const TONE_TEXT: Record<Tone, string> = {
   amber: "text-amber-400",
   yellow: "text-yellow-400",
   green: "text-green-400",
+  orange: "text-orange-400",
+  sky: "text-sky-400",
   neutral: "text-zinc-300",
 };
 const TONE_BG: Record<Tone, string> = {
   amber: "bg-amber-400/10 border-amber-400/30",
   yellow: "bg-yellow-400/10 border-yellow-400/30",
   green: "bg-green-400/10 border-green-400/30",
+  orange: "bg-orange-400/10 border-orange-400/30",
+  sky: "bg-sky-400/10 border-sky-400/30",
   neutral: "bg-zinc-700/20 border-zinc-700",
 };
 
