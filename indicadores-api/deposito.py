@@ -246,6 +246,68 @@ WHERE b.rn = 1
 ORDER BY PrimerDia, u.SecuenciaRutPicking, b.NroPedOrigen, b.NroRengOrigen
 """
 
+# Igual que SQL_FALTANTES_RANGO pero HISTÓRICO: NO descarta lo que se entregó a
+# mitad del rango. Trae todos los renglones que aparecieron en [desde, hasta] y
+# agrega la columna Vivo:
+#   · Vivo = 1 → el renglón sigue pendiente en la foto más nueva del rango
+#               (demanda viva, igual que la vista normal).
+#   · Vivo = 0 → ya se entregó/cubrió a mitad del rango (faltante histórico).
+# CantPendiente sale de la fila más nueva del renglón (rn=1), o sea lo que
+# faltaba justo antes de entregarse. Params: CTE (d,h) + CASE Vivo (d,h).
+SQL_FALTANTES_RANGO_HIST = """
+WITH base AS (
+    SELECT
+        p.NroPedOrigen, p.NroRengOrigen, p.CodArticu,
+        p.CantPendiente, p.CodCliente, p.PrecioVenta, p.FecRegistracion,
+        ROW_NUMBER() OVER (
+            PARTITION BY p.NroPedOrigen, p.NroRengOrigen
+            ORDER BY p.FecRegistracion DESC
+        ) AS rn,
+        MIN(p.FecRegistracion) OVER (
+            PARTITION BY p.NroPedOrigen, p.NroRengOrigen
+        ) AS PrimerDiaNum,
+        MAX(p.FecRegistracion) OVER (
+            PARTITION BY p.NroPedOrigen, p.NroRengOrigen
+        ) AS UltimoDiaNum
+    FROM EVERWEAR.dbo.[Ven_PedRenPendientes] p
+    WHERE p.FecRegistracion BETWEEN ? AND ?
+)
+SELECT
+    b.NroPedOrigen, b.NroRengOrigen,
+    CONVERT(date, DATEADD(day, b.FecRegistracion, '1800-12-28')) AS Fecha,
+    CONVERT(date, DATEADD(day, b.PrimerDiaNum,   '1800-12-28')) AS PrimerDia,
+    CASE WHEN b.UltimoDiaNum = (
+        SELECT MAX(FecRegistracion)
+        FROM EVERWEAR.dbo.[Ven_PedRenPendientes]
+        WHERE FecRegistracion BETWEEN ? AND ?
+    ) THEN 1 ELSE 0 END AS Vivo,
+    u.SecuenciaRutPicking,
+    b.CodArticu,
+    ap.Detalle      AS Patron,
+    s.DetalleMedida AS Medida,
+    s.UnidadMedida  AS Unidad,
+    b.CantPendiente,
+    b.CodCliente,
+    b.PrecioVenta,
+    ap.Nivel1       AS Linea,
+    t.Descripcion   AS TipoArticulo,
+    gp.Nombre       AS Preparador,
+    pr.RazonSocial  AS Proveedor,
+    uv.Usu_Arma_Nombre AS Vendedor
+FROM base b
+LEFT JOIN EVERWEAR.dbo.[Ubicacion#]            u  ON u.codArticulo    = b.CodArticu AND u.ubicacion NOT LIKE '%[A-Za-z]%'
+LEFT JOIN EVERWEAR.dbo.[StkFer_Articulos]      s  ON s.CodArticulo    = b.CodArticu
+LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet]     ap ON ap.ArticuloPatron = s.ArticuloPatron
+LEFT JOIN EVERWEAR.dbo.[Stk_TiposArticulos]    t  ON t.CodigoTipo     = s.NacionalImportado
+LEFT JOIN EVERWEAR.dbo.[Com_Proveedores]       pr ON pr.CodProveed    = s.CodProveedHabitual
+LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoRengPreparacion] prep ON prep.NroMovVenta = b.NroPedOrigen AND prep.NroRenglon = b.NroRengOrigen
+LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]          gp ON gp.Numero       = prep.CodPreparador
+LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoCabecera] cab ON cab.NroMovVenta = b.NroPedOrigen
+LEFT JOIN MAGNUS_SITD.dbo.[Ped_Usu_Arma]       uv ON cab.Vendedor    = uv.Usu_Arma_Codigo
+WHERE b.rn = 1
+ORDER BY PrimerDia, u.SecuenciaRutPicking, b.NroPedOrigen, b.NroRengOrigen
+"""
+
 # Snapshots disponibles (para el selector de fechas de la vista). Solo < hoy.
 SQL_FALTANTES_FECHAS = """
 SELECT DISTINCT TOP (180)
@@ -297,13 +359,17 @@ def _iso(v):
     return str(v)[:10]
 
 
-def fetch_faltantes(desde=None, hasta=None):
+def fetch_faltantes(desde=None, hasta=None, historico=False):
     """Sin rango (desde/hasta None): último snapshot con registro < hoy
     (comportamiento original, sin cambios para /deposito/faltantes).
 
     Con rango: todos los snapshots de [desde, hasta] deduplicados por renglón.
     Cada fila trae además 'Fecha' (snapshot más nuevo del renglón en el rango) y
-    'PrimerDia' (primera aparición del faltante en el rango)."""
+    'PrimerDia' (primera aparición del faltante en el rango).
+
+    historico=True (solo con rango): NO descarta lo que se entregó a mitad del
+    rango. Cada fila trae 'Vivo' (1 = sigue pendiente en la foto más nueva,
+    0 = faltante histórico ya entregado/cubierto)."""
     conn = get_connection("EVERWEAR")
     try:
         cur = conn.cursor()
@@ -312,8 +378,9 @@ def fetch_faltantes(desde=None, hasta=None):
             cur.execute(SQL_FALTANTES)
         else:
             d_num, h_num = _rango_dias(desde, hasta)
-            # params: BETWEEN del CTE (d,h) + BETWEEN de la subconsulta del último snapshot (d,h)
-            cur.execute(SQL_FALTANTES_RANGO, (d_num, h_num, d_num, h_num))
+            # params: BETWEEN del CTE (d,h) + BETWEEN de la subconsulta (d,h)
+            sql = SQL_FALTANTES_RANGO_HIST if historico else SQL_FALTANTES_RANGO
+            cur.execute(sql, (d_num, h_num, d_num, h_num))
         cols = [c[0] for c in cur.description]
         fecha, rows = None, []
         for r in cur.fetchall():
@@ -341,6 +408,7 @@ def fetch_faltantes(desde=None, hasta=None):
                 "Vendedor":      _txt(d.get("Vendedor")),
                 "Fecha":         fila_fecha,
                 "PrimerDia":     primer,
+                "Vivo":          int(_safe(d.get("Vivo")) if d.get("Vivo") is not None else 1),
             })
         return {"fecha": fecha, "total": len(rows), "rows": rows}
     finally:

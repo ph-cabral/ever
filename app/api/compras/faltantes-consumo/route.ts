@@ -36,6 +36,7 @@ interface FaltRow {
   Proveedor: string | null;
   Fecha: string | null; // snapshot más nuevo del renglón en el rango
   PrimerDia: string | null; // primera aparición en el rango
+  Vivo?: number; // 1 = sigue pendiente; 0 = histórico ya entregado/cubierto
 }
 interface OcRow {
   CodArticulo: string;
@@ -45,7 +46,7 @@ interface OcRow {
   Importacion: boolean;
   NroOCs: string[];
 }
-type Estado = "completo" | "incompleto" | "sin_orden";
+type Estado = "completo" | "incompleto" | "sin_orden" | "entregado";
 
 interface Bucket {
   CodArticulo: string;
@@ -53,6 +54,7 @@ interface Bucket {
   Linea: string | number | null;
   Proveedor: string | null;
   fecha: string; // PrimerDia (día del faltante)
+  vivo: boolean; // false = histórico ya entregado/cubierto
   faltan: number;
   importe: number;
   renglones: number;
@@ -82,10 +84,13 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const desdeParam = sp.get("desde");
   const hastaParam = sp.get("hasta");
+  // histórico: incluye también los faltantes ya entregados/cubiertos del rango
+  const historico = sp.get("historico") === "1" || sp.get("historico") === "true";
 
   const qs = new URLSearchParams();
   if (desdeParam) qs.set("desde", desdeParam);
   if (hastaParam) qs.set("hasta", hastaParam);
+  if (historico) qs.set("historico", "1");
   const faltUrl = `${API_URL}/deposito/faltantes${qs.toString() ? `?${qs}` : ""}`;
 
   // 1) faltantes (obligatorio) + OC (best-effort) en paralelo
@@ -146,7 +151,10 @@ export async function GET(req: NextRequest) {
     const cod = String(it.CodArticulo ?? "").trim();
     const dia = it.PrimerDia ?? it.Fecha ?? fecha ?? "";
     if (!cod || !dia) continue;
-    const k = `${cod}__${dia}`;
+    // Vivo viene solo en modo histórico; sin él, todo es demanda viva (1).
+    const vivo = it.Vivo === undefined ? true : it.Vivo !== 0;
+    // separar vivos de entregados aunque compartan artículo+día: no se mezclan.
+    const k = `${cod}__${dia}__${vivo ? "v" : "h"}`;
     let b = buckets.get(k);
     if (!b) {
       b = {
@@ -155,6 +163,7 @@ export async function GET(req: NextRequest) {
         Linea: it.Linea ?? null,
         Proveedor: it.Proveedor,
         fecha: dia,
+        vivo,
         faltan: 0,
         importe: 0,
         renglones: 0,
@@ -193,6 +202,15 @@ export async function GET(req: NextRequest) {
     let supply = ocTotal;
     let imp = 0;
     for (const b of arr) {
+      imp += b.importe;
+      if (!b.vivo) {
+        // Histórico ya entregado: cubierto con stock, no consume la OC por llegar.
+        b.cubierto = b.faltan;
+        b.descubierto = 0;
+        b.ocTotal = ocTotal;
+        b.estado = "entregado";
+        continue;
+      }
       const cub = Math.min(Math.max(supply, 0), b.faltan);
       b.cubierto = cub;
       supply -= cub;
@@ -206,7 +224,6 @@ export async function GET(req: NextRequest) {
       }
       b.estado =
         b.faltan > 0 && b.descubierto <= 0 ? "completo" : cub > 0 ? "incompleto" : "sin_orden";
-      imp += b.importe;
     }
     artImporte.set(cod, imp);
   }
@@ -226,6 +243,7 @@ export async function GET(req: NextRequest) {
       Linea: b.Linea,
       Proveedor: b.Proveedor,
       fecha: b.fecha,
+      vivo: b.vivo,
       faltan: r2(b.faltan),
       cubierto: r2(b.cubierto),
       descubierto: r2(b.descubierto),
@@ -240,10 +258,12 @@ export async function GET(req: NextRequest) {
     }));
 
   // 6) persistir el consumo por día (best-effort; tabla aplicada a mano por SQL)
+  //    Solo demanda viva: los entregados históricos no imputan OC.
   let consumoWarn = false;
-  if (rowsOut.length) {
+  const consumoRows = rowsOut.filter((r) => r.vivo);
+  if (consumoRows.length) {
     try {
-      const values = rowsOut.map(
+      const values = consumoRows.map(
         (r) =>
           Prisma.sql`(${r.fecha}::date, ${r.CodArticulo}, ${r.faltan}, ${r.cubierto}, ${r.descubierto}, ${r.ocTotal}, now())`,
       );
@@ -268,6 +288,7 @@ export async function GET(req: NextRequest) {
     fecha,
     desde: minPrimer ?? fecha,
     hasta: maxFecha ?? fecha,
+    historico,
     total: rowsOut.length,
     rows: rowsOut,
     ocWarn,

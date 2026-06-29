@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
-  Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck, CalendarRange,
+  Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck, CalendarRange, History, Check,
 } from "lucide-react";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -24,7 +24,7 @@ import {
 //   El consumo por día se guarda solo (preparado.faltante_oc_consumo).
 // ──────────────────────────────────────────────────────────────────────────────
 
-type Estado = "completo" | "incompleto" | "sin_orden";
+type Estado = "completo" | "incompleto" | "sin_orden" | "entregado";
 type Filtro = "todos" | Estado;
 
 interface Row {
@@ -33,6 +33,7 @@ interface Row {
   Linea: string | number | null;
   Proveedor: string | null;
   fecha: string; // día del faltante (primera aparición)
+  vivo: boolean; // false = histórico ya entregado/cubierto
   faltan: number;
   cubierto: number;
   descubierto: number;
@@ -58,15 +59,18 @@ const FILTROS: { key: Filtro; label: string }[] = [
   { key: "completo", label: "Cubiertos" },
   { key: "incompleto", label: "Parciales" },
   { key: "sin_orden", label: "Sin OC" },
+  { key: "entregado", label: "Entregados" },
 ];
 
 const rowCls: Record<Estado, string> = {
   completo: "bg-green-500/10 hover:bg-green-500/[0.16]",
+  entregado: "bg-emerald-500/10 hover:bg-emerald-500/[0.16]",
   incompleto: "bg-red-500/10 hover:bg-red-500/[0.16]",
   sin_orden: "hover:bg-zinc-900/50",
 };
 const cubiertoCls: Record<Estado, string> = {
   completo: "text-green-400",
+  entregado: "text-emerald-400",
   incompleto: "text-amber-400",
   sin_orden: "text-zinc-600",
 };
@@ -77,6 +81,7 @@ export default function ComprasFaltantesPage() {
   const [desdeResp, setDesdeResp] = useState<string | null>(null);
   const [hastaResp, setHastaResp] = useState<string | null>(null);
   const [desde, setDesde] = useState(""); // "" = solo último día
+  const [historico, setHistorico] = useState(false); // ver también ya entregados
   const [fechasDisp, setFechasDisp] = useState<string[]>([]);
   const [filtro, setFiltro] = useState<Filtro>("todos");
   const [loading, setLoading] = useState(false);
@@ -96,7 +101,10 @@ export default function ComprasFaltantesPage() {
     setError(null);
     setOcWarn(false);
     try {
-      const qs = desde ? `?desde=${desde}` : "";
+      const p = new URLSearchParams();
+      if (desde) p.set("desde", desde);
+      if (historico) p.set("historico", "1");
+      const qs = p.toString() ? `?${p}` : "";
       const res = await fetch(`/api/compras/faltantes-consumo${qs}`, { cache: "no-store" });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
@@ -111,14 +119,14 @@ export default function ComprasFaltantesPage() {
     } finally {
       setLoading(false);
     }
-  }, [desde]);
+  }, [desde, historico]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const conteo = useMemo(() => {
-    const c = { todos: rows.length, completo: 0, incompleto: 0, sin_orden: 0 };
+    const c = { todos: rows.length, completo: 0, incompleto: 0, sin_orden: 0, entregado: 0 };
     for (const r of rows) c[r.estado]++;
     return c as Record<Filtro, number>;
   }, [rows]);
@@ -221,9 +229,23 @@ export default function ComprasFaltantesPage() {
             )}
           </div>
 
+          <button
+            onClick={() => setHistorico((v) => !v)}
+            title="Incluir los faltantes históricos ya entregados/cubiertos del rango"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+              historico
+                ? "bg-emerald-500/15 border-emerald-400 text-emerald-300"
+                : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+            }`}
+          >
+            <History size={14} />
+            Ver histórico
+            {historico && <Check size={13} />}
+          </button>
+
           <div className="w-px h-5 bg-zinc-800 hidden sm:block" />
 
-          {FILTROS.map((f) => (
+          {FILTROS.filter((f) => f.key !== "entregado" || historico).map((f) => (
             <button
               key={f.key}
               onClick={() => setFiltro(f.key)}
@@ -329,7 +351,11 @@ export default function ComprasFaltantesPage() {
                       >
                         {r.cubierto > 0 ? (
                           <span className="inline-flex items-center gap-1 justify-end">
-                            <Truck size={13} className="opacity-70" />
+                            {r.estado === "entregado" ? (
+                              <Check size={13} className="opacity-80" />
+                            ) : (
+                              <Truck size={13} className="opacity-70" />
+                            )}
                             {fmtNum(r.cubierto)}
                           </span>
                         ) : (
@@ -340,11 +366,13 @@ export default function ComprasFaltantesPage() {
                         {r.descubierto > 0 ? fmtNum(r.descubierto) : "—"}
                       </td>
                       <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
-                        {r.cubierto > 0
-                          ? r.importacion
-                            ? <span className="text-amber-400/80">Importación</span>
-                            : fmtAr(r.fechaEntrega)
-                          : "—"}
+                        {r.estado === "entregado"
+                          ? <span className="text-emerald-400/80">Entregado</span>
+                          : r.cubierto > 0
+                            ? r.importacion
+                              ? <span className="text-amber-400/80">Importación</span>
+                              : fmtAr(r.fechaEntrega)
+                            : "—"}
                       </td>
                       <td className="px-3 py-2 text-zinc-400">{nuevoArt ? r.Proveedor || "—" : ""}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-zinc-300">

@@ -173,13 +173,16 @@ def deposito_vivo():
 def deposito_faltantes(
     desde: str | None = Query(default=None),
     hasta: str | None = Query(default=None),
+    historico: bool = Query(default=False),
 ):
     """Faltantes (renglones pendientes 'sin existencia' por controlar).
     · Sin params  → último snapshot con registro < hoy (comportamiento original).
     · desde/hasta → todos los snapshots del rango, deduplicados por renglón, con
-      'PrimerDia' (primera aparición) para poder restar la OC por día."""
+      'PrimerDia' (primera aparición) para poder restar la OC por día.
+    · historico=true (con rango) → incluye además los faltantes ya entregados/
+      cubiertos a mitad del rango; cada fila trae 'Vivo' (1 vivo / 0 histórico)."""
     try:
-        return fetch_faltantes(desde, hasta)
+        return fetch_faltantes(desde, hasta, historico)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
