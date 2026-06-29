@@ -1,0 +1,340 @@
+"use client";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Loader2, RefreshCw, AlertTriangle, PackageSearch, Users } from "lucide-react";
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Depósito WMS — OT (pedidos de Picking) por estado en un rango + carta por
+// preparador con su desglose por estado. Datos del schema WMS, leídos en vivo vía
+// /api/deposito/wms-estados (→ indicadores-api → WMS). Solo lectura.
+// Por defecto trae el último día con OT ejecutada; el rango es ajustable.
+// ──────────────────────────────────────────────────────────────────────────────
+
+interface EstadoAgg {
+  estado: number | null;
+  label: string;
+  bucket: "espera" | "proceso" | "fin" | "otro";
+  cantidad: number;
+}
+interface OperarioAgg {
+  operario: string;
+  total: number;
+  por_estado: Record<string, number>;
+}
+interface Resumen {
+  total_ot: number;
+  operarios: number;
+  en_espera: number;
+  en_proceso: number;
+  terminadas: number;
+}
+interface WmsData {
+  fecha: string | null;
+  desde: string | null;
+  hasta: string | null;
+  procesos: number[];
+  estados: EstadoAgg[];
+  por_operario: OperarioAgg[];
+  resumen: Resumen;
+}
+
+type Tone = "amber" | "yellow" | "green" | "neutral";
+const bucketTone = (b: string): Tone =>
+  b === "espera" ? "amber" : b === "proceso" ? "yellow" : b === "fin" ? "green" : "neutral";
+
+const TONE_TEXT: Record<Tone, string> = {
+  amber: "text-amber-400",
+  yellow: "text-yellow-400",
+  green: "text-green-400",
+  neutral: "text-zinc-300",
+};
+const TONE_BG: Record<Tone, string> = {
+  amber: "bg-amber-400/10 border-amber-400/30",
+  yellow: "bg-yellow-400/10 border-yellow-400/30",
+  green: "bg-green-400/10 border-green-400/30",
+  neutral: "bg-zinc-700/20 border-zinc-700",
+};
+
+const fmtNum = (n: number) =>
+  new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(n || 0);
+const fmtAr = (s: string | null) => {
+  const m = /(\d{4})-(\d{2})-(\d{2})/.exec(s || "");
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : s || "—";
+};
+const isoLocal = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate(),
+  ).padStart(2, "0")}`;
+
+export default function DepositoWmsPage() {
+  const [data, setData] = useState<WmsData | null>(null);
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async (d: string, h: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const qs = new URLSearchParams();
+      if (d) qs.set("desde", d);
+      if (h) qs.set("hasta", h || d);
+      const res = await fetch(`/api/deposito/wms-estados?${qs.toString()}`, {
+        cache: "no-store",
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setData(j as WmsData);
+      // Sin rango elegido: fija los inputs al día que devolvió el backend.
+      if (!d && j.desde) setDesde(j.desde as string);
+      if (!h && j.hasta) setHasta(j.hasta as string);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al cargar");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Primera carga: sin rango → backend devuelve el último día con OT ejecutada.
+  useEffect(() => {
+    load("", "");
+  }, [load]);
+
+  const hoy = isoLocal(new Date());
+  const ayer = isoLocal(new Date(Date.now() - 864e5));
+  const hace7 = isoLocal(new Date(Date.now() - 6 * 864e5));
+
+  const setRango = (d: string, h: string) => {
+    setDesde(d);
+    setHasta(h);
+    load(d, h);
+  };
+
+  // Mapa estado→meta para etiquetar el desglose de cada preparador.
+  const estadoMeta = useMemo(() => {
+    const m = new Map<string, EstadoAgg>();
+    (data?.estados ?? []).forEach((e) => m.set(String(e.estado), e));
+    return m;
+  }, [data]);
+
+  const r = data?.resumen;
+  const ordenEstados = data?.estados ?? [];
+  const hayOps = (data?.por_operario?.length ?? 0) > 0;
+  const primeraCarga = data === null && loading;
+  const rangoLabel =
+    desde && hasta && desde !== hasta
+      ? `${fmtAr(desde)} → ${fmtAr(hasta)}`
+      : fmtAr(desde || data?.fecha || null);
+
+  return (
+    <div className="min-h-screen bg-[#111111] text-white">
+      {/* avisos flotantes */}
+      {(loading || error) && (
+        <div className="fixed bottom-6 right-6 z-[110] flex flex-col gap-2">
+          {loading && (
+            <div className="flex items-center gap-3 bg-[#1A1A1A] border border-yellow-400/40 rounded-xl px-5 py-3 text-sm text-zinc-200">
+              <Loader2 size={16} className="animate-spin text-yellow-400" />
+              Consultando el WMS…
+            </div>
+          )}
+          {error && (
+            <div className="flex items-center gap-3 bg-[#1A1A1A] border border-red-400/40 rounded-xl px-5 py-3 text-sm text-red-300">
+              <AlertTriangle size={16} className="text-red-400" /> {error}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* header */}
+      <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 flex flex-wrap items-center justify-between px-4 md:px-8 py-3 gap-4">
+        <div className="flex items-center gap-4">
+          <span className="font-bold text-yellow-400 text-xl md:text-2xl tracking-wide uppercase">
+            EVER WEAR{" "}
+            <span className="text-xs md:text-sm tracking-[3px] font-normal">S.A.</span>
+          </span>
+          <div className="w-px h-7 bg-yellow-400/30 hidden md:block" />
+          <span className="text-zinc-500 text-sm hidden md:inline">
+            Depósito WMS · {rangoLabel}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 md:gap-3 text-sm flex-wrap">
+          <label className="flex items-center gap-1.5 text-zinc-500">
+            Desde
+            <input
+              type="date"
+              value={desde}
+              max={hasta || hoy}
+              onChange={(e) => setRango(e.target.value, hasta || e.target.value)}
+              className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none"
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-zinc-500">
+            Hasta
+            <input
+              type="date"
+              value={hasta}
+              max={hoy}
+              min={desde || undefined}
+              onChange={(e) => setRango(desde || e.target.value, e.target.value)}
+              className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none"
+            />
+          </label>
+          <button
+            onClick={() => setRango(hoy, hoy)}
+            className="px-2.5 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 transition-colors"
+          >
+            Hoy
+          </button>
+          <button
+            onClick={() => setRango(ayer, ayer)}
+            className="px-2.5 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 transition-colors"
+          >
+            Ayer
+          </button>
+          <button
+            onClick={() => setRango(hace7, hoy)}
+            className="px-2.5 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 transition-colors"
+          >
+            7 días
+          </button>
+          <button
+            onClick={() => load(desde, hasta)}
+            title="Refrescar"
+            disabled={loading}
+            className="text-zinc-400 hover:text-yellow-400 transition-colors p-2 disabled:opacity-40"
+          >
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+          </button>
+        </div>
+      </header>
+
+      {/* KPIs por estado */}
+      {r && (
+        <div className="max-w-[1500px] mx-auto px-4 md:px-8 pt-5">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <Stat label="Total OT" value={fmtNum(r.total_ot)} tone="yellow" big />
+            {ordenEstados.map((e) => (
+              <Stat
+                key={String(e.estado)}
+                label={e.label}
+                value={fmtNum(e.cantidad)}
+                tone={bucketTone(e.bucket)}
+              />
+            ))}
+            <Stat label="Preparadores" value={fmtNum(r.operarios)} tone="neutral" />
+          </div>
+        </div>
+      )}
+
+      <main className="max-w-[1500px] mx-auto px-4 md:px-8 py-6">
+        {primeraCarga ? (
+          <div className="flex flex-col items-center justify-center py-28 gap-3 text-center">
+            <Loader2 size={40} className="text-yellow-400 animate-spin" />
+            <p className="text-zinc-400 font-medium">Consultando el WMS…</p>
+          </div>
+        ) : !hayOps ? (
+          <div className="flex flex-col items-center justify-center py-28 gap-3 text-center">
+            <PackageSearch size={44} className="text-zinc-700" />
+            <p className="text-zinc-400 font-medium">
+              {error
+                ? "No se pudo leer el WMS."
+                : "No hay OT para este rango."}
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-3 mb-4">
+              <Users size={16} className="text-yellow-400" />
+              <span className="text-[13px] font-semibold text-zinc-100">
+                Preparadores con actividad
+              </span>
+              <span className="text-zinc-600 text-[12px]">
+                {data!.por_operario.length} con al menos 1 OT
+              </span>
+              <span className="flex-1 h-px bg-zinc-800" />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {data!.por_operario.map((op) => (
+                <div
+                  key={op.operario}
+                  className="rounded-xl border border-zinc-800 bg-[#171717] p-4"
+                >
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <div className="font-semibold text-zinc-100 leading-tight">
+                      {op.operario}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-2xl font-bold text-yellow-400 leading-none tabular-nums">
+                        {fmtNum(op.total)}
+                      </div>
+                      <div className="text-[10px] uppercase tracking-wide text-zinc-600">
+                        OT
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {ordenEstados
+                      .filter((e) => (op.por_estado[String(e.estado)] ?? 0) > 0)
+                      .map((e) => {
+                        const tone = bucketTone(e.bucket);
+                        return (
+                          <div
+                            key={String(e.estado)}
+                            className={`rounded-md border px-2.5 py-1.5 ${TONE_BG[tone]}`}
+                          >
+                            <div
+                              className={`text-lg font-bold tabular-nums ${TONE_TEXT[tone]}`}
+                            >
+                              {fmtNum(op.por_estado[String(e.estado)] ?? 0)}
+                            </div>
+                            <div className="text-[10px] text-zinc-500 leading-tight">
+                              {e.label}
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        <p className="text-[11px] text-zinc-600 mt-6 leading-relaxed">
+          Pedidos = OT de Picking del WMS, contadas por su estado (OTEstado) según la
+          fecha de ejecución del rango. Cada carta es un preparador (repositor asignado)
+          con al menos una OT en el período, desglosado por estado. Lectura no bloqueante
+          (READ UNCOMMITTED); no se escribe en el WMS. Por defecto se muestra el último
+          día con OT ejecutada.
+        </p>
+      </main>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  tone = "neutral",
+  big = false,
+}: {
+  label: string;
+  value: string;
+  tone?: Tone;
+  big?: boolean;
+}) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-[#1A1A1A] px-4 py-3">
+      <div className="text-[11px] uppercase tracking-wide text-zinc-500 truncate">
+        {label}
+      </div>
+      <div
+        className={`${big ? "text-3xl" : "text-2xl"} font-bold tabular-nums ${TONE_TEXT[tone]}`}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}

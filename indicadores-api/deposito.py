@@ -751,6 +751,112 @@ ORDER BY OT.OTEstado
 """
 
 
+# ── Tablero por RANGO: OT por estado + carga por preparador (/deposito/wms) ───
+# A diferencia de /deposito/vivo (foto de AHORA, sin fecha), acá se mira un RANGO
+# de OTFechaHoraEjecucion y se cuenta cada OT por su OTEstado, además de la carga
+# por operario (preparador) desglosada por estado. Solo lectura (READ UNCOMMITTED).
+#
+# Filtro: OT de Picking (proceso 4 por defecto) cuya OTFechaHoraEjecucion cae en el
+# rango. Esto muestra lo TRABAJADO en ese período (mayormente estados en proceso /
+# terminada / cerrada). Las OT puras "en espera" sin ejecutar las cubre /deposito/vivo.
+SQL_WMS_ESTADOS = """
+SELECT
+    OT.OTEstado      AS Estado,
+    P.PersonalNombre AS Operario,
+    COUNT(*)         AS Cantidad
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+LEFT JOIN Personal P ON OT.OTUsuarioGUID_Repositor = P.PersonalId
+WHERE Codot.CodotProcesoNegocio IN ({procesos})
+  AND OT.OTFechaHoraEjecucion >= ?
+  AND OT.OTFechaHoraEjecucion <= ?
+GROUP BY OT.OTEstado, P.PersonalNombre
+"""
+
+# Último día con OT ejecutada (para el default del tablero). Parametrizado por proceso.
+SQL_WMS_ULTIMO_DIA = """
+SELECT MAX(CONVERT(date, OT.OTFechaHoraEjecucion)) AS f
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+WHERE Codot.CodotProcesoNegocio IN ({procesos})
+  AND OT.OTFechaHoraEjecucion < DATEADD(day, 1, CAST(GETDATE() AS date))
+"""
+
+
+def fetch_wms_estados(desde=None, hasta=None, procesos: tuple[int, ...] = PROCESOS_VIVO):
+    """OT por estado y carga por preparador en un rango (OTFechaHoraEjecucion).
+
+    Sin desde/hasta → último día con OT ejecutada. Devuelve:
+      · estados      = [{estado, label, bucket, cantidad}] (todos los presentes)
+      · por_operario = [{operario, total, por_estado: {<cod>: n}}] con ≥1 OT
+      · resumen      = {total_ot, operarios, en_proceso, terminadas, ...}"""
+    proc_in = ",".join(str(int(p)) for p in procesos)
+    conn = get_connection("WMS")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        if desde is None and hasta is None:
+            cur.execute(SQL_WMS_ULTIMO_DIA.format(procesos=proc_in))
+            row = cur.fetchone()
+            dia = row[0] if row else None
+            if dia is None:
+                return {"fecha": None, "desde": None, "hasta": None,
+                        "procesos": list(procesos), "estados": [],
+                        "por_operario": [],
+                        "resumen": {"total_ot": 0, "operarios": 0,
+                                    "en_espera": 0, "en_proceso": 0, "terminadas": 0}}
+            d = datetime(dia.year, dia.month, dia.day, 0, 0, 0)
+            h = datetime(dia.year, dia.month, dia.day, 23, 59, 59)
+        else:
+            d, h = _rango_ot(desde, hasta)
+        cur.execute(SQL_WMS_ESTADOS.format(procesos=proc_in), (d, h))
+        filas = cur.fetchall()
+    finally:
+        conn.close()
+
+    por_estado: dict[int, int] = {}
+    por_op: dict[str, dict] = {}
+    sin_asignar = {"operario": "— Sin asignar", "total": 0, "por_estado": {}}
+    for estado, operario, cant in filas:
+        cant = int(cant or 0)
+        meta = _estado_meta(estado)
+        ecode = meta["estado"]
+        por_estado[ecode] = por_estado.get(ecode, 0) + cant
+        nombre = str(operario).strip() if operario is not None else ""
+        dst = sin_asignar if not nombre else por_op.setdefault(
+            nombre, {"operario": nombre, "total": 0, "por_estado": {}})
+        dst["total"] += cant
+        dst["por_estado"][str(ecode)] = dst["por_estado"].get(str(ecode), 0) + cant
+
+    estados = [
+        {**_estado_meta(e), "cantidad": c}
+        for e, c in sorted(por_estado.items(), key=lambda kv: (kv[0] is None, kv[0]))
+    ]
+    operarios = sorted(por_op.values(), key=lambda x: (-x["total"], x["operario"]))
+    if sin_asignar["total"] > 0:
+        operarios.append(sin_asignar)
+
+    buckets = {e: _estado_meta(e)["bucket"] for e in por_estado}
+    def _suma(bucket):
+        return sum(c for e, c in por_estado.items() if buckets.get(e) == bucket)
+
+    return {
+        "fecha": _iso(d),
+        "desde": _iso(d),
+        "hasta": _iso(h),
+        "procesos": list(procesos),
+        "estados": estados,
+        "por_operario": operarios,
+        "resumen": {
+            "total_ot":   sum(por_estado.values()),
+            "operarios":  len(por_op),
+            "en_espera":  _suma("espera"),
+            "en_proceso": _suma("proceso"),
+            "terminadas": _suma("fin"),
+        },
+    }
+
+
 def fetch_vivo(procesos: tuple[int, ...] = PROCESOS_VIVO):
     """Estado del depósito EN VIVO: pedidos (OT) en espera / en proceso y por operario."""
     proc_in = ",".join(str(int(p)) for p in procesos)

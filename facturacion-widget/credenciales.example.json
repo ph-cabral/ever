@@ -1,5 +1,0 @@
-{
-  "_comentario": "Copiar este archivo como 'credenciales.json' al lado del .exe. Usar un usuario CON permiso del modulo 'finanza'. NO commitear credenciales.json (esta en .gitignore).",
-  "dni": "30111222",
-  "password": "tu-clave"
-}
