@@ -1,11 +1,25 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  Loader2, RefreshCw, AlertTriangle, Pause, Play, ChevronDown,
+  Loader2,
+  RefreshCw,
+  AlertTriangle,
+  Pause,
+  Play,
+  ChevronDown,
 } from "lucide-react";
 import {
-  PageTitle, SectionTitle, Panel, KPI, Grid, Table, ChartBar, Tag,
-  fmtNum, C, type Col,
+  PageTitle,
+  SectionTitle,
+  Panel,
+  KPI,
+  Grid,
+  Table,
+  ChartBar,
+  Tag,
+  fmtNum,
+  C,
+  type Col,
 } from "../components/ui";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -58,7 +72,9 @@ export default function DepositoVivoPage() {
     setLoading(true);
     try {
       const r = await fetch("/api/deposito/vivo", { cache: "no-store" });
-      const j = (await r.json().catch(() => ({}))) as VivoData & { error?: string };
+      const j = (await r.json().catch(() => ({}))) as VivoData & {
+        error?: string;
+      };
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
       setData(j);
       setLastFetch(new Date());
@@ -88,7 +104,9 @@ export default function DepositoVivoPage() {
     return () => clearInterval(id);
   }, []);
 
-  const secsAgo = lastFetch ? Math.floor((Date.now() - lastFetch.getTime()) / 1000) : null;
+  const secsAgo = lastFetch
+    ? Math.floor((Date.now() - lastFetch.getTime()) / 1000)
+    : null;
 
   const chartData = useMemo(
     () =>
@@ -108,8 +126,18 @@ export default function DepositoVivoPage() {
 
   const opCols: Col<OperarioRow>[] = [
     { key: "operario", label: "Operario" },
-    { key: "en_proceso", label: "En proceso", num: true, render: (r) => fmtNum(r.en_proceso) },
-    { key: "en_espera", label: "En espera", num: true, render: (r) => fmtNum(r.en_espera) },
+    {
+      key: "en_proceso",
+      label: "En proceso",
+      num: true,
+      render: (r) => fmtNum(r.en_proceso),
+    },
+    {
+      key: "en_espera",
+      label: "En espera",
+      num: true,
+      render: (r) => fmtNum(r.en_espera),
+    },
     { key: "total", label: "Total", num: true, render: (r) => fmtNum(r.total) },
   ];
 
@@ -122,7 +150,8 @@ export default function DepositoVivoPage() {
         <div className="fixed bottom-6 right-6 z-[110] flex flex-col gap-2">
           {loading && (
             <div className="flex items-center gap-3 bg-[#1A1A1A] border border-yellow-400/40 rounded-xl px-5 py-3 text-sm text-zinc-200">
-              <Loader2 size={16} className="animate-spin text-yellow-400" /> Actualizando…
+              <Loader2 size={16} className="animate-spin text-yellow-400" />{" "}
+              Actualizando…
             </div>
           )}
           {error && (
@@ -160,7 +189,12 @@ export default function DepositoVivoPage() {
                 : secsAgo < 2
                   ? "actualizado recién"
                   : `actualizado hace ${secsAgo}s`}
-              {data && <span className="text-zinc-600"> · {hhmmss(new Date(data.generado_en))}</span>}
+              {data && (
+                <span className="text-zinc-600">
+                  {" "}
+                  · {hhmmss(new Date(data.generado_en))}
+                </span>
+              )}
             </span>
             <button
               onClick={() => setAuto((a) => !a)}
@@ -191,10 +225,12 @@ export default function DepositoVivoPage() {
             ) : (
               <>
                 <AlertTriangle size={44} className="text-zinc-700" />
-                <p className="text-zinc-400 font-medium">No se pudo leer el estado en vivo</p>
+                <p className="text-zinc-400 font-medium">
+                  No se pudo leer el estado en vivo
+                </p>
                 <p className="text-zinc-600 text-sm max-w-md">
-                  {error ?? "El servicio de depósito no respondió."} Verificá que la API de
-                  indicadores esté publicada y reintentá.
+                  {error ?? "El servicio de depósito no respondió."} Verificá
+                  que la API de indicadores esté publicada y reintentá.
                 </p>
                 <button
                   onClick={load}
@@ -215,7 +251,11 @@ export default function DepositoVivoPage() {
                 sub={`de ${fmtNum(totalVivos)} pedidos vivos`}
                 accent={data!.en_espera > 0 ? "amber" : "neutral"}
               />
-              <KPI label="En proceso" value={fmtNum(data!.en_proceso)} accent="green" />
+              <KPI
+                label="En proceso"
+                value={fmtNum(data!.en_proceso)}
+                accent="green"
+              />
               <KPI
                 label="Operarios activos"
                 value={fmtNum(data!.operarios_activos)}
@@ -233,8 +273,10 @@ export default function DepositoVivoPage() {
             {/* Carga por operario */}
             <SectionTitle>
               Carga por operario ·{" "}
-              <span className="text-yellow-400 font-bold">{fmtNum(data!.en_proceso)}</span> en
-              proceso ahora
+              <span className="text-yellow-400 font-bold">
+                {fmtNum(data!.en_proceso)}
+              </span>{" "}
+              en proceso ahora
             </SectionTitle>
             <Panel>
               {chartData.length === 0 ? (
@@ -249,15 +291,30 @@ export default function DepositoVivoPage() {
                   horizontal
                   fmt={(n) => fmtNum(n)}
                   series={[
-                    { key: "en_proceso", name: "En proceso", color: C.green, stackId: "x" },
-                    { key: "en_espera", name: "En espera", color: C.brand, stackId: "x" },
+                    {
+                      key: "en_proceso",
+                      name: "En proceso",
+                      color: C.green,
+                      stackId: "x",
+                    },
+                    {
+                      key: "en_espera",
+                      name: "En espera",
+                      color: C.brand,
+                      stackId: "x",
+                    },
                   ]}
                 />
               )}
             </Panel>
 
             <SectionTitle>Detalle por operario</SectionTitle>
-            <Table<OperarioRow> cols={opCols} rows={data!.por_operario} max={100} maxH={460} />
+            <Table<OperarioRow>
+              cols={opCols}
+              rows={data!.por_operario}
+              max={100}
+              maxH={460}
+            />
 
             {/* Diagnóstico de estados (para confirmar/ajustar el mapeo de OTEstado) */}
             {data!.diagnostico?.por_estado?.length ? (
@@ -275,10 +332,14 @@ export default function DepositoVivoPage() {
                 {showDiag && (
                   <div className="mt-3">
                     <p className="text-[11px] text-zinc-600 mb-2 leading-relaxed max-w-2xl">
-                      Conteo de OT de Picking sin ejecutar o ejecutadas en las últimas 48 h, por{" "}
-                      <code className="text-zinc-400">OTEstado</code>. Sirve para confirmar qué código
-                      es cada cosa. Si algún estado “en espera/en proceso” no coincide, se ajusta en{" "}
-                      <code className="text-zinc-400">indicadores-api/deposito.py</code>{" "}
+                      Conteo de OT de Picking sin ejecutar o ejecutadas en las
+                      últimas 48 h, por{" "}
+                      <code className="text-zinc-400">OTEstado</code>. Sirve
+                      para confirmar qué código es cada cosa. Si algún estado
+                      “en espera/en proceso” no coincide, se ajusta en{" "}
+                      <code className="text-zinc-400">
+                        indicadores-api/deposito.py
+                      </code>{" "}
                       (ESTADOS_EN_ESPERA / ESTADOS_EN_PROCESO).
                     </p>
                     <Table<EstadoDiag>
@@ -289,15 +350,25 @@ export default function DepositoVivoPage() {
                           render: (r) => (
                             <span className="flex items-center gap-2">
                               <span className="tabular-nums">{r.estado}</span>
-                              {espSet.has(r.estado) && <Tag tone="amber">en espera</Tag>}
-                              {procSet.has(r.estado) && <Tag tone="green">en proceso</Tag>}
-                              {!espSet.has(r.estado) && !procSet.has(r.estado) && (
-                                <Tag tone="neutral">terminada / otro</Tag>
+                              {espSet.has(r.estado) && (
+                                <Tag tone="amber">en espera</Tag>
                               )}
+                              {procSet.has(r.estado) && (
+                                <Tag tone="green">en proceso</Tag>
+                              )}
+                              {!espSet.has(r.estado) &&
+                                !procSet.has(r.estado) && (
+                                  <Tag tone="neutral">terminada / otro</Tag>
+                                )}
                             </span>
                           ),
                         },
-                        { key: "cantidad", label: "Cantidad", num: true, render: (r) => fmtNum(r.cantidad) },
+                        {
+                          key: "cantidad",
+                          label: "Cantidad",
+                          num: true,
+                          render: (r) => fmtNum(r.cantidad),
+                        },
                         {
                           key: "sin_ejecucion",
                           label: "Sin ejecución",
@@ -314,14 +385,219 @@ export default function DepositoVivoPage() {
             ) : null}
 
             <p className="text-[11px] text-zinc-600 mt-6 leading-relaxed">
-              Pedidos = OT de Picking del WMS, leídas en vivo. En espera = OT generada/pendiente sin
-              arrancar; En proceso = OT arrancada sin cerrar; el operario es el repositor asignado.
-              Lectura no bloqueante (READ UNCOMMITTED); no se escribe en el WMS. Refresco automático
-              cada 60 s.
+              Pedidos = OT de Picking del WMS, leídas en vivo. En espera = OT
+              generada/pendiente sin arrancar; En proceso = OT arrancada sin
+              cerrar; el operario es el repositor asignado. Lectura no
+              bloqueante (READ UNCOMMITTED); no se escribe en el WMS. Refresco
+              automático cada 60 s.
             </p>
           </>
         )}
       </main>
+    </div>
+  );
+}
+
+import { NextRequest, NextResponse } from "next/server";
+
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const qs = searchParams.toString();
+  const url = `${process.env.INDICADORES_API_URL}/deposito/resumen-ot${qs ? `?${qs}` : ""}`;
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    return NextResponse.json(data, { status: res.status });
+  } catch (e: any) {
+    return NextResponse.json({ error: String(e) }, { status: 503 });
+  }
+}
+function ResumenOt() {
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  const cargar = async () => {
+    setLoading(true);
+    const qs = new URLSearchParams();
+    if (desde) qs.set("desde", desde);
+    if (hasta) qs.set("hasta", hasta);
+    const res = await fetch(`/api/deposito/resumen-ot?${qs.toString()}`);
+    setData(await res.json());
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    cargar();
+  }, []);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2 items-end">
+        <label className="text-sm">
+          Desde
+          <input
+            type="date"
+            value={desde}
+            onChange={(e) => setDesde(e.target.value)}
+            className="border rounded px-2 py-1 ml-2"
+          />
+        </label>
+        <label className="text-sm">
+          Hasta
+          <input
+            type="date"
+            value={hasta}
+            onChange={(e) => setHasta(e.target.value)}
+            className="border rounded px-2 py-1 ml-2"
+          />
+        </label>
+        <button onClick={cargar} className="border rounded px-3 py-1 text-sm">
+          {loading ? "Cargando..." : "Filtrar"}
+        </button>
+      </div>
+
+      {data && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <KpiCard label="OT" value={data.ot_total} />
+            <KpiCard label="OT descartadas" value={data.ot_descartadas} />
+            <KpiCard label="Items pedidos" value={data.items_pedidos} />
+            <KpiCard label="Items cumplidos" value={data.items_cumplidos} />
+            <KpiCard label="% cumplido" value={`${data.pct_cumplido}%`} />
+          </div>
+
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="py-1">Ubicación</th>
+                <th>Artículo</th>
+                <th className="text-right">Pedida</th>
+                <th className="text-right">Cumplida</th>
+                <th className="text-right">Faltante</th>
+                <th className="text-right">Precio</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.items_faltantes.map((it: any, i: number) => (
+                <tr key={i} className="border-b">
+                  <td className="py-1">{it.Ubicacion}</td>
+                  <td>{it.CodArticulo}</td>
+                  <td className="text-right">{it.CantPedida}</td>
+                  <td className="text-right">{it.CantCumplida}</td>
+                  <td className="text-right">{it.Faltante}</td>
+                  <td className="text-right">{it.PrecioVenta}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  );
+}
+
+function KpiCard({ label, value }: { label: string; value: any }) {
+  return (
+    <div className="border rounded p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="text-lg font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function ResumenOt() {
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  const cargar = async () => {
+    setLoading(true);
+    const qs = new URLSearchParams();
+    if (desde) qs.set("desde", desde);
+    if (hasta) qs.set("hasta", hasta);
+    const res = await fetch(`/api/deposito/resumen-ot?${qs.toString()}`);
+    setData(await res.json());
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    cargar();
+  }, []);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2 items-end">
+        <label className="text-sm">
+          Desde
+          <input
+            type="date"
+            value={desde}
+            onChange={(e) => setDesde(e.target.value)}
+            className="border rounded px-2 py-1 ml-2"
+          />
+        </label>
+        <label className="text-sm">
+          Hasta
+          <input
+            type="date"
+            value={hasta}
+            onChange={(e) => setHasta(e.target.value)}
+            className="border rounded px-2 py-1 ml-2"
+          />
+        </label>
+        <button onClick={cargar} className="border rounded px-3 py-1 text-sm">
+          {loading ? "Cargando..." : "Filtrar"}
+        </button>
+      </div>
+
+      {data && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <KpiCard label="OT" value={data.ot_total} />
+            <KpiCard label="OT descartadas" value={data.ot_descartadas} />
+            <KpiCard label="Items pedidos" value={data.items_pedidos} />
+            <KpiCard label="Items cumplidos" value={data.items_cumplidos} />
+            <KpiCard label="% cumplido" value={`${data.pct_cumplido}%`} />
+          </div>
+
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="py-1">Ubicación</th>
+                <th>Artículo</th>
+                <th className="text-right">Pedida</th>
+                <th className="text-right">Cumplida</th>
+                <th className="text-right">Faltante</th>
+                <th className="text-right">Precio</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.items_faltantes.map((it: any, i: number) => (
+                <tr key={i} className="border-b">
+                  <td className="py-1">{it.Ubicacion}</td>
+                  <td>{it.CodArticulo}</td>
+                  <td className="text-right">{it.CantPedida}</td>
+                  <td className="text-right">{it.CantCumplida}</td>
+                  <td className="text-right">{it.Faltante}</td>
+                  <td className="text-right">{it.PrecioVenta}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  );
+}
+
+function KpiCard({ label, value }: { label: string; value: any }) {
+  return (
+    <div className="border rounded p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="text-lg font-semibold">{value}</div>
     </div>
   );
 }

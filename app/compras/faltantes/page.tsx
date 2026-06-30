@@ -87,6 +87,7 @@ export default function ComprasFaltantesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ocWarn, setOcWarn] = useState(false);
+  const [ocDesde, setOcDesde] = useState<string | null>(null);
 
   // Snapshots disponibles (para el selector "Desde")
   useEffect(() => {
@@ -112,6 +113,7 @@ export default function ComprasFaltantesPage() {
       setFecha(j.fecha ?? null);
       setDesdeResp(j.desde ?? null);
       setHastaResp(j.hasta ?? null);
+      setOcDesde(j.ocDesde ?? null);
       setOcWarn(!!j.ocWarn);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al cargar");
@@ -242,6 +244,15 @@ export default function ComprasFaltantesPage() {
             Ver histórico
             {historico && <Check size={13} />}
           </button>
+
+          {ocDesde && (
+            <span
+              title="El cruce con OC arranca en esta fecha: solo se cuentan las órdenes de compra y los faltantes desde acá."
+              className="text-[11px] text-zinc-500 whitespace-nowrap"
+            >
+              OC desde {fmtAr(ocDesde)}
+            </span>
+          )}
 
           <div className="w-px h-5 bg-zinc-800 hidden sm:block" />
 

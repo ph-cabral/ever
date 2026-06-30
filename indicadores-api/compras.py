@@ -39,6 +39,7 @@ SQL_OC_PENDIENTES = f"""
 SELECT
     cab.CompCentro                       AS CompCentro,
     cab.NroOrdCompra                     AS NroOC,
+    cab.FecMovim                          AS FecMovim,
     LTRIM(RTRIM(r.CodArticulo))          AS CodArticu,
     r.Cantidad                           AS CantPedida,
     ISNULL(r.CantidadCumplida, 0)        AS CantRecibida,
@@ -50,6 +51,11 @@ LEFT  JOIN EVERWEAR.dbo.Com_Proveedores    pr  ON pr.CodProveed   = cab.CodProve
 WHERE ISNULL(r.Cantidad, 0) - ISNULL(r.CantidadCumplida, 0) > 0
   {_EXCL}
 """
+
+# Fecha de corte por defecto: solo se cruzan las OC hechas (FecMovim) desde acá.
+# Antes de esto Magnus tiene OC viejas con saldo pendiente que NO deben cubrir
+# faltantes actuales. Se puede pisar con ?desde=YYYY-MM-DD.
+OC_DESDE_DEFAULT = "2026-06-26"
 
 
 def _safe(value):
@@ -80,6 +86,24 @@ def _fecha_entrega(v):
     return (BASE_DATE + timedelta(days=dias)).isoformat()
 
 
+def _to_date(v):
+    """FecMovim → date. Magnus puede guardarlo como int (días desde BASE_DATE) o
+    como date/datetime. Devuelve None si no se puede interpretar."""
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        return v.date() if v.year >= 1901 else None
+    if isinstance(v, date):
+        return v if v.year >= 1901 else None
+    try:
+        dias = int(v)
+    except (TypeError, ValueError):
+        return None
+    if dias <= 0:
+        return None
+    return BASE_DATE + timedelta(days=dias)
+
+
 def _nro_oc(centro, numero):
     """Formatea como en Magnus: '0001-00014349' (CompCentro-NroOrdCompra)."""
     try:
@@ -93,8 +117,20 @@ def _nro_oc(centro, numero):
     return f"{c:04d}-{n:08d}"
 
 
-def fetch_ordenes_pendientes():
-    """Agrega por artículo lo pendiente de recibir de las OC."""
+def fetch_ordenes_pendientes(desde=None):
+    """Agrega por artículo lo pendiente de recibir de las OC.
+
+    desde = 'YYYY-MM-DD' (o None → OC_DESDE_DEFAULT): solo se toman las OC cuyo
+    FecMovim (fecha en que se hizo la orden) sea >= a esa fecha. Así las OC viejas
+    con saldo pendiente no cubren faltantes actuales."""
+    corte = None
+    desde = desde or OC_DESDE_DEFAULT
+    if desde:
+        try:
+            corte = datetime.strptime(str(desde)[:10], "%Y-%m-%d").date()
+        except ValueError:
+            corte = None
+
     conn = get_connection("EVERWEAR")
     try:
         cur = conn.cursor()
@@ -108,6 +144,11 @@ def fetch_ordenes_pendientes():
             cod = (str(d.get("CodArticu") or "")).strip()
             if not cod:
                 continue
+            # corte por fecha de la orden (FecMovim)
+            if corte is not None:
+                fmov = _to_date(d.get("FecMovim"))
+                if fmov is None or fmov < corte:
+                    continue
             pend = float(_safe(d.get("CantPedida")) or 0) - float(_safe(d.get("CantRecibida")) or 0)
             if pend <= 0:
                 continue
@@ -139,6 +180,10 @@ def fetch_ordenes_pendientes():
         rows = sorted(agg.values(), key=lambda x: -x["PorLlegar"])
         for r in rows:
             r["PorLlegar"] = round(r["PorLlegar"], 2)
-        return {"total": len(rows), "rows": rows}
+        return {
+            "total": len(rows),
+            "rows": rows,
+            "desde": corte.isoformat() if corte else None,
+        }
     finally:
         conn.close()

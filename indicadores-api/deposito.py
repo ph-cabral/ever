@@ -1037,3 +1037,139 @@ def fetch_vivo(procesos: tuple[int, ...] = PROCESOS_VIVO):
         }
     finally:
         conn.close()
+
+
+# ── Resumen OT + faltantes agrupados por artículo (/deposito/vivo, resumen-ot) ─
+# A diferencia de fetch_faltantes_ot (binario: recolectó algo / nada), acá se
+# compara CANTIDAD pedida vs cumplida a nivel renglón Magnus (VenFer_PedidoReng,
+# que ya trae CodArticu/Ubicacion/PrecioVenta), agrupado por artículo y SUMADO
+# en todo el rango (no por OT individual). El precio NO se suma (MAX, 1 fila x art).
+
+SQL_RESUMEN_OT_LIST = """
+SELECT OT.OTId, OT.{col_pedido} AS NroMovVenta
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+WHERE Codot.CodotProcesoNegocio = 4   -- Picking
+  AND OT.OTEstado IN (2, 3, 4)        -- ejecutada/terminada
+  AND OT.OTFechaHoraEjecucion >= ?
+  AND OT.OTFechaHoraEjecucion <= ?
+"""
+
+SQL_RESUMEN_ITEMS = """
+SELECT
+    r.CodArticu,
+    MIN(LTRIM(RTRIM(r.Ubicacion)))   AS Ubicacion,
+    SUM(r.CantidadPedida)            AS CantPedida,
+    SUM(r.CantidadCumplida)          AS CantCumplida,
+    MAX(r.PrecioVenta)               AS PrecioVenta
+FROM EVERWEAR.dbo.VenFer_PedidoReng r
+WHERE r.NroMovVenta IN ({ph})
+GROUP BY r.CodArticu
+"""
+
+
+def fetch_resumen_ot(desde=None, hasta=None):
+    """Resumen de OT (Picking) en rango: total OT, items pedidos/cumplidos, % y
+    faltantes agrupados por artículo (sumado, no por OT), ordenado por ubicación.
+    Excluye OT cuyo pedido Magnus está descartado/anulado."""
+    d, h = _rango_ot(desde, hasta)
+
+    conn = get_connection("WMS")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_RESUMEN_OT_LIST.format(col_pedido=OT_COL_PEDIDO), (d, h))
+        ots = [{"OTId": r[0], "NroMovVenta": r[1]} for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    pedidos_todos = sorted({int(o["NroMovVenta"]) for o in ots if o["NroMovVenta"] is not None})
+    iinfo = _info_pedidos_resumen(pedidos_todos)
+
+    pedidos_validos, ot_total, ot_descartadas = [], 0, 0
+    for o in ots:
+        nro = int(o["NroMovVenta"]) if o["NroMovVenta"] is not None else None
+        meta = info.get(nro, {})
+        if _es_descartado(meta.get("Estado")) or meta.get("CompCodigo") in COMP_CODIGOS_EXCLUIDOS_RESUMEN:
+            ot_descartadas += 1
+            continue
+        ot_total += 1
+        if nro is not None:
+            pedidos_validos.append(nro)
+    pedidos_validos = sorted(set(pedidos_validos))
+
+    items, items_pedidos, items_cumplidos = [], 0.0, 0.0
+    if pedidos_validos:
+        conn = get_connection("EVERWEAR")
+        try:
+            cur = conn.cursor()
+            cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+            CH = 1000
+            for i in range(0, len(pedidos_validos), CH):
+                chunk = pedidos_validos[i:i + CH]
+                ph = ",".join("?" for _ in chunk)
+                cur.execute(SQL_RESUMEN_ITEMS.format(ph=ph), chunk)
+                for cod, ubic, pedida, cumplida, precio in cur.fetchall():
+                    pedida = float(_safe(pedida) or 0)
+                    cumplida = float(_safe(cumplida) or 0)
+                    items_pedidos += pedida
+                    items_cumplidos += cumplida
+                    items.append({
+                        "CodArticulo": _txt(cod),
+                        "Ubicacion": _txt(ubic),
+                        "CantPedida": pedida,
+                        "CantCumplida": cumplida,
+                        "Faltante": round(pedida - cumplida, 3),
+                        "PrecioVenta": float(_safe(precio) or 0),
+                    })
+        finally:
+            conn.close()
+
+    items_faltantes = sorted(
+        (it for it in items if it["Faltante"] >= 1),
+        key=lambda x: x["Ubicacion"],
+    )
+
+    pct = round(items_cumplidos / items_pedidos * 100, 2) if items_pedidos else 0.0
+
+    return {
+        "desde": _iso(d), "hasta": _iso(h),
+        "ot_total": ot_total,
+        "ot_descartadas": ot_descartadas,
+        "items_pedidos": round(items_pedidos, 3),
+        "items_cumplidos": round(items_cumplidos, 3),
+        "pct_cumplido": pct,
+        "items_faltantes": items_faltantes,
+    }
+    
+    
+    # Comprobantes a excluir SOLO en resumen-ot (no tocar SQL_PEDIDOS_INFO de faltantes_ot)
+COMP_CODIGOS_EXCLUIDOS_RESUMEN: tuple[int, ...] = (9, 49, 208)
+
+SQL_PEDIDOS_INFO_RESUMEN = """
+SELECT cab.NroMovVenta, cab.CompCodigo,
+       est.Ped_EstadoDescripcion AS Estado
+FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
+LEFT JOIN MAGNUS_SITD.dbo.Pedido_Estados est ON cab.EstadoPedido = est.Ped_Estado
+WHERE cab.NroMovVenta IN ({ph})
+"""
+
+
+def _info_pedidos_resumen(pedidos):
+    out: dict[int, dict] = {}
+    if not pedidos:
+        return out
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        CH = 1000
+        for i in range(0, len(pedidos), CH):
+            chunk = pedidos[i:i + CH]
+            ph = ",".join("?" for _ in chunk)
+            cur.execute(SQL_PEDIDOS_INFO_RESUMEN.format(ph=ph), chunk)
+            for nro, comp, estado in cur.fetchall():
+                out[int(nro)] = {"CompCodigo": _int(comp), "Estado": _txt(estado)}
+        return out
+    finally:
+        conn.close()

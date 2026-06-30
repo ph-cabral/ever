@@ -242,11 +242,13 @@ def deposito_faltantes_ot_diag():
 
 # ── Compras: OC pendientes de recibir por artículo (lo que "va a llegar") ─────
 @app.get("/compras/ordenes-pendientes")
-def compras_ordenes_pendientes():
+def compras_ordenes_pendientes(desde: str | None = Query(default=None)):
     """OC abiertas, pendiente de recibir (Pedida - Recibida) agregado por artículo.
-    Solo lectura sobre Magnus; se cruza con faltantes en /compras/faltantes."""
+    Solo lectura sobre Magnus; se cruza con faltantes en /compras/faltantes.
+    `desde`='YYYY-MM-DD' (default OC_DESDE_DEFAULT): solo OC con FecMovim >= desde,
+    para que las OC viejas no cubran faltantes actuales."""
     try:
-        return fetch_ordenes_pendientes()
+        return fetch_ordenes_pendientes(desde)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
@@ -407,3 +409,11 @@ def debug_timestamps():
         })
 
     return {"filas": len(result), "datos": result}
+
+
+@app.get("/deposito/resumen-ot")
+def deposito_resumen_ot(desde: str | None = None, hasta: str | None = None):
+    try:
+        return deposito.fetch_resumen_ot(desde, hasta)
+    except Exception as e:
+        raise HTTPException(503, f"SQL Error: {str(e)}")

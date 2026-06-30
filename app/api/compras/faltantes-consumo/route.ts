@@ -71,6 +71,11 @@ interface Bucket {
 const keyLine = (p: number, r: number) => `${p}-${r}`;
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
+// Fecha de corte del cruce: el FIFO arranca acá. Solo se consideran las OC hechas
+// desde esta fecha y los faltantes que aparecen desde esta fecha, así una OC nueva
+// no se "gasta" cubriendo faltantes viejos (de hace años). Override: ?ocDesde=YYYY-MM-DD.
+const OC_DESDE_DEFAULT = "2026-06-26";
+
 async function getJson(url: string) {
   const res = await fetch(url, {
     cache: "no-store",
@@ -86,17 +91,20 @@ export async function GET(req: NextRequest) {
   const hastaParam = sp.get("hasta");
   // histórico: incluye también los faltantes ya entregados/cubiertos del rango
   const historico = sp.get("historico") === "1" || sp.get("historico") === "true";
+  // corte del cruce (faltantes y OC se anclan acá). Override opcional ?ocDesde=
+  const ocDesde = sp.get("ocDesde") || OC_DESDE_DEFAULT;
 
   const qs = new URLSearchParams();
   if (desdeParam) qs.set("desde", desdeParam);
   if (hastaParam) qs.set("hasta", hastaParam);
   if (historico) qs.set("historico", "1");
   const faltUrl = `${API_URL}/deposito/faltantes${qs.toString() ? `?${qs}` : ""}`;
+  const ocUrl = `${API_URL}/compras/ordenes-pendientes?desde=${encodeURIComponent(ocDesde)}`;
 
   // 1) faltantes (obligatorio) + OC (best-effort) en paralelo
   const [faltRes, ocRes] = await Promise.allSettled([
     getJson(faltUrl),
-    getJson(`${API_URL}/compras/ordenes-pendientes`),
+    getJson(ocUrl),
   ]);
 
   if (faltRes.status !== "fulfilled") {
@@ -106,8 +114,13 @@ export async function GET(req: NextRequest) {
     );
   }
   const faltJson = faltRes.value;
-  const faltRows: FaltRow[] = faltJson.rows ?? [];
   const fecha: string | null = faltJson.fecha ?? null;
+  // Universo del cruce: solo faltantes que aparecen (PrimerDia) desde el corte.
+  // Así el FIFO no arrastra faltantes viejos que la OC nueva no debería cubrir.
+  const faltRows: FaltRow[] = (faltJson.rows ?? []).filter((it: FaltRow) => {
+    const dia = it.PrimerDia ?? it.Fecha ?? fecha;
+    return !dia || dia >= ocDesde;
+  });
 
   let ocWarn = false;
   const ocMap = new Map<string, OcRow>();
@@ -288,6 +301,7 @@ export async function GET(req: NextRequest) {
     fecha,
     desde: minPrimer ?? fecha,
     hasta: maxFecha ?? fecha,
+    ocDesde,
     historico,
     total: rowsOut.length,
     rows: rowsOut,
