@@ -29,9 +29,12 @@ OT_COL_PEDIDO = "OTNroMovVenta"
 # El diagnóstico lista los estados presentes con su conteo para ajustar esto.
 PATRONES_DESCARTADO: tuple[str, ...] = ("DESCART", "ANULAD")
 
-# Columna de existencia por ubicación en EVERWEAR.dbo.[Ubicacion#].
-# CONFIRMAR con GET /deposito/articulo/ubicaciones/diag?articulo=XXX y ajustar.
-UBIC_COL_CANT = "Cantidad"
+# Existencia física por ubicación = base WMS, dbo.UbicacionDetalle
+# (artículo + ubicación + cantidad). Ubicacion# de Magnus NO trae cantidad.
+UBIC_TABLA    = "UbicacionDetalle"
+UBIC_COL_ART  = "UbicacionDetalleArticuloId"
+UBIC_COL_UBI  = "UbicacionCodigo"
+UBIC_COL_CANT = "UbicacionDetalleCantidad"
 
 # ── Productividad WMS (lean) ──────────────────────────────────────────────────
 SQL_WMS = """
@@ -1187,15 +1190,20 @@ def _info_pedidos_resumen(pedidos):
 # Todas las ubicaciones (SIN el filtro numérico) con > 1 unidad. Sirve para ver
 # si el faltante está físicamente en otro rack antes de marcar "sin existencia".
 def fetch_articulo_ubicaciones(articulo: str):
-    conn = get_connection("EVERWEAR")
+    # Suma por ubicación (puede haber varias filas por lote/contenedor). El match
+    # del artículo es por código trim (Magnus deja espacios a derecha).
+    conn = get_connection("WMS")
     try:
         cur = conn.cursor()
         cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         sql = f"""
-            SELECT u.ubicacion AS Ubicacion, u.[{UBIC_COL_CANT}] AS Cantidad
-            FROM EVERWEAR.dbo.[Ubicacion#] u
-            WHERE u.codArticulo = ? AND u.[{UBIC_COL_CANT}] > 1
-            ORDER BY u.[{UBIC_COL_CANT}] DESC
+            SELECT LTRIM(RTRIM(u.{UBIC_COL_UBI}))  AS Ubicacion,
+                   SUM(u.{UBIC_COL_CANT})          AS Cantidad
+            FROM dbo.{UBIC_TABLA} u
+            WHERE LTRIM(RTRIM(u.{UBIC_COL_ART})) = LTRIM(RTRIM(?))
+            GROUP BY LTRIM(RTRIM(u.{UBIC_COL_UBI}))
+            HAVING SUM(u.{UBIC_COL_CANT}) > 1
+            ORDER BY SUM(u.{UBIC_COL_CANT}) DESC
         """
         cur.execute(sql, (articulo,))
         rows = [{"Ubicacion": _txt(u), "Cantidad": float(_safe(c) or 0)}
@@ -1206,12 +1214,14 @@ def fetch_articulo_ubicaciones(articulo: str):
 
 
 def fetch_articulo_ubicaciones_diag(articulo: str):
-    """Columnas reales de Ubicacion# + muestra, para confirmar UBIC_COL_CANT."""
-    conn = get_connection("EVERWEAR")
+    """Muestra cruda de WMS.dbo.UbicacionDetalle para el artículo (confirmar match)."""
+    conn = get_connection("WMS")
     try:
         cur = conn.cursor()
-        cur.execute("SELECT TOP 20 * FROM EVERWEAR.dbo.[Ubicacion#] WHERE codArticulo = ?",
-                    (articulo,))
+        cur.execute(
+            f"SELECT TOP 20 * FROM dbo.{UBIC_TABLA} "
+            f"WHERE LTRIM(RTRIM({UBIC_COL_ART})) = LTRIM(RTRIM(?))",
+            (articulo,))
         cols = [c[0] for c in cur.description]
         return {"columnas": cols, "muestra": [dict(zip(cols, r)) for r in cur.fetchall()]}
     finally:
