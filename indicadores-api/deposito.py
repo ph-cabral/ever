@@ -1216,3 +1216,39 @@ def fetch_articulo_ubicaciones_diag(articulo: str):
         return {"columnas": cols, "muestra": [dict(zip(cols, r)) for r in cur.fetchall()]}
     finally:
         conn.close()
+
+
+def fetch_ubicaciones_buscar_tabla(db: str = "WMS"):
+    """Busca en INFORMATION_SCHEMA tablas que tengan a la vez una columna tipo
+    'ubicacion' y una de cantidad/existencia/stock/saldo. Sirve para localizar de
+    dónde sacar la cantidad por ubicación (Ubicacion# no la tiene)."""
+    from collections import defaultdict
+    conn = get_connection(db)
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE COLUMN_NAME LIKE '%ubic%'
+               OR COLUMN_NAME LIKE '%cant%'
+               OR COLUMN_NAME LIKE '%existen%'
+               OR COLUMN_NAME LIKE '%stock%'
+               OR COLUMN_NAME LIKE '%saldo%'
+            ORDER BY TABLE_NAME, COLUMN_NAME
+        """)
+        cols = [c[0] for c in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        bytable: dict = defaultdict(list)
+        for r in rows:
+            bytable[f"{r['TABLE_SCHEMA']}.{r['TABLE_NAME']}"].append(
+                {"col": r["COLUMN_NAME"], "tipo": r["DATA_TYPE"]})
+        cand = []
+        for tab, cs in bytable.items():
+            names = [c["col"].lower() for c in cs]
+            has_ubic = any("ubic" in n for n in names)
+            has_cant = any(any(k in n for k in ("cant", "existen", "stock", "saldo")) for n in names)
+            if has_ubic and has_cant:
+                cand.append({"tabla": tab, "columnas": cs})
+        return {"db": db, "candidatas": cand}
+    finally:
+        conn.close()

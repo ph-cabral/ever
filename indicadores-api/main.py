@@ -9,6 +9,7 @@ from deposito import (
     fetch_faltantes_fechas, fetch_vivo, fetch_faltantes_ot, fetch_faltantes_ot_diag,
     fetch_wms_estados, fetch_wms_estados_diag,
     fetch_articulo_ubicaciones, fetch_articulo_ubicaciones_diag,
+    fetch_ubicaciones_buscar_tabla,
 )
 from compras import fetch_ordenes_pendientes
 from finanza import fetch_facturacion_dia, fetch_descubrir
@@ -229,6 +230,14 @@ def deposito_articulo_ubicaciones(articulo: str = Query(...)):
 def deposito_articulo_ubicaciones_diag(articulo: str = Query(...)):
     try:
         return fetch_articulo_ubicaciones_diag(articulo)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/ubicaciones/buscar-tabla")
+def deposito_ubicaciones_buscar_tabla(db: str = Query(default="WMS")):
+    """Diagnóstico: tablas con columna de ubicación + cantidad/existencia."""
+    try:
+        return fetch_ubicaciones_buscar_tabla(db)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
