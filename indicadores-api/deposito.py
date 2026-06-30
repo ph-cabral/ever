@@ -1015,10 +1015,13 @@ def fetch_vivo(procesos: tuple[int, ...] = PROCESOS_VIVO):
         ]
         operarios.sort(key=lambda x: (-x["en_proceso"], -x["total"], x["operario"]))
 
-        cur.execute(SQL_VIVO_DIAG.format(procesos=proc_in))
         diag = [
-            {"estado": int(e), "sin_ejecucion": int(se or 0), "cantidad": int(c or 0)}
-            for e, se, c in cur.fetchall()
+            {"estado": int(e), "cantidad": int(c or 0), "sin_ejecucion": int(se or 0)}
+            for e, c, se, _ult in cur.fetchall()
+# ]
+#         diag = [
+#             {"estado": int(e), "sin_ejecucion": int(se or 0), "cantidad": int(c or 0)}
+#             for e, se, c in cur.fetchall()
         ]
 
         return {
@@ -1084,7 +1087,7 @@ def fetch_resumen_ot(desde=None, hasta=None):
         conn.close()
 
     pedidos_todos = sorted({int(o["NroMovVenta"]) for o in ots if o["NroMovVenta"] is not None})
-    iinfo = _info_pedidos_resumen(pedidos_todos)
+    info = _info_pedidos_resumen(pedidos_todos)
 
     pedidos_validos, ot_total, ot_descartadas = [], 0, 0
     for o in ots:
