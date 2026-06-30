@@ -8,7 +8,7 @@ from deposito import (
     fetch_wms, fetch_tiempo, fetch_ingresados, fetch_faltantes,
     fetch_faltantes_fechas, fetch_vivo, fetch_faltantes_ot, fetch_faltantes_ot_diag,
     fetch_wms_estados, fetch_wms_estados_diag,
-    fetch_articulo_ubicaciones,
+    fetch_articulo_ubicaciones, fetch_articulos_multi_ubicacion,
 )
 from compras import fetch_ordenes_pendientes
 from finanza import fetch_facturacion_dia, fetch_descubrir
@@ -222,6 +222,14 @@ def deposito_articulo_ubicaciones(articulo: str = Query(...)):
     """Ubicaciones (sin filtrar) de un artículo con >1 unidad: ubicacion + cantidad."""
     try:
         return fetch_articulo_ubicaciones(articulo)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/articulos/multi-ubicacion")
+def deposito_articulos_multi_ubicacion():
+    """Artículos con más de una ubicación asignada (rack), para depurar el maestro."""
+    try:
+        return fetch_articulos_multi_ubicacion()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

@@ -157,7 +157,7 @@ SQL_FALTANTES = """
 SELECT
     p.NroPedOrigen, p.NroRengOrigen,
     CONVERT(date, DATEADD(day, p.FecRegistracion, '1800-12-28')) AS Fecha,
-    u.SecuenciaRutPicking,
+    u.ubicacion AS SecuenciaRutPicking,
     p.CodArticu,
     ap.Detalle      AS Patron,
     s.DetalleMedida AS Medida,
@@ -171,7 +171,16 @@ SELECT
     pr.RazonSocial  AS Proveedor,
     uv.Usu_Arma_Nombre AS Vendedor
 FROM EVERWEAR.dbo.[Ven_PedRenPendientes] p
-LEFT JOIN EVERWEAR.dbo.[Ubicacion#]            u  ON u.codArticulo    = p.CodArticu AND u.ubicacion NOT LIKE '%[A-Za-z]%'
+OUTER APPLY (
+    -- Ubicación asignada de picking = numérica con guión (rack). Excluye depósito
+    -- (letras) y el carro de preparado (0002, sin guión). 1 sola por renglón.
+    SELECT TOP 1 u2.ubicacion
+    FROM EVERWEAR.dbo.[Ubicacion#] u2
+    WHERE u2.codArticulo = p.CodArticu
+      AND u2.ubicacion NOT LIKE '%[A-Za-z]%'
+      AND u2.ubicacion LIKE '%-%'
+    ORDER BY u2.ubicacion
+) u
 LEFT JOIN EVERWEAR.dbo.[StkFer_Articulos]      s  ON s.CodArticulo    = p.CodArticu
 LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet]     ap ON ap.ArticuloPatron = s.ArticuloPatron
 LEFT JOIN EVERWEAR.dbo.[Stk_TiposArticulos]    t  ON t.CodigoTipo     = s.NacionalImportado
@@ -185,7 +194,7 @@ WHERE p.FecRegistracion = (
     FROM EVERWEAR.dbo.[Ven_PedRenPendientes]
     WHERE FecRegistracion < DATEDIFF(day, '1800-12-28', CAST(GETDATE() AS date))
 )
-ORDER BY u.SecuenciaRutPicking, p.NroPedOrigen, p.NroRengOrigen
+ORDER BY u.ubicacion, p.NroPedOrigen, p.NroRengOrigen
 """
 
 # Mismo universo, pero por RANGO de snapshots. Cada día de Ven_PedRenPendientes es
@@ -219,7 +228,7 @@ SELECT
     b.NroPedOrigen, b.NroRengOrigen,
     CONVERT(date, DATEADD(day, b.FecRegistracion, '1800-12-28')) AS Fecha,
     CONVERT(date, DATEADD(day, b.PrimerDiaNum,   '1800-12-28')) AS PrimerDia,
-    u.SecuenciaRutPicking,
+    u.ubicacion AS SecuenciaRutPicking,
     b.CodArticu,
     ap.Detalle      AS Patron,
     s.DetalleMedida AS Medida,
@@ -233,7 +242,16 @@ SELECT
     pr.RazonSocial  AS Proveedor,
     uv.Usu_Arma_Nombre AS Vendedor
 FROM base b
-LEFT JOIN EVERWEAR.dbo.[Ubicacion#]            u  ON u.codArticulo    = b.CodArticu AND u.ubicacion NOT LIKE '%[A-Za-z]%'
+OUTER APPLY (
+    -- Ubicación asignada de picking = numérica con guión (rack). Excluye depósito
+    -- (letras) y el carro de preparado (0002, sin guión). 1 sola por renglón.
+    SELECT TOP 1 u2.ubicacion
+    FROM EVERWEAR.dbo.[Ubicacion#] u2
+    WHERE u2.codArticulo = b.CodArticu
+      AND u2.ubicacion NOT LIKE '%[A-Za-z]%'
+      AND u2.ubicacion LIKE '%-%'
+    ORDER BY u2.ubicacion
+) u
 LEFT JOIN EVERWEAR.dbo.[StkFer_Articulos]      s  ON s.CodArticulo    = b.CodArticu
 LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet]     ap ON ap.ArticuloPatron = s.ArticuloPatron
 LEFT JOIN EVERWEAR.dbo.[Stk_TiposArticulos]    t  ON t.CodigoTipo     = s.NacionalImportado
@@ -250,7 +268,7 @@ WHERE b.rn = 1
       FROM EVERWEAR.dbo.[Ven_PedRenPendientes]
       WHERE FecRegistracion BETWEEN ? AND ?
   )
-ORDER BY PrimerDia, u.SecuenciaRutPicking, b.NroPedOrigen, b.NroRengOrigen
+ORDER BY PrimerDia, u.ubicacion, b.NroPedOrigen, b.NroRengOrigen
 """
 
 # Igual que SQL_FALTANTES_RANGO pero HISTÓRICO: NO descarta lo que se entregó a
@@ -288,7 +306,7 @@ SELECT
         FROM EVERWEAR.dbo.[Ven_PedRenPendientes]
         WHERE FecRegistracion BETWEEN ? AND ?
     ) THEN 1 ELSE 0 END AS Vivo,
-    u.SecuenciaRutPicking,
+    u.ubicacion AS SecuenciaRutPicking,
     b.CodArticu,
     ap.Detalle      AS Patron,
     s.DetalleMedida AS Medida,
@@ -302,7 +320,16 @@ SELECT
     pr.RazonSocial  AS Proveedor,
     uv.Usu_Arma_Nombre AS Vendedor
 FROM base b
-LEFT JOIN EVERWEAR.dbo.[Ubicacion#]            u  ON u.codArticulo    = b.CodArticu AND u.ubicacion NOT LIKE '%[A-Za-z]%'
+OUTER APPLY (
+    -- Ubicación asignada de picking = numérica con guión (rack). Excluye depósito
+    -- (letras) y el carro de preparado (0002, sin guión). 1 sola por renglón.
+    SELECT TOP 1 u2.ubicacion
+    FROM EVERWEAR.dbo.[Ubicacion#] u2
+    WHERE u2.codArticulo = b.CodArticu
+      AND u2.ubicacion NOT LIKE '%[A-Za-z]%'
+      AND u2.ubicacion LIKE '%-%'
+    ORDER BY u2.ubicacion
+) u
 LEFT JOIN EVERWEAR.dbo.[StkFer_Articulos]      s  ON s.CodArticulo    = b.CodArticu
 LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet]     ap ON ap.ArticuloPatron = s.ArticuloPatron
 LEFT JOIN EVERWEAR.dbo.[Stk_TiposArticulos]    t  ON t.CodigoTipo     = s.NacionalImportado
@@ -312,7 +339,7 @@ LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]          gp ON gp.Numero       = prep.CodP
 LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoCabecera] cab ON cab.NroMovVenta = b.NroPedOrigen
 LEFT JOIN MAGNUS_SITD.dbo.[Ped_Usu_Arma]       uv ON cab.Vendedor    = uv.Usu_Arma_Codigo
 WHERE b.rn = 1
-ORDER BY PrimerDia, u.SecuenciaRutPicking, b.NroPedOrigen, b.NroRengOrigen
+ORDER BY PrimerDia, u.ubicacion, b.NroPedOrigen, b.NroRengOrigen
 """
 
 # Snapshots disponibles (para el selector de fechas de la vista). Solo < hoy.
@@ -1209,5 +1236,50 @@ def fetch_articulo_ubicaciones(articulo: str):
         rows = [{"Ubicacion": _txt(u), "Cantidad": float(_safe(c) or 0)}
                 for u, c in cur.fetchall()]
         return {"articulo": articulo, "total": len(rows), "rows": rows}
+    finally:
+        conn.close()
+
+
+# ── Artículos con MÁS DE UNA ubicación asignada (para depurar el maestro) ──────
+# Ubicación asignada = numérica con guión (rack); excluye depósito (letras) y
+# carro (0002, sin guión). El que tenga >1 hay que dejarle una sola.
+SQL_MULTI_UBIC = """
+WITH asign AS (
+    SELECT LTRIM(RTRIM(codArticulo)) AS Cod, LTRIM(RTRIM(ubicacion)) AS Ubic
+    FROM EVERWEAR.dbo.[Ubicacion#]
+    WHERE ubicacion NOT LIKE '%[A-Za-z]%' AND ubicacion LIKE '%-%'
+),
+multi AS (
+    SELECT Cod FROM asign GROUP BY Cod HAVING COUNT(DISTINCT Ubic) > 1
+)
+SELECT a.Cod, a.Ubic,
+       ap.Detalle AS Patron, s.DetalleMedida AS Medida, s.UnidadMedida AS Unidad
+FROM asign a
+JOIN multi m ON m.Cod = a.Cod
+LEFT JOIN EVERWEAR.dbo.[StkFer_Articulos]  s  ON LTRIM(RTRIM(s.CodArticulo)) = a.Cod
+LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloPatron
+GROUP BY a.Cod, a.Ubic, ap.Detalle, s.DetalleMedida, s.UnidadMedida
+ORDER BY a.Cod, a.Ubic
+"""
+
+
+def fetch_articulos_multi_ubicacion():
+    """Artículos con >1 ubicación asignada (rack). Agrupados: cod, nombre, lista."""
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_MULTI_UBIC)
+        agg: dict = {}
+        for cod, ubic, patron, medida, unidad in cur.fetchall():
+            cod = _txt(cod)
+            if cod not in agg:
+                nombre = " ".join(" ".join(_txt(x) for x in (patron, medida, unidad)).split())
+                agg[cod] = {"CodArticulo": cod, "Nombre": nombre, "Ubicaciones": []}
+            agg[cod]["Ubicaciones"].append(_txt(ubic))
+        rows = sorted(agg.values(), key=lambda r: -len(r["Ubicaciones"]))
+        for r in rows:
+            r["Cantidad"] = len(r["Ubicaciones"])
+        return {"total": len(rows), "rows": rows}
     finally:
         conn.close()
