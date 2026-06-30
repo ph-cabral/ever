@@ -18,22 +18,49 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-
+// type CampoDef = {
+//   k: string;
+//   l: string;
+//   t: "text" | "textarea" | "date" | "select";
+//   opciones?: string[];
+//   auto?: boolean;
+// };
 type Campos = Record<string, string | null>;
 type Tarjeta = { id: number; columnaId: number; orden: number; campos: Campos };
 type Columna = { id: number; tableroId: number; nombre: string; orden: number; tarjetas: Tarjeta[] };
 type Tablero = { id: number; clave: string; nombre: string; columnas: Columna[] };
-
-type CampoDef = { k: string; l: string; t: "text" | "textarea" | "date" };
+type CampoDef = {
+  k: string;
+  l: string;
+  t: "text" | "textarea" | "date" | "select";
+  opciones?: string[];
+  auto?: boolean;
+};
+// type CampoDef = { k: string; l: string; t: "text" | "textarea" | "date" };
 const SCHEMAS: Record<string, { titleKey: string; fields: CampoDef[] }> = {
   sistema: {
-    titleKey: "problema",
+    titleKey: "descripcion",
     fields: [
-      { k: "fecha", l: "Fecha", t: "date" },
-      { k: "problema", l: "Problema", t: "text" },
-      { k: "solucion", l: "Solución", t: "textarea" },
+      { k: "fecha", l: "Fecha", t: "date", auto: true },
+      { k: "descripcion", l: "Problema / solución", t: "textarea" },
       { k: "ubicacion", l: "Ubicación", t: "text" },
-      { k: "categoria", l: "Categoría", t: "text" },
+      {
+        k: "categoria",
+        l: "Categoría",
+        t: "select",
+        opciones: [
+          "Impresoras",
+          "Automatización",
+          "Mantenimiento de equipos",
+          "Varios",
+        ],
+      },
+      {
+        k: "importancia",
+        l: "Importancia",
+        t: "select",
+        opciones: ["Alta", "Media", "Baja"],
+      },
     ],
   },
   softech: {
@@ -191,7 +218,15 @@ export default function SistemaClient() {
     if (!destCol) return;
 
     const idx = Math.max(0, Math.min(destIndex, destCol.tarjetas.length));
-    destCol.tarjetas.splice(idx, 0, { ...card, columnaId: destColumnaId });
+    // destCol.tarjetas.splice(idx, 0, { ...card, columnaId: destColumnaId });
+    destCol.tarjetas.splice(idx, 0, {
+      ...card,
+      columnaId: destColumnaId,
+      campos:
+        destCol.id !== srcCol.id
+          ? { ...card.campos, fecha: new Date().toISOString() }
+          : card.campos,
+    });
 
     const cambios: { id: number; columnaId: number; orden: number }[] = [];
     srcCol.tarjetas.forEach((tj, i) => {
@@ -221,17 +256,38 @@ export default function SistemaClient() {
     cargar();
   };
 
+  // const guardarTarjeta = async (campos: Campos) => {
+  //   if (!modalTarjeta) return;
+  //   if (modalTarjeta.tarjeta) {
+  //     await apiJson(`/api/sistema/tarjetas/${modalTarjeta.tarjeta.id}`, {
+  //       method: "PATCH",
+  //       body: JSON.stringify({ campos }),
+  //     });
+  //   } else {
+  //     await apiJson("/api/sistema/tarjetas", {
+  //       method: "POST",
+  //       body: JSON.stringify({ columnaId: modalTarjeta.columnaId, campos }),
+  //     });
+  //   }
+  //   setModalTarjeta(null);
+  //   cargar();
+  // };
   const guardarTarjeta = async (campos: Campos) => {
     if (!modalTarjeta) return;
     if (modalTarjeta.tarjeta) {
       await apiJson(`/api/sistema/tarjetas/${modalTarjeta.tarjeta.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ campos }),
+        body: JSON.stringify({
+          campos: { ...campos, fecha: new Date().toISOString() },
+        }),
       });
     } else {
       await apiJson("/api/sistema/tarjetas", {
         method: "POST",
-        body: JSON.stringify({ columnaId: modalTarjeta.columnaId, campos }),
+        body: JSON.stringify({
+          columnaId: modalTarjeta.columnaId,
+          campos: { ...campos, fecha: new Date().toISOString() },
+        }),
       });
     }
     setModalTarjeta(null);
@@ -401,7 +457,10 @@ function ModalTarjeta({
   const [campos, setCampos] = useState<Campos>(modal.tarjeta?.campos ?? {});
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
       <div
         className="bg-[#161616] border border-zinc-800 rounded-xl w-full max-w-md p-5 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
@@ -411,7 +470,52 @@ function ModalTarjeta({
         </h2>
 
         <div className="flex flex-col gap-3">
-          {schema.fields.map((f) => (
+          <p className="text-xs text-zinc-500 mb-3">
+            Fecha:{" "}
+            {campos.fecha ? new Date(campos.fecha).toLocaleString() : "—"}
+          </p>
+          {schema.fields.map((f) => {
+            if (f.auto) return null;
+            return (
+              <div key={f.k}>
+                <label className="text-xs text-zinc-500 mb-1 block">
+                  {f.l}
+                </label>
+                {f.t === "textarea" ? (
+                  <Textarea
+                    value={campos[f.k] ?? ""}
+                    onChange={(e) =>
+                      setCampos((c) => ({ ...c, [f.k]: e.target.value }))
+                    }
+                  />
+                ) : f.t === "select" ? (
+                  <select
+                    className="w-full bg-[#0d0d0d] border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100"
+                    value={campos[f.k] ?? ""}
+                    onChange={(e) =>
+                      setCampos((c) => ({ ...c, [f.k]: e.target.value }))
+                    }
+                  >
+                    <option value="">—</option>
+                    {f.opciones?.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <Input
+                    type="text"
+                    value={campos[f.k] ?? ""}
+                    onChange={(e) =>
+                      setCampos((c) => ({ ...c, [f.k]: e.target.value }))
+                    }
+                  />
+                )}
+              </div>
+            );
+          })}
+          {/* {schema.fields.map((f) => (
             <div key={f.k}>
               <label className="text-xs text-zinc-500 mb-1 block">{f.l}</label>
               {f.t === "textarea" ? (
@@ -427,7 +531,7 @@ function ModalTarjeta({
                 />
               )}
             </div>
-          ))}
+          ))} */}
         </div>
 
         <div className="flex items-center justify-between mt-5">
@@ -509,6 +613,7 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
   const sfPorEstado = countBy(sfCards, (c) => c.colNombre);
   const sfPorSistema = countBy(sfCards, (c) => c.campos.sistema);
   const burenPorUbic = countBy(bCards, (c) => c.campos.ubicacion);
+  const sisPorImportancia = countBy(sCards, (c) => c.campos.importancia);
 
   return (
     <div>
