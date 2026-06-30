@@ -1024,7 +1024,6 @@ def fetch_vivo(procesos: tuple[int, ...] = PROCESOS_VIVO):
 #         diag = [
 #             {"estado": int(e), "sin_ejecucion": int(se or 0), "cantidad": int(c or 0)}
 #             for e, se, c in cur.fetchall()
-        ]
 
         return {
             "generado_en": datetime.now().astimezone().isoformat(timespec="seconds"),
