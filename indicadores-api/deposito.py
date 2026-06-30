@@ -1015,9 +1015,11 @@ def fetch_vivo(procesos: tuple[int, ...] = PROCESOS_VIVO):
         ]
         operarios.sort(key=lambda x: (-x["en_proceso"], -x["total"], x["operario"]))
 
+        cur.execute(SQL_VIVO_TODOS_ESTADOS.format(dias=VIVO_ESTADOS_VENTANA_DIAS))
         diag = [
             {"estado": int(e), "cantidad": int(c or 0), "sin_ejecucion": int(se or 0)}
             for e, c, se, _ult in cur.fetchall()
+        ]
 # ]
 #         diag = [
 #             {"estado": int(e), "sin_ejecucion": int(se or 0), "cantidad": int(c or 0)}
