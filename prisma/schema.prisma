@@ -493,42 +493,61 @@ model sector_permiso {
   @@schema("everwear")
 }
 
-// ===== Módulo "sistema": tablero tipo Trello (casos internos / Softech / Buren) =====
-// NOTA: este bloque es de referencia. El flujo real es: correr sql/sistema_init.sql
-// contra la base y después `prisma db pull` (multi-schema no soporta `migrate dev`,
-// ver nota en sql/sistema_init.sql) — eso reescribe este bloque a partir de la DB real.
+// ===== Módulo "sistema": tablero tipo Trello con columnas GLOBALES + vinculación =====
+// NOTA: este bloque es de referencia. El flujo real es: correr sql/sistema_init.sql y
+// luego sql/sistema_vinculacion.sql contra la base y después `prisma db pull`
+// (multi-schema no soporta `migrate dev`) — eso reescribe este bloque desde la DB real.
+// Columnas son globales (las mismas en todos los tableros). Cada tablero oculta las que
+// no quiere ver (sistema_columna_oculta). Una tarjeta tiene dueño (tableroId) y un
+// vínculo opcional (vinculadoTableroId): si está vinculada aparece en ambos tableros y
+// es la MISMA fila, por eso se mueve a la par. Cuenta para el vinculado (orquestado).
 model sistema_tablero {
-  id        Int               @id @default(autoincrement())
-  clave     String            @unique @db.VarChar(40) // sistema | softech | buren
-  nombre    String            @db.VarChar(100)
-  createdAt DateTime          @default(now())
-  columnas  sistema_columna[]
+  id            Int                      @id @default(autoincrement())
+  clave         String                   @unique @db.VarChar(40)
+  nombre        String                   @db.VarChar(100)
+  createdAt     DateTime                 @default(now())
+  tarjetas      sistema_tarjeta[]        @relation("tarjetaTablero")
+  vinculadas    sistema_tarjeta[]        @relation("tarjetaVinculado")
+  columnasOcultas sistema_columna_oculta[]
 
   @@schema("sistema")
 }
 
 model sistema_columna {
-  id        Int               @id @default(autoincrement())
-  tableroId Int
-  nombre    String            @db.VarChar(100)
-  orden     Int               @default(0)
-  createdAt DateTime          @default(now())
-  tablero   sistema_tablero   @relation(fields: [tableroId], references: [id], onDelete: Cascade)
+  id        Int                      @id @default(autoincrement())
+  nombre    String                   @unique @db.VarChar(100)
+  orden     Int                      @default(0)
+  createdAt DateTime                 @default(now())
   tarjetas  sistema_tarjeta[]
+  ocultaEn  sistema_columna_oculta[]
 
-  @@index([tableroId])
+  @@schema("sistema")
+}
+
+model sistema_columna_oculta {
+  tableroId Int
+  columnaId Int
+  tablero   sistema_tablero @relation(fields: [tableroId], references: [id], onDelete: Cascade)
+  columna   sistema_columna @relation(fields: [columnaId], references: [id], onDelete: Cascade)
+
+  @@id([tableroId, columnaId])
   @@schema("sistema")
 }
 
 model sistema_tarjeta {
-  id        Int             @id @default(autoincrement())
-  columnaId Int
-  orden     Int             @default(0)
-  campos    Json            @default("{}") // {problema, fecha, solucion, ubicacion, categoria, inicio, fin, sistema, origen, accion, tiempo} según tablero
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
-  columna   sistema_columna @relation(fields: [columnaId], references: [id], onDelete: Cascade)
+  id                 Int              @id @default(autoincrement())
+  tableroId          Int
+  columnaId          Int
+  vinculadoTableroId Int?
+  orden              Int              @default(0)
+  campos             Json             @default("{}")
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  tablero            sistema_tablero  @relation("tarjetaTablero", fields: [tableroId], references: [id], onDelete: Cascade)
+  vinculado          sistema_tablero? @relation("tarjetaVinculado", fields: [vinculadoTableroId], references: [id], onDelete: SetNull)
+  columna            sistema_columna  @relation(fields: [columnaId], references: [id], onDelete: Cascade)
 
+  @@index([tableroId])
   @@index([columnaId])
   @@schema("sistema")
 }

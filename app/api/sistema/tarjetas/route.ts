@@ -5,11 +5,12 @@ import { prisma } from "@/lib/prisma";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { columnaId, campos } = body;
-
-    if (!columnaId) {
-      return NextResponse.json({ error: "Falta columnaId" }, { status: 400 });
-    }
+   const { columnaId, campos, tableroId, vinculadoTableroId } = body;
+   if (!columnaId || !tableroId)
+     return NextResponse.json(
+       { error: "Falta columnaId/tableroId" },
+       { status: 400 },
+     );
 
     const max = await prisma.sistema_tarjeta.aggregate({
       where: { columnaId: Number(columnaId) },
@@ -17,13 +18,15 @@ export async function POST(req: NextRequest) {
     });
     const orden = (max._max.orden ?? -1) + 1;
 
-    const tarjeta = await prisma.sistema_tarjeta.create({
-      data: {
-        columnaId: Number(columnaId),
-        orden,
-        campos: campos ?? {},
-      },
-    });
+const tarjeta = await prisma.sistema_tarjeta.create({
+  data: {
+    columnaId: Number(columnaId),
+    tableroId: Number(tableroId),
+    vinculadoTableroId: vinculadoTableroId ? Number(vinculadoTableroId) : null,
+    orden,
+    campos: campos ?? {},
+  },
+});
 
     return NextResponse.json(tarjeta, { status: 201 });
   } catch (error) {

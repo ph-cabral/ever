@@ -49,8 +49,9 @@ export async function DELETE(
       return NextResponse.json({ error: "No encontrada" }, { status: 404 });
     }
 
+    // columnas son globales: reasignar a cualquier otra columna
     const otras = await prisma.sistema_columna.findMany({
-      where: { tableroId: columna.tableroId, id: { not: columnaId } },
+      where: { id: { not: columnaId } },
       orderBy: { orden: "asc" },
     });
 
