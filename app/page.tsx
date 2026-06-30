@@ -46,13 +46,27 @@ export default async function Home() {
         ) : (
           <div className="flex flex-wrap justify-center gap-5 max-w-3xl">
             {visibles.map((m) => (
-              <Link
-                key={m.key}
-                href={m.href}
-                className={`px-8 py-6 ${m.color} text-white text-xl font-semibold rounded-2xl transition-colors`}
-              >
-                {m.label}
-              </Link>
+              <div key={m.key} className="flex w-56 flex-col items-stretch gap-2">
+                <Link
+                  href={m.href}
+                  className={`px-8 py-6 ${m.color} text-center text-white text-xl font-semibold rounded-2xl transition-colors`}
+                >
+                  {m.label}
+                </Link>
+                {m.children?.length ? (
+                  <div className="flex flex-wrap justify-center gap-1.5">
+                    {m.children.map((c) => (
+                      <Link
+                        key={c.href}
+                        href={c.href}
+                        className="rounded-lg bg-white/5 px-3 py-1 text-xs text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+                      >
+                        {c.label}
+                      </Link>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             ))}
           </div>
         )}

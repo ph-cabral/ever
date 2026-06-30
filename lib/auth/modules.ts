@@ -6,6 +6,7 @@ export type ModuleKey =
   | "manguera"
   | "deposito"
   | "picking"
+  | "compras"
   | "finanza"
   | "rrhh"
   | "indicadores"
@@ -19,16 +20,35 @@ export interface ModuleDef {
   label: string;
   href: string;
   color: string; // clases tailwind para el botón del home
+  children?: { label: string; href: string }[]; // sub-vistas para el submenú del home
 }
 
 export const MODULES: ModuleDef[] = [
-  { key: "manguera",    label: "Mangueras",   href: "/manguera",    color: "bg-orange-600 hover:bg-orange-500" },
-  { key: "deposito",    label: "Depósito",    href: "/deposito",    color: "bg-emerald-700 hover:bg-emerald-600" },
-  { key: "picking",     label: "Picking",     href: "/picking",     color: "bg-purple-700 hover:bg-purple-600" },
+  { key: "manguera",    label: "Mangueras",   href: "/manguera",    color: "bg-orange-600 hover:bg-orange-500",
+    children: [{ label: "Corte", href: "/manguera/corte" }] },
+  { key: "deposito",    label: "Depósito",    href: "/deposito",    color: "bg-emerald-700 hover:bg-emerald-600",
+    children: [
+      { label: "Evaluación", href: "/deposito/evaluacion" },
+      { label: "Faltantes",  href: "/deposito/faltantes" },
+      { label: "Pedidos",    href: "/deposito/pedidos" },
+      { label: "En vivo",    href: "/deposito/vivo" },
+      { label: "WMS",        href: "/deposito/wms" },
+    ] },
+  { key: "picking",     label: "Picking",     href: "/picking",     color: "bg-purple-700 hover:bg-purple-600",
+    children: [{ label: "Picker", href: "/picking/picker" }] },
+  { key: "compras",     label: "Compras",     href: "/compras",     color: "bg-amber-700 hover:bg-amber-600",
+    children: [{ label: "Faltantes", href: "/compras/faltantes" }] },
   { key: "finanza",     label: "Finanzas",    href: "/finanza",     color: "bg-teal-700 hover:bg-teal-600" },
-  { key: "rrhh",        label: "RRHH",        href: "/rrhh",        color: "bg-indigo-700 hover:bg-indigo-600" },
+  { key: "rrhh",        label: "RRHH",        href: "/rrhh",        color: "bg-indigo-700 hover:bg-indigo-600",
+    children: [
+      { label: "Dashboard",  href: "/rrhh/dashboard" },
+      { label: "Asistencia", href: "/rrhh/asistencia" },
+      { label: "Legajos",    href: "/rrhh/legajos" },
+      { label: "Relojes",    href: "/rrhh/relojes" },
+    ] },
   { key: "indicadores", label: "Indicadores", href: "/indicadores", color: "bg-blue-700 hover:bg-blue-600" },
-  { key: "sorteo",      label: "Sorteo",      href: "/sorteo",      color: "bg-pink-700 hover:bg-pink-600" },
+  { key: "sorteo",      label: "Sorteo",      href: "/sorteo",      color: "bg-pink-700 hover:bg-pink-600",
+    children: [{ label: "Armar", href: "/sorteo/armar" }] },
   { key: "vicki",       label: "Vicki",       href: "/vicki",       color: "bg-slate-700 hover:bg-slate-600" },
   { key: "buscador",    label: "Buscador",    href: "/buscador",    color: "bg-cyan-700 hover:bg-cyan-600" },
   { key: "sistema",     label: "Sistema",     href: "/sistema",     color: "bg-rose-700 hover:bg-rose-600" },
@@ -64,6 +84,8 @@ const ROUTE_MODULE: { prefix: string; mod: ModuleKey }[] = [
   { prefix: "/api/deposito",    mod: "deposito" },
   { prefix: "/picking",         mod: "picking" },
   { prefix: "/api/picking",     mod: "picking" },
+  { prefix: "/compras",         mod: "compras" },
+  { prefix: "/api/compras",     mod: "compras" },
   { prefix: "/finanza",         mod: "finanza" },
   { prefix: "/api/finanza",     mod: "finanza" },
   { prefix: "/rrhh",            mod: "rrhh" },

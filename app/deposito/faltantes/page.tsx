@@ -8,6 +8,7 @@ import {
   Check,
   X,
   PackageCheck,
+  MapPin,
 } from "lucide-react";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -68,6 +69,7 @@ export default function FaltantesPage() {
   >([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ubicArt, setUbicArt] = useState<string | null>(null); // artículo del modal de ubicaciones
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -307,6 +309,7 @@ export default function FaltantesPage() {
               tipos={tipos}
               novedadId={novedades[keyOf(current)] ?? null}
               onNovedad={(id) => saveNovedad(current, id)}
+              onUbic={() => setUbicArt(current.CodArticulo)}
             />
           )}
         </div>
@@ -446,7 +449,14 @@ export default function FaltantesPage() {
                           {it.Ubicacion ?? "—"}
                         </td>
                         <td className="px-3 py-2 font-mono text-zinc-300">
-                          {it.CodArticulo}
+                          <button
+                            onClick={() => setUbicArt(it.CodArticulo)}
+                            title="Ver ubicaciones"
+                            className="inline-flex items-center gap-1 hover:text-yellow-400"
+                          >
+                            <MapPin size={13} className="text-zinc-500" />
+                            {it.CodArticulo}
+                          </button>
                         </td>
                         <td className="px-3 py-2 text-zinc-100">{it.Nombre}</td>
                         <td className="px-3 py-2 text-right tabular-nums">
@@ -505,7 +515,92 @@ export default function FaltantesPage() {
           )}
         </main>
       </div>
+
+      {ubicArt && (
+        <UbicacionesModal articulo={ubicArt} onClose={() => setUbicArt(null)} />
+      )}
     </>
+  );
+}
+
+// Modal: todas las ubicaciones del artículo (sin filtrar) con >1 unidad.
+// Tabla sin encabezado: ubicación + cantidad. Para chequear si hay stock en
+// otro rack antes de marcar "sin existencia".
+function UbicacionesModal({
+  articulo,
+  onClose,
+}: {
+  articulo: string;
+  onClose: () => void;
+}) {
+  const [rows, setRows] = useState<{ Ubicacion: string; Cantidad: number }[]>(
+    [],
+  );
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let vivo = true;
+    fetch(
+      `/api/deposito/faltantes/ubicaciones?articulo=${encodeURIComponent(articulo)}`,
+      { cache: "no-store" },
+    )
+      .then((r) => r.json())
+      .then((j) => {
+        if (vivo) setRows(j.rows ?? []);
+      })
+      .catch(() => {
+        if (vivo) setRows([]);
+      })
+      .finally(() => {
+        if (vivo) setLoading(false);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [articulo]);
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm bg-[#1A1A1A] border border-zinc-700 rounded-xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+          <span className="font-mono text-sm text-yellow-400">{articulo}</span>
+          <button
+            onClick={onClose}
+            className="text-zinc-400 hover:text-white"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="max-h-80 overflow-y-auto">
+          {loading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="animate-spin text-zinc-500" />
+            </div>
+          ) : rows.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm text-zinc-500">
+              Sin otras ubicaciones
+            </p>
+          ) : (
+            <table className="w-full text-sm">
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i} className="border-b border-zinc-800/60">
+                    <td className="px-4 py-2 text-zinc-200">{r.Ubicacion}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-zinc-300">
+                      {fmtNum(r.Cantidad)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -591,12 +686,14 @@ function CardDetalle({
   tipos,
   novedadId,
   onNovedad,
+  onUbic,
 }: {
   it: Item;
   estado: Estado;
   tipos: Tipo[];
   novedadId: number | null;
   onNovedad: (id: number | null) => void;
+  onUbic: () => void;
 }) {
   return (
     <div className="px-5 py-4">
@@ -608,7 +705,15 @@ function CardDetalle({
       <h2 className="text-2xl font-bold leading-tight text-white mb-1">
         {it.Nombre || "—"}
       </h2>
-      <p className="font-mono text-sm text-yellow-400 mb-3">{it.CodArticulo}</p>
+      <button
+        onClick={onUbic}
+        className="flex items-center gap-1.5 mb-3"
+      >
+        <MapPin size={14} className="text-zinc-500" />
+        <span className="font-mono text-sm text-yellow-400">
+          {it.CodArticulo}
+        </span>
+      </button>
       <div className="mb-4">
         <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1.5">
           Novedad

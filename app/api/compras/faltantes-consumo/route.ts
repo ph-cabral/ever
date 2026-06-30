@@ -93,6 +93,13 @@ export async function GET(req: NextRequest) {
   const historico = sp.get("historico") === "1" || sp.get("historico") === "true";
   // corte del cruce (faltantes y OC se anclan acá). Override opcional ?ocDesde=
   const ocDesde = sp.get("ocDesde") || OC_DESDE_DEFAULT;
+  // La OC del 26 cubre faltantes del 25 en adelante → corte de faltantes = 1 día antes.
+  const addDays = (iso: string, n: number) => {
+    const d = new Date(iso + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  const faltDesde = sp.get("faltDesde") || addDays(ocDesde, -1);
 
   const qs = new URLSearchParams();
   if (desdeParam) qs.set("desde", desdeParam);
@@ -119,7 +126,7 @@ export async function GET(req: NextRequest) {
   // Así el FIFO no arrastra faltantes viejos que la OC nueva no debería cubrir.
   const faltRows: FaltRow[] = (faltJson.rows ?? []).filter((it: FaltRow) => {
     const dia = it.PrimerDia ?? it.Fecha ?? fecha;
-    return !dia || dia >= ocDesde;
+    return !dia || dia >= faltDesde;
   });
 
   let ocWarn = false;
@@ -302,6 +309,7 @@ export async function GET(req: NextRequest) {
     desde: minPrimer ?? fecha,
     hasta: maxFecha ?? fecha,
     ocDesde,
+    faltDesde,
     historico,
     total: rowsOut.length,
     rows: rowsOut,

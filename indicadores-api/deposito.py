@@ -29,6 +29,10 @@ OT_COL_PEDIDO = "OTNroMovVenta"
 # El diagnóstico lista los estados presentes con su conteo para ajustar esto.
 PATRONES_DESCARTADO: tuple[str, ...] = ("DESCART", "ANULAD")
 
+# Columna de existencia por ubicación en EVERWEAR.dbo.[Ubicacion#].
+# CONFIRMAR con GET /deposito/articulo/ubicaciones/diag?articulo=XXX y ajustar.
+UBIC_COL_CANT = "Cantidad"
+
 # ── Productividad WMS (lean) ──────────────────────────────────────────────────
 SQL_WMS = """
 SELECT
@@ -1175,5 +1179,40 @@ def _info_pedidos_resumen(pedidos):
             for nro, comp, estado in cur.fetchall():
                 out[int(nro)] = {"CompCodigo": _int(comp), "Estado": _txt(estado)}
         return out
+    finally:
+        conn.close()
+
+
+# ── Ubicaciones de un artículo (modal de /deposito/faltantes) ─────────────────
+# Todas las ubicaciones (SIN el filtro numérico) con > 1 unidad. Sirve para ver
+# si el faltante está físicamente en otro rack antes de marcar "sin existencia".
+def fetch_articulo_ubicaciones(articulo: str):
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        sql = f"""
+            SELECT u.ubicacion AS Ubicacion, u.[{UBIC_COL_CANT}] AS Cantidad
+            FROM EVERWEAR.dbo.[Ubicacion#] u
+            WHERE u.codArticulo = ? AND u.[{UBIC_COL_CANT}] > 1
+            ORDER BY u.[{UBIC_COL_CANT}] DESC
+        """
+        cur.execute(sql, (articulo,))
+        rows = [{"Ubicacion": _txt(u), "Cantidad": float(_safe(c) or 0)}
+                for u, c in cur.fetchall()]
+        return {"articulo": articulo, "total": len(rows), "rows": rows}
+    finally:
+        conn.close()
+
+
+def fetch_articulo_ubicaciones_diag(articulo: str):
+    """Columnas reales de Ubicacion# + muestra, para confirmar UBIC_COL_CANT."""
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT TOP 20 * FROM EVERWEAR.dbo.[Ubicacion#] WHERE codArticulo = ?",
+                    (articulo,))
+        cols = [c[0] for c in cur.description]
+        return {"columnas": cols, "muestra": [dict(zip(cols, r)) for r in cur.fetchall()]}
     finally:
         conn.close()
