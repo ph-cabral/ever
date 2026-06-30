@@ -412,100 +412,100 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: String(e) }, { status: 503 });
   }
 }
-function ResumenOt() {
-  const [desde, setDesde] = useState("");
-  const [hasta, setHasta] = useState("");
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
+// function ResumenOt() {
+//   const [desde, setDesde] = useState("");
+//   const [hasta, setHasta] = useState("");
+//   const [data, setData] = useState<any>(null);
+//   const [loading, setLoading] = useState(false);
 
-  const cargar = async () => {
-    setLoading(true);
-    const qs = new URLSearchParams();
-    if (desde) qs.set("desde", desde);
-    if (hasta) qs.set("hasta", hasta);
-    const res = await fetch(`/api/deposito/resumen-ot?${qs.toString()}`);
-    setData(await res.json());
-    setLoading(false);
-  };
+//   const cargar = async () => {
+//     setLoading(true);
+//     const qs = new URLSearchParams();
+//     if (desde) qs.set("desde", desde);
+//     if (hasta) qs.set("hasta", hasta);
+//     const res = await fetch(`/api/deposito/resumen-ot?${qs.toString()}`);
+//     setData(await res.json());
+//     setLoading(false);
+//   };
 
-  useEffect(() => {
-    cargar();
-  }, []);
+//   useEffect(() => {
+//     cargar();
+//   }, []);
 
-  return (
-    <div className="space-y-4">
-      <div className="flex gap-2 items-end">
-        <label className="text-sm">
-          Desde
-          <input
-            type="date"
-            value={desde}
-            onChange={(e) => setDesde(e.target.value)}
-            className="border rounded px-2 py-1 ml-2"
-          />
-        </label>
-        <label className="text-sm">
-          Hasta
-          <input
-            type="date"
-            value={hasta}
-            onChange={(e) => setHasta(e.target.value)}
-            className="border rounded px-2 py-1 ml-2"
-          />
-        </label>
-        <button onClick={cargar} className="border rounded px-3 py-1 text-sm">
-          {loading ? "Cargando..." : "Filtrar"}
-        </button>
-      </div>
+//   return (
+//     <div className="space-y-4">
+//       <div className="flex gap-2 items-end">
+//         <label className="text-sm">
+//           Desde
+//           <input
+//             type="date"
+//             value={desde}
+//             onChange={(e) => setDesde(e.target.value)}
+//             className="border rounded px-2 py-1 ml-2"
+//           />
+//         </label>
+//         <label className="text-sm">
+//           Hasta
+//           <input
+//             type="date"
+//             value={hasta}
+//             onChange={(e) => setHasta(e.target.value)}
+//             className="border rounded px-2 py-1 ml-2"
+//           />
+//         </label>
+//         <button onClick={cargar} className="border rounded px-3 py-1 text-sm">
+//           {loading ? "Cargando..." : "Filtrar"}
+//         </button>
+//       </div>
 
-      {data && (
-        <>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <KpiCard label="OT" value={data.ot_total} />
-            <KpiCard label="OT descartadas" value={data.ot_descartadas} />
-            <KpiCard label="Items pedidos" value={data.items_pedidos} />
-            <KpiCard label="Items cumplidos" value={data.items_cumplidos} />
-            <KpiCard label="% cumplido" value={`${data.pct_cumplido}%`} />
-          </div>
+//       {data && (
+//         <>
+//           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+//             <KpiCard label="OT" value={data.ot_total} />
+//             <KpiCard label="OT descartadas" value={data.ot_descartadas} />
+//             <KpiCard label="Items pedidos" value={data.items_pedidos} />
+//             <KpiCard label="Items cumplidos" value={data.items_cumplidos} />
+//             <KpiCard label="% cumplido" value={`${data.pct_cumplido}%`} />
+//           </div>
 
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr className="text-left border-b">
-                <th className="py-1">Ubicación</th>
-                <th>Artículo</th>
-                <th className="text-right">Pedida</th>
-                <th className="text-right">Cumplida</th>
-                <th className="text-right">Faltante</th>
-                <th className="text-right">Precio</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items_faltantes.map((it: any, i: number) => (
-                <tr key={i} className="border-b">
-                  <td className="py-1">{it.Ubicacion}</td>
-                  <td>{it.CodArticulo}</td>
-                  <td className="text-right">{it.CantPedida}</td>
-                  <td className="text-right">{it.CantCumplida}</td>
-                  <td className="text-right">{it.Faltante}</td>
-                  <td className="text-right">{it.PrecioVenta}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-    </div>
-  );
-}
+//           <table className="w-full text-sm border-collapse">
+//             <thead>
+//               <tr className="text-left border-b">
+//                 <th className="py-1">Ubicación</th>
+//                 <th>Artículo</th>
+//                 <th className="text-right">Pedida</th>
+//                 <th className="text-right">Cumplida</th>
+//                 <th className="text-right">Faltante</th>
+//                 <th className="text-right">Precio</th>
+//               </tr>
+//             </thead>
+//             <tbody>
+//               {data.items_faltantes.map((it: any, i: number) => (
+//                 <tr key={i} className="border-b">
+//                   <td className="py-1">{it.Ubicacion}</td>
+//                   <td>{it.CodArticulo}</td>
+//                   <td className="text-right">{it.CantPedida}</td>
+//                   <td className="text-right">{it.CantCumplida}</td>
+//                   <td className="text-right">{it.Faltante}</td>
+//                   <td className="text-right">{it.PrecioVenta}</td>
+//                 </tr>
+//               ))}
+//             </tbody>
+//           </table>
+//         </>
+//       )}
+//     </div>
+//   );
+// }
 
-function KpiCard({ label, value }: { label: string; value: any }) {
-  return (
-    <div className="border rounded p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="text-lg font-semibold">{value}</div>
-    </div>
-  );
-}
+// function KpiCard({ label, value }: { label: string; value: any }) {
+//   return (
+//     <div className="border rounded p-3">
+//       <div className="text-xs text-muted-foreground">{label}</div>
+//       <div className="text-lg font-semibold">{value}</div>
+//     </div>
+//   );
+// }
 
 function ResumenOt() {
   const [desde, setDesde] = useState("");
