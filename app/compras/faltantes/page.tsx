@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck, CalendarRange, History, Check,
+  Layers, ChevronDown, ChevronRight,
 } from "lucide-react";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -75,6 +76,102 @@ const cubiertoCls: Record<Estado, string> = {
   sin_orden: "text-zinc-600",
 };
 
+// Tabla reutilizable: una sola tabla o el cuerpo de cada acordeón por proveedor.
+function Tabla({ data }: { data: Row[] }) {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-zinc-800">
+      <table className="w-full text-sm">
+        <thead className="bg-[#1A1A1A] text-zinc-400">
+          <tr className="text-left">
+            <th className="px-3 py-2 font-medium">Cód.</th>
+            <th className="px-3 py-2 font-medium">Artículo</th>
+            <th className="px-3 py-2 font-medium">Día</th>
+            <th className="px-3 py-2 font-medium text-right">Faltan</th>
+            <th className="px-3 py-2 font-medium text-right">Cubre OC</th>
+            <th className="px-3 py-2 font-medium text-right">Falta OC</th>
+            <th className="px-3 py-2 font-medium">Entrega</th>
+            <th className="px-3 py-2 font-medium">Proveedor</th>
+            <th className="px-3 py-2 font-medium text-right">Importe</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((r, i) => {
+            const prev = data[i - 1];
+            const nuevoArt = !prev || prev.CodArticulo !== r.CodArticulo;
+            return (
+              <tr
+                key={`${r.CodArticulo}-${r.fecha}`}
+                className={`transition-colors ${rowCls[r.estado]} ${
+                  nuevoArt ? "border-t-2 border-zinc-700/80" : "border-t border-zinc-800/50"
+                }`}
+              >
+                <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">
+                  {nuevoArt ? r.CodArticulo : ""}
+                </td>
+                <td className="px-3 py-2 text-zinc-100">
+                  {nuevoArt ? (
+                    <span>
+                      {r.Nombre}
+                      {r.ocTotal > 0 && (
+                        <span className="ml-2 text-[11px] text-zinc-500">
+                          OC total {fmtNum(r.ocTotal)}
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    ""
+                  )}
+                </td>
+                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">
+                  {fmtAr(r.fecha)}
+                  {r.pedidos > 1 && (
+                    <span className="ml-2 text-[11px] text-zinc-600">{r.pedidos} ped.</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-zinc-100">
+                  {fmtNum(r.faltan)}
+                </td>
+                <td
+                  className={`px-3 py-2 text-right tabular-nums font-medium ${cubiertoCls[r.estado]}`}
+                >
+                  {r.cubierto > 0 ? (
+                    <span className="inline-flex items-center gap-1 justify-end">
+                      {r.estado === "entregado" ? (
+                        <Check size={13} className="opacity-80" />
+                      ) : (
+                        <Truck size={13} className="opacity-70" />
+                      )}
+                      {fmtNum(r.cubierto)}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-red-300/90">
+                  {r.descubierto > 0 ? fmtNum(r.descubierto) : "—"}
+                </td>
+                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
+                  {r.estado === "entregado"
+                    ? <span className="text-emerald-400/80">Entregado</span>
+                    : r.cubierto > 0
+                      ? r.importacion
+                        ? <span className="text-amber-400/80">Importación</span>
+                        : fmtAr(r.fechaEntrega)
+                      : "—"}
+                </td>
+                <td className="px-3 py-2 text-zinc-400">{nuevoArt ? r.Proveedor || "—" : ""}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                  ${fmtNum(r.importe)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function ComprasFaltantesPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [fecha, setFecha] = useState<string | null>(null);
@@ -88,6 +185,8 @@ export default function ComprasFaltantesPage() {
   const [error, setError] = useState<string | null>(null);
   const [ocWarn, setOcWarn] = useState(false);
   const [ocDesde, setOcDesde] = useState<string | null>(null);
+  const [agrupar, setAgrupar] = useState(false); // agrupar por proveedor
+  const [cerrados, setCerrados] = useState<Record<string, boolean>>({}); // acordeones colapsados
 
   // Snapshots disponibles (para el selector "Desde")
   useEffect(() => {
@@ -133,10 +232,25 @@ export default function ComprasFaltantesPage() {
     return c as Record<Filtro, number>;
   }, [rows]);
 
-  const visibles = useMemo(
-    () => (filtro === "todos" ? rows : rows.filter((r) => r.estado === filtro)),
-    [rows, filtro],
-  );
+  // Orden por valor (importe desc), siempre.
+  const visibles = useMemo(() => {
+    const base = filtro === "todos" ? rows : rows.filter((r) => r.estado === filtro);
+    return [...base].sort((a, b) => b.importe - a.importe);
+  }, [rows, filtro]);
+
+  // Grupos por proveedor, cada grupo ordenado por importe y los grupos por importe total.
+  const grupos = useMemo(() => {
+    const m = new Map<string, Row[]>();
+    for (const r of visibles) {
+      const k = r.Proveedor || "Sin proveedor";
+      const arr = m.get(k);
+      if (arr) arr.push(r);
+      else m.set(k, [r]);
+    }
+    return [...m.entries()]
+      .map(([prov, rs]) => ({ prov, rs, importe: rs.reduce((s, x) => s + x.importe, 0) }))
+      .sort((a, b) => b.importe - a.importe);
+  }, [visibles]);
 
   const tot = useMemo(() => {
     let faltan = 0, cubierto = 0, descubierto = 0, importe = 0;
@@ -245,6 +359,20 @@ export default function ComprasFaltantesPage() {
             {historico && <Check size={13} />}
           </button>
 
+          <button
+            onClick={() => setAgrupar((v) => !v)}
+            title="Agrupar los faltantes por proveedor en tablas con acordeón"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+              agrupar
+                ? "bg-sky-500/15 border-sky-400 text-sky-300"
+                : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+            }`}
+          >
+            <Layers size={14} />
+            Agrupar por proveedor
+            {agrupar && <Check size={13} />}
+          </button>
+
           {ocDesde && (
             <span
               title="El cruce con OC arranca en esta fecha: solo se cuentan las órdenes de compra y los faltantes desde acá."
@@ -304,97 +432,40 @@ export default function ComprasFaltantesPage() {
               </a>
             )}
           </div>
-        ) : (
-          <div className="overflow-x-auto rounded-xl border border-zinc-800">
-            <table className="w-full text-sm">
-              <thead className="bg-[#1A1A1A] text-zinc-400">
-                <tr className="text-left">
-                  <th className="px-3 py-2 font-medium">Cód.</th>
-                  <th className="px-3 py-2 font-medium">Artículo</th>
-                  <th className="px-3 py-2 font-medium">Día</th>
-                  <th className="px-3 py-2 font-medium text-right">Faltan</th>
-                  <th className="px-3 py-2 font-medium text-right">Cubre OC</th>
-                  <th className="px-3 py-2 font-medium text-right">Falta OC</th>
-                  <th className="px-3 py-2 font-medium">Entrega</th>
-                  <th className="px-3 py-2 font-medium">Proveedor</th>
-                  <th className="px-3 py-2 font-medium text-right">Importe</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibles.map((r, i) => {
-                  const prev = visibles[i - 1];
-                  const nuevoArt = !prev || prev.CodArticulo !== r.CodArticulo;
-                  return (
-                    <tr
-                      key={`${r.CodArticulo}-${r.fecha}`}
-                      className={`transition-colors ${rowCls[r.estado]} ${
-                        nuevoArt ? "border-t-2 border-zinc-700/80" : "border-t border-zinc-800/50"
-                      }`}
-                    >
-                      <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">
-                        {nuevoArt ? r.CodArticulo : ""}
-                      </td>
-                      <td className="px-3 py-2 text-zinc-100">
-                        {nuevoArt ? (
-                          <span>
-                            {r.Nombre}
-                            {r.ocTotal > 0 && (
-                              <span className="ml-2 text-[11px] text-zinc-500">
-                                OC total {fmtNum(r.ocTotal)}
-                              </span>
-                            )}
-                          </span>
-                        ) : (
-                          ""
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">
-                        {fmtAr(r.fecha)}
-                        {r.pedidos > 1 && (
-                          <span className="ml-2 text-[11px] text-zinc-600">{r.pedidos} ped.</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-zinc-100">
-                        {fmtNum(r.faltan)}
-                      </td>
-                      <td
-                        className={`px-3 py-2 text-right tabular-nums font-medium ${cubiertoCls[r.estado]}`}
-                      >
-                        {r.cubierto > 0 ? (
-                          <span className="inline-flex items-center gap-1 justify-end">
-                            {r.estado === "entregado" ? (
-                              <Check size={13} className="opacity-80" />
-                            ) : (
-                              <Truck size={13} className="opacity-70" />
-                            )}
-                            {fmtNum(r.cubierto)}
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-red-300/90">
-                        {r.descubierto > 0 ? fmtNum(r.descubierto) : "—"}
-                      </td>
-                      <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
-                        {r.estado === "entregado"
-                          ? <span className="text-emerald-400/80">Entregado</span>
-                          : r.cubierto > 0
-                            ? r.importacion
-                              ? <span className="text-amber-400/80">Importación</span>
-                              : fmtAr(r.fechaEntrega)
-                            : "—"}
-                      </td>
-                      <td className="px-3 py-2 text-zinc-400">{nuevoArt ? r.Proveedor || "—" : ""}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
-                        ${fmtNum(r.importe)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        ) : agrupar ? (
+          <div className="flex flex-col gap-3">
+            {grupos.map(({ prov, rs, importe }) => {
+              const abierto = !cerrados[prov];
+              return (
+                <div key={prov} className="rounded-xl border border-zinc-800 overflow-hidden">
+                  <button
+                    onClick={() => setCerrados((c) => ({ ...c, [prov]: abierto }))}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-[#1A1A1A] hover:bg-[#202020] transition-colors text-left"
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      {abierto ? (
+                        <ChevronDown size={15} className="text-zinc-500 shrink-0" />
+                      ) : (
+                        <ChevronRight size={15} className="text-zinc-500 shrink-0" />
+                      )}
+                      <span className="font-medium text-zinc-100 truncate">{prov}</span>
+                      <span className="text-[11px] text-zinc-500 shrink-0">{rs.length} reng.</span>
+                    </span>
+                    <span className="text-sm tabular-nums text-zinc-300 shrink-0">
+                      ${fmtNum(importe)}
+                    </span>
+                  </button>
+                  {abierto && (
+                    <div className="border-t border-zinc-800">
+                      <Tabla data={rs} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
+        ) : (
+          <Tabla data={visibles} />
         )}
       </main>
     </div>
