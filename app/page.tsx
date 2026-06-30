@@ -11,7 +11,22 @@ export default async function Home() {
   const s = await getSession();
   if (!s) redirect("/login");
 
-  const visibles = MODULES.filter((m) => s.rol === "ADMIN" || s.mods.includes(m.key));
+  const isAdmin = s.rol === "ADMIN";
+  const vistas = s.vistas; // cookies viejas: undefined ⇒ se muestran todas
+  const ocultos = new Set(s.ocultos ?? []);
+
+  // Módulos visibles: habilitados y no marcados como ocultos.
+  const visibles = MODULES.filter(
+    (m) => (isAdmin || s.mods.includes(m.key)) && !ocultos.has(m.key),
+  ).map((m) => ({
+    ...m,
+    // Sub-vistas visibles: permitidas (o cookie vieja sin `vistas`) y no ocultas.
+    children: (m.children ?? []).filter(
+      (c) =>
+        (isAdmin || !Array.isArray(vistas) || vistas.includes(c.href)) &&
+        !ocultos.has(c.href),
+    ),
+  }));
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">

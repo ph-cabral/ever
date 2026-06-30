@@ -5,16 +5,29 @@ import {
   MODULES,
   defaultModulosForSector,
   isModuleKey,
+  isViewHref,
+  viewsForModule,
   type ModuleKey,
 } from "@/lib/auth/modules";
 
 export const dynamic = "force-dynamic";
 
-function sanitize(v: unknown): ModuleKey[] {
+function sanitizeMods(v: unknown): ModuleKey[] {
   return Array.isArray(v) ? v.filter(isModuleKey) : [];
 }
+function sanitizeHrefs(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter(isViewHref) : [];
+}
+function sanitizeOcultos(v: unknown): string[] {
+  return Array.isArray(v)
+    ? v.filter((x): x is string => isModuleKey(x) || isViewHref(x))
+    : [];
+}
+function allViewsForMods(mods: ModuleKey[]): string[] {
+  return mods.flatMap((m) => viewsForModule(m).map((v) => v.href));
+}
 
-// Lista todos los sectores conocidos con sus módulos (guardados o sugeridos).
+// Lista todos los sectores conocidos con sus permisos (guardados o sugeridos).
 export async function GET() {
   const g = await requireAdmin();
   if (!g.ok) return NextResponse.json({ error: g.error }, { status: g.status });
@@ -39,20 +52,34 @@ export async function GET() {
     .sort((a, b) => a.localeCompare(b, "es"))
     .map((sector) => {
       const row = byName.get(sector);
+      if (!row) {
+        const modulos = defaultModulosForSector(sector);
+        return { sector, modulos, vistas: allViewsForMods(modulos), ocultos: [], guardado: false };
+      }
+      const modulos = sanitizeMods(row.modulos);
+      const stored = sanitizeHrefs((row as any).vistas);
       return {
         sector,
-        modulos: row ? sanitize(row.modulos) : defaultModulosForSector(sector),
-        guardado: !!row,
+        modulos,
+        // vistas vacías ⇒ todas las de los módulos habilitados (compat filas viejas)
+        vistas: stored.length ? stored : allViewsForMods(modulos),
+        ocultos: sanitizeOcultos((row as any).ocultos),
+        guardado: true,
       };
     });
 
   return NextResponse.json({
     items,
-    modulosDisponibles: MODULES.map((m) => ({ key: m.key, label: m.label })),
+    // Catálogo completo: módulos + sus vistas, para construir el árbol en el cliente.
+    modulosDisponibles: MODULES.map((m) => ({
+      key: m.key,
+      label: m.label,
+      vistas: (m.children ?? []).map((c) => ({ label: c.label, href: c.href })),
+    })),
   });
 }
 
-// Guarda (upsert) los módulos de uno o varios sectores.
+// Guarda (upsert) los permisos de uno o varios sectores.
 export async function PUT(req: NextRequest) {
   const g = await requireAdmin();
   if (!g.ok) return NextResponse.json({ error: g.error }, { status: g.status });
@@ -64,11 +91,16 @@ export async function PUT(req: NextRequest) {
   for (const it of items) {
     const sector = String(it?.sector ?? "").trim();
     if (!sector) continue;
-    const modulos = sanitize(it?.modulos);
+    const modulos = sanitizeMods(it?.modulos);
+    // Sólo se guardan vistas de módulos habilitados.
+    const vistas = sanitizeHrefs(it?.vistas).filter((href) =>
+      modulos.some((m) => viewsForModule(m).some((v) => v.href === href)),
+    );
+    const ocultos = sanitizeOcultos(it?.ocultos);
     await prisma.sector_permiso.upsert({
       where: { sector },
-      create: { sector, modulos },
-      update: { modulos },
+      create: { sector, modulos, vistas, ocultos } as any,
+      update: { modulos, vistas, ocultos } as any,
     });
   }
 

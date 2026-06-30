@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   moduleForPath,
+  viewForPath,
   isAdminPath,
   type SessionPayload,
 } from "@/lib/auth/modules";
@@ -112,6 +113,22 @@ export async function middleware(req: NextRequest) {
     url.pathname = "/";
     url.search = "";
     url.searchParams.set("denied", mod);
+    return NextResponse.redirect(url);
+  }
+
+  // 4) Permiso por vista (sub-ruta). Sólo páginas; cookies viejas (sin `vistas`) pasan.
+  const view = viewForPath(pathname);
+  if (
+    view &&
+    session.rol !== "ADMIN" &&
+    Array.isArray(session.vistas) &&
+    !session.vistas.includes(view.href)
+  ) {
+    if (isApi) return NextResponse.json({ error: "Sin permiso para esta vista" }, { status: 403 });
+    const url = req.nextUrl.clone();
+    url.pathname = view.href.split("/").slice(0, 2).join("/") || "/";
+    url.search = "";
+    url.searchParams.set("denied", view.href);
     return NextResponse.redirect(url);
   }
 

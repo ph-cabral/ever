@@ -56,8 +56,40 @@ export const MODULES: ModuleDef[] = [
 
 export const ALL_MODULE_KEYS: ModuleKey[] = MODULES.map((m) => m.key);
 
+// ----- Vistas (sub-rutas) de cada módulo, para permisos finos -----
+export interface ViewRef {
+  mod: ModuleKey;
+  label: string;
+  href: string;
+}
+
+export const VIEWS: ViewRef[] = MODULES.flatMap((m) =>
+  (m.children ?? []).map((c) => ({ mod: m.key, label: c.label, href: c.href })),
+);
+
+export const ALL_VIEW_HREFS: string[] = VIEWS.map((v) => v.href);
+
+export function viewsForModule(key: ModuleKey): ViewRef[] {
+  return VIEWS.filter((v) => v.mod === key);
+}
+
+/** Vista (sub-ruta) más específica a la que pertenece un pathname, o null. */
+export function viewForPath(pathname: string): ViewRef | null {
+  let best: ViewRef | null = null;
+  for (const v of VIEWS) {
+    if (pathname === v.href || pathname.startsWith(v.href + "/")) {
+      if (!best || v.href.length > best.href.length) best = v;
+    }
+  }
+  return best;
+}
+
 export function isModuleKey(v: unknown): v is ModuleKey {
   return typeof v === "string" && (ALL_MODULE_KEYS as string[]).includes(v);
+}
+
+export function isViewHref(v: unknown): v is string {
+  return typeof v === "string" && ALL_VIEW_HREFS.includes(v);
 }
 
 export function moduleLabel(key: ModuleKey): string {
@@ -71,6 +103,8 @@ export interface SessionPayload {
   nombre: string;
   rol: "ADMIN" | "USUARIO";
   mods: ModuleKey[]; // módulos habilitados, resueltos al iniciar sesión
+  vistas?: string[]; // hrefs de sub-vistas permitidas (cookies viejas no la traen)
+  ocultos?: string[]; // keys de módulo / hrefs de vista ocultos del inicio (tienen acceso)
   iat: number; // epoch (segundos)
   exp: number; // epoch (segundos)
 }

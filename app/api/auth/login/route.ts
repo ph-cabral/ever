@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyPassword } from "@/lib/auth/password";
 import { signSession, sessionCookieOptions, SESSION_COOKIE } from "@/lib/auth/session";
-import { modulosForUsuario } from "@/lib/auth/permissions";
+import { permisosForUsuario } from "@/lib/auth/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -41,13 +41,18 @@ export async function POST(req: NextRequest) {
   }
 
   const rol = usuario.rol === "ADMIN" ? "ADMIN" : "USUARIO";
-  const mods = await modulosForUsuario({ rol: usuario.rol, sector: usuario.sector });
+  const { mods, vistas, ocultos } = await permisosForUsuario({
+    rol: usuario.rol,
+    sector: usuario.sector,
+  });
   const { token, maxAge } = signSession({
     uid: usuario.id,
     dni: usuario.dni,
     nombre: usuario.nombre,
     rol,
     mods,
+    vistas,
+    ocultos,
   });
 
   await prisma.usuario
