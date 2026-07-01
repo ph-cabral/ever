@@ -164,6 +164,7 @@ SELECT
     s.UnidadMedida  AS Unidad,
     p.CantPendiente,
     p.CodCliente,
+    cli.Cliente_Nombre AS ClienteNombre,
     p.PrecioVenta,
     ap.Nivel1       AS Linea,
     t.Descripcion   AS TipoArticulo,
@@ -189,6 +190,7 @@ LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoRengPreparacion] prep ON prep.NroMovVenta =
 LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]          gp ON gp.Numero       = prep.CodPreparador
 LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoCabecera] cab ON cab.NroMovVenta = p.NroPedOrigen
 LEFT JOIN MAGNUS_SITD.dbo.[Ped_Usu_Arma]       uv ON cab.Vendedor    = uv.Usu_Arma_Codigo
+LEFT JOIN MAGNUS_SITD.dbo.[Clientes]           cli ON cli.CodCliente = p.CodCliente
 WHERE p.FecRegistracion = (
     SELECT MAX(FecRegistracion)
     FROM EVERWEAR.dbo.[Ven_PedRenPendientes]
@@ -235,6 +237,7 @@ SELECT
     s.UnidadMedida  AS Unidad,
     b.CantPendiente,
     b.CodCliente,
+    cli.Cliente_Nombre AS ClienteNombre,
     b.PrecioVenta,
     ap.Nivel1       AS Linea,
     t.Descripcion   AS TipoArticulo,
@@ -260,6 +263,7 @@ LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoRengPreparacion] prep ON prep.NroMovVenta =
 LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]          gp ON gp.Numero       = prep.CodPreparador
 LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoCabecera] cab ON cab.NroMovVenta = b.NroPedOrigen
 LEFT JOIN MAGNUS_SITD.dbo.[Ped_Usu_Arma]       uv ON cab.Vendedor    = uv.Usu_Arma_Codigo
+LEFT JOIN MAGNUS_SITD.dbo.[Clientes]           cli ON cli.CodCliente = b.CodCliente
 WHERE b.rn = 1
   -- Solo lo que sigue pendiente en la foto más nueva del rango: si un renglón se
   -- entregó a mitad del rango (no llega al último snapshot) NO es demanda viva.
@@ -313,6 +317,7 @@ SELECT
     s.UnidadMedida  AS Unidad,
     b.CantPendiente,
     b.CodCliente,
+    cli.Cliente_Nombre AS ClienteNombre,
     b.PrecioVenta,
     ap.Nivel1       AS Linea,
     t.Descripcion   AS TipoArticulo,
@@ -338,6 +343,7 @@ LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoRengPreparacion] prep ON prep.NroMovVenta =
 LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]          gp ON gp.Numero       = prep.CodPreparador
 LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoCabecera] cab ON cab.NroMovVenta = b.NroPedOrigen
 LEFT JOIN MAGNUS_SITD.dbo.[Ped_Usu_Arma]       uv ON cab.Vendedor    = uv.Usu_Arma_Codigo
+LEFT JOIN MAGNUS_SITD.dbo.[Clientes]           cli ON cli.CodCliente = b.CodCliente
 WHERE b.rn = 1
 ORDER BY PrimerDia, u.ubicacion, b.NroPedOrigen, b.NroRengOrigen
 """
@@ -434,6 +440,7 @@ def fetch_faltantes(desde=None, hasta=None, historico=False):
                 "Nombre":        nombre,
                 "CantPend":      cant,
                 "Cliente":       _safe(d.get("CodCliente")),
+                "ClienteNombre": _txt(d.get("ClienteNombre")) or None,
                 "Importe":       round(precio * cant, 2),
                 "TipoArticulo":  _txt(d.get("TipoArticulo")).replace("Fabril", "Fabrica"),
                 "Preparador":    _txt(d.get("Preparador")),

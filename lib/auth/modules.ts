@@ -7,6 +7,7 @@ export type ModuleKey =
   | "deposito"
   | "picking"
   | "compras"
+  | "ventas"
   | "finanza"
   | "rrhh"
   | "indicadores"
@@ -52,6 +53,8 @@ export const MODULES: ModuleDef[] = [
     children: [{ label: "Picker", href: "/picking/picker" }] },
   { key: "compras",     label: "Compras",     href: "/compras",     color: "bg-amber-700 hover:bg-amber-600",
     children: [{ label: "Faltantes", href: "/compras/faltantes" }] },
+  { key: "ventas",      label: "Ventas",      href: "/ventas",      color: "bg-red-700 hover:bg-red-600",
+    children: [{ label: "Faltantes", href: "/ventas/faltantes" }] },
   { key: "finanza",     label: "Finanzas",    href: "/finanza",     color: "bg-teal-700 hover:bg-teal-600" },
   { key: "rrhh",        label: "RRHH",        href: "/rrhh",        color: "bg-indigo-700 hover:bg-indigo-600",
     children: [
@@ -140,6 +143,8 @@ const ROUTE_MODULE: { prefix: string; mod: ModuleKey }[] = [
   { prefix: "/api/picking",     mod: "picking" },
   { prefix: "/compras",         mod: "compras" },
   { prefix: "/api/compras",     mod: "compras" },
+  { prefix: "/ventas",          mod: "ventas" },
+  { prefix: "/api/ventas",      mod: "ventas" },
   { prefix: "/finanza",         mod: "finanza" },
   { prefix: "/api/finanza",     mod: "finanza" },
   { prefix: "/rrhh",            mod: "rrhh" },
@@ -194,7 +199,7 @@ export const DEFAULT_SECTOR_MODULOS: Record<string, ModuleKey[]> = {
   "soporte":           ["sistema"],
   "finanzas":          ["finanza", "indicadores"],
   "comercial":         ["buscador"],
-  "ventas":            ["buscador"],
+  "ventas":            ["buscador", "ventas"],
   "gerencia":          ALL_MODULE_KEYS,
   "direccion":         ALL_MODULE_KEYS,
   "dirección":         ALL_MODULE_KEYS,
