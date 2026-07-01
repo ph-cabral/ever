@@ -50,13 +50,12 @@ export async function GET() {
     if (!fecha) return NextResponse.json({ fecha: null, rows: [] });
 
     const [existRows, ctrlRows, extraRows] = await Promise.all([
-      prisma.$queryRaw<
-        { nroPedOrigen: number; nroRengOrigen: number; existencia: boolean | null }[]
-      >`
-        SELECT "nroPedOrigen", "nroRengOrigen", existencia
-        FROM preparado.faltante_existencia
-        WHERE fecha = ${fecha}::date
-      `,
+      // faltante_existencia SÍ tiene modelo Prisma (columnas reales snake_case,
+      // mapeadas) → usar el client, no SQL crudo con comillas camelCase.
+      prisma.faltante_existencia.findMany({
+        where: { fecha: new Date(fecha) },
+        select: { nroPedOrigen: true, nroRengOrigen: true, existencia: true },
+      }),
       prisma.$queryRaw<
         {
           nroPedOrigen: number;
