@@ -16,11 +16,13 @@ export const maxDuration = 60;
 //      (primera aparición) y solo lo que sigue pendiente en la foto más nueva.
 //   2. Se filtra a lo marcado "sin existencia" (preparado.faltante_existencia,
 //      última marca por renglón).
-//   3. Se agrupa por (artículo, PrimerDia) → "faltante de cada día" sin doble
+//   3. Se agrupa por (artículo, PrimerDia) → "lo nuevo de cada día" sin doble
 //      contar (cada renglón cuenta una sola vez, en su día de aparición).
-//   4. La OC "por llegar" (Magnus, en vivo) se reparte FIFO por fecha: cubre
-//      primero el día más viejo y se va agotando. Así una misma OC no figura
-//      cubriendo varios días.
+//   4. Por artículo, "faltan" se ACUMULA día a día (no se resetea): faltan[día] =
+//      faltan[día-1] + nuevoDelDia. Se cubre contra la OC "por llegar" (Magnus,
+//      en vivo). El día que llega la OC (fechaEntrega) y cubrió con sobrante, el
+//      acumulado vuelve a 0 ese mismo día (no se arrastra crédito viejo); si NO
+//      alcanzó a cubrir, el descubierto real sigue acumulando tal cual.
 //   5. Se persiste el consumo por día en preparado.faltante_oc_consumo
 //      (best-effort: si la tabla no está creada aún, la vista igual funciona).
 // ──────────────────────────────────────────────────────────────────────────────
@@ -55,7 +57,8 @@ interface Bucket {
   Proveedor: string | null;
   fecha: string; // PrimerDia (día del faltante)
   vivo: boolean; // false = histórico ya entregado/cubierto
-  faltan: number;
+  faltan: number; // acumulado (ver punto 4 más abajo), no solo lo nuevo del día
+  nuevoDelDia: number; // lo que aportó puntualmente este día (sin acumular)
   importe: number;
   renglones: number;
   pedidos: Set<number>;
@@ -213,6 +216,7 @@ export async function GET(req: NextRequest) {
         fecha: dia,
         vivo,
         faltan: 0,
+        nuevoDelDia: 0,
         importe: 0,
         renglones: 0,
         pedidos: new Set<number>(),
@@ -227,6 +231,7 @@ export async function GET(req: NextRequest) {
       buckets.set(k, b);
     }
     b.faltan += it.CantPend || 0;
+    b.nuevoDelDia += it.CantPend || 0;
     b.importe += it.Importe || 0;
     b.renglones += 1;
     b.pedidos.add(it.NroPedOrigen);
@@ -235,7 +240,23 @@ export async function GET(req: NextRequest) {
       b.Linea = it.Linea;
   }
 
-  // 4) por artículo: repartir la OC FIFO por fecha (día más viejo primero)
+  // 4) por artículo: acumular el faltante día a día (no se resetea) y cubrirlo
+  //    contra la OC "por llegar" (Magnus, en vivo).
+  //
+  //    · faltan (por día) = acumulado de todo lo que sigue sin existencia hasta
+  //      ESE día (faltanAcum[día] = faltanAcum[día-1] + nuevoDelDia). Antes solo
+  //      mostraba lo nuevo de cada día y por eso "se reseteaba".
+  //    · La OC cubre ese acumulado (cubierto = min(acumulado, ocTotal)).
+  //    · El día en que llega la OC (fechaEntrega) y quedó CUBIERTA con sobrante
+  //      (descubierto = 0), ese sobrante no se arrastra: el acumulado vuelve a 0
+  //      ese mismo día y el ciclo arranca de nuevo al día siguiente. Si en cambio
+  //      NO alcanzó a cubrir (descubierto > 0), el descubierto real NO se
+  //      resetea: sigue acumulando hasta que se cubra con una OC nueva.
+  //    · Límite conocido: Magnus agrega todas las OC pendientes del artículo en
+  //      un solo total con la fecha de entrega MÁS TEMPRANA (ver
+  //      indicadores-api/compras.py:fetch_ordenes_pendientes). Si un artículo
+  //      tiene 2+ OC activas con fechas distintas, hoy se tratan como 1 solo
+  //      pool con 1 sola fecha de corte — no por-OC individual.
   const porArt = new Map<string, Bucket[]>();
   for (const b of buckets.values()) {
     const arr = porArt.get(b.CodArticulo) ?? [];
@@ -247,7 +268,8 @@ export async function GET(req: NextRequest) {
     arr.sort((a, c) => (a.fecha < c.fecha ? -1 : a.fecha > c.fecha ? 1 : 0));
     const oc = ocMap.get(cod);
     const ocTotal = oc?.PorLlegar ?? 0;
-    let supply = ocTotal;
+    const fechaEntrega = oc?.FechaEntrega ?? null;
+    let acumulado = 0;
     let imp = 0;
     for (const b of arr) {
       imp += b.importe;
@@ -259,13 +281,24 @@ export async function GET(req: NextRequest) {
         b.estado = "entregado";
         continue;
       }
-      const cub = Math.min(Math.max(supply, 0), b.faltan);
+      acumulado += b.nuevoDelDia;
+      let cub = Math.min(Math.max(ocTotal, 0), acumulado);
+      let desc = Math.max(acumulado - ocTotal, 0);
+
+      // Llega la OC hoy y cubrió con sobrante → se descarta el crédito, no sigue
+      // a favor para el próximo ciclo. Si no alcanzó, el descubierto queda como está.
+      if (fechaEntrega && b.fecha === fechaEntrega && desc <= 0) {
+        acumulado = 0;
+        cub = 0;
+        desc = 0;
+      }
+
+      b.faltan = r2(acumulado); // acumulado (ya reseteado arriba si correspondía)
       b.cubierto = cub;
-      supply -= cub;
-      b.descubierto = Math.max(b.faltan - cub, 0);
+      b.descubierto = desc;
       b.ocTotal = ocTotal;
       if (oc) {
-        b.fechaEntrega = oc.FechaEntrega ?? null;
+        b.fechaEntrega = fechaEntrega;
         b.importacion = !!oc.Importacion;
         b.ocs = oc.NroOCs ?? [];
         if (!b.Proveedor && oc.Proveedor) b.Proveedor = oc.Proveedor;
@@ -294,7 +327,8 @@ export async function GET(req: NextRequest) {
         Proveedor: b.Proveedor,
         fecha: b.fecha,
         vivo: b.vivo,
-        faltan: r2(b.faltan),
+        faltan: r2(b.faltan), // acumulado hasta este día (ver punto 4)
+        nuevoDelDia: r2(b.nuevoDelDia),
         cubierto: r2(b.cubierto),
         descubierto: r2(b.descubierto),
         importe: r2(b.importe),

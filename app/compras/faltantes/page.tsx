@@ -7,14 +7,16 @@ import {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/faltantes — faltantes "sin existencia" por (artículo, día) con la OC
-//   restada por día.
+//   restada, ACUMULADO día a día.
 //
 //   · Rango "Desde/Hasta": default hoy/hoy. Ampliar "Desde" hacia atrás para ver
 //     faltantes de días anteriores. Cada renglón cuenta una sola vez, en su DÍA
-//     DE APARICIÓN (no se doble-cuenta el backlog que se repite).
-//   · La OC "por llegar" (Magnus, en vivo) se reparte FIFO por fecha: cubre primero
-//     el día más viejo y se va agotando. Una misma OC ya no figura cubriendo varios
-//     días.
+//     DE APARICIÓN (no se doble-cuenta el mismo renglón dos veces).
+//   · "Faltan" es ACUMULADO por artículo: faltan[día] = faltan[día-1] + lo nuevo
+//     de ese día (no se resetea). Se cubre contra la OC "por llegar" (Magnus, en
+//     vivo). El día que llega la OC (fechaEntrega): si cubrió con sobrante, el
+//     acumulado vuelve a 0 ese día (no se arrastra crédito); si NO alcanzó, el
+//     descubierto real sigue tal cual (no se fuerza a 0).
 //   · Extraordinario/Comprar (preparado.faltante_extraordinario, por artículo+día):
 //     el botón 🚩 de cada fila marca ambos flags juntos → la fila desaparece de
 //     esta tabla. El botón "Extraordinario" del header gira la tarjeta (como una
@@ -40,7 +42,8 @@ interface Row {
   Proveedor: string | null;
   fecha: string; // día del faltante (primera aparición)
   vivo: boolean; // false = histórico ya entregado/cubierto
-  faltan: number;
+  faltan: number; // acumulado hasta este día (no se resetea día a día)
+  nuevoDelDia: number; // lo nuevo que aportó puntualmente este día
   cubierto: number;
   descubierto: number;
   importe: number;
@@ -154,8 +157,20 @@ function Tabla({ data, onMark }: { data: Row[]; onMark: (row: Row) => void }) {
                     <span className="ml-2 text-[11px] text-zinc-600">{r.pedidos} ped.</span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-100">
+                <td
+                  className="px-3 py-2 text-right tabular-nums text-zinc-100"
+                  title={
+                    r.vivo && r.nuevoDelDia !== r.faltan
+                      ? `Acumulado. Nuevo este día: ${fmtNum(r.nuevoDelDia)}`
+                      : undefined
+                  }
+                >
                   {fmtNum(r.faltan)}
+                  {r.vivo && r.nuevoDelDia > 0 && r.nuevoDelDia !== r.faltan && (
+                    <span className="ml-1 text-[11px] text-zinc-600">
+                      (+{fmtNum(r.nuevoDelDia)})
+                    </span>
+                  )}
                 </td>
                 <td
                   className={`px-3 py-2 text-right tabular-nums font-medium ${cubiertoCls[r.estado]}`}
@@ -391,15 +406,31 @@ export default function ComprasFaltantesPage() {
       .sort((a, b) => b.importe - a.importe);
   }, [visibles]);
 
+  // faltan/cubierto/descubierto de las filas "vivo" son ACUMULADOS por artículo
+  // (crecen día a día, no se resetean). Sumar todas las filas duplicaría el
+  // acumulado: para el total se toma solo la fila más nueva (última fecha) de
+  // cada artículo. Las filas "entregado" (histórico) no acumulan, se suman todas.
   const tot = useMemo(() => {
-    let faltan = 0, cubierto = 0, descubierto = 0, importe = 0;
+    let importe = 0;
     const arts = new Set<string>();
+    const ultimaVivaPorArt = new Map<string, Row>();
+    let faltan = 0, cubierto = 0, descubierto = 0;
     for (const r of visibles) {
+      importe += r.importe;
+      arts.add(r.CodArticulo);
+      if (r.vivo) {
+        const prev = ultimaVivaPorArt.get(r.CodArticulo);
+        if (!prev || r.fecha > prev.fecha) ultimaVivaPorArt.set(r.CodArticulo, r);
+      } else {
+        faltan += r.faltan;
+        cubierto += r.cubierto;
+        descubierto += r.descubierto;
+      }
+    }
+    for (const r of ultimaVivaPorArt.values()) {
       faltan += r.faltan;
       cubierto += r.cubierto;
       descubierto += r.descubierto;
-      importe += r.importe;
-      arts.add(r.CodArticulo);
     }
     return { art: arts.size, dias: visibles.length, faltan, cubierto, descubierto, importe };
   }, [visibles]);
