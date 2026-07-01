@@ -39,7 +39,8 @@ interface Mark {
   nroPedOrigen: number;
   nroRengOrigen: number;
   codArticulo: string;
-  existencia: boolean;
+  existencia: boolean | null;
+  cantidad: number | null;
 }
 // Catálogo de novedades (preparado.faltante_novedad_tipo). Llega en la 1ra carga:
 // se muestra el nombre, se guarda el id.
@@ -63,6 +64,7 @@ export default function FaltantesPage() {
   const [estados, setEstados] = useState<Record<string, Estado>>({});
   const [tipos, setTipos] = useState<Tipo[]>([]); // catálogo de novedades
   const [novedades, setNovedades] = useState<Record<string, number | null>>({}); // novedad por renglón (id)
+  const [cantidades, setCantidades] = useState<Record<string, number | null>>({}); // cantidad por renglón
   const [idx, setIdx] = useState(0); // puntero del flujo móvil
   const [undoStack, setUndoStack] = useState<
     { key: string; prev: Estado; idx: number }[]
@@ -95,6 +97,7 @@ export default function FaltantesPage() {
       }
 
       const est: Record<string, Estado> = {};
+      const cant: Record<string, number | null> = {};
       const nov: Record<string, number | null> = {};
       if (fch) {
         const [cRes, nRes] = await Promise.all([
@@ -107,10 +110,13 @@ export default function FaltantesPage() {
         ]);
         if (cRes.ok) {
           const cj = await cRes.json().catch(() => ({ rows: [] }));
-          for (const m of (cj.rows ?? []) as Mark[])
-            est[`${m.nroPedOrigen}-${m.nroRengOrigen}`] = m.existencia
-              ? "si"
-              : "no";
+          for (const m of (cj.rows ?? []) as Mark[]) {
+            const k = `${m.nroPedOrigen}-${m.nroRengOrigen}`;
+            if (typeof m.existencia === "boolean")
+              est[k] = m.existencia ? "si" : "no";
+            if (m.cantidad !== null && m.cantidad !== undefined)
+              cant[k] = m.cantidad;
+          }
         }
         if (nRes.ok) {
           const nj = await nRes.json().catch(() => ({ rows: [] }));
@@ -124,6 +130,7 @@ export default function FaltantesPage() {
       }
       setEstados(est);
       setNovedades(nov);
+      setCantidades(cant);
       setUndoStack([]);
       const first = rows.findIndex((r) => !est[keyOf(r)]);
       setIdx(first < 0 ? rows.length : first);
@@ -171,6 +178,27 @@ export default function FaltantesPage() {
           novedadId,
         }),
       }).catch(() => setError("No se pudo guardar la novedad"));
+    },
+    [fecha],
+  );
+
+  // Cantidad por renglón (número libre). Guarda al instante, independiente
+  // de si ya se marcó existencia/sin existencia.
+  const saveCantidad = useCallback(
+    (it: Item, cantidad: number | null) => {
+      const k = keyOf(it);
+      setCantidades((m) => ({ ...m, [k]: cantidad }));
+      fetch("/api/deposito/faltantes/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fecha,
+          nroPedOrigen: it.NroPedOrigen,
+          nroRengOrigen: it.NroRengOrigen,
+          codArticulo: it.CodArticulo,
+          cantidad,
+        }),
+      }).catch(() => setError("No se pudo guardar la cantidad"));
     },
     [fecha],
   );
@@ -416,6 +444,9 @@ export default function FaltantesPage() {
                       Cant.
                     </th>
                     <th className="px-3 py-2.5 font-medium">Cliente</th>
+                    <th className="px-3 py-2.5 font-medium text-right">
+                      Cantidad
+                    </th>
                     {/* <th className="px-3 py-2.5 font-medium">Vendedor</th> */}
                     {/* <th className="px-3 py-2.5 font-medium text-right">Importe</th> */}
                     {/* <th className="px-3 py-2.5 font-medium">Tipo</th> */}
@@ -434,7 +465,7 @@ export default function FaltantesPage() {
                     return (
                       <tr
                         key={keyOf(it)}
-                        className={`border-t border-zinc-800/70 mt-5${
+                        className={`border-t border-zinc-800/70 ${
                           e === "si"
                             ? "bg-green-950/30"
                             : e === "no"
@@ -463,6 +494,25 @@ export default function FaltantesPage() {
                           {fmtNum(it.CantPend)}
                         </td>
                         <td className="px-3 py-2 text-zinc-300">{it.Cliente ?? "—"}</td>
+                        <td className="px-3 py-2 text-right">
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            value={cantidades[keyOf(it)] ?? ""}
+                            onChange={(ev) => {
+                              const v = ev.target.value;
+                              setCantidades((m) => ({
+                                ...m,
+                                [keyOf(it)]: v === "" ? null : Number(v),
+                              }));
+                            }}
+                            onBlur={(ev) => {
+                              const v = ev.target.value;
+                              saveCantidad(it, v === "" ? null : Number(v));
+                            }}
+                            className="w-20 bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-right text-zinc-100 focus:border-yellow-400 outline-none"
+                          />
+                        </td>
                         {/* <td className="px-3 py-2 text-zinc-300">{it.Vendedor || "—"}</td> */}
                         {/* <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
                           ${fmtNum(it.Importe)}

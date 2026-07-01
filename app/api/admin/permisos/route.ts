@@ -8,6 +8,7 @@ import {
   isViewHref,
   viewsForModule,
   type ModuleKey,
+  type NavNode,
 } from "@/lib/auth/modules";
 
 export const dynamic = "force-dynamic";
@@ -68,13 +69,17 @@ export async function GET() {
       };
     });
 
+  // Árbol recursivo de vistas (para checkboxes anidados en el cliente).
+  const mapNodes = (nodes: NavNode[] | undefined): any[] =>
+    (nodes ?? []).map((n) => ({ label: n.label, href: n.href, children: mapNodes(n.children) }));
+
   return NextResponse.json({
     items,
-    // Catálogo completo: módulos + sus vistas, para construir el árbol en el cliente.
+    // Catálogo completo: módulos + sus vistas (árbol), para construir el árbol en el cliente.
     modulosDisponibles: MODULES.map((m) => ({
       key: m.key,
       label: m.label,
-      vistas: (m.children ?? []).map((c) => ({ label: c.label, href: c.href })),
+      vistas: mapNodes(m.children),
     })),
   });
 }

@@ -453,7 +453,8 @@ model faltante_existencia {
   nroPedOrigen   Int      @map("nro_ped_origen")
   nroRengOrigen  Int      @map("nro_reng_origen")
   codArticulo    String?  @map("cod_articulo") @db.VarChar(50)
-  existencia     Boolean
+  existencia     Boolean?
+  cantidad       Float?
   creado_en      DateTime @default(now())
   actualizado_en DateTime @updatedAt
 

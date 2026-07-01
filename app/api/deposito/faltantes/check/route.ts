@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
         nroRengOrigen: true,
         codArticulo: true,
         existencia: true,
+        cantidad: true,
       },
     });
     return NextResponse.json({ rows });
@@ -25,12 +26,16 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST → guarda/actualiza una marca. Body:
-// { fecha, nroPedOrigen, nroRengOrigen, codArticulo, existencia:boolean }
+// POST → guarda/actualiza una marca y/o la cantidad. Body:
+// { fecha, nroPedOrigen, nroRengOrigen, codArticulo, existencia?:boolean, cantidad?:number|null }
+// existencia y cantidad son independientes: se puede mandar sólo uno de los dos
+// (ej. tipear la cantidad sin haber marcado todavía en existencia/sin existencia).
 export async function POST(req: NextRequest) {
   try {
     const b = await req.json();
     const fecha = new Date(b.fecha);
+    const tieneExistencia = typeof b.existencia === "boolean";
+    const tieneCantidad = b.cantidad !== undefined;
     const row = await prisma.faltante_existencia.upsert({
       where: {
         uniq_faltante: {
@@ -40,7 +45,10 @@ export async function POST(req: NextRequest) {
         },
       },
       update: {
-        existencia: b.existencia,
+        ...(tieneExistencia ? { existencia: b.existencia } : {}),
+        ...(tieneCantidad
+          ? { cantidad: b.cantidad === null ? null : Number(b.cantidad) }
+          : {}),
         codArticulo: String(b.codArticulo ?? ""),
       },
       create: {
@@ -48,7 +56,12 @@ export async function POST(req: NextRequest) {
         nroPedOrigen: b.nroPedOrigen,
         nroRengOrigen: b.nroRengOrigen,
         codArticulo: String(b.codArticulo ?? ""),
-        existencia: b.existencia,
+        existencia: tieneExistencia ? b.existencia : null,
+        cantidad: tieneCantidad
+          ? b.cantidad === null
+            ? null
+            : Number(b.cantidad)
+          : null,
       },
     });
     return NextResponse.json({ ok: true, id: row.id });

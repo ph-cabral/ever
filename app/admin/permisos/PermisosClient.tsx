@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 
-type Vista = { label: string; href: string };
+type Vista = { label: string; href: string; children: Vista[] };
 type Mod = { key: string; label: string; vistas: Vista[] };
 type Item = {
   sector: string;
@@ -15,6 +15,10 @@ type Item = {
   ocultos: string[];
   guardado: boolean;
 };
+
+function flattenHrefs(vistas: Vista[]): string[] {
+  return vistas.flatMap((v) => [v.href, ...flattenHrefs(v.children)]);
+}
 
 export function PermisosClient() {
   const [items, setItems] = useState<Item[]>([]);
@@ -49,11 +53,11 @@ export function PermisosClient() {
     setDirty(true);
   }
 
-  // Activar/desactivar un módulo: al activar, habilita todas sus vistas.
+  // Activar/desactivar un módulo: al activar, habilita todas sus vistas (recursivo).
   function toggleMod(sector: string, m: Mod) {
     update(sector, (it) => {
       const has = it.modulos.includes(m.key);
-      const viewHrefs = m.vistas.map((v) => v.href);
+      const viewHrefs = flattenHrefs(m.vistas);
       if (has) {
         return {
           ...it,
@@ -70,13 +74,17 @@ export function PermisosClient() {
     });
   }
 
-  function toggleVista(sector: string, href: string) {
+  // Toggle de una vista y sus descendientes (marcar/desmarcar en bloque).
+  function toggleVista(sector: string, v: Vista) {
     update(sector, (it) => {
-      const has = it.vistas.includes(href);
+      const hrefs = [v.href, ...flattenHrefs(v.children)];
+      const has = it.vistas.includes(v.href);
       return {
         ...it,
-        vistas: has ? it.vistas.filter((h) => h !== href) : [...it.vistas, href],
-        ocultos: has ? it.ocultos.filter((x) => x !== href) : it.ocultos,
+        vistas: has
+          ? it.vistas.filter((h) => !hrefs.includes(h))
+          : [...new Set([...it.vistas, ...hrefs])],
+        ocultos: has ? it.ocultos.filter((x) => !hrefs.includes(x)) : it.ocultos,
       };
     });
   }
@@ -127,6 +135,28 @@ export function PermisosClient() {
       >
         {on ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
       </button>
+    );
+  }
+
+  // Fila de vista (recursiva).
+  function VistaRow({ it, v, depth }: { it: Item; v: Vista; depth: number }) {
+    const allowed = it.vistas.includes(v.href);
+    return (
+      <div className="mt-1 flex flex-col gap-1" style={{ marginLeft: depth * 20 }}>
+        <div className="flex items-center gap-2">
+          <Checkbox checked={allowed} onCheckedChange={() => toggleVista(it.sector, v)} />
+          <span className={allowed ? "text-sm" : "text-sm text-muted-foreground"}>{v.label}</span>
+          {allowed && (
+            <OjoBtn
+              on={it.ocultos.includes(v.href)}
+              onClick={() => toggleOculto(it.sector, v.href)}
+              title="Mostrar/ocultar vista en el inicio"
+            />
+          )}
+        </div>
+        {allowed &&
+          v.children.map((c) => <VistaRow key={c.href} it={it} v={c} depth={depth + 1} />)}
+      </div>
     );
   }
 
@@ -198,32 +228,10 @@ export function PermisosClient() {
                           </div>
 
                           {enabled && m.vistas.length > 0 && (
-                            <div className="ml-7 mt-1 flex flex-col gap-1">
-                              {m.vistas.map((v) => {
-                                const allowed = it.vistas.includes(v.href);
-                                return (
-                                  <div key={v.href} className="flex items-center gap-2">
-                                    <Checkbox
-                                      checked={allowed}
-                                      onCheckedChange={() => toggleVista(it.sector, v.href)}
-                                    />
-                                    <span
-                                      className={
-                                        allowed ? "text-sm" : "text-sm text-muted-foreground"
-                                      }
-                                    >
-                                      {v.label}
-                                    </span>
-                                    {allowed && (
-                                      <OjoBtn
-                                        on={it.ocultos.includes(v.href)}
-                                        onClick={() => toggleOculto(it.sector, v.href)}
-                                        title="Mostrar/ocultar vista en el inicio"
-                                      />
-                                    )}
-                                  </div>
-                                );
-                              })}
+                            <div className="ml-7">
+                              {m.vistas.map((v) => (
+                                <VistaRow key={v.href} it={it} v={v} depth={0} />
+                              ))}
                             </div>
                           )}
                         </div>

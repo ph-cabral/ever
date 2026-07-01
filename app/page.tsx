@@ -2,8 +2,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { getSession } from "@/lib/auth/session";
-import { MODULES } from "@/lib/auth/modules";
+import { MODULES, type NavNode } from "@/lib/auth/modules";
 import { LogoutButton } from "@/components/auth/LogoutButton";
+import { HomeMenu, type MenuNode } from "@/components/home/HomeMenu";
 
 export const dynamic = "force-dynamic";
 
@@ -15,17 +16,24 @@ export default async function Home() {
   const vistas = s.vistas; // cookies viejas: undefined ⇒ se muestran todas
   const ocultos = new Set(s.ocultos ?? []);
 
-  // Módulos visibles: habilitados y no marcados como ocultos.
-  const visibles = MODULES.filter(
+  // Poda recursiva del árbol: deja sólo vistas permitidas y no ocultas.
+  const filterNodes = (nodes: NavNode[] | undefined): MenuNode[] =>
+    (nodes ?? [])
+      .filter(
+        (n) =>
+          (isAdmin || !Array.isArray(vistas) || vistas.includes(n.href)) &&
+          !ocultos.has(n.href),
+      )
+      .map((n) => ({ label: n.label, href: n.href, children: filterNodes(n.children) }));
+
+  // Módulos visibles (habilitados y no ocultos) con su árbol podado.
+  const tree: MenuNode[] = MODULES.filter(
     (m) => (isAdmin || s.mods.includes(m.key)) && !ocultos.has(m.key),
   ).map((m) => ({
-    ...m,
-    // Sub-vistas visibles: permitidas (o cookie vieja sin `vistas`) y no ocultas.
-    children: (m.children ?? []).filter(
-      (c) =>
-        (isAdmin || !Array.isArray(vistas) || vistas.includes(c.href)) &&
-        !ocultos.has(c.href),
-    ),
+    label: m.label,
+    href: m.href,
+    color: m.color,
+    children: filterNodes(m.children),
   }));
 
   return (
@@ -53,38 +61,7 @@ export default async function Home() {
           EverWear · Sistema interno
         </h1>
 
-        {visibles.length === 0 ? (
-          <p className="text-white/60 text-center max-w-sm">
-            Todavía no tenés módulos habilitados. Pedile a un administrador que configure los
-            permisos de tu sector.
-          </p>
-        ) : (
-          <div className="flex flex-wrap justify-center gap-5 max-w-3xl">
-            {visibles.map((m) => (
-              <div key={m.key} className="flex w-56 flex-col items-stretch gap-2">
-                <Link
-                  href={m.href}
-                  className={`px-8 py-6 ${m.color} text-center text-white text-xl font-semibold rounded-2xl transition-colors`}
-                >
-                  {m.label}
-                </Link>
-                {m.children?.length ? (
-                  <div className="flex flex-wrap justify-center gap-1.5">
-                    {m.children.map((c) => (
-                      <Link
-                        key={c.href}
-                        href={c.href}
-                        className="rounded-lg bg-white/5 px-3 py-1 text-xs text-white/70 hover:bg-white/10 hover:text-white transition-colors"
-                      >
-                        {c.label}
-                      </Link>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        )}
+        <HomeMenu modules={tree} />
       </main>
     </div>
   );

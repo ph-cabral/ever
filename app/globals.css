@@ -152,3 +152,26 @@ body {
 
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* ===== Menú animado del inicio (drill radial) ===== */
+/* "Salto visto desde arriba": encoge un poco y luego crece con rebote. */
+@keyframes menu-jump {
+  0%   { transform: scale(1); }
+  25%  { transform: scale(0.82); }
+  60%  { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+.menu-jump { animation: menu-jump 380ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+/* "Explosión": cada botón sale desde el centro hacia su posición final. */
+@keyframes menu-burst {
+  0%   { transform: translate(0, 0) scale(0.2); opacity: 0; }
+  100% { transform: translate(var(--bx), var(--by)) scale(1); opacity: 1; }
+}
+.menu-burst { animation: menu-burst 340ms cubic-bezier(0.22, 1.2, 0.36, 1) both; }
+
+@keyframes menu-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.menu-fade-in { animation: menu-fade-in 200ms ease both; }

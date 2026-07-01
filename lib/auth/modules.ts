@@ -15,12 +15,19 @@ export type ModuleKey =
   | "buscador"
   | "sistema";
 
+// Nodo de navegación (recursivo): una vista puede tener sub-vistas.
+export interface NavNode {
+  label: string;
+  href: string;
+  children?: NavNode[];
+}
+
 export interface ModuleDef {
   key: ModuleKey;
   label: string;
   href: string;
   color: string; // clases tailwind para el botón del home
-  children?: { label: string; href: string }[]; // sub-vistas para el submenú del home
+  children?: NavNode[]; // sub-vistas (árbol) para el menú animado del home
 }
 
 export const MODULES: ModuleDef[] = [
@@ -29,7 +36,14 @@ export const MODULES: ModuleDef[] = [
   { key: "deposito",    label: "Depósito",    href: "/deposito",    color: "bg-emerald-700 hover:bg-emerald-600",
     children: [
       { label: "Evaluación", href: "/deposito/evaluacion" },
-      { label: "Faltantes",  href: "/deposito/faltantes" },
+      { label: "Faltantes",  href: "/deposito/faltantes", children: [
+        { label: "Check",       href: "/deposito/faltantes/check" },
+        { label: "Control",     href: "/deposito/faltantes/control" },
+        { label: "Duplicadas",  href: "/deposito/faltantes/duplicadas" },
+        { label: "Encargar",    href: "/deposito/faltantes/encargar" },
+        { label: "Nuevo",       href: "/deposito/faltantes/nuevo" },
+        { label: "Reposición",  href: "/deposito/faltantes/reposicion" },
+      ] },
       { label: "Pedidos",    href: "/deposito/pedidos" },
       { label: "En vivo",    href: "/deposito/vivo" },
       { label: "WMS",        href: "/deposito/wms" },
@@ -63,9 +77,15 @@ export interface ViewRef {
   href: string;
 }
 
-export const VIEWS: ViewRef[] = MODULES.flatMap((m) =>
-  (m.children ?? []).map((c) => ({ mod: m.key, label: c.label, href: c.href })),
-);
+function flattenNodes(mod: ModuleKey, nodes: NavNode[] | undefined): ViewRef[] {
+  if (!nodes) return [];
+  return nodes.flatMap((n) => [
+    { mod, label: n.label, href: n.href },
+    ...flattenNodes(mod, n.children),
+  ]);
+}
+
+export const VIEWS: ViewRef[] = MODULES.flatMap((m) => flattenNodes(m.key, m.children));
 
 export const ALL_VIEW_HREFS: string[] = VIEWS.map((v) => v.href);
 
