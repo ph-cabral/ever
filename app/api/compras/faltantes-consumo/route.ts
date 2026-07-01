@@ -164,6 +164,34 @@ export async function GET(req: NextRequest) {
     for (const [k, ex] of latest) if (ex === false) sinExistencia.add(k);
   }
 
+  // 2b) marcas extraordinario/comprar por (fecha, artículo) — best-effort: si la
+  // tabla no está creada aún (prisma/sql/faltante_extraordinario.sql sin aplicar),
+  // la vista sigue funcionando con todo en extraordinario=false.
+  const keyArtDia = (cod: string, dia: string) => `${cod}__${dia}`;
+  const extraMap = new Map<string, { extraordinario: boolean; comprar: boolean }>();
+  let extraWarn = false;
+  if (faltRows.length && desdeMarks && hastaMarks) {
+    try {
+      const extraRows = await prisma.$queryRaw<
+        { fecha: Date; codArticulo: string; extraordinario: boolean; comprar: boolean }[]
+      >`
+        SELECT fecha, "codArticulo", extraordinario, comprar
+        FROM preparado.faltante_extraordinario
+        WHERE fecha BETWEEN ${new Date(desdeMarks)} AND ${new Date(hastaMarks)}
+      `;
+      for (const e of extraRows) {
+        const dia = e.fecha.toISOString().slice(0, 10);
+        extraMap.set(keyArtDia(e.codArticulo, dia), {
+          extraordinario: !!e.extraordinario,
+          comprar: !!e.comprar,
+        });
+      }
+    } catch (e) {
+      extraWarn = true;
+      console.error("read faltante_extraordinario", e);
+    }
+  }
+
   // 3) agrupar lo "sin existencia" por (artículo, primer día)
   const buckets = new Map<string, Bucket>();
   for (const it of faltRows) {
@@ -257,25 +285,30 @@ export async function GET(req: NextRequest) {
       if (a.CodArticulo !== c.CodArticulo) return a.CodArticulo < c.CodArticulo ? -1 : 1;
       return a.fecha < c.fecha ? -1 : a.fecha > c.fecha ? 1 : 0;
     })
-    .map((b) => ({
-      CodArticulo: b.CodArticulo,
-      Nombre: b.Nombre,
-      Linea: b.Linea,
-      Proveedor: b.Proveedor,
-      fecha: b.fecha,
-      vivo: b.vivo,
-      faltan: r2(b.faltan),
-      cubierto: r2(b.cubierto),
-      descubierto: r2(b.descubierto),
-      importe: r2(b.importe),
-      renglones: b.renglones,
-      pedidos: b.pedidos.size,
-      ocTotal: r2(b.ocTotal),
-      fechaEntrega: b.fechaEntrega,
-      importacion: b.importacion,
-      ocs: b.ocs,
-      estado: b.estado,
-    }));
+    .map((b) => {
+      const mark = extraMap.get(keyArtDia(b.CodArticulo, b.fecha));
+      return {
+        CodArticulo: b.CodArticulo,
+        Nombre: b.Nombre,
+        Linea: b.Linea,
+        Proveedor: b.Proveedor,
+        fecha: b.fecha,
+        vivo: b.vivo,
+        faltan: r2(b.faltan),
+        cubierto: r2(b.cubierto),
+        descubierto: r2(b.descubierto),
+        importe: r2(b.importe),
+        renglones: b.renglones,
+        pedidos: b.pedidos.size,
+        ocTotal: r2(b.ocTotal),
+        fechaEntrega: b.fechaEntrega,
+        importacion: b.importacion,
+        ocs: b.ocs,
+        estado: b.estado,
+        extraordinario: mark?.extraordinario ?? false,
+        comprar: mark?.comprar ?? false,
+      };
+    });
 
   // 6) persistir el consumo por día (best-effort; tabla aplicada a mano por SQL)
   //    Solo demanda viva: los entregados históricos no imputan OC.
@@ -315,5 +348,6 @@ export async function GET(req: NextRequest) {
     rows: rowsOut,
     ocWarn,
     consumoWarn,
+    extraWarn,
   });
 }

@@ -2,26 +2,31 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck, CalendarRange, History, Check,
-  Layers, ChevronDown, ChevronRight,
+  Layers, ChevronDown, ChevronRight, Flag, RotateCw, ShoppingCart, Undo2,
 } from "lucide-react";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/faltantes — faltantes "sin existencia" por (artículo, día) con la OC
 //   restada por día.
 //
-//   · Default: solo el último snapshot (como antes).
-//   · Filtro "Desde": amplía el rango hacia atrás. Cada renglón cuenta una sola
-//     vez, en su DÍA DE APARICIÓN (no se doble-cuenta el backlog que se repite).
+//   · Rango "Desde/Hasta": default hoy/hoy. Ampliar "Desde" hacia atrás para ver
+//     faltantes de días anteriores. Cada renglón cuenta una sola vez, en su DÍA
+//     DE APARICIÓN (no se doble-cuenta el backlog que se repite).
 //   · La OC "por llegar" (Magnus, en vivo) se reparte FIFO por fecha: cubre primero
 //     el día más viejo y se va agotando. Una misma OC ya no figura cubriendo varios
 //     días.
+//   · Extraordinario/Comprar (preparado.faltante_extraordinario, por artículo+día):
+//     el botón 🚩 de cada fila marca ambos flags juntos → la fila desaparece de
+//     esta tabla. El botón "Extraordinario" del header gira la tarjeta (como una
+//     carta) y muestra el reverso con lo marcado extraordinario Y comprar, con
+//     columnas propias para desmarcar cada flag por separado.
 //
 //   Color de fila por estado del DÍA:
 //     · verde  → la OC que llegó a ese día cubre el faltante (descubierto = 0)
 //     · rojo   → la OC alcanzó en parte (0 < cubierto < faltan)
 //     · neutro → a ese día no le llegó OC (cubierto = 0)
 //
-//   Solo lectura. La marca de existencia se hace en /deposito/faltantes/control.
+//   La marca de existencia se hace en /deposito/faltantes/control.
 //   El consumo por día se guarda solo (preparado.faltante_oc_consumo).
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -46,6 +51,8 @@ interface Row {
   importacion: boolean;
   ocs: string[];
   estado: Estado;
+  extraordinario: boolean;
+  comprar: boolean;
 }
 
 const fmtNum = (n: number) =>
@@ -54,6 +61,15 @@ const fmtAr = (s: string | null) => {
   const m = /(\d{4})-(\d{2})-(\d{2})/.exec(s || "");
   return m ? `${m[3]}/${m[2]}/${m[1]}` : s || "—";
 };
+// Fecha local (no UTC) en formato YYYY-MM-DD, para que "hoy" coincida con el
+// día calendario del usuario y no se corra por huso horario.
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+// Clave de fila: (artículo, día) — misma granularidad que usa el backend para
+// marcar extraordinario/comprar (preparado.faltante_extraordinario).
+const rowKey = (r: Pick<Row, "CodArticulo" | "fecha">) => `${r.CodArticulo}__${r.fecha}`;
 
 const FILTROS: { key: Filtro; label: string }[] = [
   { key: "todos", label: "Todos" },
@@ -77,12 +93,13 @@ const cubiertoCls: Record<Estado, string> = {
 };
 
 // Tabla reutilizable: una sola tabla o el cuerpo de cada acordeón por proveedor.
-function Tabla({ data }: { data: Row[] }) {
+function Tabla({ data, onMark }: { data: Row[]; onMark: (row: Row) => void }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-zinc-800">
       <table className="w-full text-sm">
         <thead className="bg-[#1A1A1A] text-zinc-400">
           <tr className="text-left">
+            <th className="px-3 py-2 font-medium"></th>
             <th className="px-3 py-2 font-medium">Cód.</th>
             <th className="px-3 py-2 font-medium">Artículo</th>
             <th className="px-3 py-2 font-medium">Día</th>
@@ -100,11 +117,20 @@ function Tabla({ data }: { data: Row[] }) {
             const nuevoArt = !prev || prev.CodArticulo !== r.CodArticulo;
             return (
               <tr
-                key={`${r.CodArticulo}-${r.fecha}`}
+                key={rowKey(r)}
                 className={`transition-colors ${rowCls[r.estado]} ${
                   nuevoArt ? "border-t-2 border-zinc-700/80" : "border-t border-zinc-800/50"
                 }`}
               >
+                <td className="px-2 py-2">
+                  <button
+                    onClick={() => onMark(r)}
+                    title="Marcar como pedido extraordinario (pasa al reverso)"
+                    className="text-zinc-600 hover:text-red-400 transition-colors p-1"
+                  >
+                    <Flag size={14} />
+                  </button>
+                </td>
                 <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">
                   {nuevoArt ? r.CodArticulo : ""}
                 </td>
@@ -172,14 +198,98 @@ function Tabla({ data }: { data: Row[] }) {
   );
 }
 
+// Reverso de la tarjeta: pedidos marcados extraordinario Y comprar. Desmarcar
+// cualquiera de las 2 columnas saca la fila de acá:
+//   · Desmarcar "Extraordinario" → vuelve a la tabla principal.
+//   · Desmarcar "Comprar" (dejando extraordinario=true) → queda oculta de las
+//     DOS tablas (archivada). Es intencional: "extraordinario pero no se va a
+//     comprar" no debería seguir ensuciando ninguna vista.
+function TablaExtraordinarios({
+  data,
+  onToggle,
+}: {
+  data: Row[];
+  onToggle: (row: Row, patch: Partial<Pick<Row, "extraordinario" | "comprar">>) => void;
+}) {
+  if (data.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-28 gap-3 text-center rounded-xl border border-zinc-800">
+        <ShoppingCart size={40} className="text-zinc-700" />
+        <p className="text-zinc-400 font-medium">
+          No hay pedidos extraordinarios marcados para comprar.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-x-auto rounded-xl border border-red-900/50">
+      <table className="w-full text-sm">
+        <thead className="bg-[#1A1A1A] text-zinc-400">
+          <tr className="text-left">
+            <th className="px-3 py-2 font-medium">Cód.</th>
+            <th className="px-3 py-2 font-medium">Artículo</th>
+            <th className="px-3 py-2 font-medium">Día</th>
+            <th className="px-3 py-2 font-medium text-right">Faltan</th>
+            <th className="px-3 py-2 font-medium text-right">Falta OC</th>
+            <th className="px-3 py-2 font-medium">Proveedor</th>
+            <th className="px-3 py-2 font-medium text-right">Importe</th>
+            <th className="px-3 py-2 font-medium text-center">Extraordinario</th>
+            <th className="px-3 py-2 font-medium text-center">Comprar</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((r) => (
+            <tr
+              key={rowKey(r)}
+              className="border-t border-zinc-800/50 bg-red-500/[0.06] hover:bg-red-500/[0.1] transition-colors"
+            >
+              <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{r.CodArticulo}</td>
+              <td className="px-3 py-2 text-zinc-100">{r.Nombre}</td>
+              <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">{fmtAr(r.fecha)}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-zinc-100">{fmtNum(r.faltan)}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-red-300/90">
+                {r.descubierto > 0 ? fmtNum(r.descubierto) : "—"}
+              </td>
+              <td className="px-3 py-2 text-zinc-400">{r.Proveedor || "—"}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-zinc-300">${fmtNum(r.importe)}</td>
+              <td className="px-3 py-2 text-center">
+                <button
+                  onClick={() => onToggle(r, { extraordinario: false })}
+                  title="Desmarcar extraordinario (vuelve a la tabla principal)"
+                  className="inline-flex items-center gap-1 text-red-400 hover:text-zinc-400 transition-colors px-2 py-1 rounded border border-red-400/40"
+                >
+                  <Undo2 size={13} />
+                </button>
+              </td>
+              <td className="px-3 py-2 text-center">
+                <button
+                  onClick={() => onToggle(r, { comprar: !r.comprar })}
+                  title={r.comprar ? "Desmarcar comprar" : "Marcar comprar"}
+                  className={`inline-flex items-center justify-center w-6 h-6 rounded border transition-colors ${
+                    r.comprar
+                      ? "bg-emerald-500/20 border-emerald-400 text-emerald-300"
+                      : "border-zinc-600 text-transparent hover:border-zinc-400"
+                  }`}
+                >
+                  <Check size={13} />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function ComprasFaltantesPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [fecha, setFecha] = useState<string | null>(null);
   const [desdeResp, setDesdeResp] = useState<string | null>(null);
   const [hastaResp, setHastaResp] = useState<string | null>(null);
-  const [desde, setDesde] = useState(""); // "" = solo último día
+  const [desde, setDesde] = useState(todayISO); // rango de búsqueda, default hoy
+  const [hasta, setHasta] = useState(todayISO);
   const [historico, setHistorico] = useState(false); // ver también ya entregados
-  const [fechasDisp, setFechasDisp] = useState<string[]>([]);
   const [filtro, setFiltro] = useState<Filtro>("todos");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -187,14 +297,7 @@ export default function ComprasFaltantesPage() {
   const [ocDesde, setOcDesde] = useState<string | null>(null);
   const [agrupar, setAgrupar] = useState(false); // agrupar por proveedor
   const [cerrados, setCerrados] = useState<Record<string, boolean>>({}); // acordeones colapsados
-
-  // Snapshots disponibles (para el selector "Desde")
-  useEffect(() => {
-    fetch("/api/deposito/faltantes/fechas", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { fechas: [] }))
-      .then((j) => setFechasDisp(j.fechas ?? []))
-      .catch(() => setFechasDisp([]));
-  }, []);
+  const [flipped, setFlipped] = useState(false); // girar la tarjeta → ver extraordinarios
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -202,10 +305,10 @@ export default function ComprasFaltantesPage() {
     setOcWarn(false);
     try {
       const p = new URLSearchParams();
-      if (desde) p.set("desde", desde);
+      p.set("desde", desde);
+      p.set("hasta", hasta);
       if (historico) p.set("historico", "1");
-      const qs = p.toString() ? `?${p}` : "";
-      const res = await fetch(`/api/compras/faltantes-consumo${qs}`, { cache: "no-store" });
+      const res = await fetch(`/api/compras/faltantes-consumo?${p}`, { cache: "no-store" });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       setRows(j.rows ?? []);
@@ -220,23 +323,59 @@ export default function ComprasFaltantesPage() {
     } finally {
       setLoading(false);
     }
-  }, [desde, historico]);
+  }, [desde, hasta, historico]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  // Marcar/desmarcar extraordinario y/o comprar. Optimista: actualiza la UI ya,
+  // y si el POST falla revierte + avisa. Clave: (CodArticulo, fecha).
+  const toggleMark = useCallback(
+    async (row: Row, patch: Partial<Pick<Row, "extraordinario" | "comprar">>) => {
+      const prev = { extraordinario: row.extraordinario, comprar: row.comprar };
+      const next = { ...prev, ...patch };
+      setRows((rs) => rs.map((r) => (rowKey(r) === rowKey(row) ? { ...r, ...next } : r)));
+      try {
+        const res = await fetch("/api/compras/faltantes-extraordinario", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fecha: row.fecha, codArticulo: row.CodArticulo, ...next }),
+        });
+        if (!res.ok) throw new Error();
+      } catch {
+        setRows((rs) => rs.map((r) => (rowKey(r) === rowKey(row) ? { ...r, ...prev } : r)));
+        setError("No se pudo guardar la marca de extraordinario/comprar");
+      }
+    },
+    [],
+  );
+  // Botón por fila: marca extraordinario Y comprar juntos (así aparece directo
+  // en el reverso, sin quedar en un estado intermedio invisible en ambos lados).
+  const marcarExtraordinario = useCallback(
+    (row: Row) => toggleMark(row, { extraordinario: true, comprar: true }),
+    [toggleMark],
+  );
+
+  // Tabla principal: nunca muestra lo marcado extraordinario.
+  const frontRows = useMemo(() => rows.filter((r) => !r.extraordinario), [rows]);
+  // Reverso de la tarjeta: extraordinario Y comprar (ambas marcadas).
+  const backRows = useMemo(
+    () => rows.filter((r) => r.extraordinario && r.comprar),
+    [rows],
+  );
+
   const conteo = useMemo(() => {
-    const c = { todos: rows.length, completo: 0, incompleto: 0, sin_orden: 0, entregado: 0 };
-    for (const r of rows) c[r.estado]++;
+    const c = { todos: frontRows.length, completo: 0, incompleto: 0, sin_orden: 0, entregado: 0 };
+    for (const r of frontRows) c[r.estado]++;
     return c as Record<Filtro, number>;
-  }, [rows]);
+  }, [frontRows]);
 
   // Orden por valor (importe desc), siempre.
   const visibles = useMemo(() => {
-    const base = filtro === "todos" ? rows : rows.filter((r) => r.estado === filtro);
+    const base = filtro === "todos" ? frontRows : frontRows.filter((r) => r.estado === filtro);
     return [...base].sort((a, b) => b.importe - a.importe);
-  }, [rows, filtro]);
+  }, [frontRows, filtro]);
 
   // Grupos por proveedor, cada grupo ordenado por importe y los grupos por importe total.
   const grupos = useMemo(() => {
@@ -270,7 +409,7 @@ export default function ComprasFaltantesPage() {
       ? `${fmtAr(desdeResp)} – ${fmtAr(hastaResp)}`
       : fmtAr(fecha);
 
-  const hay = rows.length > 0;
+  const hay = frontRows.length > 0;
 
   return (
     <div className="min-h-screen bg-[#111111] text-white">
@@ -322,25 +461,31 @@ export default function ComprasFaltantesPage() {
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <div className="flex items-center gap-2 mr-2">
             <CalendarRange size={15} className="text-zinc-500" />
-            <select
+            <input
+              type="date"
               value={desde}
+              max={hasta}
               onChange={(e) => setDesde(e.target.value)}
               className="bg-[#1A1A1A] border border-zinc-700 rounded-md px-2 py-1.5 text-xs text-zinc-200 focus:border-yellow-400 outline-none"
-            >
-              <option value="">Solo último día</option>
-              {fechasDisp.map((f, i) => (
-                <option key={f} value={f}>
-                  Desde {fmtAr(f)}
-                  {i === 0 ? " (último)" : ""}
-                </option>
-              ))}
-            </select>
-            {desde && (
+            />
+            <span className="text-zinc-600 text-xs">a</span>
+            <input
+              type="date"
+              value={hasta}
+              min={desde}
+              onChange={(e) => setHasta(e.target.value)}
+              className="bg-[#1A1A1A] border border-zinc-700 rounded-md px-2 py-1.5 text-xs text-zinc-200 focus:border-yellow-400 outline-none"
+            />
+            {(desde !== todayISO() || hasta !== todayISO()) && (
               <button
-                onClick={() => setDesde("")}
+                onClick={() => {
+                  const t = todayISO();
+                  setDesde(t);
+                  setHasta(t);
+                }}
                 className="text-xs text-zinc-500 hover:text-yellow-400 underline underline-offset-2"
               >
-                volver al último día
+                hoy
               </button>
             )}
           </div>
@@ -371,6 +516,27 @@ export default function ComprasFaltantesPage() {
             <Layers size={14} />
             Agrupar por proveedor
             {agrupar && <Check size={13} />}
+          </button>
+
+          <button
+            onClick={() => setFlipped((v) => !v)}
+            title="Ver pedidos extraordinarios marcados para comprar (gira la tabla)"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+              backRows.length > 0
+                ? "bg-red-500/15 border-red-400 text-red-300"
+                : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+            }`}
+          >
+            <RotateCw
+              size={14}
+              className={`transition-transform duration-500 ${flipped ? "rotate-180" : ""}`}
+            />
+            Extraordinario
+            {backRows.length > 0 && (
+              <span className="bg-red-500 text-white rounded-full px-1.5 text-[10px] leading-4 tabular-nums">
+                {backRows.length}
+              </span>
+            )}
           </button>
 
           {ocDesde && (
@@ -411,62 +577,87 @@ export default function ComprasFaltantesPage() {
           )}
         </div>
 
-        {!hay ? (
-          <div className="flex flex-col items-center justify-center py-28 gap-3 text-center">
-            {loading ? (
-              <Loader2 size={40} className="text-yellow-400 animate-spin" />
-            ) : (
-              <PackageCheck size={44} className="text-zinc-700" />
-            )}
-            <p className="text-zinc-400 font-medium">
-              {loading
-                ? "Consultando la base…"
-                : "No hay faltantes marcados como “sin existencia”."}
-            </p>
-            {!loading && (
-              <a
-                href="/deposito/faltantes/control"
-                className="text-sm text-yellow-400/80 hover:text-yellow-400 underline underline-offset-4"
-              >
-                Ir al control de faltantes →
-              </a>
-            )}
-          </div>
-        ) : agrupar ? (
-          <div className="flex flex-col gap-3">
-            {grupos.map(({ prov, rs, importe }) => {
-              const abierto = !cerrados[prov];
-              return (
-                <div key={prov} className="rounded-xl border border-zinc-800 overflow-hidden">
-                  <button
-                    onClick={() => setCerrados((c) => ({ ...c, [prov]: abierto }))}
-                    className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-[#1A1A1A] hover:bg-[#202020] transition-colors text-left"
-                  >
-                    <span className="flex items-center gap-2 min-w-0">
-                      {abierto ? (
-                        <ChevronDown size={15} className="text-zinc-500 shrink-0" />
-                      ) : (
-                        <ChevronRight size={15} className="text-zinc-500 shrink-0" />
-                      )}
-                      <span className="font-medium text-zinc-100 truncate">{prov}</span>
-                      <span className="text-[11px] text-zinc-500 shrink-0">{rs.length} reng.</span>
-                    </span>
-                    <span className="text-sm tabular-nums text-zinc-300 shrink-0">
-                      ${fmtNum(importe)}
-                    </span>
-                  </button>
-                  {abierto && (
-                    <div className="border-t border-zinc-800">
-                      <Tabla data={rs} />
-                    </div>
+        {/* Tarjeta que gira: frente = tabla normal, reverso = extraordinarios */}
+        <div className="[perspective:2000px]">
+          <div
+            className={`relative grid transition-transform duration-700 ease-in-out [transform-style:preserve-3d] ${
+              flipped ? "[transform:rotateY(180deg)]" : ""
+            }`}
+          >
+            {/* Frente */}
+            <div
+              className={`col-start-1 row-start-1 [backface-visibility:hidden] ${
+                flipped ? "pointer-events-none" : ""
+              }`}
+            >
+              {!hay ? (
+                <div className="flex flex-col items-center justify-center py-28 gap-3 text-center">
+                  {loading ? (
+                    <Loader2 size={40} className="text-yellow-400 animate-spin" />
+                  ) : (
+                    <PackageCheck size={44} className="text-zinc-700" />
+                  )}
+                  <p className="text-zinc-400 font-medium">
+                    {loading
+                      ? "Consultando la base…"
+                      : "No hay faltantes marcados como “sin existencia”."}
+                  </p>
+                  {!loading && (
+                    <a
+                      href="/deposito/faltantes/control"
+                      className="text-sm text-yellow-400/80 hover:text-yellow-400 underline underline-offset-4"
+                    >
+                      Ir al control de faltantes →
+                    </a>
                   )}
                 </div>
-              );
-            })}
+              ) : agrupar ? (
+                <div className="flex flex-col gap-3">
+                  {grupos.map(({ prov, rs, importe }) => {
+                    const abierto = !cerrados[prov];
+                    return (
+                      <div key={prov} className="rounded-xl border border-zinc-800 overflow-hidden">
+                        <button
+                          onClick={() => setCerrados((c) => ({ ...c, [prov]: abierto }))}
+                          className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-[#1A1A1A] hover:bg-[#202020] transition-colors text-left"
+                        >
+                          <span className="flex items-center gap-2 min-w-0">
+                            {abierto ? (
+                              <ChevronDown size={15} className="text-zinc-500 shrink-0" />
+                            ) : (
+                              <ChevronRight size={15} className="text-zinc-500 shrink-0" />
+                            )}
+                            <span className="font-medium text-zinc-100 truncate">{prov}</span>
+                            <span className="text-[11px] text-zinc-500 shrink-0">{rs.length} reng.</span>
+                          </span>
+                          <span className="text-sm tabular-nums text-zinc-300 shrink-0">
+                            ${fmtNum(importe)}
+                          </span>
+                        </button>
+                        {abierto && (
+                          <div className="border-t border-zinc-800">
+                            <Tabla data={rs} onMark={marcarExtraordinario} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <Tabla data={visibles} onMark={marcarExtraordinario} />
+              )}
+            </div>
+
+            {/* Reverso */}
+            <div
+              className={`col-start-1 row-start-1 [backface-visibility:hidden] [transform:rotateY(180deg)] ${
+                !flipped ? "pointer-events-none" : ""
+              }`}
+            >
+              <TablaExtraordinarios data={backRows} onToggle={toggleMark} />
+            </div>
           </div>
-        ) : (
-          <Tabla data={visibles} />
-        )}
+        </div>
       </main>
     </div>
   );
