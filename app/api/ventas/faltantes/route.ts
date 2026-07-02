@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const API_URL = process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
+const API_URL =
+  process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/ventas/faltantes — agrega server-side todo lo que necesita
@@ -77,15 +78,20 @@ export async function GET() {
           vendido: boolean | null;
         }[]
       >`
-        SELECT "nroPedOrigen", "nroRengOrigen",
-               to_char("fechaArribo", 'YYYY-MM-DD') AS "fechaArribo",
-               "clienteQuiere",
-               "vendido"
-        FROM preparado.faltante_control
-        WHERE fecha = ${fecha}::date
-      `,
+   SELECT DISTINCT ON ("nroPedOrigen", "nroRengOrigen")
+          "nroPedOrigen", "nroRengOrigen",
+          to_char("fechaArribo", 'YYYY-MM-DD') AS "fechaArribo",
+          "clienteQuiere",
+          "vendido"
+   FROM preparado.faltante_control
+   ORDER BY "nroPedOrigen", "nroRengOrigen", "updatedAt" DESC      `,
       prisma.$queryRaw<
-        { codArticulo: string; extraordinario: boolean; comprar: boolean | null; fecha: Date }[]
+        {
+          codArticulo: string;
+          extraordinario: boolean;
+          comprar: boolean | null;
+          fecha: Date;
+        }[]
       >`
         SELECT DISTINCT ON ("codArticulo") "codArticulo", extraordinario, comprar, fecha
         FROM preparado.faltante_extraordinario
@@ -104,11 +110,16 @@ export async function GET() {
 
     const sin = new Set<string>();
     for (const r of existRows)
-      if (r.existencia === false) sin.add(`${r.nroPedOrigen}-${r.nroRengOrigen}`);
+      if (r.existencia === false)
+        sin.add(`${r.nroPedOrigen}-${r.nroRengOrigen}`);
 
     const ctrl = new Map<
       string,
-      { fechaArribo: string | null; clienteQuiere: boolean | null; vendido: boolean | null }
+      {
+        fechaArribo: string | null;
+        clienteQuiere: boolean | null;
+        vendido: boolean | null;
+      }
     >();
     for (const r of ctrlRows)
       ctrl.set(`${r.nroPedOrigen}-${r.nroRengOrigen}`, {
@@ -120,13 +131,18 @@ export async function GET() {
     // Artículos con remito de ingreso x OC ya concretado (Tabla 2, requisito 3).
     const ingresados = new Set<string>(
       (ingresosJson?.rows ?? [])
-        .map((r: { CodArticulo?: string }) => String(r.CodArticulo ?? "").trim())
+        .map((r: { CodArticulo?: string }) =>
+          String(r.CodArticulo ?? "").trim(),
+        )
         .filter(Boolean),
     );
 
     // Por artículo: solo mientras comprar esté sin decidir (null). Apenas
     // compras/ventas lo resuelve (true o false), deja de calificar acá.
-    const extraMap = new Map<string, { comprar: boolean | null; fecha: string }>();
+    const extraMap = new Map<
+      string,
+      { comprar: boolean | null; fecha: string }
+    >();
     for (const r of extraRows)
       if (r.extraordinario)
         extraMap.set(r.codArticulo, {
@@ -148,7 +164,11 @@ export async function GET() {
           extraordinarioFecha: extra?.fecha ?? null,
         };
       })
-      .filter((r) => r.clienteQuiere === null && (r.fechaArribo !== null || r.extraordinario));
+      .filter(
+        (r) =>
+          r.clienteQuiere === null &&
+          (r.fechaArribo !== null || r.extraordinario),
+      );
 
     // Tabla 2: sin existencia + clienteQuiere=true + fechaArribo + ya llegó por
     // remito (CodArticulo en /compras/ingresos) + vendido aún sin decidir.
