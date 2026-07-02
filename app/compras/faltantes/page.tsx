@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck, CalendarRange, History, Check,
-  Layers, ChevronDown, ChevronRight, Flag, RotateCw, ShoppingCart, Undo2,
+  Layers, ChevronDown, ChevronRight, Flag, RotateCw, ShoppingCart, Undo2, CalendarCheck,
 } from "lucide-react";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -30,7 +30,13 @@ import {
 //     · rojo   → la OC alcanzó en parte (0 < cubierto < faltan)
 //     · neutro → a ese día no le llegó OC (cubierto = 0)
 //
-//   La marca de existencia se hace en /deposito/faltantes/control.
+//   Fecha de arribo (columna "Arribo"): se carga acá a nivel artículo+día y se
+//   aplica (fan-out) a todos los renglones de ese bucket en
+//   preparado.faltante_control (/api/compras/faltantes-arribo). Por defecto
+//   un bucket con TODOS sus renglones ya con fecha de arribo se oculta de esta
+//   vista — botón "Ver con arribo" para corroborar los que ya se pasaron.
+//   Reemplaza a /deposito/faltantes/control (ahora redirige acá). "¿Cliente lo
+//   quiere?" se sigue decidiendo en /ventas/faltantes, sin cambios.
 //   El consumo por día se guarda solo (preparado.faltante_oc_consumo).
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -58,6 +64,8 @@ interface Row {
   estado: Estado;
   extraordinario: boolean;
   comprar: boolean | null; // null = pendiente (decide ventas/faltantes)
+  fechaArribo: string | null; // más vieja cargada entre los renglones del bucket
+  tieneArribo: boolean; // true = TODOS los renglones del bucket ya la tienen
 }
 
 const fmtNum = (n: number) =>
@@ -98,7 +106,15 @@ const cubiertoCls: Record<Estado, string> = {
 };
 
 // Tabla reutilizable: una sola tabla o el cuerpo de cada acordeón por proveedor.
-function Tabla({ data, onMark }: { data: Row[]; onMark: (row: Row) => void }) {
+function Tabla({
+  data,
+  onMark,
+  onArribo,
+}: {
+  data: Row[];
+  onMark: (row: Row) => void;
+  onArribo: (row: Row, fechaArribo: string | null) => void;
+}) {
   return (
     <div className="overflow-x-auto rounded-xl border border-zinc-800">
       <table className="w-full text-sm">
@@ -114,6 +130,7 @@ function Tabla({ data, onMark }: { data: Row[]; onMark: (row: Row) => void }) {
             <th className="px-3 py-2 font-medium">Entrega</th>
             <th className="px-3 py-2 font-medium">Proveedor</th>
             <th className="px-3 py-2 font-medium text-right">Importe</th>
+            <th className="px-3 py-2 font-medium">Arribo</th>
           </tr>
         </thead>
         <tbody>
@@ -205,6 +222,23 @@ function Tabla({ data, onMark }: { data: Row[]; onMark: (row: Row) => void }) {
                 <td className="px-3 py-2 text-zinc-400">{nuevoArt ? r.Proveedor || "—" : ""}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
                   ${fmtNum(r.importe)}
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    type="date"
+                    value={r.fechaArribo ?? ""}
+                    onChange={(e) => onArribo(r, e.target.value || null)}
+                    title={
+                      r.tieneArribo
+                        ? "Ya cargada — se oculta salvo 'Ver con arribo'"
+                        : "Cargar fecha de arribo (aplica a todos los renglones del artículo ese día)"
+                    }
+                    className={`bg-[#1f1f1f] border rounded-md px-2 py-1 text-xs outline-none [color-scheme:dark] ${
+                      r.tieneArribo
+                        ? "border-emerald-600 text-emerald-300"
+                        : "border-zinc-700 text-zinc-200 focus:border-yellow-400"
+                    }`}
+                  />
                 </td>
               </tr>
             );
@@ -307,6 +341,7 @@ export default function ComprasFaltantesPage() {
   const [desde, setDesde] = useState(todayISO); // rango de búsqueda, default hoy
   const [hasta, setHasta] = useState(todayISO);
   const [historico, setHistorico] = useState(false); // ver también ya entregados
+  const [conArribo, setConArribo] = useState(false); // ver también los que ya tienen fecha de arribo
   const [filtro, setFiltro] = useState<Filtro>("todos");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -325,6 +360,7 @@ export default function ComprasFaltantesPage() {
       p.set("desde", desde);
       p.set("hasta", hasta);
       if (historico) p.set("historico", "1");
+      if (conArribo) p.set("conArribo", "1");
       const res = await fetch(`/api/compras/faltantes-consumo?${p}`, { cache: "no-store" });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
@@ -340,7 +376,7 @@ export default function ComprasFaltantesPage() {
     } finally {
       setLoading(false);
     }
-  }, [desde, hasta, historico]);
+  }, [desde, hasta, historico, conArribo]);
 
   useEffect(() => {
     load();
@@ -374,6 +410,30 @@ export default function ComprasFaltantesPage() {
     (row: Row) => toggleMark(row, { extraordinario: true, comprar: null }),
     [toggleMark],
   );
+
+  // Carga/borra la fecha de arribo del bucket (artículo+día). El fan-out por
+  // renglón a preparado.faltante_control lo hace el backend (ver
+  // /api/compras/faltantes-arribo) — acá solo se actualiza optimista y se
+  // revierte si falla. Reemplaza a /deposito/faltantes/control.
+  const guardarArribo = useCallback(async (row: Row, fechaArribo: string | null) => {
+    const prev = { fechaArribo: row.fechaArribo, tieneArribo: row.tieneArribo };
+    setRows((rs) =>
+      rs.map((r) =>
+        rowKey(r) === rowKey(row) ? { ...r, fechaArribo, tieneArribo: !!fechaArribo } : r,
+      ),
+    );
+    try {
+      const res = await fetch("/api/compras/faltantes-arribo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fecha: row.fecha, codArticulo: row.CodArticulo, fechaArribo }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setRows((rs) => rs.map((r) => (rowKey(r) === rowKey(row) ? { ...r, ...prev } : r)));
+      setError("No se pudo guardar la fecha de arribo");
+    }
+  }, []);
 
   // Tabla principal: nunca muestra lo marcado extraordinario.
   const frontRows = useMemo(() => rows.filter((r) => !r.extraordinario), [rows]);
@@ -542,6 +602,20 @@ export default function ComprasFaltantesPage() {
           </button>
 
           <button
+            onClick={() => setConArribo((v) => !v)}
+            title="Mostrar también los artículos que ya tienen fecha de arribo cargada (para corroborar los que se pasaron)"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+              conArribo
+                ? "bg-emerald-500/15 border-emerald-400 text-emerald-300"
+                : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+            }`}
+          >
+            <CalendarCheck size={14} />
+            Ver con arribo
+            {conArribo && <Check size={13} />}
+          </button>
+
+          <button
             onClick={() => setAgrupar((v) => !v)}
             title="Agrupar los faltantes por proveedor en tablas con acordeón"
             className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
@@ -639,14 +713,6 @@ export default function ComprasFaltantesPage() {
                       ? "Consultando la base…"
                       : "No hay faltantes marcados como “sin existencia”."}
                   </p>
-                  {!loading && (
-                    <a
-                      href="/deposito/faltantes/control"
-                      className="text-sm text-yellow-400/80 hover:text-yellow-400 underline underline-offset-4"
-                    >
-                      Ir al control de faltantes →
-                    </a>
-                  )}
                 </div>
               ) : agrupar ? (
                 <div className="flex flex-col gap-3">
@@ -673,7 +739,7 @@ export default function ComprasFaltantesPage() {
                         </button>
                         {abierto && (
                           <div className="border-t border-zinc-800">
-                            <Tabla data={rs} onMark={marcarExtraordinario} />
+                            <Tabla data={rs} onMark={marcarExtraordinario} onArribo={guardarArribo} />
                           </div>
                         )}
                       </div>
@@ -681,7 +747,7 @@ export default function ComprasFaltantesPage() {
                   })}
                 </div>
               ) : (
-                <Tabla data={visibles} onMark={marcarExtraordinario} />
+                <Tabla data={visibles} onMark={marcarExtraordinario} onArribo={guardarArribo} />
               )}
             </div>
 

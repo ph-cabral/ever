@@ -16,3 +16,11 @@ CREATE TABLE IF NOT EXISTS preparado.faltante_control (
 );
 
 CREATE INDEX IF NOT EXISTS idx_faltante_control_fecha ON preparado.faltante_control (fecha);
+
+-- vendido: acción de VENTAS en /ventas/faltantes ("Tabla 2" — renglones con
+-- clienteQuiere=true + fechaArribo, ya confirmados por remito de ingreso).
+-- NULL = sin decidir (aparece en Tabla 2); true/false = decidido (sale de la
+-- tabla en cualquiera de los dos casos). Aplicar a mano en Postgres.
+ALTER TABLE preparado.faltante_control
+  ADD COLUMN IF NOT EXISTS "vendido" BOOLEAN,
+  ADD COLUMN IF NOT EXISTS "vendidoAt" TIMESTAMPTZ;

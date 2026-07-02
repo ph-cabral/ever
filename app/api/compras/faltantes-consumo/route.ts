@@ -61,6 +61,8 @@ interface Bucket {
   nuevoDelDia: number; // lo que aportó puntualmente este día (sin acumular)
   importe: number;
   renglones: number;
+  renglonesConArribo: number; // cuántos de los renglones ya tienen fechaArribo
+  fechaArriboMin: string | null; // más vieja cargada entre esos renglones
   pedidos: Set<number>;
   cubierto: number;
   descubierto: number;
@@ -94,6 +96,10 @@ export async function GET(req: NextRequest) {
   const hastaParam = sp.get("hasta");
   // histórico: incluye también los faltantes ya entregados/cubiertos del rango
   const historico = sp.get("historico") === "1" || sp.get("historico") === "true";
+  // conArribo: por defecto oculta los buckets que ya tienen fecha de arribo
+  // cargada (preparado.faltante_control) en TODOS sus renglones; con
+  // conArribo=1 los vuelve a mostrar (para corroborar los que ya se pasaron).
+  const conArribo = sp.get("conArribo") === "1" || sp.get("conArribo") === "true";
   // corte del cruce (faltantes y OC se anclan acá). Override opcional ?ocDesde=
   const ocDesde = sp.get("ocDesde") || OC_DESDE_DEFAULT;
   // La OC del 26 cubre faltantes del 25 en adelante → corte de faltantes = 1 día antes.
@@ -167,6 +173,30 @@ export async function GET(req: NextRequest) {
     for (const [k, ex] of latest) if (ex === false) sinExistencia.add(k);
   }
 
+  // 2c) fechaArribo por renglón (preparado.faltante_control), para poder
+  // ocultar de esta vista lo que ya está cargado (ver conArribo). Igual que
+  // sinExistencia: se toma sobre el rango, sin exigir que la columna "fecha"
+  // de faltante_control coincida con el PrimerDia del bucket — ver nota en
+  // lib/faltantesArribo.ts sobre por qué esa columna es otra fecha.
+  const arriboPorRenglon = new Map<string, string | null>();
+  if (faltRows.length && desdeMarks && hastaMarks) {
+    try {
+      const ctrlRows = await prisma.$queryRaw<
+        { nroPedOrigen: number; nroRengOrigen: number; fechaArribo: string | null }[]
+      >`
+        SELECT "nroPedOrigen", "nroRengOrigen",
+               to_char("fechaArribo", 'YYYY-MM-DD') AS "fechaArribo"
+        FROM preparado.faltante_control
+        WHERE fecha BETWEEN ${new Date(desdeMarks)} AND ${new Date(hastaMarks)}
+        ORDER BY "updatedAt" ASC
+      `;
+      for (const r of ctrlRows)
+        if (r.fechaArribo) arriboPorRenglon.set(keyLine(r.nroPedOrigen, r.nroRengOrigen), r.fechaArribo);
+    } catch (e) {
+      console.error("read faltante_control (arribo)", e);
+    }
+  }
+
   // 2b) marcas extraordinario/comprar por (fecha, artículo) — best-effort: si la
   // tabla no está creada aún (prisma/sql/faltante_extraordinario.sql sin aplicar),
   // la vista sigue funcionando con todo en extraordinario=false.
@@ -219,6 +249,8 @@ export async function GET(req: NextRequest) {
         nuevoDelDia: 0,
         importe: 0,
         renglones: 0,
+        renglonesConArribo: 0,
+        fechaArriboMin: null,
         pedidos: new Set<number>(),
         cubierto: 0,
         descubierto: 0,
@@ -235,6 +267,11 @@ export async function GET(req: NextRequest) {
     b.importe += it.Importe || 0;
     b.renglones += 1;
     b.pedidos.add(it.NroPedOrigen);
+    const arribo = arriboPorRenglon.get(keyLine(it.NroPedOrigen, it.NroRengOrigen));
+    if (arribo) {
+      b.renglonesConArribo += 1;
+      if (!b.fechaArriboMin || arribo < b.fechaArriboMin) b.fechaArriboMin = arribo;
+    }
     if (!b.Proveedor && it.Proveedor) b.Proveedor = it.Proveedor;
     if ((b.Linea === null || b.Linea === "") && it.Linea != null && it.Linea !== "")
       b.Linea = it.Linea;
@@ -309,8 +346,13 @@ export async function GET(req: NextRequest) {
     artImporte.set(cod, imp);
   }
 
-  // 5) ordenar: artículos por importe total desc, días asc dentro del artículo
+  // 5) ordenar: artículos por importe total desc, días asc dentro del artículo.
+  //    conArribo=0 (default): oculta buckets con TODOS sus renglones ya con
+  //    fecha de arribo cargada (preparado.faltante_control) — ya están
+  //    resueltos para compras. conArribo=1 los vuelve a mostrar, para
+  //    corroborar los que ya se pasaron.
   const rowsOut = [...buckets.values()]
+    .filter((b) => conArribo || b.renglones === 0 || b.renglonesConArribo < b.renglones)
     .sort((a, c) => {
       const ia = artImporte.get(a.CodArticulo) ?? 0;
       const ic = artImporte.get(c.CodArticulo) ?? 0;
@@ -341,6 +383,8 @@ export async function GET(req: NextRequest) {
         estado: b.estado,
         extraordinario: mark?.extraordinario ?? false,
         comprar: mark?.comprar ?? null,
+        fechaArribo: b.fechaArriboMin,
+        tieneArribo: b.renglones > 0 && b.renglonesConArribo === b.renglones,
       };
     });
 
@@ -378,6 +422,7 @@ export async function GET(req: NextRequest) {
     ocDesde,
     faltDesde,
     historico,
+    conArribo,
     total: rowsOut.length,
     rows: rowsOut,
     ocWarn,

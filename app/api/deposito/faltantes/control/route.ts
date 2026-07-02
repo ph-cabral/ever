@@ -19,12 +19,14 @@ export async function GET(req: NextRequest) {
         nroRengOrigen: number;
         fechaArribo: string | null;
         clienteQuiere: boolean | null;
+        vendido: boolean | null;
       }[]
     >`
       SELECT "nroPedOrigen",
              "nroRengOrigen",
              to_char("fechaArribo", 'YYYY-MM-DD') AS "fechaArribo",
-             "clienteQuiere"
+             "clienteQuiere",
+             "vendido"
       FROM preparado.faltante_control
       WHERE fecha = ${fecha}::date
     `;
@@ -34,6 +36,7 @@ export async function GET(req: NextRequest) {
         nroRengOrigen: Number(r.nroRengOrigen),
         fechaArribo: r.fechaArribo,
         clienteQuiere: r.clienteQuiere,
+        vendido: r.vendido,
       })),
     });
   } catch (error) {
@@ -46,7 +49,11 @@ export async function GET(req: NextRequest) {
 }
 
 // POST → guarda/actualiza un renglón. Body:
-// { fecha, nroPedOrigen, nroRengOrigen, codArticulo, fechaArribo:string|null, clienteQuiere:boolean|null }
+// { fecha, nroPedOrigen, nroRengOrigen, codArticulo, fechaArribo:string|null,
+//   clienteQuiere:boolean|null, vendido?:boolean|null }
+// `vendido` es OPCIONAL: si no viene en el body, NO se toca (lo usan
+// /deposito/faltantes/control y /ventas/faltantes "Tabla 1" sin saber de él;
+// solo /ventas/faltantes "Tabla 2" lo manda).
 export async function POST(req: NextRequest) {
   try {
     const b = await req.json();
@@ -59,6 +66,9 @@ export async function POST(req: NextRequest) {
       b.clienteQuiere === null || b.clienteQuiere === undefined
         ? null
         : Boolean(b.clienteQuiere);
+    const vendidoProvisto = Object.prototype.hasOwnProperty.call(b, "vendido");
+    const vendido: boolean | null =
+      b.vendido === null || b.vendido === undefined ? null : Boolean(b.vendido);
 
     if (!fecha || !nroPedOrigen || !nroRengOrigen)
       return NextResponse.json(
@@ -67,13 +77,18 @@ export async function POST(req: NextRequest) {
       );
 
     await prisma.$executeRaw`
-      INSERT INTO preparado.faltante_control
-        (fecha, "nroPedOrigen", "nroRengOrigen", "codArticulo", "fechaArribo", "clienteQuiere", "updatedAt")
-      VALUES (${fecha}::date, ${nroPedOrigen}, ${nroRengOrigen}, ${codArticulo}, ${fechaArribo}::date, ${clienteQuiere}::boolean, now())
+      INSERT INTO preparado.faltante_control AS fc
+        (fecha, "nroPedOrigen", "nroRengOrigen", "codArticulo", "fechaArribo", "clienteQuiere", "vendido", "vendidoAt", "updatedAt")
+      VALUES (
+        ${fecha}::date, ${nroPedOrigen}, ${nroRengOrigen}, ${codArticulo}, ${fechaArribo}::date, ${clienteQuiere}::boolean,
+        ${vendido}::boolean, ${vendidoProvisto ? new Date() : null}, now()
+      )
       ON CONFLICT (fecha, "nroPedOrigen", "nroRengOrigen") DO UPDATE SET
         "fechaArribo"   = EXCLUDED."fechaArribo",
         "clienteQuiere" = EXCLUDED."clienteQuiere",
         "codArticulo"   = EXCLUDED."codArticulo",
+        "vendido"       = CASE WHEN ${vendidoProvisto} THEN EXCLUDED."vendido" ELSE fc."vendido" END,
+        "vendidoAt"     = CASE WHEN ${vendidoProvisto} THEN now() ELSE fc."vendidoAt" END,
         "updatedAt"     = now()
     `;
     return NextResponse.json({ ok: true });

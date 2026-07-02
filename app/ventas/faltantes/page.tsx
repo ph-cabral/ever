@@ -25,9 +25,11 @@ import {
 //   Toda la agregación (existencia + fecha de arribo + extraordinario de
 //   compras) se resuelve en el backend: GET /api/ventas/faltantes.
 //
-//   TODO (a definir después, "segunda vista" del diagrama): tabla aparte con
-//   los que ya tienen fecha de arribo Y tuvieron ingreso de stock. No entra
-//   en este alcance.
+//   "Tabla 2" (listos para vender): renglones que YA tienen fechaArribo,
+//   clienteQuiere=true, Y aparecen en un remito de ingreso x OC (Magnus,
+//   indicadores-api /compras/ingresos) — o sea, ya llegaron físicamente.
+//   Acción (✓ vendido / ✗ no vendido): cualquiera de las dos respuestas
+//   guarda "vendido" en faltante_control y retira la fila (optimista).
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface Item {
@@ -45,9 +47,27 @@ interface Item {
   extraordinarioFecha: string | null; // clave (fecha, CodArticulo) para decidir comprar
 }
 
+// Forma propia (no extiende Item): "listos" no trae extraordinario/extraordinarioFecha.
+interface ItemListo {
+  NroPedOrigen: number;
+  NroRengOrigen: number;
+  CodArticulo: string;
+  Nombre: string;
+  CantPend: number;
+  Cliente: number | string | null;
+  ClienteNombre: string | null;
+  Importe: number;
+  Fecha: string | null;
+  fechaArribo: string | null;
+  clienteQuiere: boolean | null;
+  vendido: boolean | null;
+  yaIngreso: boolean; // CodArticulo con remito de ingreso x OC ya concretado
+}
+
 const keyOf = (it: { NroPedOrigen: number; NroRengOrigen: number }) =>
   `${it.NroPedOrigen}-${it.NroRengOrigen}`;
-const grupoKeyOf = (it: Item) => `${it.Cliente}__${it.NroPedOrigen}`;
+const grupoKeyOf = (it: { Cliente: number | string | null; NroPedOrigen: number }) =>
+  `${it.Cliente}__${it.NroPedOrigen}`;
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(n || 0);
 const fmtAr = (s: string | null) => {
@@ -87,8 +107,41 @@ function agrupar(items: Item[]): Grupo[] {
   return [...m.values()].sort((a, b) => b.pedido - a.pedido);
 }
 
+interface GrupoListo {
+  key: string;
+  cliente: number | string | null;
+  clienteNombre: string | null;
+  pedido: number;
+  items: ItemListo[];
+  importe: number;
+}
+
+function agruparListos(items: ItemListo[]): GrupoListo[] {
+  const m = new Map<string, GrupoListo>();
+  for (const it of items) {
+    const k = grupoKeyOf(it);
+    let g = m.get(k);
+    if (!g) {
+      g = {
+        key: k,
+        cliente: it.Cliente,
+        clienteNombre: it.ClienteNombre,
+        pedido: it.NroPedOrigen,
+        items: [],
+        importe: 0,
+      };
+      m.set(k, g);
+    }
+    g.items.push(it);
+    g.importe += it.Importe || 0;
+    if (!g.clienteNombre && it.ClienteNombre) g.clienteNombre = it.ClienteNombre;
+  }
+  return [...m.values()].sort((a, b) => b.pedido - a.pedido);
+}
+
 export default function VentasFaltantesPage() {
   const [items, setItems] = useState<Item[]>([]);
+  const [listos, setListos] = useState<ItemListo[]>([]);
   const [fecha, setFecha] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,10 +155,12 @@ export default function VentasFaltantesPage() {
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       setItems(j.rows ?? []);
+      setListos(j.listos ?? []);
       setFecha(j.fecha ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al cargar");
       setItems([]);
+      setListos([]);
     } finally {
       setLoading(false);
     }
@@ -172,18 +227,49 @@ export default function VentasFaltantesPage() {
     [fecha, load],
   );
 
+  // Tabla 2: guarda "vendido" en preparado.faltante_control (mismo endpoint,
+  // ahora acepta ese campo opcional — ver route.ts) y retira la fila, sea cual
+  // sea la respuesta (vendido o no vendido). Optimista, igual que decidir().
+  const decidirVendido = useCallback(
+    (it: ItemListo, vendido: boolean) => {
+      setListos((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
+      fetch("/api/deposito/faltantes/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fecha,
+          nroPedOrigen: it.NroPedOrigen,
+          nroRengOrigen: it.NroRengOrigen,
+          codArticulo: it.CodArticulo,
+          fechaArribo: it.fechaArribo,
+          clienteQuiere: it.clienteQuiere,
+          vendido,
+        }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error();
+        })
+        .catch(() => {
+          setError("No se pudo guardar la venta");
+          load();
+        });
+    },
+    [fecha, load],
+  );
+
   const extraordinarios = useMemo(() => items.filter((it) => it.extraordinario), [items]);
   const normales = useMemo(() => items.filter((it) => !it.extraordinario), [items]);
   const gruposExtra = useMemo(() => agrupar(extraordinarios), [extraordinarios]);
   const gruposNormales = useMemo(() => agrupar(normales), [normales]);
+  const gruposListos = useMemo(() => agruparListos(listos), [listos]);
 
   const tot = useMemo(() => {
     let importe = 0;
     for (const it of items) importe += it.Importe || 0;
-    return { art: items.length, extra: extraordinarios.length, importe };
-  }, [items, extraordinarios]);
+    return { art: items.length, extra: extraordinarios.length, listos: listos.length, importe };
+  }, [items, extraordinarios, listos]);
 
-  const hay = items.length > 0;
+  const hay = items.length > 0 || listos.length > 0;
 
   return (
     <div className="min-h-screen bg-[#111111] text-white">
@@ -216,6 +302,7 @@ export default function VentasFaltantesPage() {
           <span className="hidden sm:inline text-zinc-400">
             <b className="text-yellow-400">{tot.art}</b> art. ·{" "}
             <b className="text-red-400">{tot.extra}</b> extraord. ·{" "}
+            <b className="text-green-400">{tot.listos}</b> listos ·{" "}
             <b className="text-zinc-200">${fmtNum(tot.importe)}</b>
           </span>
           <button
@@ -275,6 +362,17 @@ export default function VentasFaltantesPage() {
               <section className="flex flex-col gap-3">
                 {gruposNormales.map((g) => (
                   <GrupoCard key={g.key} g={g} onDecidir={decidir} />
+                ))}
+              </section>
+            )}
+
+            {gruposListos.length > 0 && (
+              <section className="flex flex-col gap-3">
+                <h2 className="flex items-center gap-2 text-sm font-medium text-green-400 uppercase tracking-wide">
+                  <PackageCheck size={16} /> Listos para vender (ya ingresaron)
+                </h2>
+                {gruposListos.map((g) => (
+                  <GrupoCardListo key={g.key} g={g} onDecidir={decidirVendido} />
                 ))}
               </section>
             )}
@@ -345,6 +443,74 @@ function GrupoCard({
                     <button
                       onClick={() => onDecidir(it, false)}
                       title="No lo quiere"
+                      className="p-1.5 rounded-md border border-zinc-700 text-red-500 hover:bg-red-600/20"
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function GrupoCardListo({
+  g, onDecidir,
+}: {
+  g: GrupoListo;
+  onDecidir: (it: ItemListo, vendido: boolean) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-green-900/50 bg-green-500/[0.05] overflow-hidden">
+      <div className="flex items-center gap-4 px-4 py-3 border-b bg-green-500/[0.08] border-green-900/40">
+        <div className="flex-1 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1 min-w-0">
+          <Campo label="Cliente" value={g.clienteNombre || g.cliente || "—"} />
+          <Campo label="Factura / Pedido" value={<span className="font-mono text-yellow-400">{g.pedido}</span>} />
+          <Campo label="Artículos" value={`${g.items.length}`} />
+        </div>
+        <div className="shrink-0 text-right hidden sm:block">
+          <div className="text-sm tabular-nums text-zinc-200">${fmtNum(g.importe)}</div>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-[#141414] text-zinc-400">
+            <tr className="text-left">
+              <th className="px-3 py-2 font-medium">Cód.</th>
+              <th className="px-3 py-2 font-medium">Artículo</th>
+              <th className="px-3 py-2 font-medium text-right">Cant. faltante</th>
+              <th className="px-3 py-2 font-medium">Fecha faltante</th>
+              <th className="px-3 py-2 font-medium">Fecha arribo</th>
+              <th className="px-3 py-2 font-medium text-right">Importe</th>
+              <th className="px-3 py-2 font-medium text-center">Vendido</th>
+            </tr>
+          </thead>
+          <tbody>
+            {g.items.map((it) => (
+              <tr key={keyOf(it)} className="border-t border-zinc-800/70">
+                <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{it.CodArticulo}</td>
+                <td className="px-3 py-2 text-zinc-100">{it.Nombre}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{fmtNum(it.CantPend)}</td>
+                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">{fmtAr(it.Fecha)}</td>
+                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">{fmtAr(it.fechaArribo)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-zinc-300">${fmtNum(it.Importe)}</td>
+                <td className="px-3 py-2">
+                  <div className="flex items-center justify-center gap-1.5">
+                    <button
+                      onClick={() => onDecidir(it, true)}
+                      title="Vendido"
+                      className="p-1.5 rounded-md border border-zinc-700 text-green-500 hover:bg-green-600/20"
+                    >
+                      <Check size={15} />
+                    </button>
+                    <button
+                      onClick={() => onDecidir(it, false)}
+                      title="No vendido"
                       className="p-1.5 rounded-md border border-zinc-700 text-red-500 hover:bg-red-600/20"
                     >
                       <X size={15} />

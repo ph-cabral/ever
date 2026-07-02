@@ -1,0 +1,69 @@
+import { prisma } from "@/lib/prisma";
+
+const API_URL = process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
+
+interface FaltRow {
+  NroPedOrigen: number;
+  NroRengOrigen: number;
+  CodArticulo: string;
+  Fecha: string | null; // snapshot más nuevo del renglón (= día "rolling" que usan
+  //   /deposito/faltantes, faltante_existencia y faltante_control como clave).
+  PrimerDia: string | null; // primera aparición dentro del rango consultado.
+}
+
+export interface BucketRenglon {
+  nroPedOrigen: number;
+  nroRengOrigen: number;
+  // OJO: NO es el PrimerDia del bucket de /compras/faltantes. Es el "Fecha"
+  // (snapshot vigente) del renglón — la misma fecha con la que ya se guarda
+  // faltante_existencia / faltante_control desde /deposito/faltantes y que
+  // /ventas/faltantes usa para buscar (WHERE fecha = <fecha del día>). Si acá
+  // se usara el PrimerDia histórico del bucket, ventas nunca encontraría la
+  // fila (ventas siempre consulta con la fecha "de hoy", no con la histórica).
+  fecha: string;
+}
+
+const keyLine = (p: number, r: number) => `${p}-${r}`;
+
+// Renglones "sin existencia" que componen el bucket (CodArticulo, PrimerDia)
+// que muestra /compras/faltantes (agrupado por artículo+día). Se usa para el
+// fan-out de fechaArribo: la fecha se carga a nivel artículo+día en esa
+// pantalla, pero preparado.faltante_control sigue siendo por renglón (mismo
+// esquema que ya usa /ventas/faltantes — no se tocó).
+export async function resolveBucketRenglones(
+  codArticulo: string,
+  primerDia: string,
+): Promise<BucketRenglon[]> {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const hasta = hoy > primerDia ? hoy : primerDia;
+  const qs = new URLSearchParams({ desde: primerDia, hasta });
+
+  const res = await fetch(`${API_URL}/deposito/faltantes?${qs}`, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(45000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} /deposito/faltantes`);
+  const json = await res.json();
+
+  const rows: FaltRow[] = (json.rows ?? []).filter(
+    (r: FaltRow) => r.CodArticulo === codArticulo && (r.PrimerDia ?? r.Fecha) === primerDia,
+  );
+  if (!rows.length) return [];
+
+  // última marca de existencia por renglón (mismo patrón que faltantes-consumo).
+  const marks = await prisma.faltante_existencia.findMany({
+    where: { fecha: { gte: new Date(primerDia), lte: new Date(hasta) } },
+    select: { nroPedOrigen: true, nroRengOrigen: true, existencia: true, fecha: true },
+    orderBy: { fecha: "asc" },
+  });
+  const latest = new Map<string, boolean>();
+  for (const m of marks) latest.set(keyLine(m.nroPedOrigen, m.nroRengOrigen), m.existencia);
+
+  return rows
+    .filter((r) => latest.get(keyLine(r.NroPedOrigen, r.NroRengOrigen)) === false)
+    .map((r) => ({
+      nroPedOrigen: r.NroPedOrigen,
+      nroRengOrigen: r.NroRengOrigen,
+      fecha: r.Fecha ?? primerDia,
+    }));
+}

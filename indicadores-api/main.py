@@ -12,6 +12,7 @@ from deposito import (
     fetch_articulo_ubicaciones, fetch_articulos_multi_ubicacion,
 )
 from compras import fetch_ordenes_pendientes
+from ingresos import fetch_remitos_ingreso
 from finanza import fetch_facturacion_dia, fetch_descubrir
 from clientes import fetch_cliente
 from datetime import date, datetime, timedelta
@@ -283,6 +284,18 @@ def compras_ordenes_pendientes(desde: str | None = Query(default=None)):
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
+# ── Compras: remitos de ingreso x OC ya concretados (lo que "ya llegó") ───────
+@app.get("/compras/ingresos")
+def compras_ingresos(desde: str | None = Query(default=None)):
+    """Remitos de ingreso x OC ya concretados (Com_RemitoCabecera/Renglones),
+    agregado por artículo. Fuente verificada: ingresos_extraccion.py.
+    Para /ventas/faltantes ("Tabla 2"): confirma que un renglón con fecha de
+    arribo YA llegó físicamente. `desde`='YYYY-MM-DD' (default: hoy-60)."""
+    try:
+        return fetch_remitos_ingreso(desde)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
 # ── Finanza: facturación del día (calculadora) ───────────────────────────────
 @app.get("/finanza/facturacion-dia")
 def finanza_facturacion_dia(fecha: str | None = Query(default=None)):
@@ -448,3 +461,11 @@ def deposito_resumen_ot(desde: str | None = None, hasta: str | None = None):
         return deposito.fetch_resumen_ot(desde, hasta)
     except Exception as e:
         raise HTTPException(503, f"SQL Error: {str(e)}")
+    
+    
+@app.get("/deposito/ubicacion-columnas/diag")
+def diag_ubicacion_cols():
+    conn = get_connection("WMS")
+    cur = conn.cursor()
+    cur.execute("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='UbicacionDetalle'")
+    return {"columnas": [r[0] for r in cur.fetchall()]}
