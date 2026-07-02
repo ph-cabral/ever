@@ -36,9 +36,8 @@ export const MODULES: ModuleDef[] = [
   { key: "deposito",    label: "Depósito",    href: "/deposito",    color: "bg-emerald-700 hover:bg-emerald-600",
     children: [
       { label: "Evaluación", href: "/deposito/evaluacion" },
-      { label: "Faltantes",  href: "/deposito/faltantes", children: [
-        { label: "Duplicadas",  href: "/deposito/faltantes/duplicadas" },
-      ] },
+      { label: "Faltantes",  href: "/deposito/faltantes" },
+      { label: "Duplicadas", href: "/deposito/faltantes/duplicadas" },
       { label: "Pedidos",    href: "/deposito/pedidos" },
       { label: "WMS",        href: "/deposito/wms" },
     ] },
