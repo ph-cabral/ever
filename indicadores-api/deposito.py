@@ -1398,6 +1398,90 @@ def fetch_articulo_ubicaciones(articulo: str):
         conn.close()
 
 
+# ── Stock total del depósito 1 (central), paginado (/deposito/stock) ──────────
+# Suma UbicacionDetalleCantidad por artículo, filtrado a UbicacionDepositoId=1.
+# Confirmado por diag /deposito/ubicacion-columnas/diag (2026-07-02): UbicacionDetalle
+# SÍ trae columna de depósito (no estaba entre las 3 UBIC_COL_* originales).
+UBIC_COL_DEP     = "UbicacionDepositoId"
+DEPOSITO_CENTRAL = 1
+
+
+def fetch_stock_deposito1(page: int = 1, page_size: int = 50, q: str | None = None):
+    """Stock del depósito 1 paginado: código, nombre, stock (suma de todas sus
+    ubicaciones), proveedor. No trae los 4mil+ artículos de un tiro:
+    Paso 1 (WMS)      -> agrupa por artículo y pagina con OFFSET/FETCH.
+    Paso 2 (EVERWEAR) -> enriquece SOLO los códigos de esa página (nombre/proveedor)."""
+    page = max(1, page)
+    page_size = max(1, min(page_size, 200))
+    offset = (page - 1) * page_size
+
+    filtro_q = f"AND LTRIM(RTRIM(u.{UBIC_COL_ART})) LIKE ?" if q else ""
+    sql_stock = f"""
+        SELECT LTRIM(RTRIM(u.{UBIC_COL_ART})) AS Cod,
+               SUM(u.{UBIC_COL_CANT})          AS Stock
+        FROM dbo.{UBIC_TABLA} u
+        WHERE u.{UBIC_COL_DEP} = ?
+          {filtro_q}
+        GROUP BY LTRIM(RTRIM(u.{UBIC_COL_ART}))
+        HAVING SUM(u.{UBIC_COL_CANT}) > 0
+        ORDER BY Cod
+        OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
+    """
+    params: list = [DEPOSITO_CENTRAL]
+    if q:
+        params.append(f"%{q}%")
+    params += [offset, page_size]
+
+    conn = get_connection("WMS")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(sql_stock, params)
+        stock = {_txt(c): float(_safe(s) or 0) for c, s in cur.fetchall()}
+    finally:
+        conn.close()
+
+    rows: list[dict] = []
+    if stock:
+        codigos = list(stock.keys())
+        ph = ",".join("?" for _ in codigos)
+        sql_info = f"""
+            SELECT LTRIM(RTRIM(s.CodArticulo)) AS Cod,
+                   ap.Detalle      AS Patron,
+                   s.DetalleMedida AS Medida,
+                   s.UnidadMedida  AS Unidad,
+                   pr.RazonSocial  AS Proveedor
+            FROM EVERWEAR.dbo.[StkFer_Articulos]  s
+            LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloPatron
+            LEFT JOIN EVERWEAR.dbo.[Com_Proveedores]   pr ON pr.CodProveed     = s.CodProveedHabitual
+            WHERE LTRIM(RTRIM(s.CodArticulo)) IN ({ph})
+        """
+        conn = get_connection("EVERWEAR")
+        try:
+            cur = conn.cursor()
+            cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+            cur.execute(sql_info, codigos)
+            info: dict = {}
+            for cod, patron, medida, unidad, prov in cur.fetchall():
+                cod = _txt(cod)
+                nombre = " ".join(" ".join(_txt(x) for x in (patron, medida, unidad)).split())
+                info[cod] = {"Nombre": nombre, "Proveedor": _txt(prov)}
+        finally:
+            conn.close()
+
+        for cod in codigos:
+            meta = info.get(cod, {})
+            rows.append({
+                "CodArticulo": cod,
+                "Nombre": meta.get("Nombre", ""),
+                "Stock": stock[cod],
+                "Proveedor": meta.get("Proveedor", ""),
+            })
+        rows.sort(key=lambda r: r["CodArticulo"])
+
+    return {"page": page, "page_size": page_size, "rows": rows}
+
+
 # ── Artículos con MÁS DE UNA ubicación asignada (para depurar el maestro) ──────
 # Ubicación asignada = numérica con guión (rack); excluye depósito (letras) y
 # carro (0002, sin guión). El que tenga >1 hay que dejarle una sola.

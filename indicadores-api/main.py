@@ -10,6 +10,7 @@ from deposito import (
     fetch_ot_diferencias,
     fetch_wms_estados, fetch_wms_estados_diag,
     fetch_articulo_ubicaciones, fetch_articulos_multi_ubicacion,
+    fetch_stock_deposito1,
 )
 from compras import fetch_ordenes_pendientes
 from ingresos import fetch_remitos_ingreso
@@ -232,6 +233,18 @@ def deposito_articulos_multi_ubicacion():
     """Artículos con más de una ubicación asignada (rack), para depurar el maestro."""
     try:
         return fetch_articulos_multi_ubicacion()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/stock")
+def deposito_stock(
+    page: int = Query(default=1),
+    page_size: int = Query(default=50),
+    q: str | None = Query(default=None),
+):
+    """Stock del depósito 1 (central), paginado: código, nombre, stock, proveedor."""
+    try:
+        return fetch_stock_deposito1(page, page_size, q)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
