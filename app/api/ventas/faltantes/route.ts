@@ -65,9 +65,13 @@ export async function GET() {
     const [existRows, ctrlRows, extraRows, ingresosJson] = await Promise.all([
       // faltante_existencia SÍ tiene modelo Prisma (columnas reales snake_case,
       // mapeadas) → usar el client, no SQL crudo con comillas camelCase.
+      // NO exact-match por fecha: la marca puede haberse escrito con la fecha
+      // rolling del renglón (no necesariamente "hoy") — se toma la más nueva
+      // por renglón, igual patrón que ctrlRows más abajo.
       prisma.faltante_existencia.findMany({
-        where: { fecha: new Date(fecha) },
-        select: { nroPedOrigen: true, nroRengOrigen: true, existencia: true },
+        where: { fecha: { lte: new Date(fecha) } },
+        select: { nroPedOrigen: true, nroRengOrigen: true, existencia: true, fecha: true },
+        orderBy: { fecha: "asc" },
       }),
       prisma.$queryRaw<
         {
@@ -109,10 +113,13 @@ export async function GET() {
         .catch(() => ({ rows: [] })),
     ]);
 
-    const sin = new Set<string>();
+    // Última marca de existencia por renglón (existRows viene asc por fecha,
+    // sin exact-match — ver comentario arriba).
+    const existLatest = new Map<string, boolean | null>();
     for (const r of existRows)
-      if (r.existencia === false)
-        sin.add(`${r.nroPedOrigen}-${r.nroRengOrigen}`);
+      existLatest.set(`${r.nroPedOrigen}-${r.nroRengOrigen}`, r.existencia);
+    const sin = new Set<string>();
+    for (const [k, ex] of existLatest) if (ex === false) sin.add(k);
 
     const ctrl = new Map<
       string,
