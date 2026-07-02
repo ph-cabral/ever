@@ -7,6 +7,7 @@ from utils import construir_timestamps, calcular_tiempos, COLUMNAS_TIEMPO
 from deposito import (
     fetch_wms, fetch_tiempo, fetch_ingresados, fetch_faltantes,
     fetch_faltantes_fechas, fetch_vivo, fetch_faltantes_ot, fetch_faltantes_ot_diag,
+    fetch_ot_diferencias,
     fetch_wms_estados, fetch_wms_estados_diag,
     fetch_articulo_ubicaciones, fetch_articulos_multi_ubicacion,
 )
@@ -254,6 +255,19 @@ def deposito_faltantes_ot_diag():
     y los estados de pedido presentes (para ajustar PATRONES_DESCARTADO)."""
     try:
         return fetch_faltantes_ot_diag()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/ot-diferencias")
+def deposito_ot_diferencias(
+    desde: str | None = Query(default=None),
+    hasta: str | None = Query(default=None),
+):
+    """Renglones de OT Picking Cumplidas (WMS) con cantidad pedida != cumplida.
+    Fuente NUEVA de /deposito/faltantes (reemplaza Ven_PedRenPendientes de Magnus).
+    Sin params → último día Cumplido antes de hoy."""
+    try:
+        return fetch_ot_diferencias(desde, hasta)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

@@ -657,6 +657,114 @@ def fetch_faltantes_ot(desde=None, hasta=None):
     }
 
 
+# ── Renglones OT Cumplidas con diferencia pedida≠cumplida (/deposito/ot-diferencias)
+# Picking, OT.OTEstado=2 (Cumplido), OTItemTipo=1 (Recolectar). Por rango de fecha
+# de ejecución. Si 'hasta' no se pasa o cae hoy/futuro, se resuelve al último día
+# con OT Cumplida ANTES de hoy (salta findes/feriados sin registro). Fuente NUEVA
+# de /deposito/faltantes (reemplaza el snapshot Ven_PedRenPendientes de Magnus).
+SQL_OT_ULTIMO_DIA_CUMPLIDO = """
+SELECT MAX(CONVERT(date, OT.OTFechaHoraEjecucion)) AS f
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+WHERE Codot.CodotProcesoNegocio = 4
+  AND OT.OTEstado = 2
+  AND OT.OTFechaHoraEjecucion < CAST(GETDATE() AS date)
+"""
+
+SQL_OT_DIFERENCIAS = """
+SELECT
+    OT.OTId,
+    CONVERT(varchar(10), OT.OTFechaHoraEjecucion, 23) AS Fecha,
+    OT.{col_pedido}              AS NroMovVenta,
+    P_Repositor.PersonalNombre   AS Operario,
+    i.OTItemNroRenglon           AS Renglon,
+    LTRIM(RTRIM(i.OTItemUbicacionCodigo)) AS Ubicacion,
+    LTRIM(RTRIM(i.OTItemArticuloId))      AS CodArticulo,
+    i.OTItemCantPedida           AS CantPedida,
+    i.OTItemCantCumplida         AS CantCumplida
+FROM OT
+INNER JOIN Codot   ON OT.CodotCodigo = Codot.CodotCodigo
+INNER JOIN OTItem i ON i.OTId = OT.OTId
+LEFT JOIN Personal P_Repositor ON OT.OTUsuarioGUID_Repositor = P_Repositor.PersonalId
+WHERE Codot.CodotProcesoNegocio = 4                    -- Picking
+  AND OT.OTEstado = 2                                  -- Cumplido
+  AND i.OTItemTipo = 1                                 -- Recolectar
+  AND i.OTItemCantPedida <> i.OTItemCantCumplida        -- solo diferencia
+  AND OT.OTFechaHoraEjecucion >= ?
+  AND OT.OTFechaHoraEjecucion <= ?
+ORDER BY OT.OTId DESC, i.OTItemNroRenglon
+"""
+
+
+def _rango_ot_diferencias(desde=None, hasta=None):
+    hoy = date.today()
+    h_d = datetime.strptime(hasta, "%Y-%m-%d").date() if hasta else None
+    if h_d is None or h_d >= hoy:
+        conn = get_connection("WMS")
+        try:
+            cur = conn.cursor()
+            cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+            cur.execute(SQL_OT_ULTIMO_DIA_CUMPLIDO)
+            row = cur.fetchone()
+            h_d = row[0] if row and row[0] else hoy - timedelta(days=1)
+        finally:
+            conn.close()
+    d_d = datetime.strptime(desde, "%Y-%m-%d").date() if desde else h_d
+    if d_d > h_d:
+        d_d = h_d
+    d = datetime(d_d.year, d_d.month, d_d.day, 0, 0, 0)
+    h = datetime(h_d.year, h_d.month, h_d.day, 23, 59, 59)
+    return d, h
+
+
+def fetch_ot_diferencias(desde=None, hasta=None):
+    """Renglones de OT Picking Cumplidas con CantPedida != CantCumplida.
+    Sin params → último día Cumplido antes de hoy. Con desde/hasta → ese rango
+    ('hasta' hoy/futuro se resuelve al último día Cumplido < hoy).
+    Excluye pedidos descartados/anulados (Magnus)."""
+    d, h = _rango_ot_diferencias(desde, hasta)
+    conn = get_connection("WMS")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_OT_DIFERENCIAS.format(col_pedido=OT_COL_PEDIDO), (d, h))
+        cols = [c[0] for c in cur.description]
+        filas = [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    pedidos = sorted({int(f["NroMovVenta"]) for f in filas if f.get("NroMovVenta") is not None})
+    info = _info_pedidos(pedidos)
+
+    rows, excluidas_ot = [], set()
+    for f in filas:
+        nro = int(f["NroMovVenta"]) if f.get("NroMovVenta") is not None else None
+        meta = info.get(nro, {})
+        if _es_descartado(meta.get("Estado")):
+            excluidas_ot.add(_int(f.get("OTId")))
+            continue
+        pedida = float(_safe(f.get("CantPedida")) or 0)
+        cumplida = float(_safe(f.get("CantCumplida")) or 0)
+        rows.append({
+            "OTId":         _int(f.get("OTId")),
+            "NroMovVenta":  nro,
+            "Fecha":        _iso(f.get("Fecha")),
+            "Operario":     _txt(f.get("Operario")),
+            "Cliente":      meta.get("Cliente"),
+            "Vendedor":     _txt(meta.get("Vendedor")),
+            "Renglon":      _int(f.get("Renglon")),
+            "Ubicacion":    _txt(f.get("Ubicacion")),
+            "CodArticulo":  _txt(f.get("CodArticulo")),
+            "CantPedida":   pedida,
+            "CantCumplida": cumplida,
+            "Diferencia":   round(pedida - cumplida, 3),
+        })
+
+    resumen = {"renglones": len(rows), "ot": len({r["OTId"] for r in rows}),
+               "otDescartadas": len(excluidas_ot)}
+    return {"desde": _iso(d), "hasta": _iso(h), "total": len(rows), "rows": rows, "resumen": resumen}
+
+
 # Diagnóstico: confirmar el nombre real de la columna pedido en OT y qué estados
 # de Magnus aparecen (para ajustar OT_COL_PEDIDO y PATRONES_DESCARTADO).
 SQL_COLS_TABLA = """
