@@ -78,13 +78,14 @@ export async function GET() {
           vendido: boolean | null;
         }[]
       >`
-   SELECT DISTINCT ON ("nroPedOrigen", "nroRengOrigen")
-          "nroPedOrigen", "nroRengOrigen",
-          to_char("fechaArribo", 'YYYY-MM-DD') AS "fechaArribo",
-          "clienteQuiere",
-          "vendido"
-   FROM preparado.faltante_control
-   ORDER BY "nroPedOrigen", "nroRengOrigen", "updatedAt" DESC      `,
+        SELECT DISTINCT ON ("nroPedOrigen", "nroRengOrigen")
+               "nroPedOrigen", "nroRengOrigen",
+               to_char("fechaArribo", 'YYYY-MM-DD') AS "fechaArribo",
+               "clienteQuiere",
+               "vendido"
+        FROM preparado.faltante_control
+        ORDER BY "nroPedOrigen", "nroRengOrigen", "updatedAt" DESC
+      `,
       prisma.$queryRaw<
         {
           codArticulo: string;
