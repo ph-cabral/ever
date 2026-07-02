@@ -43,6 +43,7 @@ interface Item {
   Importe: number;
   Fecha: string | null; // fecha del faltante (snapshot Ven_PedRenPendientes)
   fechaArribo: string | null;
+  arriboOC: boolean; // true = fecha derivada de la OC pendiente (no cargada a mano)
   extraordinario: boolean; // leído de preparado.faltante_extraordinario (compras)
   extraordinarioFecha: string | null; // clave (fecha, CodArticulo) para decidir comprar
 }
@@ -429,7 +430,17 @@ function GrupoCard({
                 <td className="px-3 py-2 text-zinc-100">{it.Nombre}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{fmtNum(it.CantPend)}</td>
                 <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">{fmtAr(it.Fecha)}</td>
-                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">{fmtAr(it.fechaArribo)}</td>
+                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">
+                  {fmtAr(it.fechaArribo)}
+                  {it.arriboOC && it.fechaArribo && (
+                    <span
+                      className="ml-1.5 text-[10px] text-sky-400/80 align-middle"
+                      title="Fecha estimada de la OC pendiente (editable en Compras → Faltantes, columna Arribo)"
+                    >
+                      OC
+                    </span>
+                  )}
+                </td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-300">${fmtNum(it.Importe)}</td>
                 <td className="px-3 py-2">
                   <div className="flex items-center justify-center gap-1.5">

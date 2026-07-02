@@ -7,6 +7,10 @@ export const maxDuration = 60;
 const API_URL =
   process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
 
+// Ancla del cruce con OC — mismo corte que /compras/faltantes (OC_DESDE_DEFAULT
+// en faltantes-consumo/route.ts). Mantener sincronizados.
+const OC_DESDE = "2026-06-26";
+
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/ventas/faltantes — agrega server-side todo lo que necesita
 //   /ventas/faltantes (Tabla 1 y Tabla 2). NO escribe nada acá; solo LEE:
@@ -17,10 +21,15 @@ const API_URL =
 //     · preparado.faltante_control                (fechaArribo, clienteQuiere, vendido)
 //     · preparado.faltante_extraordinario          (flag de COMPRAS, por
 //       código de artículo — no se toca esa tabla, solo se consulta)
+//     · indicadores-api /compras/ordenes-pendientes (OC "por llegar" de Magnus:
+//       si el artículo tiene OC pendiente NO importación con FechaEntrega, esa
+//       fecha vale como arribo AUTOMÁTICO; la carga manual en /compras/faltantes
+//       — faltante_control — la PISA cuando compras conoce la fecha real)
 //
 //   Tabla 1 — regla de entrada: sin existencia + clienteQuiere aún sin
-//   responder + (ya tiene fecha de arribo O [compras lo marcó extraordinario Y
-//   el "comprar" de faltante_extraordinario todavía está sin decidir]). La
+//   responder + (ya tiene fecha de arribo [manual u OC] O [compras lo marcó
+//   extraordinario Y el "comprar" de faltante_extraordinario todavía está sin
+//   decidir]). La
 //   decisión de comprar se toma acá mismo (ver decidir() en el page.tsx) y
 //   apenas se decide, la fila deja de calificar por la vía extraordinario.
 //
@@ -62,7 +71,7 @@ export async function GET() {
     const fecha: string | null = fj.fecha ?? null;
     if (!fecha) return NextResponse.json({ fecha: null, rows: [] });
 
-    const [existRows, ctrlRows, extraRows, ingresosJson] = await Promise.all([
+    const [existRows, ctrlRows, extraRows, ingresosJson, ocJson] = await Promise.all([
       // faltante_existencia SÍ tiene modelo Prisma (columnas reales snake_case,
       // mapeadas) → usar el client, no SQL crudo con comillas camelCase.
       // NO exact-match por fecha: la marca puede haberse escrito con la fecha
@@ -111,6 +120,14 @@ export async function GET() {
       })
         .then((r) => (r.ok ? r.json() : { rows: [] }))
         .catch(() => ({ rows: [] })),
+      // OC pendientes (arribo automático). Best-effort: si falla, solo quedan
+      // los arribos manuales de faltante_control.
+      fetch(`${API_URL}/compras/ordenes-pendientes?desde=${OC_DESDE}`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(45000),
+      })
+        .then((r) => (r.ok ? r.json() : { rows: [] }))
+        .catch(() => ({ rows: [] })),
     ]);
 
     // Última marca de existencia por renglón (existRows viene asc por fecha,
@@ -135,6 +152,19 @@ export async function GET() {
         clienteQuiere: r.clienteQuiere,
         vendido: r.vendido,
       });
+
+    // Arribo automático por OC: artículo → FechaEntrega de la OC pendiente,
+    // salvo importación (sin fecha confiable). Manual (faltante_control) pisa.
+    const ocArribo = new Map<string, string>();
+    for (const r of (ocJson?.rows ?? []) as {
+      CodArticulo?: string;
+      FechaEntrega?: string | null;
+      Importacion?: boolean;
+    }[]) {
+      const cod = String(r.CodArticulo ?? "").trim();
+      if (cod && r.FechaEntrega && !r.Importacion)
+        ocArribo.set(cod, r.FechaEntrega);
+    }
 
     // Artículos con remito de ingreso x OC ya concretado (Tabla 2, requisito 3).
     const ingresados = new Set<string>(
@@ -164,9 +194,11 @@ export async function GET() {
         const c = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);
         const extra = extraMap.get(r.CodArticulo);
         const extraordinario = !!extra && extra.comprar === null;
+        const manual = c?.fechaArribo ?? null;
         return {
           ...r,
-          fechaArribo: c?.fechaArribo ?? null,
+          fechaArribo: manual ?? ocArribo.get(r.CodArticulo.trim()) ?? null,
+          arriboOC: !manual && ocArribo.has(r.CodArticulo.trim()),
           clienteQuiere: c?.clienteQuiere ?? null,
           extraordinario,
           extraordinarioFecha: extra?.fecha ?? null,
@@ -186,7 +218,10 @@ export async function GET() {
         const c = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);
         return {
           ...r,
-          fechaArribo: c?.fechaArribo ?? null,
+          // mismo fallback OC que Tabla 1 (por si el POST de control no
+          // persistió la fecha al responder clienteQuiere)
+          fechaArribo:
+            c?.fechaArribo ?? ocArribo.get(r.CodArticulo.trim()) ?? null,
           clienteQuiere: c?.clienteQuiere ?? null,
           vendido: c?.vendido ?? null,
           yaIngreso: ingresados.has(r.CodArticulo.trim()),
