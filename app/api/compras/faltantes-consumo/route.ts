@@ -171,12 +171,12 @@ export async function GET(req: NextRequest) {
   // tabla no está creada aún (prisma/sql/faltante_extraordinario.sql sin aplicar),
   // la vista sigue funcionando con todo en extraordinario=false.
   const keyArtDia = (cod: string, dia: string) => `${cod}__${dia}`;
-  const extraMap = new Map<string, { extraordinario: boolean; comprar: boolean }>();
+  const extraMap = new Map<string, { extraordinario: boolean; comprar: boolean | null }>();
   let extraWarn = false;
   if (faltRows.length && desdeMarks && hastaMarks) {
     try {
       const extraRows = await prisma.$queryRaw<
-        { fecha: Date; codArticulo: string; extraordinario: boolean; comprar: boolean }[]
+        { fecha: Date; codArticulo: string; extraordinario: boolean; comprar: boolean | null }[]
       >`
         SELECT fecha, "codArticulo", extraordinario, comprar
         FROM preparado.faltante_extraordinario
@@ -186,7 +186,7 @@ export async function GET(req: NextRequest) {
         const dia = e.fecha.toISOString().slice(0, 10);
         extraMap.set(keyArtDia(e.codArticulo, dia), {
           extraordinario: !!e.extraordinario,
-          comprar: !!e.comprar,
+          comprar: e.comprar === null ? null : !!e.comprar,
         });
       }
     } catch (e) {
@@ -340,7 +340,7 @@ export async function GET(req: NextRequest) {
         ocs: b.ocs,
         estado: b.estado,
         extraordinario: mark?.extraordinario ?? false,
-        comprar: mark?.comprar ?? false,
+        comprar: mark?.comprar ?? null,
       };
     });
 

@@ -42,6 +42,7 @@ interface Item {
   Fecha: string | null; // fecha del faltante (snapshot Ven_PedRenPendientes)
   fechaArribo: string | null;
   extraordinario: boolean; // leído de preparado.faltante_extraordinario (compras)
+  extraordinarioFecha: string | null; // clave (fecha, CodArticulo) para decidir comprar
 }
 
 const keyOf = (it: { NroPedOrigen: number; NroRengOrigen: number }) =>
@@ -117,24 +118,56 @@ export default function VentasFaltantesPage() {
   // Guarda clienteQuiere en preparado.faltante_control (mismo endpoint que ya
   // usa /deposito/faltantes/control) y retira la fila de esta tabla, sea cual
   // sea la respuesta. Optimista: si falla el guardado, se vuelve a traer todo.
+  //
+  // Si el renglón es extraordinario, esta misma respuesta decide también
+  // "comprar" en preparado.faltante_extraordinario (a nivel artículo+día, no
+  // por renglón) → saca de acá, ya mismo, a TODOS los renglones de ese mismo
+  // artículo (no solo el clickeado), porque la decisión es a nivel artículo.
   const decidir = useCallback(
     (it: Item, quiere: boolean) => {
-      setItems((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
-      fetch("/api/deposito/faltantes/control", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fecha,
-          nroPedOrigen: it.NroPedOrigen,
-          nroRengOrigen: it.NroRengOrigen,
-          codArticulo: it.CodArticulo,
-          fechaArribo: it.fechaArribo,
-          clienteQuiere: quiere,
+      setItems((rs) =>
+        rs.filter((r) =>
+          it.extraordinario && r.CodArticulo === it.CodArticulo
+            ? false
+            : keyOf(r) !== keyOf(it),
+        ),
+      );
+      const calls = [
+        fetch("/api/deposito/faltantes/control", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fecha,
+            nroPedOrigen: it.NroPedOrigen,
+            nroRengOrigen: it.NroRengOrigen,
+            codArticulo: it.CodArticulo,
+            fechaArribo: it.fechaArribo,
+            clienteQuiere: quiere,
+          }),
         }),
-      }).catch(() => {
-        setError("No se pudo guardar la decisión");
-        load();
-      });
+      ];
+      if (it.extraordinario && it.extraordinarioFecha) {
+        calls.push(
+          fetch("/api/compras/faltantes-extraordinario", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fecha: it.extraordinarioFecha,
+              codArticulo: it.CodArticulo,
+              extraordinario: true,
+              comprar: quiere,
+            }),
+          }),
+        );
+      }
+      Promise.all(calls)
+        .then((rs) => {
+          if (rs.some((r) => !r.ok)) throw new Error();
+        })
+        .catch(() => {
+          setError("No se pudo guardar la decisión");
+          load();
+        });
     },
     [fecha, load],
   );

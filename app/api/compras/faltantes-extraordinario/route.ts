@@ -19,7 +19,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "fecha y codArticulo son requeridos" }, { status: 400 });
   }
   const extraordinario = !!body?.extraordinario;
-  const comprar = !!body?.comprar;
+  // Tri-state: null = pendiente de decisión, true/false = decidido.
+  const comprar: boolean | null = body?.comprar === null ? null : !!body?.comprar;
 
   try {
     await prisma.$executeRaw`

@@ -16,7 +16,10 @@ const API_URL = process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001"
 //       código de artículo — no se toca esa tabla, solo se consulta)
 //
 //   Regla de entrada (según diagrama): sin existencia + clienteQuiere aún sin
-//   responder + (ya tiene fecha de arribo O compras lo marcó extraordinario).
+//   responder + (ya tiene fecha de arribo O [compras lo marcó extraordinario Y
+//   el "comprar" de faltante_extraordinario todavía está sin decidir]). La
+//   decisión de comprar se toma acá mismo (ver decidir() en el page.tsx) y
+//   apenas se decide, la fila deja de calificar por la vía extraordinario.
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface FaltanteRow {
@@ -70,8 +73,10 @@ export async function GET() {
         FROM preparado.faltante_control
         WHERE fecha = ${fecha}::date
       `,
-      prisma.$queryRaw<{ codArticulo: string; extraordinario: boolean }[]>`
-        SELECT DISTINCT ON ("codArticulo") "codArticulo", extraordinario
+      prisma.$queryRaw<
+        { codArticulo: string; extraordinario: boolean; comprar: boolean | null; fecha: Date }[]
+      >`
+        SELECT DISTINCT ON ("codArticulo") "codArticulo", extraordinario, comprar, fecha
         FROM preparado.faltante_extraordinario
         ORDER BY "codArticulo", "updatedAt" DESC
       `,
@@ -91,19 +96,28 @@ export async function GET() {
         clienteQuiere: r.clienteQuiere,
       });
 
-    const extraSet = new Set<string>();
-    for (const r of extraRows) if (r.extraordinario) extraSet.add(r.codArticulo);
+    // Por artículo: solo mientras comprar esté sin decidir (null). Apenas
+    // compras/ventas lo resuelve (true o false), deja de calificar acá.
+    const extraMap = new Map<string, { comprar: boolean | null; fecha: string }>();
+    for (const r of extraRows)
+      if (r.extraordinario)
+        extraMap.set(r.codArticulo, {
+          comprar: r.comprar,
+          fecha: r.fecha.toISOString().slice(0, 10),
+        });
 
     const out = rows
       .filter((r) => sin.has(`${r.NroPedOrigen}-${r.NroRengOrigen}`))
       .map((r) => {
         const c = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);
-        const extraordinario = extraSet.has(r.CodArticulo);
+        const extra = extraMap.get(r.CodArticulo);
+        const extraordinario = !!extra && extra.comprar === null;
         return {
           ...r,
           fechaArribo: c?.fechaArribo ?? null,
           clienteQuiere: c?.clienteQuiere ?? null,
           extraordinario,
+          extraordinarioFecha: extra?.fecha ?? null,
         };
       })
       .filter((r) => r.clienteQuiere === null && (r.fechaArribo !== null || r.extraordinario));

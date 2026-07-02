@@ -18,10 +18,12 @@ import {
 //     acumulado vuelve a 0 ese día (no se arrastra crédito); si NO alcanzó, el
 //     descubierto real sigue tal cual (no se fuerza a 0).
 //   · Extraordinario/Comprar (preparado.faltante_extraordinario, por artículo+día):
-//     el botón 🚩 de cada fila marca ambos flags juntos → la fila desaparece de
-//     esta tabla. El botón "Extraordinario" del header gira la tarjeta (como una
-//     carta) y muestra el reverso con lo marcado extraordinario Y comprar, con
-//     columnas propias para desmarcar cada flag por separado.
+//     el botón 🚩 de cada fila marca extraordinario=true (comprar queda null,
+//     pendiente) → la fila desaparece de esta tabla. La decisión de comprar o
+//     no se toma en /ventas/faltantes; recién cuando comprar deja de ser null,
+//     el botón "Extraordinario" del header (gira la tarjeta) muestra la fila en
+//     el reverso. Ahí queda hasta que la OC "por llegar" cubre el faltante del
+//     artículo (descubierto llega a 0) — sale sola, sin acción manual.
 //
 //   Color de fila por estado del DÍA:
 //     · verde  → la OC que llegó a ese día cubre el faltante (descubierto = 0)
@@ -55,7 +57,7 @@ interface Row {
   ocs: string[];
   estado: Estado;
   extraordinario: boolean;
-  comprar: boolean;
+  comprar: boolean | null; // null = pendiente (decide ventas/faltantes)
 }
 
 const fmtNum = (n: number) =>
@@ -213,12 +215,12 @@ function Tabla({ data, onMark }: { data: Row[]; onMark: (row: Row) => void }) {
   );
 }
 
-// Reverso de la tarjeta: pedidos marcados extraordinario Y comprar. Desmarcar
-// cualquiera de las 2 columnas saca la fila de acá:
+// Reverso de la tarjeta: pedidos extraordinario=true, YA decididos (comprar
+// !== null, decisión que toma ventas/faltantes) y con descubierto > 0 (la OC
+// por llegar todavía no cubre el faltante; ver backRows en el componente de
+// abajo). El toggle "Comprar" de acá permite a compras cambiar manualmente
+// esa decisión (true↔false), pero no volver a dejarla pendiente (null).
 //   · Desmarcar "Extraordinario" → vuelve a la tabla principal.
-//   · Desmarcar "Comprar" (dejando extraordinario=true) → queda oculta de las
-//     DOS tablas (archivada). Es intencional: "extraordinario pero no se va a
-//     comprar" no debería seguir ensuciando ninguna vista.
 function TablaExtraordinarios({
   data,
   onToggle,
@@ -365,18 +367,22 @@ export default function ComprasFaltantesPage() {
     },
     [],
   );
-  // Botón por fila: marca extraordinario Y comprar juntos (así aparece directo
-  // en el reverso, sin quedar en un estado intermedio invisible en ambos lados).
+  // Botón por fila: marca extraordinario y deja "comprar" pendiente (null).
+  // La decisión de comprar o no la toma ventas/faltantes; recién ahí, cuando
+  // deja de ser null, la fila aparece en el reverso.
   const marcarExtraordinario = useCallback(
-    (row: Row) => toggleMark(row, { extraordinario: true, comprar: true }),
+    (row: Row) => toggleMark(row, { extraordinario: true, comprar: null }),
     [toggleMark],
   );
 
   // Tabla principal: nunca muestra lo marcado extraordinario.
   const frontRows = useMemo(() => rows.filter((r) => !r.extraordinario), [rows]);
-  // Reverso de la tarjeta: extraordinario Y comprar (ambas marcadas).
+  // Reverso de la tarjeta: extraordinario, ya decidido (comprar !== null) Y
+  // todavía con descubierto > 0 (la OC "por llegar" aún no cubre el faltante
+  // del artículo). Apenas la OC lo cubre (descubierto llega a 0 o queda a
+  // favor), sale sola de acá — no hace falta desmarcar nada a mano.
   const backRows = useMemo(
-    () => rows.filter((r) => r.extraordinario && r.comprar),
+    () => rows.filter((r) => r.extraordinario && r.comprar !== null && r.descubierto > 0),
     [rows],
   );
 

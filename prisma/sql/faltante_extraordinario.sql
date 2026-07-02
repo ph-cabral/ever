@@ -20,3 +20,12 @@ CREATE TABLE IF NOT EXISTS preparado.faltante_extraordinario (
 
 CREATE INDEX IF NOT EXISTS idx_faltante_extraordinario_fecha
   ON preparado.faltante_extraordinario (fecha);
+
+-- comprar pasa a tri-state: NULL = pendiente de decisión (ventas/faltantes
+-- aún no respondió), true/false = decidido (comprar o no). Antes
+-- NOT NULL DEFAULT false no permitía distinguir "sin decidir" de "decidido
+-- que no". La decisión ahora se toma en /ventas/faltantes (ver
+-- app/ventas/faltantes/page.tsx → decidir()), no en /compras/faltantes.
+ALTER TABLE preparado.faltante_extraordinario
+  ALTER COLUMN comprar DROP DEFAULT,
+  ALTER COLUMN comprar DROP NOT NULL;
