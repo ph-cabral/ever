@@ -26,7 +26,6 @@ const MODULO_LABEL: Record<string, string> = {
   picking: "Picking",
   finanza: "Finanzas",
   rrhh: "RRHH",
-  indicadores: "Indicadores",
   sorteo: "Sorteo",
   vicki: "Vicki",
 };

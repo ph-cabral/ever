@@ -10,7 +10,6 @@ export type ModuleKey =
   | "ventas"
   | "finanza"
   | "rrhh"
-  | "indicadores"
   | "sorteo"
   | "vicki"
   | "buscador"
@@ -38,15 +37,9 @@ export const MODULES: ModuleDef[] = [
     children: [
       { label: "Evaluación", href: "/deposito/evaluacion" },
       { label: "Faltantes",  href: "/deposito/faltantes", children: [
-        { label: "Check",       href: "/deposito/faltantes/check" },
-        { label: "Control",     href: "/deposito/faltantes/control" },
         { label: "Duplicadas",  href: "/deposito/faltantes/duplicadas" },
-        { label: "Encargar",    href: "/deposito/faltantes/encargar" },
-        { label: "Nuevo",       href: "/deposito/faltantes/nuevo" },
-        { label: "Reposición",  href: "/deposito/faltantes/reposicion" },
       ] },
       { label: "Pedidos",    href: "/deposito/pedidos" },
-      { label: "En vivo",    href: "/deposito/vivo" },
       { label: "WMS",        href: "/deposito/wms" },
     ] },
   { key: "picking",     label: "Picking",     href: "/picking",     color: "bg-purple-700 hover:bg-purple-600",
@@ -63,7 +56,6 @@ export const MODULES: ModuleDef[] = [
       { label: "Legajos",    href: "/rrhh/legajos" },
       { label: "Relojes",    href: "/rrhh/relojes" },
     ] },
-  { key: "indicadores", label: "Indicadores", href: "/indicadores", color: "bg-blue-700 hover:bg-blue-600" },
   { key: "sorteo",      label: "Sorteo",      href: "/sorteo",      color: "bg-pink-700 hover:bg-pink-600",
     children: [{ label: "Armar", href: "/sorteo/armar" }] },
   { key: "vicki",       label: "Vicki",       href: "/vicki",       color: "bg-slate-700 hover:bg-slate-600" },
@@ -150,8 +142,6 @@ const ROUTE_MODULE: { prefix: string; mod: ModuleKey }[] = [
   { prefix: "/rrhh",            mod: "rrhh" },
   { prefix: "/api/rrhh",        mod: "rrhh" },
   { prefix: "/api/foto",        mod: "rrhh" },
-  { prefix: "/indicadores",     mod: "indicadores" },
-  { prefix: "/api/indicadores", mod: "indicadores" },
   { prefix: "/sorteo",          mod: "sorteo" },
   { prefix: "/api/sorteo",      mod: "sorteo" },
   { prefix: "/vicki",           mod: "vicki" },
@@ -193,11 +183,11 @@ export const DEFAULT_SECTOR_MODULOS: Record<string, ModuleKey[]> = {
   "producción":        ["manguera"],
   "rrhh":              ["rrhh"],
   "recursos humanos":  ["rrhh"],
-  "administracion":    ["finanza", "indicadores", "rrhh", "buscador"],
-  "administración":    ["finanza", "indicadores", "rrhh", "buscador"],
+  "administracion":    ["finanza", "rrhh", "buscador"],
+  "administración":    ["finanza", "rrhh", "buscador"],
   "sistemas":          ["sistema"],
   "soporte":           ["sistema"],
-  "finanzas":          ["finanza", "indicadores"],
+  "finanzas":          ["finanza"],
   "comercial":         ["buscador"],
   "ventas":            ["buscador", "ventas"],
   "gerencia":          ALL_MODULE_KEYS,
