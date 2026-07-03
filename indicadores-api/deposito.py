@@ -65,6 +65,8 @@ UBIC_COL_CANT = "UbicacionDetalleCantidad"
 # ORDER BY OT.OTId DESC
 # """
 
+CODIGOS_COMPROBANTE_WMS = (10, 70, 100, 210, 310)
+
 SQL_WMS = """
 SELECT
     CONVERT(varchar(10), OT.OTFechaHoraEjecucion, 103) AS [FECHA EJECUCION],
@@ -91,18 +93,24 @@ INNER JOIN EVERWEAR.dbo.TMP_TiempoDePedidos t ON t.NroMovVenta = OT.{col_pedido}
 WHERE OT.OTEstado IN (2, 3, 4)
   AND OT.OTFechaHoraEjecucion >= ?
   AND OT.OTFechaHoraEjecucion <= ?
-  AND TRY_CAST(LEFT(t.CodComprobante, CHARINDEX(' ', t.CodComprobante + ' ') - 1) AS INT) IN (10, 70, 100, 210, 310)
+  AND TRY_CAST(LEFT(t.CodComprobante, CHARINDEX(' ', t.CodComprobante + ' ') - 1) AS INT) IN ({codigos})
   AND LTRIM(RTRIM(t.Estado)) IN ('Abierto', 'Cerrado', 'Facturado')
   AND LTRIM(RTRIM(ISNULL(t.CodComprobante_Factura, 'SinCodigo'))) <> 'SinCodigo'
 ORDER BY OT.OTId DESC
 """
 
-def fetch_wms(desde: datetime, hasta: datetime):
+def fetch_wms(desde: datetime, hasta: datetime, incluir_410: bool = False):
+    """incluir_410=True SOLO para /deposito (productividad). /deposito/pedidos
+    (preparado/ingresados) debe seguir SIN el 410 -> no pasar el flag ahí."""
+    codigos = CODIGOS_COMPROBANTE_WMS + (410,) if incluir_410 else CODIGOS_COMPROBANTE_WMS
     conn = get_connection("WMS")
     try:
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
-        cur.execute(SQL_WMS.format(col_pedido=OT_COL_PEDIDO), (desde, hasta))
+        cur.execute(
+            SQL_WMS.format(col_pedido=OT_COL_PEDIDO, codigos=",".join(map(str, codigos))),
+            (desde, hasta),
+        )
         return _rows(cur)
     finally:
         conn.close()
