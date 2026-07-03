@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
-  Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck, CalendarRange, History, Check,
+  Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck, CalendarRange, Check,
   Layers, ChevronDown, ChevronRight, Flag, RotateCw, ShoppingCart, Undo2, CalendarCheck,
 } from "lucide-react";
 
@@ -80,6 +80,10 @@ const todayISO = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
+// Default de "desde": ancla del cruce con OC (OC_DESDE_DEFAULT del backend).
+// Con default hoy–hoy la vista quedaba vacía cada mañana: solo miraba la foto
+// de ayer y perdía los buckets/acumulado de los días anteriores.
+const DESDE_DEFAULT = "2026-06-26";
 // Clave de fila: (artículo, día) — misma granularidad que usa el backend para
 // marcar extraordinario/comprar (preparado.faltante_extraordinario).
 const rowKey = (r: Pick<Row, "CodArticulo" | "fecha">) => `${r.CodArticulo}__${r.fecha}`;
@@ -338,9 +342,8 @@ export default function ComprasFaltantesPage() {
   const [fecha, setFecha] = useState<string | null>(null);
   const [desdeResp, setDesdeResp] = useState<string | null>(null);
   const [hastaResp, setHastaResp] = useState<string | null>(null);
-  const [desde, setDesde] = useState(todayISO); // rango de búsqueda, default hoy
+  const [desde, setDesde] = useState(DESDE_DEFAULT); // rango de búsqueda, default = ancla OC
   const [hasta, setHasta] = useState(todayISO);
-  const [historico, setHistorico] = useState(false); // ver también ya entregados
   const [conArribo, setConArribo] = useState(false); // ver también los que ya tienen fecha de arribo
   const [filtro, setFiltro] = useState<Filtro>("todos");
   const [loading, setLoading] = useState(false);
@@ -359,7 +362,6 @@ export default function ComprasFaltantesPage() {
       const p = new URLSearchParams();
       p.set("desde", desde);
       p.set("hasta", hasta);
-      if (historico) p.set("historico", "1");
       if (conArribo) p.set("conArribo", "1");
       const res = await fetch(`/api/compras/faltantes-consumo?${p}`, { cache: "no-store" });
       const j = await res.json().catch(() => ({}));
@@ -376,7 +378,7 @@ export default function ComprasFaltantesPage() {
     } finally {
       setLoading(false);
     }
-  }, [desde, hasta, historico, conArribo]);
+  }, [desde, hasta, conArribo]);
 
   useEffect(() => {
     load();
@@ -573,33 +575,18 @@ export default function ComprasFaltantesPage() {
               onChange={(e) => setHasta(e.target.value)}
               className="bg-[#1A1A1A] border border-zinc-700 rounded-md px-2 py-1.5 text-xs text-zinc-200 focus:border-yellow-400 outline-none"
             />
-            {(desde !== todayISO() || hasta !== todayISO()) && (
+            {(desde !== DESDE_DEFAULT || hasta !== todayISO()) && (
               <button
                 onClick={() => {
-                  const t = todayISO();
-                  setDesde(t);
-                  setHasta(t);
+                  setDesde(DESDE_DEFAULT);
+                  setHasta(todayISO());
                 }}
                 className="text-xs text-zinc-500 hover:text-yellow-400 underline underline-offset-2"
               >
-                hoy
+                restablecer
               </button>
             )}
           </div>
-
-          <button
-            onClick={() => setHistorico((v) => !v)}
-            title="Incluir los faltantes históricos ya entregados/cubiertos del rango"
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
-              historico
-                ? "bg-emerald-500/15 border-emerald-400 text-emerald-300"
-                : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
-            }`}
-          >
-            <History size={14} />
-            Ver histórico
-            {historico && <Check size={13} />}
-          </button>
 
           <button
             onClick={() => setConArribo((v) => !v)}
@@ -661,7 +648,8 @@ export default function ComprasFaltantesPage() {
 
           <div className="w-px h-5 bg-zinc-800 hidden sm:block" />
 
-          {FILTROS.filter((f) => f.key !== "entregado" || historico).map((f) => (
+          {/* "entregado" ya no existe: todo lo marcado sin existencia es demanda viva */}
+          {FILTROS.filter((f) => f.key !== "entregado").map((f) => (
             <button
               key={f.key}
               onClick={() => setFiltro(f.key)}

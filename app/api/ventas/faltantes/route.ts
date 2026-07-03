@@ -55,10 +55,18 @@ interface FaltanteRow {
 
 export async function GET() {
   try {
-    const res = await fetch(`${API_URL}/deposito/faltantes`, {
-      cache: "no-store",
-      signal: AbortSignal.timeout(45000),
-    });
+    // Rango HISTÓRICO desde el ancla, NO el último snapshot: un renglón
+    // faltante sale de Ven_PedRenPendientes apenas el pedido se factura
+    // (vive ~1 día), así que con el snapshot del día se perdían todos los
+    // faltantes de días anteriores aunque siguieran sin responder.
+    const hoy = new Date().toISOString().slice(0, 10);
+    const res = await fetch(
+      `${API_URL}/deposito/faltantes?desde=${OC_DESDE}&hasta=${hoy}&historico=1`,
+      {
+        cache: "no-store",
+        signal: AbortSignal.timeout(45000),
+      },
+    );
     if (!res.ok) {
       const detail = await res.json().catch(() => null);
       return NextResponse.json(
@@ -78,7 +86,7 @@ export async function GET() {
       // rolling del renglón (no necesariamente "hoy") — se toma la más nueva
       // por renglón, igual patrón que ctrlRows más abajo.
       prisma.faltante_existencia.findMany({
-        where: { fecha: { lte: new Date(fecha) } },
+        where: { fecha: { lte: new Date(hoy) } },
         select: { nroPedOrigen: true, nroRengOrigen: true, existencia: true, fecha: true },
         orderBy: { fecha: "asc" },
       }),
@@ -114,7 +122,8 @@ export async function GET() {
       // Remitos de ingreso x OC desde la fecha del faltante (regla Tabla 2,
       // requisito 3). Si falla (SQL Server caído), Tabla 2 queda vacía pero
       // Tabla 1 sigue funcionando (no se corta el fetch principal).
-      fetch(`${API_URL}/compras/ingresos?desde=${fecha}`, {
+      // desde el ancla (los faltantes ahora abarcan varios días, no un snapshot)
+      fetch(`${API_URL}/compras/ingresos?desde=${OC_DESDE}`, {
         cache: "no-store",
         signal: AbortSignal.timeout(45000),
       })

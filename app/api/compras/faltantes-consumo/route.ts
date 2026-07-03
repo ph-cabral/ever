@@ -94,8 +94,7 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const desdeParam = sp.get("desde");
   const hastaParam = sp.get("hasta");
-  // histórico: incluye también los faltantes ya entregados/cubiertos del rango
-  const historico = sp.get("historico") === "1" || sp.get("historico") === "true";
+  // (?historico= ya no se usa: siempre se pide histórico, ver qs más abajo)
   // conArribo: por defecto oculta los buckets que ya tienen fecha de arribo
   // cargada (preparado.faltante_control) en TODOS sus renglones; con
   // conArribo=1 los vuelve a mostrar (para corroborar los que ya se pasaron).
@@ -113,7 +112,12 @@ export async function GET(req: NextRequest) {
   const qs = new URLSearchParams();
   if (desdeParam) qs.set("desde", desdeParam);
   if (hastaParam) qs.set("hasta", hastaParam);
-  if (historico) qs.set("historico", "1");
+  // SIEMPRE histórico: los renglones faltantes salen de Ven_PedRenPendientes
+  // apenas se factura el pedido (viven ~1 snapshot). Sin histórico, la variante
+  // "viva" exige estar en la última foto y se pierden los faltantes de días
+  // anteriores. Lo marcado "sin existencia" es demanda vigente siempre (ver
+  // agrupado, punto 3) — el param ?historico= del front quedó sin efecto.
+  qs.set("historico", "1");
   const faltUrl = `${API_URL}/deposito/faltantes${qs.toString() ? `?${qs}` : ""}`;
   const ocUrl = `${API_URL}/compras/ordenes-pendientes?desde=${encodeURIComponent(ocDesde)}`;
 
@@ -157,9 +161,14 @@ export async function GET(req: NextRequest) {
     if (r.Fecha && (!maxFecha || r.Fecha > maxFecha)) maxFecha = r.Fecha;
   }
 
-  // 2) marcas existencia=false (última marca por renglón) del rango
+  // 2) marcas existencia=false (última marca por renglón).
+  // OJO: la ventana arranca en el ANCLA (faltDesde), NO en minPrimer del rango
+  // visible: un renglón que sigue pendiente hoy pudo marcarse "sin existencia"
+  // días atrás (la marca se guarda con la fecha de aquel snapshot). Con rango
+  // default hoy–hoy, minPrimer = ayer y esas marcas viejas quedaban afuera →
+  // la vista aparecía vacía aunque los faltantes siguieran vivos.
   const sinExistencia = new Set<string>();
-  const desdeMarks = minPrimer ?? fecha;
+  const desdeMarks = faltDesde < (minPrimer ?? faltDesde) ? faltDesde : (minPrimer ?? faltDesde);
   const hastaMarks = maxFecha ?? fecha;
   if (faltRows.length && desdeMarks && hastaMarks) {
     // new Date('YYYY-MM-DD') = medianoche UTC, igual que se guardan las marcas (@db.Date)
@@ -202,6 +211,10 @@ export async function GET(req: NextRequest) {
   // la vista sigue funcionando con todo en extraordinario=false.
   const keyArtDia = (cod: string, dia: string) => `${cod}__${dia}`;
   const extraMap = new Map<string, { extraordinario: boolean; comprar: boolean | null }>();
+  // marca más nueva por artículo (fallback cuando el día del bucket "rodó" y
+  // ya no coincide con la fecha guardada — mismo criterio que /ventas/faltantes,
+  // que resuelve extraordinario solo por codArticulo).
+  const extraUltPorArt = new Map<string, { extraordinario: boolean; comprar: boolean | null }>();
   let extraWarn = false;
   if (faltRows.length && desdeMarks && hastaMarks) {
     try {
@@ -211,13 +224,16 @@ export async function GET(req: NextRequest) {
         SELECT fecha, "codArticulo", extraordinario, comprar
         FROM preparado.faltante_extraordinario
         WHERE fecha BETWEEN ${new Date(desdeMarks)} AND ${new Date(hastaMarks)}
+        ORDER BY "updatedAt" ASC
       `;
       for (const e of extraRows) {
         const dia = e.fecha.toISOString().slice(0, 10);
-        extraMap.set(keyArtDia(e.codArticulo, dia), {
+        const val = {
           extraordinario: !!e.extraordinario,
           comprar: e.comprar === null ? null : !!e.comprar,
-        });
+        };
+        extraMap.set(keyArtDia(e.codArticulo, dia), val);
+        extraUltPorArt.set(e.codArticulo, val); // asc → queda la más nueva
       }
     } catch (e) {
       extraWarn = true;
@@ -232,10 +248,12 @@ export async function GET(req: NextRequest) {
     const cod = String(it.CodArticulo ?? "").trim();
     const dia = it.PrimerDia ?? it.Fecha ?? fecha ?? "";
     if (!cod || !dia) continue;
-    // Vivo viene solo en modo histórico; sin él, todo es demanda viva (1).
-    const vivo = it.Vivo === undefined ? true : it.Vivo !== 0;
-    // separar vivos de entregados aunque compartan artículo+día: no se mezclan.
-    const k = `${cod}__${dia}__${vivo ? "v" : "h"}`;
+    // Todo renglón MARCADO "sin existencia" es demanda vigente aunque Vivo=0:
+    // que haya salido de Ven_PedRenPendientes solo significa que el pedido se
+    // facturó (sin el artículo), no que el faltante se haya resuelto. Sale del
+    // circuito por OC que cubre / fechaArribo / extraordinario, no por Magnus.
+    const vivo = true;
+    const k = `${cod}__${dia}__v`;
     let b = buckets.get(k);
     if (!b) {
       b = {
@@ -361,7 +379,13 @@ export async function GET(req: NextRequest) {
       return a.fecha < c.fecha ? -1 : a.fecha > c.fecha ? 1 : 0;
     })
     .map((b) => {
-      const mark = extraMap.get(keyArtDia(b.CodArticulo, b.fecha));
+      // exact-match por (artículo, día del bucket) y, si no hay (el PrimerDia
+      // del bucket depende del rango consultado — con rango corto "rueda" y ya
+      // no coincide con la fecha con la que se guardó la marca), fallback a la
+      // marca más nueva del artículo.
+      const mark =
+        extraMap.get(keyArtDia(b.CodArticulo, b.fecha)) ??
+        extraUltPorArt.get(b.CodArticulo);
       return {
         CodArticulo: b.CodArticulo,
         Nombre: b.Nombre,
