@@ -14,7 +14,7 @@ import { useDepositoData } from "@/lib/deposito/store";
 import { filterDepositoByOperario } from "@/lib/deposito/parseDeposito";
 
 const TABS = [
-  { id: "resumen", label: "Resumen", icon: LayoutDashboard, needs: "prod" },
+  // { id: "resumen", label: "Resumen", icon: LayoutDashboard, needs: "prod" },
   { id: "picking", label: "Picking", icon: PackageSearch, needs: "prod" },
   { id: "librepo", label: "Libre + Reposición", icon: Repeat, needs: "prod" },
   { id: "reub", label: "Re-Ubicación", icon: MapPin, needs: "prod" },
@@ -30,7 +30,7 @@ export default function DepositoPage() {
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
   const [operario, setOperario] = useState("__all__");
-  const [tab, setTab] = useState<TabId>("resumen");
+  const [tab, setTab] = useState<TabId>("picking");
 
   // Por defecto: hoy en ambos (cliente, evita mismatch SSR).
   useEffect(() => {
@@ -181,8 +181,8 @@ export default function DepositoPage() {
             )}
           </div>
         ) : (
+            // {tab === "resumen" && viewProd && <ResumenTab d={viewProd} mes="__all__" />}
           <>
-            {tab === "resumen" && viewProd && <ResumenTab d={viewProd} mes="__all__" />}
             {tab === "picking" && viewProd && (
               <ProcesoTab d={viewProd} proceso="Picking" mes="__all__" />
             )}
