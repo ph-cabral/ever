@@ -3,7 +3,9 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck, CalendarRange, Check,
   Layers, ChevronDown, ChevronRight, Flag, RotateCw, ShoppingCart, Undo2, CalendarCheck,
+  Download,
 } from "lucide-react";
+import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/faltantes — faltantes "sin existencia" por (artículo, día) con la OC
@@ -460,6 +462,14 @@ export default function ComprasFaltantesPage() {
     return [...base].sort((a, b) => b.importe - a.importe);
   }, [frontRows, filtro]);
 
+  const exportar = useCallback(() => {
+    exportarFaltantesCompras(flipped ? backRows : visibles, {
+      modo: flipped ? "extraordinarios" : "faltantes",
+      desde: desdeResp,
+      hasta: hastaResp,
+    });
+  }, [flipped, backRows, visibles, desdeResp, hastaResp]);
+
   // Grupos por proveedor, cada grupo ordenado por importe y los grupos por importe total.
   const grupos = useMemo(() => {
     const m = new Map<string, Row[]>();
@@ -635,6 +645,15 @@ export default function ComprasFaltantesPage() {
                 {backRows.length}
               </span>
             )}
+          </button>
+
+          <button
+            onClick={exportar}
+            disabled={flipped ? backRows.length === 0 : visibles.length === 0}
+            title="Exportar a Excel lo que se ve en la tabla"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 transition-colors text-xs font-medium disabled:opacity-40"
+          >
+            <Download size={14} /> Excel
           </button>
 
           {ocDesde && (

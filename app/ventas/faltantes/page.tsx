@@ -2,8 +2,9 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck,
-  Check, X, RotateCw,
+  Check, X, RotateCw, Download,
 } from "lucide-react";
+import { exportarFaltantesVentas } from "@/lib/ventas/exportFaltantes";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /ventas/faltantes — "Tabla 1" (según diagrama del usuario).
@@ -264,6 +265,12 @@ export default function VentasFaltantesPage() {
   const gruposNormales = useMemo(() => agrupar(normales), [normales]);
   const gruposListos = useMemo(() => agruparListos(listos), [listos]);
 
+  const itemsVisibles = flipped ? extraordinarios : items;
+  const exportar = useCallback(
+    () => exportarFaltantesVentas(itemsVisibles, listos),
+    [itemsVisibles, listos],
+  );
+
   const tot = useMemo(() => {
     let importe = 0;
     for (const it of items) importe += it.Importe || 0;
@@ -325,6 +332,14 @@ export default function VentasFaltantesPage() {
                 {extraordinarios.length}
               </span>
             )}
+          </button>
+          <button
+            onClick={exportar}
+            disabled={!hay}
+            title="Exportar a Excel lo que se ve en la tabla"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 transition-colors text-xs font-medium disabled:opacity-40"
+          >
+            <Download size={14} /> Excel
           </button>
           <button
             onClick={load}
