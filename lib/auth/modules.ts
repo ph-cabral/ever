@@ -2,6 +2,9 @@
 // IMPORTANTE: este archivo NO debe importar nada de Node ("crypto", "fs", prisma, etc.)
 // porque también lo usa el middleware, que corre en el runtime edge.
 
+// Árbol de sub-vistas auto-detectado desde app/**/page.tsx (datos planos, sin Node).
+import { GENERATED_CHILDREN } from "./nav.generated";
+
 export type ModuleKey =
   | "manguera"
   | "deposito"
@@ -30,37 +33,26 @@ export interface ModuleDef {
   children?: NavNode[]; // sub-vistas (árbol) para el menú animado del home
 }
 
-export const MODULES: ModuleDef[] = [
-  { key: "manguera",    label: "Mangueras",   href: "/manguera",    color: "bg-orange-600 hover:bg-orange-500",
-    children: [{ label: "Corte", href: "/manguera/corte" }] },
-  { key: "deposito",    label: "Depósito",    href: "/deposito",    color: "bg-emerald-700 hover:bg-emerald-600",
-    children: [
-      { label: "Evaluación", href: "/deposito/evaluacion" },
-      { label: "Faltantes",  href: "/deposito/faltantes" },
-      { label: "Duplicadas", href: "/deposito/faltantes/duplicadas" },
-      { label: "Pedidos",    href: "/deposito/pedidos" },
-      { label: "WMS",        href: "/deposito/wms" },
-    ] },
-  { key: "picking",     label: "Picking",     href: "/picking",     color: "bg-purple-700 hover:bg-purple-600",
-    children: [{ label: "Picker", href: "/picking/picker" }] },
-  { key: "compras",     label: "Compras",     href: "/compras",     color: "bg-amber-700 hover:bg-amber-600",
-    children: [{ label: "Faltantes", href: "/compras/faltantes" }] },
-  { key: "ventas",      label: "Ventas",      href: "/ventas",      color: "bg-red-700 hover:bg-red-600",
-    children: [{ label: "Faltantes", href: "/ventas/faltantes" }] },
+// Sólo color + label por módulo. Las sub-vistas (children) se detectan solas
+// escaneando app/**/page.tsx en build (scripts/gen-nav.mjs -> nav.generated.ts).
+const RAW_MODULES: Omit<ModuleDef, "children">[] = [
+  { key: "manguera",    label: "Mangueras",   href: "/manguera",    color: "bg-orange-600 hover:bg-orange-500" },
+  { key: "deposito",    label: "Depósito",    href: "/deposito",    color: "bg-emerald-700 hover:bg-emerald-600" },
+  { key: "picking",     label: "Picking",     href: "/picking",     color: "bg-purple-700 hover:bg-purple-600" },
+  { key: "compras",     label: "Compras",     href: "/compras",     color: "bg-amber-700 hover:bg-amber-600" },
+  { key: "ventas",      label: "Ventas",      href: "/ventas",      color: "bg-red-700 hover:bg-red-600" },
   { key: "finanza",     label: "Finanzas",    href: "/finanza",     color: "bg-teal-700 hover:bg-teal-600" },
-  { key: "rrhh",        label: "RRHH",        href: "/rrhh",        color: "bg-indigo-700 hover:bg-indigo-600",
-    children: [
-      { label: "Dashboard",  href: "/rrhh/dashboard" },
-      { label: "Asistencia", href: "/rrhh/asistencia" },
-      { label: "Legajos",    href: "/rrhh/legajos" },
-      { label: "Relojes",    href: "/rrhh/relojes" },
-    ] },
-  { key: "sorteo",      label: "Sorteo",      href: "/sorteo",      color: "bg-pink-700 hover:bg-pink-600",
-    children: [{ label: "Armar", href: "/sorteo/armar" }] },
+  { key: "rrhh",        label: "RRHH",        href: "/rrhh",        color: "bg-indigo-700 hover:bg-indigo-600" },
+  { key: "sorteo",      label: "Sorteo",      href: "/sorteo",      color: "bg-pink-700 hover:bg-pink-600" },
   { key: "vicki",       label: "Vicki",       href: "/vicki",       color: "bg-slate-700 hover:bg-slate-600" },
   { key: "buscador",    label: "Buscador",    href: "/buscador",    color: "bg-cyan-700 hover:bg-cyan-600" },
   { key: "sistema",     label: "Sistema",     href: "/sistema",     color: "bg-rose-700 hover:bg-rose-600" },
 ];
+
+export const MODULES: ModuleDef[] = RAW_MODULES.map((m) => ({
+  ...m,
+  children: GENERATED_CHILDREN[m.key] ?? [],
+}));
 
 export const ALL_MODULE_KEYS: ModuleKey[] = MODULES.map((m) => m.key);
 
