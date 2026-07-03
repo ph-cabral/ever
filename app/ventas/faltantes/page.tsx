@@ -232,6 +232,36 @@ export default function VentasFaltantesPage() {
   // Tabla 2: guarda "vendido" en preparado.faltante_control (mismo endpoint,
   // ahora acepta ese campo opcional — ver route.ts) y retira la fila, sea cual
   // sea la respuesta (vendido o no vendido). Optimista, igual que decidir().
+  // Tabla 1 con fecha de arribo, vista "Ingresados": misma acción que
+  // decidirVendido pero sobre un Item (Tabla 1). Fija clienteQuiere=vendido
+  // para que el renglón deje de calificar en Tabla 1 al recargar.
+  const decidirVendidoTabla1 = useCallback(
+    (it: Item, vendido: boolean) => {
+      setItems((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
+      fetch("/api/deposito/faltantes/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fecha,
+          nroPedOrigen: it.NroPedOrigen,
+          nroRengOrigen: it.NroRengOrigen,
+          codArticulo: it.CodArticulo,
+          fechaArribo: it.fechaArribo,
+          clienteQuiere: vendido,
+          vendido,
+        }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error();
+        })
+        .catch(() => {
+          setError("No se pudo guardar la venta");
+          load();
+        });
+    },
+    [fecha, load],
+  );
+
   const decidirVendido = useCallback(
     (it: ItemListo, vendido: boolean) => {
       setListos((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
@@ -264,8 +294,10 @@ export default function VentasFaltantesPage() {
   const gruposExtra = useMemo(() => agrupar(extraordinarios), [extraordinarios]);
   const gruposNormales = useMemo(() => agrupar(normales), [normales]);
   const gruposListos = useMemo(() => agruparListos(listos), [listos]);
+  const conArribo = useMemo(() => items.filter((it) => it.fechaArribo), [items]);
+  const gruposConArribo = useMemo(() => agrupar(conArribo), [conArribo]);
 
-  const itemsVisibles = flipped ? extraordinarios : items;
+  const itemsVisibles = flipped ? conArribo : items;
   const exportar = useCallback(
     () => exportarFaltantesVentas(itemsVisibles, listos),
     [itemsVisibles, listos],
@@ -315,10 +347,10 @@ export default function VentasFaltantesPage() {
           </span>
           <button
             onClick={() => setFlipped((v) => !v)}
-            title="Ver solo los extraordinarios (gira la tabla)"
+            title="Ver ingresados (con fecha de arribo) — gira la tabla"
             className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
-              extraordinarios.length > 0
-                ? "bg-red-500/15 border-red-400 text-red-300"
+              conArribo.length > 0
+                ? "bg-green-500/15 border-green-400 text-green-300"
                 : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
             }`}
           >
@@ -326,10 +358,10 @@ export default function VentasFaltantesPage() {
               size={14}
               className={`transition-transform duration-500 ${flipped ? "rotate-180" : ""}`}
             />
-            Extraordinario
-            {extraordinarios.length > 0 && (
-              <span className="bg-red-500 text-white rounded-full px-1.5 text-[10px] leading-4 tabular-nums">
-                {extraordinarios.length}
+            Ingresados
+            {conArribo.length > 0 && (
+              <span className="bg-green-500 text-white rounded-full px-1.5 text-[10px] leading-4 tabular-nums">
+                {conArribo.length}
               </span>
             )}
           </button>
@@ -366,7 +398,7 @@ export default function VentasFaltantesPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-6">
-            {gruposExtra.length > 0 && (
+            {!flipped && gruposExtra.length > 0 && (
               <section className="flex flex-col gap-3">
                 {gruposExtra.map((g) => (
                   <GrupoCard key={g.key} g={g} extra onDecidir={decidir} />
@@ -378,6 +410,14 @@ export default function VentasFaltantesPage() {
               <section className="flex flex-col gap-3">
                 {gruposNormales.map((g) => (
                   <GrupoCard key={g.key} g={g} onDecidir={decidir} />
+                ))}
+              </section>
+            )}
+
+            {flipped && gruposConArribo.length > 0 && (
+              <section className="flex flex-col gap-3">
+                {gruposConArribo.map((g) => (
+                  <GrupoCard key={g.key} g={g} vendidoMode onDecidir={decidirVendidoTabla1} />
                 ))}
               </section>
             )}
@@ -400,10 +440,11 @@ export default function VentasFaltantesPage() {
 }
 
 function GrupoCard({
-  g, extra, onDecidir,
+  g, extra, vendidoMode, onDecidir,
 }: {
   g: Grupo;
   extra?: boolean;
+  vendidoMode?: boolean;
   onDecidir: (it: Item, quiere: boolean) => void;
 }) {
   return (
@@ -435,7 +476,7 @@ function GrupoCard({
               <th className="px-3 py-2 font-medium">Fecha faltante</th>
               <th className="px-3 py-2 font-medium">Fecha arribo</th>
               <th className="px-3 py-2 font-medium text-right">Importe</th>
-              <th className="px-3 py-2 font-medium text-center">Acción</th>
+              <th className="px-3 py-2 font-medium text-center">{vendidoMode ? "Vendido" : "Acción"}</th>
             </tr>
           </thead>
           <tbody>
@@ -461,14 +502,14 @@ function GrupoCard({
                   <div className="flex items-center justify-center gap-1.5">
                     <button
                       onClick={() => onDecidir(it, true)}
-                      title="Lo quiere"
+                      title={vendidoMode ? "Vendido" : "Lo quiere"}
                       className="p-1.5 rounded-md border border-zinc-700 text-green-500 hover:bg-green-600/20"
                     >
                       <Check size={15} />
                     </button>
                     <button
                       onClick={() => onDecidir(it, false)}
-                      title="No lo quiere"
+                      title={vendidoMode ? "No vendido" : "No lo quiere"}
                       className="p-1.5 rounded-md border border-zinc-700 text-red-500 hover:bg-red-600/20"
                     >
                       <X size={15} />

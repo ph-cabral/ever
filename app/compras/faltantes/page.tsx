@@ -76,6 +76,15 @@ const fmtAr = (s: string | null) => {
   const m = /(\d{4})-(\d{2})-(\d{2})/.exec(s || "");
   return m ? `${m[3]}/${m[2]}/${m[1]}` : s || "—";
 };
+// Suma días a una fecha YYYY-MM-DD sin corrimiento de huso horario (parseo manual,
+// no new Date(str) directo). Usado para sugerir Arribo = Despacho + 2 días.
+const addDaysISO = (iso: string, days: number) => {
+  const m = /(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return "";
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
 // Fecha local (no UTC) en formato YYYY-MM-DD, para que "hoy" coincida con el
 // día calendario del usuario y no se corra por huso horario.
 const todayISO = () => {
@@ -133,7 +142,7 @@ function Tabla({
             <th className="px-3 py-2 font-medium text-right">Faltan</th>
             <th className="px-3 py-2 font-medium text-right">Cubre OC</th>
             <th className="px-3 py-2 font-medium text-right">Falta OC</th>
-            <th className="px-3 py-2 font-medium">Entrega</th>
+            <th className="px-3 py-2 font-medium">Despacho</th>
             <th className="px-3 py-2 font-medium">Proveedor</th>
             <th className="px-3 py-2 font-medium text-right">Importe</th>
             <th className="px-3 py-2 font-medium">Arribo</th>
@@ -230,21 +239,32 @@ function Tabla({
                   ${fmtNum(r.importe)}
                 </td>
                 <td className="px-3 py-2">
-                  <input
-                    type="date"
-                    value={r.fechaArribo ?? ""}
-                    onChange={(e) => onArribo(r, e.target.value || null)}
-                    title={
-                      r.tieneArribo
-                        ? "Ya cargada — se oculta salvo 'Ver con arribo'"
-                        : "Cargar fecha de arribo (aplica a todos los renglones del artículo ese día)"
-                    }
-                    className={`bg-[#1f1f1f] border rounded-md px-2 py-1 text-xs outline-none [color-scheme:dark] ${
-                      r.tieneArribo
-                        ? "border-emerald-600 text-emerald-300"
-                        : "border-zinc-700 text-zinc-200 focus:border-yellow-400"
-                    }`}
-                  />
+                  {(() => {
+                    // Sugerido = Despacho + 2 días, solo mientras no haya arribo
+                    // cargado a mano. No se persiste hasta que se edite/confirme.
+                    const sugerido = !r.fechaArribo && r.fechaEntrega ? addDaysISO(r.fechaEntrega, 2) : null;
+                    return (
+                      <input
+                        type="date"
+                        value={r.fechaArribo ?? sugerido ?? ""}
+                        onChange={(e) => onArribo(r, e.target.value || null)}
+                        title={
+                          r.tieneArribo
+                            ? "Ya cargada — se oculta salvo 'Ver con arribo'"
+                            : sugerido
+                              ? "Sugerido: Despacho + 2 días. No guardado — editá para confirmar o corregir por retraso."
+                              : "Cargar fecha de arribo (aplica a todos los renglones del artículo ese día)"
+                        }
+                        className={`bg-[#1f1f1f] border rounded-md px-2 py-1 text-xs outline-none [color-scheme:dark] ${
+                          r.tieneArribo
+                            ? "border-emerald-600 text-emerald-300"
+                            : sugerido
+                              ? "border-dashed border-zinc-600 text-zinc-400 focus:border-yellow-400"
+                              : "border-zinc-700 text-zinc-200 focus:border-yellow-400"
+                        }`}
+                      />
+                    );
+                  })()}
                 </td>
               </tr>
             );
