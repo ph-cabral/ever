@@ -67,7 +67,39 @@ UBIC_COL_CANT = "UbicacionDetalleCantidad"
 
 CODIGOS_COMPROBANTE_WMS = (10, 70, 100, 210, 310)
 
-SQL_WMS = """
+# /deposito (productividad cruda) -> TODA la actividad WMS, SIN filtrar por
+# comprobante de Magnus (no debe verse afectada por ese filtro).
+SQL_WMS_TODOS = """
+SELECT
+    CONVERT(varchar(10), OT.OTFechaHoraEjecucion, 103) AS [FECHA EJECUCION],
+    CASE Codot.CodotProcesoNegocio
+        WHEN 1 THEN 'Reposicion'
+        WHEN 2 THEN 'Interdeposito'
+        WHEN 3 THEN 'Re-Ubicacion'
+        WHEN 4 THEN 'Picking'
+        WHEN 5 THEN 'Libre'
+    END                              AS [PROCESO],
+    P_Repositor.PersonalNombre       AS [OPERARIO],
+    ISNULL(i.[CANT. ITEM DE RECOLECCION], 0) AS [CANT. ITEM DE RECOLECCION],
+    ISNULL(i.[CANT. ITEM RECOLECTADOS], 0)   AS [CANT. ITEM RECOLECTADOS]
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+LEFT JOIN Personal P_Repositor ON OT.OTUsuarioGUID_Repositor = P_Repositor.PersonalId
+LEFT JOIN (
+    SELECT OTId,
+        SUM(CASE WHEN OTItemTipo = 1 THEN 1 ELSE 0 END)                          AS [CANT. ITEM DE RECOLECCION],
+        SUM(CASE WHEN OTItemTipo = 1 AND OTItemCantCumplida > 0 THEN 1 ELSE 0 END) AS [CANT. ITEM RECOLECTADOS]
+    FROM OTItem GROUP BY OTId
+) i ON OT.OTId = i.OTId
+WHERE OT.OTEstado IN (2, 3, 4)
+  AND OT.OTFechaHoraEjecucion >= ?
+  AND OT.OTFechaHoraEjecucion <= ?
+ORDER BY OT.OTId DESC
+"""
+
+# /deposito/pedidos (preparado vs ingresados) -> SOLO OT que matchean un pedido
+# Magnus de los comprobantes válidos. NO agregar 410 acá.
+SQL_WMS_PEDIDOS = """
 SELECT
     CONVERT(varchar(10), OT.OTFechaHoraEjecucion, 103) AS [FECHA EJECUCION],
     CASE Codot.CodotProcesoNegocio
@@ -99,18 +131,23 @@ WHERE OT.OTEstado IN (2, 3, 4)
 ORDER BY OT.OTId DESC
 """
 
-def fetch_wms(desde: datetime, hasta: datetime, incluir_410: bool = False):
-    """incluir_410=True SOLO para /deposito (productividad). /deposito/pedidos
-    (preparado/ingresados) debe seguir SIN el 410 -> no pasar el flag ahí."""
-    codigos = CODIGOS_COMPROBANTE_WMS + (410,) if incluir_410 else CODIGOS_COMPROBANTE_WMS
+def fetch_wms(desde: datetime, hasta: datetime, todos: bool = False):
+    """todos=True -> /deposito: TODA la actividad WMS, sin filtro de comprobante.
+    todos=False (default) -> /deposito/pedidos: solo comprobantes (10,70,100,210,310)."""
     conn = get_connection("WMS")
     try:
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
-        cur.execute(
-            SQL_WMS.format(col_pedido=OT_COL_PEDIDO, codigos=",".join(map(str, codigos))),
-            (desde, hasta),
-        )
+        if todos:
+            cur.execute(SQL_WMS_TODOS, (desde, hasta))
+        else:
+            cur.execute(
+                SQL_WMS_PEDIDOS.format(
+                    col_pedido=OT_COL_PEDIDO,
+                    codigos=",".join(map(str, CODIGOS_COMPROBANTE_WMS)),
+                ),
+                (desde, hasta),
+            )
         return _rows(cur)
     finally:
         conn.close()

@@ -12,10 +12,10 @@ export async function GET(req: NextRequest) {
   const qs = new URLSearchParams();
   const desde = searchParams.get("desde");
   const hasta = searchParams.get("hasta");
-  const incluir410 = searchParams.get("incluir_410");
+  const todos = searchParams.get("todos");
   if (desde) qs.set("desde", desde);
   if (hasta) qs.set("hasta", hasta);
-  if (incluir410) qs.set("incluir_410", incluir410);
+  if (todos) qs.set("todos", todos);
 
   try {
     const res = await fetch(`${API_URL}/deposito/wms?${qs.toString()}`, {

@@ -26,7 +26,7 @@ export function useDepositoData(desde: string, hasta: string) {
     const errs: string[] = [];
 
     try {
-      const r = await fetch(`/api/deposito/wms?desde=${desde}&hasta=${hasta}&incluir_410=true`, { cache: "no-store" });
+      const r = await fetch(`/api/deposito/wms?desde=${desde}&hasta=${hasta}&todos=true`, { cache: "no-store" });
       const j = (await r.json().catch(() => ({}))) as ApiResp;
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
       setProd(parseDepositoRows(j.rows ?? [], "WMS en vivo"));

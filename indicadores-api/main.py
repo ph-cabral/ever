@@ -125,12 +125,12 @@ def _parse_rango(desde: str | None, hasta: str | None):
 def deposito_wms(
     desde: str | None = Query(default=None),
     hasta: str | None = Query(default=None),
-    incluir_410: bool = Query(default=False),
+    todos: bool = Query(default=False),
 ):
     """Productividad de Operarios (WMS) por rango de OTFechaHoraEjecucion."""
     try:
         d, h = _parse_rango(desde, hasta)
-        rows = fetch_wms(d, h, incluir_410=incluir_410)
+        rows = fetch_wms(d, h, todos=todos)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
     return {
