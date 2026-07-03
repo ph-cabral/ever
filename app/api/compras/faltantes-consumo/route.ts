@@ -445,7 +445,7 @@ export async function GET(req: NextRequest) {
     hasta: maxFecha ?? fecha,
     ocDesde,
     faltDesde,
-    historico,
+    historico: true, // siempre histórico (ver qs arriba)
     conArribo,
     total: rowsOut.length,
     rows: rowsOut,
