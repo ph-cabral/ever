@@ -146,6 +146,11 @@ export async function GET() {
       existLatest.set(`${r.nroPedOrigen}-${r.nroRengOrigen}`, r.existencia);
     const sin = new Set<string>();
     for (const [k, ex] of existLatest) if (ex === false) sin.add(k);
+    // existencia=true: fue error de preparado (SÍ había en depósito). No pasa
+    // por compras — se muestra como "arribado" automático (fechaArribo
+    // sintético "EN_STOCK") directo en Tabla 1 / Ingresados.
+    const con = new Set<string>();
+    for (const [k, ex] of existLatest) if (ex === true) con.add(k);
 
     const ctrl = new Map<
       string,
@@ -244,7 +249,25 @@ export async function GET() {
           r.vendido === null,
       );
 
-    return NextResponse.json({ fecha, rows: out, listos });
+    // existencia=true: error de preparado, no pasa por compras. "Arribado"
+    // automático con fechaArribo sintético = "EN_STOCK" (ver fmtAr en el
+    // front). Mismo gate de salida que Tabla 1 (clienteQuiere aún null).
+    const enStock = rows
+      .filter((r) => con.has(`${r.NroPedOrigen}-${r.NroRengOrigen}`))
+      .map((r) => {
+        const c = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);
+        return {
+          ...r,
+          fechaArribo: "EN_STOCK" as const,
+          arriboOC: false,
+          clienteQuiere: c?.clienteQuiere ?? null,
+          extraordinario: false,
+          extraordinarioFecha: null,
+        };
+      })
+      .filter((r) => r.clienteQuiere === null);
+
+    return NextResponse.json({ fecha, rows: [...out, ...enStock], listos });
   } catch (error) {
     console.error("GET /api/ventas/faltantes", error);
     return NextResponse.json(

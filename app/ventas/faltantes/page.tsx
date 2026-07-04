@@ -73,6 +73,7 @@ const grupoKeyOf = (it: { Cliente: number | string | null; NroPedOrigen: number 
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(n || 0);
 const fmtAr = (s: string | null) => {
+  if (s === "EN_STOCK") return "En stock";
   const m = /(\d{4})-(\d{2})-(\d{2})/.exec(s || "");
   return m ? `${m[3]}/${m[2]}/${m[1]}` : s || "—";
 };
@@ -198,7 +199,7 @@ export default function VentasFaltantesPage() {
             nroPedOrigen: it.NroPedOrigen,
             nroRengOrigen: it.NroRengOrigen,
             codArticulo: it.CodArticulo,
-            fechaArribo: it.fechaArribo,
+            fechaArribo: it.fechaArribo === "EN_STOCK" ? null : it.fechaArribo,
             clienteQuiere: quiere,
           }),
         }),
@@ -246,7 +247,7 @@ export default function VentasFaltantesPage() {
           nroPedOrigen: it.NroPedOrigen,
           nroRengOrigen: it.NroRengOrigen,
           codArticulo: it.CodArticulo,
-          fechaArribo: it.fechaArribo,
+          fechaArribo: it.fechaArribo === "EN_STOCK" ? null : it.fechaArribo,
           clienteQuiere: vendido,
           vendido,
         }),

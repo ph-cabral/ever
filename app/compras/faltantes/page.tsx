@@ -169,21 +169,17 @@ function Tabla({
                   </button>
                 </td>
                 <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">
-                  {nuevoArt ? r.CodArticulo : ""}
+                  {r.CodArticulo}
                 </td>
                 <td className="px-3 py-2 text-zinc-100">
-                  {nuevoArt ? (
-                    <span>
-                      {r.Nombre}
-                      {r.ocTotal > 0 && (
-                        <span className="ml-2 text-[11px] text-zinc-500">
-                          OC total {fmtNum(r.ocTotal)}
-                        </span>
-                      )}
-                    </span>
-                  ) : (
-                    ""
-                  )}
+                  <span>
+                    {r.Nombre}
+                    {nuevoArt && r.ocTotal > 0 && (
+                      <span className="ml-2 text-[11px] text-zinc-500">
+                        OC total {fmtNum(r.ocTotal)}
+                      </span>
+                    )}
+                  </span>
                 </td>
                 <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">
                   {fmtAr(r.fecha)}
@@ -234,7 +230,7 @@ function Tabla({
                         : fmtAr(r.fechaEntrega)
                       : "—"}
                 </td>
-                <td className="px-3 py-2 text-zinc-400">{nuevoArt ? r.Proveedor || "—" : ""}</td>
+                <td className="px-3 py-2 text-zinc-400">{r.Proveedor || "—"}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
                   ${fmtNum(r.importe)}
                 </td>
