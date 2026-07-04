@@ -26,13 +26,14 @@ import { exportarFaltantesVentas } from "@/lib/ventas/exportFaltantes";
 //   Toda la agregación (existencia + fecha de arribo + extraordinario de
 //   compras) se resuelve en el backend: GET /api/ventas/faltantes.
 //
-//   "Tabla 2" (listos para vender): renglones que YA tienen fechaArribo,
-//   clienteQuiere=true, Y aparecen en un remito de ingreso x OC (Magnus,
-//   indicadores-api /compras/ingresos) — o sea, ya llegaron físicamente.
+//   Toggle "Ingresados" (header, flipped=true): misma lista de arriba,
+//   filtrada a los que YA tienen fechaArribo (gruposConArribo, vendidoMode).
 //   Acción (✓ vendido / ✗ no vendido): cualquiera de las dos respuestas
 //   guarda "vendido" en faltante_control y retira la fila (optimista).
-//   Botón basurero (violeta): "irrelevante" — descarta el renglón sin
-//   marcarlo vendido/no vendido, guarda irrelevante=true y retira la fila.
+//   Acá también vive el botón basurero (violeta): "irrelevante" descarta el
+//   renglón sin pasar por vendido/no vendido — guarda irrelevante=true y
+//   retira la fila. Solo en "Ingresados", no en la vista default ni en
+//   "Listos para vender" (rows→listos, requiere remito de ingreso x OC).
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface Item {
@@ -296,12 +297,12 @@ export default function VentasFaltantesPage() {
     [fecha, load],
   );
 
-  // Botón basurero (Tabla 2, junto a Vendido/No vendido): "irrelevante",
-  // descarta el renglón sin marcarlo vendido/no vendido. Guarda
-  // irrelevante=true en faltante_control y retira la fila.
+  // Botón basurero (Tabla 1, SOLO filas "En stock" — existencia=true, error
+  // de preparado): "irrelevante", descarta el renglón sin pasar por
+  // lo-quiere/no-lo-quiere. Guarda irrelevante=true y retira la fila.
   const marcarIrrelevante = useCallback(
-    (it: ItemListo) => {
-      setListos((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
+    (it: Item) => {
+      setItems((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
       fetch("/api/deposito/faltantes/control", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -310,8 +311,8 @@ export default function VentasFaltantesPage() {
           nroPedOrigen: it.NroPedOrigen,
           nroRengOrigen: it.NroRengOrigen,
           codArticulo: it.CodArticulo,
-          fechaArribo: it.fechaArribo,
-          clienteQuiere: it.clienteQuiere,
+          fechaArribo: it.fechaArribo === "EN_STOCK" ? null : it.fechaArribo,
+          clienteQuiere: null,
           irrelevante: true,
         }),
       })
@@ -454,7 +455,13 @@ export default function VentasFaltantesPage() {
             {flipped && gruposConArribo.length > 0 && (
               <section className="flex flex-col gap-3">
                 {gruposConArribo.map((g) => (
-                  <GrupoCard key={g.key} g={g} vendidoMode onDecidir={decidirVendidoTabla1} />
+                  <GrupoCard
+                    key={g.key}
+                    g={g}
+                    vendidoMode
+                    onDecidir={decidirVendidoTabla1}
+                    onIrrelevante={marcarIrrelevante}
+                  />
                 ))}
               </section>
             )}
@@ -465,12 +472,7 @@ export default function VentasFaltantesPage() {
                   <PackageCheck size={16} /> Listos para vender (ya ingresaron)
                 </h2>
                 {gruposListos.map((g) => (
-                  <GrupoCardListo
-                    key={g.key}
-                    g={g}
-                    onDecidir={decidirVendido}
-                    onIrrelevante={marcarIrrelevante}
-                  />
+                  <GrupoCardListo key={g.key} g={g} onDecidir={decidirVendido} />
                 ))}
               </section>
             )}
@@ -482,12 +484,13 @@ export default function VentasFaltantesPage() {
 }
 
 function GrupoCard({
-  g, extra, vendidoMode, onDecidir,
+  g, extra, vendidoMode, onDecidir, onIrrelevante,
 }: {
   g: Grupo;
   extra?: boolean;
   vendidoMode?: boolean;
   onDecidir: (it: Item, quiere: boolean) => void;
+  onIrrelevante?: (it: Item) => void;
 }) {
   return (
     <div
@@ -556,6 +559,15 @@ function GrupoCard({
                     >
                       <X size={15} />
                     </button>
+                    {onIrrelevante && (
+                      <button
+                        onClick={() => onIrrelevante(it)}
+                        title="Irrelevante — descartar"
+                        className="p-1.5 rounded-md border border-zinc-700 text-violet-600 hover:bg-violet-800/25 hover:text-violet-500"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -568,11 +580,10 @@ function GrupoCard({
 }
 
 function GrupoCardListo({
-  g, onDecidir, onIrrelevante,
+  g, onDecidir,
 }: {
   g: GrupoListo;
   onDecidir: (it: ItemListo, vendido: boolean) => void;
-  onIrrelevante?: (it: ItemListo) => void;
 }) {
   return (
     <div className="rounded-xl border border-green-900/50 bg-green-500/[0.05] overflow-hidden">
@@ -625,15 +636,6 @@ function GrupoCardListo({
                     >
                       <X size={15} />
                     </button>
-                    {onIrrelevante && (
-                      <button
-                        onClick={() => onIrrelevante(it)}
-                        title="Irrelevante — descartar"
-                        className="p-1.5 rounded-md border border-zinc-700 text-violet-600 hover:bg-violet-800/25 hover:text-violet-500"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    )}
                   </div>
                 </td>
               </tr>
