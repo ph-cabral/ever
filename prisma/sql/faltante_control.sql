@@ -24,3 +24,11 @@ CREATE INDEX IF NOT EXISTS idx_faltante_control_fecha ON preparado.faltante_cont
 ALTER TABLE preparado.faltante_control
   ADD COLUMN IF NOT EXISTS "vendido" BOOLEAN,
   ADD COLUMN IF NOT EXISTS "vendidoAt" TIMESTAMPTZ;
+
+-- irrelevante: descarte de VENTAS en /ventas/faltantes ("Tabla 1", botón
+-- basurero junto a Lo quiere/No lo quiere). No es una decisión del cliente
+-- (eso es clienteQuiere) — es "este renglón no corresponde", y saca la fila
+-- de la tabla sin más. Aplicar a mano en Postgres.
+ALTER TABLE preparado.faltante_control
+  ADD COLUMN IF NOT EXISTS "irrelevante" BOOLEAN,
+  ADD COLUMN IF NOT EXISTS "irrelevanteAt" TIMESTAMPTZ;

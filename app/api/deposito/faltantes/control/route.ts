@@ -20,13 +20,15 @@ export async function GET(req: NextRequest) {
         fechaArribo: string | null;
         clienteQuiere: boolean | null;
         vendido: boolean | null;
+        irrelevante: boolean | null;
       }[]
     >`
       SELECT "nroPedOrigen",
              "nroRengOrigen",
              to_char("fechaArribo", 'YYYY-MM-DD') AS "fechaArribo",
              "clienteQuiere",
-             "vendido"
+             "vendido",
+             "irrelevante"
       FROM preparado.faltante_control
       WHERE fecha = ${fecha}::date
     `;
@@ -37,6 +39,7 @@ export async function GET(req: NextRequest) {
         fechaArribo: r.fechaArribo,
         clienteQuiere: r.clienteQuiere,
         vendido: r.vendido,
+        irrelevante: r.irrelevante,
       })),
     });
   } catch (error) {
@@ -69,6 +72,11 @@ export async function POST(req: NextRequest) {
     const vendidoProvisto = Object.prototype.hasOwnProperty.call(b, "vendido");
     const vendido: boolean | null =
       b.vendido === null || b.vendido === undefined ? null : Boolean(b.vendido);
+    // irrelevante: igual patrón opcional que vendido — solo se toca si viene
+    // en el body (lo manda /ventas/faltantes, botón basurero "Tabla 1").
+    const irrelevanteProvisto = Object.prototype.hasOwnProperty.call(b, "irrelevante");
+    const irrelevante: boolean | null =
+      b.irrelevante === null || b.irrelevante === undefined ? null : Boolean(b.irrelevante);
 
     if (!fecha || !nroPedOrigen || !nroRengOrigen)
       return NextResponse.json(
@@ -78,18 +86,21 @@ export async function POST(req: NextRequest) {
 
     await prisma.$executeRaw`
       INSERT INTO preparado.faltante_control AS fc
-        (fecha, "nroPedOrigen", "nroRengOrigen", "codArticulo", "fechaArribo", "clienteQuiere", "vendido", "vendidoAt", "updatedAt")
+        (fecha, "nroPedOrigen", "nroRengOrigen", "codArticulo", "fechaArribo", "clienteQuiere", "vendido", "vendidoAt", "irrelevante", "irrelevanteAt", "updatedAt")
       VALUES (
         ${fecha}::date, ${nroPedOrigen}, ${nroRengOrigen}, ${codArticulo}, ${fechaArribo}::date, ${clienteQuiere}::boolean,
-        ${vendido}::boolean, ${vendidoProvisto ? new Date() : null}, now()
+        ${vendido}::boolean, ${vendidoProvisto ? new Date() : null},
+        ${irrelevante}::boolean, ${irrelevanteProvisto ? new Date() : null}, now()
       )
       ON CONFLICT (fecha, "nroPedOrigen", "nroRengOrigen") DO UPDATE SET
-        "fechaArribo"   = EXCLUDED."fechaArribo",
-        "clienteQuiere" = EXCLUDED."clienteQuiere",
-        "codArticulo"   = EXCLUDED."codArticulo",
-        "vendido"       = CASE WHEN ${vendidoProvisto} THEN EXCLUDED."vendido" ELSE fc."vendido" END,
-        "vendidoAt"     = CASE WHEN ${vendidoProvisto} THEN now() ELSE fc."vendidoAt" END,
-        "updatedAt"     = now()
+        "fechaArribo"    = EXCLUDED."fechaArribo",
+        "clienteQuiere"  = EXCLUDED."clienteQuiere",
+        "codArticulo"    = EXCLUDED."codArticulo",
+        "vendido"        = CASE WHEN ${vendidoProvisto} THEN EXCLUDED."vendido" ELSE fc."vendido" END,
+        "vendidoAt"      = CASE WHEN ${vendidoProvisto} THEN now() ELSE fc."vendidoAt" END,
+        "irrelevante"    = CASE WHEN ${irrelevanteProvisto} THEN EXCLUDED."irrelevante" ELSE fc."irrelevante" END,
+        "irrelevanteAt"  = CASE WHEN ${irrelevanteProvisto} THEN now() ELSE fc."irrelevanteAt" END,
+        "updatedAt"      = now()
     `;
     return NextResponse.json({ ok: true });
   } catch (error) {

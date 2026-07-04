@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck,
-  Check, X, RotateCw, Download,
+  Check, X, RotateCw, Download, Trash2,
 } from "lucide-react";
 import { exportarFaltantesVentas } from "@/lib/ventas/exportFaltantes";
 
@@ -234,6 +234,36 @@ export default function VentasFaltantesPage() {
     [fecha, load],
   );
 
+  // Botón basurero (Tabla 1, junto a Lo quiere/No lo quiere): "irrelevante",
+  // NO es una decisión del cliente — el renglón no corresponde y se descarta
+  // sin más. Guarda irrelevante=true en faltante_control y retira la fila.
+  const marcarIrrelevante = useCallback(
+    (it: Item) => {
+      setItems((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
+      fetch("/api/deposito/faltantes/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fecha,
+          nroPedOrigen: it.NroPedOrigen,
+          nroRengOrigen: it.NroRengOrigen,
+          codArticulo: it.CodArticulo,
+          fechaArribo: it.fechaArribo === "EN_STOCK" ? null : it.fechaArribo,
+          clienteQuiere: null,
+          irrelevante: true,
+        }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error();
+        })
+        .catch(() => {
+          setError("No se pudo marcar como irrelevante");
+          load();
+        });
+    },
+    [fecha, load],
+  );
+
   // Tabla 2: guarda "vendido" en preparado.faltante_control (mismo endpoint,
   // ahora acepta ese campo opcional — ver route.ts) y retira la fila, sea cual
   // sea la respuesta (vendido o no vendido). Optimista, igual que decidir().
@@ -406,7 +436,13 @@ export default function VentasFaltantesPage() {
             {!flipped && gruposExtra.length > 0 && (
               <section className="flex flex-col gap-3">
                 {gruposExtra.map((g) => (
-                  <GrupoCard key={g.key} g={g} extra onDecidir={decidir} />
+                  <GrupoCard
+                    key={g.key}
+                    g={g}
+                    extra
+                    onDecidir={decidir}
+                    onIrrelevante={marcarIrrelevante}
+                  />
                 ))}
               </section>
             )}
@@ -414,7 +450,12 @@ export default function VentasFaltantesPage() {
             {!flipped && gruposNormales.length > 0 && (
               <section className="flex flex-col gap-3">
                 {gruposNormales.map((g) => (
-                  <GrupoCard key={g.key} g={g} onDecidir={decidir} />
+                  <GrupoCard
+                    key={g.key}
+                    g={g}
+                    onDecidir={decidir}
+                    onIrrelevante={marcarIrrelevante}
+                  />
                 ))}
               </section>
             )}
@@ -445,12 +486,13 @@ export default function VentasFaltantesPage() {
 }
 
 function GrupoCard({
-  g, extra, vendidoMode, onDecidir,
+  g, extra, vendidoMode, onDecidir, onIrrelevante,
 }: {
   g: Grupo;
   extra?: boolean;
   vendidoMode?: boolean;
   onDecidir: (it: Item, quiere: boolean) => void;
+  onIrrelevante?: (it: Item) => void;
 }) {
   return (
     <div
@@ -519,6 +561,15 @@ function GrupoCard({
                     >
                       <X size={15} />
                     </button>
+                    {onIrrelevante && (
+                      <button
+                        onClick={() => onIrrelevante(it)}
+                        title="Irrelevante — descartar"
+                        className="p-1.5 rounded-md border border-zinc-700 text-violet-600 hover:bg-violet-800/25 hover:text-violet-500"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

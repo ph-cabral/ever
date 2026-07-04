@@ -97,13 +97,15 @@ export async function GET() {
           fechaArribo: string | null;
           clienteQuiere: boolean | null;
           vendido: boolean | null;
+          irrelevante: boolean | null;
         }[]
       >`
         SELECT DISTINCT ON ("nroPedOrigen", "nroRengOrigen")
                "nroPedOrigen", "nroRengOrigen",
                to_char("fechaArribo", 'YYYY-MM-DD') AS "fechaArribo",
                "clienteQuiere",
-               "vendido"
+               "vendido",
+               "irrelevante"
         FROM preparado.faltante_control
         ORDER BY "nroPedOrigen", "nroRengOrigen", "updatedAt" DESC
       `,
@@ -158,6 +160,7 @@ export async function GET() {
         fechaArribo: string | null;
         clienteQuiere: boolean | null;
         vendido: boolean | null;
+        irrelevante: boolean | null;
       }
     >();
     for (const r of ctrlRows)
@@ -165,6 +168,7 @@ export async function GET() {
         fechaArribo: r.fechaArribo,
         clienteQuiere: r.clienteQuiere,
         vendido: r.vendido,
+        irrelevante: r.irrelevante,
       });
 
     // Arribo automático por OC: artículo → FechaEntrega de la OC pendiente,
@@ -204,6 +208,11 @@ export async function GET() {
 
     const out = rows
       .filter((r) => sin.has(`${r.NroPedOrigen}-${r.NroRengOrigen}`))
+      // irrelevante (botón basurero en el front): descarte definitivo, no
+      // vuelve a entrar a Tabla 1 aunque clienteQuiere siga en null.
+      .filter(
+        (r) => !ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`)?.irrelevante,
+      )
       .map((r) => {
         const c = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);
         const extra = extraMap.get(r.CodArticulo);
@@ -254,6 +263,9 @@ export async function GET() {
     // front). Mismo gate de salida que Tabla 1 (clienteQuiere aún null).
     const enStock = rows
       .filter((r) => con.has(`${r.NroPedOrigen}-${r.NroRengOrigen}`))
+      .filter(
+        (r) => !ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`)?.irrelevante,
+      )
       .map((r) => {
         const c = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);
         return {
