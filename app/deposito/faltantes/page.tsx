@@ -72,6 +72,8 @@ export default function FaltantesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ubicArt, setUbicArt] = useState<string | null>(null); // artículo del modal de ubicaciones
+  const [exitDir, setExitDir] = useState<"left" | "right" | null>(null); // tarjeta móvil saliendo
+  const [transitioning, setTransitioning] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -203,19 +205,28 @@ export default function FaltantesPage() {
     [fecha],
   );
 
-  // Celular: marca y avanza al siguiente.
+  // Celular: marca y avanza al siguiente. La tarjeta actual sale volando hacia
+  // el costado (verde → derecha, rojo → izquierda) y recién ahí avanza el
+  // puntero — así hay tiempo de ver la animación antes de que cambie el dato.
   const mark = useCallback(
     (it: Item, existencia: boolean) => {
+      if (transitioning) return;
       const k = keyOf(it);
-      setUndoStack((u) => [
-        ...u,
-        { key: k, prev: estados[k] ?? "pendiente", idx },
-      ]);
+      setTransitioning(true);
+      setExitDir(existencia ? "right" : "left");
       setEstados((s) => ({ ...s, [k]: existencia ? "si" : "no" }));
-      setIdx((i) => Math.min(i + 1, items.length));
       void persist(it, existencia);
+      window.setTimeout(() => {
+        setUndoStack((u) => [
+          ...u,
+          { key: k, prev: estados[k] ?? "pendiente", idx },
+        ]);
+        setIdx((i) => Math.min(i + 1, items.length));
+        setExitDir(null);
+        setTransitioning(false);
+      }, 260);
     },
-    [estados, idx, items.length, persist],
+    [estados, idx, items.length, persist, transitioning],
   );
 
   // PC: marca por fila sin mover el puntero móvil.
@@ -289,8 +300,8 @@ export default function FaltantesPage() {
         <div className="h-14 shrink-0 flex items-center justify-between px-4 border-b border-zinc-800">
           <button
             onClick={undo}
-            disabled={!undoStack.length}
-            className="flex items-center gap-1.5 text-sm font-medium text-zinc-300 disabled:opacity-30 active:text-yellow-400"
+            disabled={!undoStack.length || transitioning}
+            className="btn-anim flex items-center gap-1.5 text-sm font-medium text-zinc-300 disabled:opacity-30 disabled:hover:scale-100 disabled:hover:translate-y-0 active:text-yellow-400"
           >
             <Undo2 size={18} /> Deshacer
           </button>
@@ -325,20 +336,31 @@ export default function FaltantesPage() {
               <button
                 onClick={undo}
                 disabled={!undoStack.length}
-                className="mt-2 flex items-center gap-1.5 text-sm text-zinc-300 disabled:opacity-30"
+                className="btn-anim mt-2 flex items-center gap-1.5 text-sm text-zinc-300 disabled:opacity-30"
               >
                 <Undo2 size={16} /> Deshacer último
               </button>
             </div>
           ) : (
-            <CardDetalle
-              it={current}
-              estado={estados[keyOf(current)] ?? "pendiente"}
-              tipos={tipos}
-              novedadId={novedades[keyOf(current)] ?? null}
-              onNovedad={(id) => saveNovedad(current, id)}
-              onUbic={() => setUbicArt(current.CodArticulo)}
-            />
+            <div
+              key={keyOf(current)}
+              className={
+                exitDir === "right"
+                  ? "card-out-right"
+                  : exitDir === "left"
+                    ? "card-out-left"
+                    : "animate-in fade-in slide-in-from-bottom-2 duration-300"
+              }
+            >
+              <CardDetalle
+                it={current}
+                estado={estados[keyOf(current)] ?? "pendiente"}
+                tipos={tipos}
+                novedadId={novedades[keyOf(current)] ?? null}
+                onNovedad={(id) => saveNovedad(current, id)}
+                onUbic={() => setUbicArt(current.CodArticulo)}
+              />
+            </div>
           )}
         </div>
 
@@ -346,13 +368,15 @@ export default function FaltantesPage() {
           <div className="shrink-0 grid grid-cols-2 gap-px bg-zinc-800">
             <button
               onClick={() => mark(current, true)}
-              className="h-24 flex flex-col items-center justify-center gap-1 bg-green-600 active:bg-green-700 text-white font-bold text-lg"
+              disabled={transitioning}
+              className="h-24 flex flex-col items-center justify-center gap-1 bg-green-600 active:bg-green-700 active:scale-[0.97] text-white font-bold text-lg transition-transform duration-150 disabled:opacity-60"
             >
               <Check size={28} /> En existencia
             </button>
             <button
               onClick={() => mark(current, false)}
-              className="h-24 flex flex-col items-center justify-center gap-1 bg-red-600 active:bg-red-700 text-white font-bold text-lg"
+              disabled={transitioning}
+              className="h-24 flex flex-col items-center justify-center gap-1 bg-red-600 active:bg-red-700 active:scale-[0.97] text-white font-bold text-lg transition-transform duration-150 disabled:opacity-60"
             >
               <X size={28} /> Sin existencia
             </button>
@@ -400,7 +424,7 @@ export default function FaltantesPage() {
               onClick={undo}
               disabled={!undoStack.length}
               title="Deshacer"
-              className="flex items-center gap-1.5 text-zinc-400 hover:text-yellow-400 disabled:opacity-30 transition-colors"
+              className="btn-anim flex items-center gap-1.5 text-zinc-400 hover:text-yellow-400 disabled:opacity-30 disabled:hover:scale-100 disabled:hover:translate-y-0"
             >
               <Undo2 size={16} /> Deshacer
             </button>
@@ -408,7 +432,7 @@ export default function FaltantesPage() {
               onClick={load}
               title="Refrescar"
               disabled={loading}
-              className="text-zinc-400 hover:text-yellow-400 transition-colors p-2 disabled:opacity-40"
+              className="btn-anim text-zinc-400 hover:text-yellow-400 p-2 disabled:opacity-40 disabled:hover:scale-100 disabled:hover:translate-y-0"
             >
               <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
             </button>
@@ -465,7 +489,7 @@ export default function FaltantesPage() {
                     return (
                       <tr
                         key={keyOf(it)}
-                        className={`border-t border-zinc-800/70 ${
+                        className={`border-t border-zinc-800/70 transition-colors duration-300 animate-in fade-in duration-300 ${
                           e === "si"
                             ? "bg-green-950/30"
                             : e === "no"
@@ -483,7 +507,7 @@ export default function FaltantesPage() {
                           <button
                             onClick={() => setUbicArt(it.CodArticulo)}
                             title="Ver ubicaciones"
-                            className="inline-flex items-center gap-1 hover:text-yellow-400"
+                            className="chip-anim inline-flex items-center gap-1 hover:text-yellow-400"
                           >
                             <MapPin size={13} className="text-zinc-500" />
                             {it.CodArticulo}
@@ -535,7 +559,7 @@ export default function FaltantesPage() {
                             <button
                               onClick={() => markRow(it, true)}
                               title="En existencia"
-                              className={`p-1.5 rounded-md border ${
+                              className={`btn-anim p-1.5 rounded-md border ${
                                 e === "si"
                                   ? "bg-green-600 border-green-600 text-white"
                                   : "border-zinc-700 text-green-500 hover:bg-green-600/20"
@@ -546,7 +570,7 @@ export default function FaltantesPage() {
                             <button
                               onClick={() => markRow(it, false)}
                               title="Sin existencia"
-                              className={`p-1.5 rounded-md border ${
+                              className={`btn-anim p-1.5 rounded-md border ${
                                 e === "no"
                                   ? "bg-red-600 border-red-600 text-white"
                                   : "border-zinc-700 text-red-500 hover:bg-red-600/20"
@@ -609,18 +633,18 @@ function UbicacionesModal({
   }, [articulo]);
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm bg-[#1A1A1A] border border-zinc-700 rounded-xl overflow-hidden"
+        className="w-full max-w-sm bg-[#1A1A1A] border border-zinc-700 rounded-xl overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
           <span className="font-mono text-sm text-yellow-400">{articulo}</span>
           <button
             onClick={onClose}
-            className="text-zinc-400 hover:text-white"
+            className="btn-anim text-zinc-400 hover:text-white"
           >
             <X size={18} />
           </button>

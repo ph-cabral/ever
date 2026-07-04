@@ -125,10 +125,12 @@ function Tabla({
   data,
   onMark,
   onArribo,
+  leaving = {},
 }: {
   data: Row[];
   onMark: (row: Row) => void;
   onArribo: (row: Row, fechaArribo: string | null) => void;
+  leaving?: Record<string, "left" | "right">;
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-zinc-800">
@@ -152,18 +154,22 @@ function Tabla({
           {data.map((r, i) => {
             const prev = data[i - 1];
             const nuevoArt = !prev || prev.CodArticulo !== r.CodArticulo;
+            const dir = leaving[rowKey(r)];
             return (
               <tr
                 key={rowKey(r)}
-                className={`transition-colors ${rowCls[r.estado]} ${
+                className={`transition-colors animate-in fade-in duration-300 ${
+                  dir === "right" ? "row-out-right" : dir === "left" ? "row-out-left" : ""
+                } ${rowCls[r.estado]} ${
                   nuevoArt ? "border-t-2 border-zinc-700/80" : "border-t border-zinc-800/50"
                 }`}
               >
                 <td className="px-2 py-2">
                   <button
                     onClick={() => onMark(r)}
+                    disabled={!!dir}
                     title="Marcar como pedido extraordinario (pasa al reverso)"
-                    className="text-zinc-600 hover:text-red-400 transition-colors p-1"
+                    className="btn-anim text-zinc-600 hover:text-red-400 p-1 disabled:opacity-40"
                   >
                     <Flag size={14} />
                   </button>
@@ -280,9 +286,13 @@ function Tabla({
 function TablaExtraordinarios({
   data,
   onToggle,
+  onUndo,
+  leaving = {},
 }: {
   data: Row[];
   onToggle: (row: Row, patch: Partial<Pick<Row, "extraordinario" | "comprar">>) => void;
+  onUndo: (row: Row) => void;
+  leaving?: Record<string, "left" | "right">;
 }) {
   if (data.length === 0) {
     return (
@@ -311,44 +321,50 @@ function TablaExtraordinarios({
           </tr>
         </thead>
         <tbody>
-          {data.map((r) => (
-            <tr
-              key={rowKey(r)}
-              className="border-t border-zinc-800/50 bg-red-500/[0.06] hover:bg-red-500/[0.1] transition-colors"
-            >
-              <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{r.CodArticulo}</td>
-              <td className="px-3 py-2 text-zinc-100">{r.Nombre}</td>
-              <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">{fmtAr(r.fecha)}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-zinc-100">{fmtNum(r.faltan)}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-red-300/90">
-                {r.descubierto > 0 ? fmtNum(r.descubierto) : "—"}
-              </td>
-              <td className="px-3 py-2 text-zinc-400">{r.Proveedor || "—"}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-zinc-300">${fmtNum(r.importe)}</td>
-              <td className="px-3 py-2 text-center">
-                <button
-                  onClick={() => onToggle(r, { extraordinario: false })}
-                  title="Desmarcar extraordinario (vuelve a la tabla principal)"
-                  className="inline-flex items-center gap-1 text-red-400 hover:text-zinc-400 transition-colors px-2 py-1 rounded border border-red-400/40"
-                >
-                  <Undo2 size={13} />
-                </button>
-              </td>
-              <td className="px-3 py-2 text-center">
-                <button
-                  onClick={() => onToggle(r, { comprar: !r.comprar })}
-                  title={r.comprar ? "Desmarcar comprar" : "Marcar comprar"}
-                  className={`inline-flex items-center justify-center w-6 h-6 rounded border transition-colors ${
-                    r.comprar
-                      ? "bg-emerald-500/20 border-emerald-400 text-emerald-300"
-                      : "border-zinc-600 text-transparent hover:border-zinc-400"
-                  }`}
-                >
-                  <Check size={13} />
-                </button>
-              </td>
-            </tr>
-          ))}
+          {data.map((r) => {
+            const dir = leaving[rowKey(r)];
+            return (
+              <tr
+                key={rowKey(r)}
+                className={`border-t border-zinc-800/50 bg-red-500/[0.06] hover:bg-red-500/[0.1] transition-colors animate-in fade-in duration-300 ${
+                  dir === "right" ? "row-out-right" : dir === "left" ? "row-out-left" : ""
+                }`}
+              >
+                <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{r.CodArticulo}</td>
+                <td className="px-3 py-2 text-zinc-100">{r.Nombre}</td>
+                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">{fmtAr(r.fecha)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-zinc-100">{fmtNum(r.faltan)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-red-300/90">
+                  {r.descubierto > 0 ? fmtNum(r.descubierto) : "—"}
+                </td>
+                <td className="px-3 py-2 text-zinc-400">{r.Proveedor || "—"}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-zinc-300">${fmtNum(r.importe)}</td>
+                <td className="px-3 py-2 text-center">
+                  <button
+                    onClick={() => onUndo(r)}
+                    disabled={!!dir}
+                    title="Desmarcar extraordinario (vuelve a la tabla principal)"
+                    className="btn-anim inline-flex items-center gap-1 text-red-400 hover:text-zinc-400 px-2 py-1 rounded border border-red-400/40 disabled:opacity-40"
+                  >
+                    <Undo2 size={13} />
+                  </button>
+                </td>
+                <td className="px-3 py-2 text-center">
+                  <button
+                    onClick={() => onToggle(r, { comprar: !r.comprar })}
+                    title={r.comprar ? "Desmarcar comprar" : "Marcar comprar"}
+                    className={`btn-anim inline-flex items-center justify-center w-6 h-6 rounded border ${
+                      r.comprar
+                        ? "bg-emerald-500/20 border-emerald-400 text-emerald-300"
+                        : "border-zinc-600 text-transparent hover:border-zinc-400"
+                    }`}
+                  >
+                    <Check size={13} />
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -371,6 +387,7 @@ export default function ComprasFaltantesPage() {
   const [agrupar, setAgrupar] = useState(false); // agrupar por proveedor
   const [cerrados, setCerrados] = useState<Record<string, boolean>>({}); // acordeones colapsados
   const [flipped, setFlipped] = useState(false); // girar la tarjeta → ver extraordinarios
+  const [leaving, setLeaving] = useState<Record<string, "left" | "right">>({}); // filas saliendo (animación)
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -423,12 +440,35 @@ export default function ComprasFaltantesPage() {
     },
     [],
   );
+  // Anima la fila hacia el costado indicado y recién al terminar ejecuta el
+  // cambio real (toggleMark) — así la fila ya está afuera cuando desaparece.
+  const EXIT_MS = 260;
+  const animarYQuitar = useCallback(
+    (row: Row, dir: "left" | "right", patch: Partial<Pick<Row, "extraordinario" | "comprar">>) => {
+      const k = rowKey(row);
+      setLeaving((m) => ({ ...m, [k]: dir }));
+      window.setTimeout(() => {
+        toggleMark(row, patch);
+        setLeaving((m) => {
+          const n = { ...m };
+          delete n[k];
+          return n;
+        });
+      }, EXIT_MS);
+    },
+    [toggleMark],
+  );
   // Botón por fila: marca extraordinario y deja "comprar" pendiente (null).
   // La decisión de comprar o no la toma ventas/faltantes; recién ahí, cuando
   // deja de ser null, la fila aparece en el reverso.
   const marcarExtraordinario = useCallback(
-    (row: Row) => toggleMark(row, { extraordinario: true, comprar: null }),
-    [toggleMark],
+    (row: Row) => animarYQuitar(row, "right", { extraordinario: true, comprar: null }),
+    [animarYQuitar],
+  );
+  // Reverso: desmarcar extraordinario (vuelve a la tabla principal).
+  const desmarcarExtraordinario = useCallback(
+    (row: Row) => animarYQuitar(row, "left", { extraordinario: false }),
+    [animarYQuitar],
   );
 
   // Carga/borra la fecha de arribo del bucket (artículo+día). El fan-out por
@@ -577,7 +617,7 @@ export default function ComprasFaltantesPage() {
             onClick={load}
             title="Refrescar"
             disabled={loading}
-            className="text-zinc-400 hover:text-yellow-400 transition-colors p-2 disabled:opacity-40"
+            className="btn-anim text-zinc-400 hover:text-yellow-400 p-2 disabled:opacity-40 disabled:hover:scale-100 disabled:hover:translate-y-0"
           >
             <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
           </button>
@@ -620,7 +660,7 @@ export default function ComprasFaltantesPage() {
           <button
             onClick={() => setConArribo((v) => !v)}
             title="Mostrar también los artículos que ya tienen fecha de arribo cargada (para corroborar los que se pasaron)"
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+            className={`chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium ${
               conArribo
                 ? "bg-emerald-500/15 border-emerald-400 text-emerald-300"
                 : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
@@ -634,7 +674,7 @@ export default function ComprasFaltantesPage() {
           <button
             onClick={() => setAgrupar((v) => !v)}
             title="Agrupar los faltantes por proveedor en tablas con acordeón"
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+            className={`chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium ${
               agrupar
                 ? "bg-sky-500/15 border-sky-400 text-sky-300"
                 : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
@@ -648,7 +688,7 @@ export default function ComprasFaltantesPage() {
           <button
             onClick={() => setFlipped((v) => !v)}
             title="Ver pedidos extraordinarios marcados para comprar (gira la tabla)"
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+            className={`chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium ${
               backRows.length > 0
                 ? "bg-red-500/15 border-red-400 text-red-300"
                 : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
@@ -670,7 +710,7 @@ export default function ComprasFaltantesPage() {
             onClick={exportar}
             disabled={flipped ? backRows.length === 0 : visibles.length === 0}
             title="Exportar a Excel lo que se ve en la tabla"
-            className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 transition-colors text-xs font-medium disabled:opacity-40"
+            className="chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 text-xs font-medium disabled:opacity-40 disabled:hover:scale-100 disabled:hover:translate-y-0"
           >
             <Download size={14} /> Excel
           </button>
@@ -691,7 +731,7 @@ export default function ComprasFaltantesPage() {
             <button
               key={f.key}
               onClick={() => setFiltro(f.key)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+              className={`chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium ${
                 filtro === f.key
                   ? "bg-yellow-400/15 border-yellow-400 text-yellow-300"
                   : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
@@ -765,7 +805,7 @@ export default function ComprasFaltantesPage() {
                         </button>
                         {abierto && (
                           <div className="border-t border-zinc-800">
-                            <Tabla data={rs} onMark={marcarExtraordinario} onArribo={guardarArribo} />
+                            <Tabla data={rs} onMark={marcarExtraordinario} onArribo={guardarArribo} leaving={leaving} />
                           </div>
                         )}
                       </div>
@@ -773,7 +813,7 @@ export default function ComprasFaltantesPage() {
                   })}
                 </div>
               ) : (
-                <Tabla data={visibles} onMark={marcarExtraordinario} onArribo={guardarArribo} />
+                <Tabla data={visibles} onMark={marcarExtraordinario} onArribo={guardarArribo} leaving={leaving} />
               )}
             </div>
 
@@ -783,7 +823,12 @@ export default function ComprasFaltantesPage() {
                 !flipped ? "pointer-events-none" : ""
               }`}
             >
-              <TablaExtraordinarios data={backRows} onToggle={toggleMark} />
+              <TablaExtraordinarios
+                data={backRows}
+                onToggle={toggleMark}
+                onUndo={desmarcarExtraordinario}
+                leaving={leaving}
+              />
             </div>
           </div>
         </div>

@@ -156,6 +156,27 @@ export default function VentasFaltantesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flipped, setFlipped] = useState(false); // header: foco solo extraordinarios
+  const [leaving, setLeaving] = useState<Record<string, "left" | "right">>({}); // filas saliendo (animación)
+
+  // Anima las filas (una o varias, ej. extraordinario = todo el artículo) hacia
+  // el costado y recién al terminar ejecuta el cambio real — la fila ya está
+  // afuera cuando desaparece del array, sin salto de layout.
+  const EXIT_MS = 260;
+  const withExit = useCallback((keys: string[], dir: "left" | "right", fn: () => void) => {
+    setLeaving((m) => {
+      const n = { ...m };
+      for (const k of keys) n[k] = dir;
+      return n;
+    });
+    window.setTimeout(() => {
+      fn();
+      setLeaving((m) => {
+        const n = { ...m };
+        for (const k of keys) delete n[k];
+        return n;
+      });
+    }, EXIT_MS);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -190,51 +211,60 @@ export default function VentasFaltantesPage() {
   // artículo (no solo el clickeado), porque la decisión es a nivel artículo.
   const decidir = useCallback(
     (it: Item, quiere: boolean) => {
-      setItems((rs) =>
-        rs.filter((r) =>
+      const keys = items
+        .filter((r) =>
           it.extraordinario && r.CodArticulo === it.CodArticulo
-            ? false
-            : keyOf(r) !== keyOf(it),
-        ),
-      );
-      const calls = [
-        fetch("/api/deposito/faltantes/control", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fecha,
-            nroPedOrigen: it.NroPedOrigen,
-            nroRengOrigen: it.NroRengOrigen,
-            codArticulo: it.CodArticulo,
-            fechaArribo: it.fechaArribo === "EN_STOCK" ? null : it.fechaArribo,
-            clienteQuiere: quiere,
-          }),
-        }),
-      ];
-      if (it.extraordinario && it.extraordinarioFecha) {
-        calls.push(
-          fetch("/api/compras/faltantes-extraordinario", {
+            ? true
+            : keyOf(r) === keyOf(it),
+        )
+        .map(keyOf);
+      withExit(keys, quiere ? "right" : "left", () => {
+        setItems((rs) =>
+          rs.filter((r) =>
+            it.extraordinario && r.CodArticulo === it.CodArticulo
+              ? false
+              : keyOf(r) !== keyOf(it),
+          ),
+        );
+        const calls = [
+          fetch("/api/deposito/faltantes/control", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              fecha: it.extraordinarioFecha,
+              fecha,
+              nroPedOrigen: it.NroPedOrigen,
+              nroRengOrigen: it.NroRengOrigen,
               codArticulo: it.CodArticulo,
-              extraordinario: true,
-              comprar: quiere,
+              fechaArribo: it.fechaArribo === "EN_STOCK" ? null : it.fechaArribo,
+              clienteQuiere: quiere,
             }),
           }),
-        );
-      }
-      Promise.all(calls)
-        .then((rs) => {
-          if (rs.some((r) => !r.ok)) throw new Error();
-        })
-        .catch(() => {
-          setError("No se pudo guardar la decisión");
-          load();
-        });
+        ];
+        if (it.extraordinario && it.extraordinarioFecha) {
+          calls.push(
+            fetch("/api/compras/faltantes-extraordinario", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                fecha: it.extraordinarioFecha,
+                codArticulo: it.CodArticulo,
+                extraordinario: true,
+                comprar: quiere,
+              }),
+            }),
+          );
+        }
+        Promise.all(calls)
+          .then((rs) => {
+            if (rs.some((r) => !r.ok)) throw new Error();
+          })
+          .catch(() => {
+            setError("No se pudo guardar la decisión");
+            load();
+          });
+      });
     },
-    [fecha, load],
+    [items, fecha, load, withExit],
   );
 
   // Tabla 2: guarda "vendido" en preparado.faltante_control (mismo endpoint,
@@ -245,56 +275,60 @@ export default function VentasFaltantesPage() {
   // para que el renglón deje de calificar en Tabla 1 al recargar.
   const decidirVendidoTabla1 = useCallback(
     (it: Item, vendido: boolean) => {
-      setItems((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
-      fetch("/api/deposito/faltantes/control", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fecha,
-          nroPedOrigen: it.NroPedOrigen,
-          nroRengOrigen: it.NroRengOrigen,
-          codArticulo: it.CodArticulo,
-          fechaArribo: it.fechaArribo === "EN_STOCK" ? null : it.fechaArribo,
-          clienteQuiere: vendido,
-          vendido,
-        }),
-      })
-        .then((r) => {
-          if (!r.ok) throw new Error();
+      withExit([keyOf(it)], vendido ? "right" : "left", () => {
+        setItems((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
+        fetch("/api/deposito/faltantes/control", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fecha,
+            nroPedOrigen: it.NroPedOrigen,
+            nroRengOrigen: it.NroRengOrigen,
+            codArticulo: it.CodArticulo,
+            fechaArribo: it.fechaArribo === "EN_STOCK" ? null : it.fechaArribo,
+            clienteQuiere: vendido,
+            vendido,
+          }),
         })
-        .catch(() => {
-          setError("No se pudo guardar la venta");
-          load();
-        });
+          .then((r) => {
+            if (!r.ok) throw new Error();
+          })
+          .catch(() => {
+            setError("No se pudo guardar la venta");
+            load();
+          });
+      });
     },
-    [fecha, load],
+    [fecha, load, withExit],
   );
 
   const decidirVendido = useCallback(
     (it: ItemListo, vendido: boolean) => {
-      setListos((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
-      fetch("/api/deposito/faltantes/control", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fecha,
-          nroPedOrigen: it.NroPedOrigen,
-          nroRengOrigen: it.NroRengOrigen,
-          codArticulo: it.CodArticulo,
-          fechaArribo: it.fechaArribo,
-          clienteQuiere: it.clienteQuiere,
-          vendido,
-        }),
-      })
-        .then((r) => {
-          if (!r.ok) throw new Error();
+      withExit([keyOf(it)], vendido ? "right" : "left", () => {
+        setListos((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
+        fetch("/api/deposito/faltantes/control", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fecha,
+            nroPedOrigen: it.NroPedOrigen,
+            nroRengOrigen: it.NroRengOrigen,
+            codArticulo: it.CodArticulo,
+            fechaArribo: it.fechaArribo,
+            clienteQuiere: it.clienteQuiere,
+            vendido,
+          }),
         })
-        .catch(() => {
-          setError("No se pudo guardar la venta");
-          load();
-        });
+          .then((r) => {
+            if (!r.ok) throw new Error();
+          })
+          .catch(() => {
+            setError("No se pudo guardar la venta");
+            load();
+          });
+      });
     },
-    [fecha, load],
+    [fecha, load, withExit],
   );
 
   // Botón basurero (Tabla 1, SOLO filas "En stock" — existencia=true, error
@@ -302,29 +336,31 @@ export default function VentasFaltantesPage() {
   // lo-quiere/no-lo-quiere. Guarda irrelevante=true y retira la fila.
   const marcarIrrelevante = useCallback(
     (it: Item) => {
-      setItems((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
-      fetch("/api/deposito/faltantes/control", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fecha,
-          nroPedOrigen: it.NroPedOrigen,
-          nroRengOrigen: it.NroRengOrigen,
-          codArticulo: it.CodArticulo,
-          fechaArribo: it.fechaArribo === "EN_STOCK" ? null : it.fechaArribo,
-          clienteQuiere: null,
-          irrelevante: true,
-        }),
-      })
-        .then((r) => {
-          if (!r.ok) throw new Error();
+      withExit([keyOf(it)], "left", () => {
+        setItems((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
+        fetch("/api/deposito/faltantes/control", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fecha,
+            nroPedOrigen: it.NroPedOrigen,
+            nroRengOrigen: it.NroRengOrigen,
+            codArticulo: it.CodArticulo,
+            fechaArribo: it.fechaArribo === "EN_STOCK" ? null : it.fechaArribo,
+            clienteQuiere: null,
+            irrelevante: true,
+          }),
         })
-        .catch(() => {
-          setError("No se pudo marcar como irrelevante");
-          load();
-        });
+          .then((r) => {
+            if (!r.ok) throw new Error();
+          })
+          .catch(() => {
+            setError("No se pudo marcar como irrelevante");
+            load();
+          });
+      });
     },
-    [fecha, load],
+    [fecha, load, withExit],
   );
 
   const extraordinarios = useMemo(() => items.filter((it) => it.extraordinario), [items]);
@@ -386,7 +422,7 @@ export default function VentasFaltantesPage() {
           <button
             onClick={() => setFlipped((v) => !v)}
             title="Ver ingresados (con fecha de arribo) — gira la tabla"
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+            className={`chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium ${
               conArribo.length > 0
                 ? "bg-green-500/15 border-green-400 text-green-300"
                 : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
@@ -407,7 +443,7 @@ export default function VentasFaltantesPage() {
             onClick={exportar}
             disabled={!hay}
             title="Exportar a Excel lo que se ve en la tabla"
-            className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 transition-colors text-xs font-medium disabled:opacity-40"
+            className="chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 text-xs font-medium disabled:opacity-40 disabled:hover:scale-100 disabled:hover:translate-y-0"
           >
             <Download size={14} /> Excel
           </button>
@@ -415,7 +451,7 @@ export default function VentasFaltantesPage() {
             onClick={load}
             title="Refrescar"
             disabled={loading}
-            className="text-zinc-400 hover:text-yellow-400 transition-colors p-2 disabled:opacity-40"
+            className="btn-anim text-zinc-400 hover:text-yellow-400 p-2 disabled:opacity-40 disabled:hover:scale-100 disabled:hover:translate-y-0"
           >
             <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
           </button>
@@ -439,7 +475,7 @@ export default function VentasFaltantesPage() {
             {!flipped && gruposExtra.length > 0 && (
               <section className="flex flex-col gap-3">
                 {gruposExtra.map((g) => (
-                  <GrupoCard key={g.key} g={g} extra onDecidir={decidir} />
+                  <GrupoCard key={g.key} g={g} extra onDecidir={decidir} leaving={leaving} />
                 ))}
               </section>
             )}
@@ -447,7 +483,7 @@ export default function VentasFaltantesPage() {
             {!flipped && gruposNormales.length > 0 && (
               <section className="flex flex-col gap-3">
                 {gruposNormales.map((g) => (
-                  <GrupoCard key={g.key} g={g} onDecidir={decidir} />
+                  <GrupoCard key={g.key} g={g} onDecidir={decidir} leaving={leaving} />
                 ))}
               </section>
             )}
@@ -461,6 +497,7 @@ export default function VentasFaltantesPage() {
                     vendidoMode
                     onDecidir={decidirVendidoTabla1}
                     onIrrelevante={marcarIrrelevante}
+                    leaving={leaving}
                   />
                 ))}
               </section>
@@ -472,7 +509,7 @@ export default function VentasFaltantesPage() {
                   <PackageCheck size={16} /> Listos para vender (ya ingresaron)
                 </h2>
                 {gruposListos.map((g) => (
-                  <GrupoCardListo key={g.key} g={g} onDecidir={decidirVendido} />
+                  <GrupoCardListo key={g.key} g={g} onDecidir={decidirVendido} leaving={leaving} />
                 ))}
               </section>
             )}
@@ -484,13 +521,14 @@ export default function VentasFaltantesPage() {
 }
 
 function GrupoCard({
-  g, extra, vendidoMode, onDecidir, onIrrelevante,
+  g, extra, vendidoMode, onDecidir, onIrrelevante, leaving = {},
 }: {
   g: Grupo;
   extra?: boolean;
   vendidoMode?: boolean;
   onDecidir: (it: Item, quiere: boolean) => void;
   onIrrelevante?: (it: Item) => void;
+  leaving?: Record<string, "left" | "right">;
 }) {
   return (
     <div
@@ -525,8 +563,15 @@ function GrupoCard({
             </tr>
           </thead>
           <tbody>
-            {g.items.map((it) => (
-              <tr key={keyOf(it)} className="border-t border-zinc-800/70">
+            {g.items.map((it) => {
+              const dir = leaving[keyOf(it)];
+              return (
+              <tr
+                key={keyOf(it)}
+                className={`border-t border-zinc-800/70 animate-in fade-in duration-300 ${
+                  dir === "right" ? "row-out-right" : dir === "left" ? "row-out-left" : ""
+                }`}
+              >
                 <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{it.CodArticulo}</td>
                 <td className="px-3 py-2 text-zinc-100">{it.Nombre}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{fmtNum(it.CantPend)}</td>
@@ -547,23 +592,26 @@ function GrupoCard({
                   <div className="flex items-center justify-center gap-1.5">
                     <button
                       onClick={() => onDecidir(it, true)}
+                      disabled={!!dir}
                       title={vendidoMode ? "Vendido" : "Lo quiere"}
-                      className="p-1.5 rounded-md border border-zinc-700 text-green-500 hover:bg-green-600/20"
+                      className="btn-anim p-1.5 rounded-md border border-zinc-700 text-green-500 hover:bg-green-600/20 disabled:opacity-40"
                     >
                       <Check size={15} />
                     </button>
                     <button
                       onClick={() => onDecidir(it, false)}
+                      disabled={!!dir}
                       title={vendidoMode ? "No vendido" : "No lo quiere"}
-                      className="p-1.5 rounded-md border border-zinc-700 text-red-500 hover:bg-red-600/20"
+                      className="btn-anim p-1.5 rounded-md border border-zinc-700 text-red-500 hover:bg-red-600/20 disabled:opacity-40"
                     >
                       <X size={15} />
                     </button>
                     {onIrrelevante && (
                       <button
                         onClick={() => onIrrelevante(it)}
+                        disabled={!!dir}
                         title="Irrelevante — descartar"
-                        className="p-1.5 rounded-md border border-zinc-700 text-violet-600 hover:bg-violet-800/25 hover:text-violet-500"
+                        className="btn-anim p-1.5 rounded-md border border-zinc-700 text-violet-600 hover:bg-violet-800/25 hover:text-violet-500 disabled:opacity-40"
                       >
                         <Trash2 size={15} />
                       </button>
@@ -571,7 +619,8 @@ function GrupoCard({
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -580,10 +629,11 @@ function GrupoCard({
 }
 
 function GrupoCardListo({
-  g, onDecidir,
+  g, onDecidir, leaving = {},
 }: {
   g: GrupoListo;
   onDecidir: (it: ItemListo, vendido: boolean) => void;
+  leaving?: Record<string, "left" | "right">;
 }) {
   return (
     <div className="rounded-xl border border-green-900/50 bg-green-500/[0.05] overflow-hidden">
@@ -612,34 +662,44 @@ function GrupoCardListo({
             </tr>
           </thead>
           <tbody>
-            {g.items.map((it) => (
-              <tr key={keyOf(it)} className="border-t border-zinc-800/70">
-                <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{it.CodArticulo}</td>
-                <td className="px-3 py-2 text-zinc-100">{it.Nombre}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{fmtNum(it.CantPend)}</td>
-                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">{fmtAr(it.Fecha)}</td>
-                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">{fmtAr(it.fechaArribo)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-300">${fmtNum(it.Importe)}</td>
-                <td className="px-3 py-2">
-                  <div className="flex items-center justify-center gap-1.5">
-                    <button
-                      onClick={() => onDecidir(it, true)}
-                      title="Vendido"
-                      className="p-1.5 rounded-md border border-zinc-700 text-green-500 hover:bg-green-600/20"
-                    >
-                      <Check size={15} />
-                    </button>
-                    <button
-                      onClick={() => onDecidir(it, false)}
-                      title="No vendido"
-                      className="p-1.5 rounded-md border border-zinc-700 text-red-500 hover:bg-red-600/20"
-                    >
-                      <X size={15} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {g.items.map((it) => {
+              const dir = leaving[keyOf(it)];
+              return (
+                <tr
+                  key={keyOf(it)}
+                  className={`border-t border-zinc-800/70 animate-in fade-in duration-300 ${
+                    dir === "right" ? "row-out-right" : dir === "left" ? "row-out-left" : ""
+                  }`}
+                >
+                  <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{it.CodArticulo}</td>
+                  <td className="px-3 py-2 text-zinc-100">{it.Nombre}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{fmtNum(it.CantPend)}</td>
+                  <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">{fmtAr(it.Fecha)}</td>
+                  <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">{fmtAr(it.fechaArribo)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-zinc-300">${fmtNum(it.Importe)}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <button
+                        onClick={() => onDecidir(it, true)}
+                        disabled={!!dir}
+                        title="Vendido"
+                        className="btn-anim p-1.5 rounded-md border border-zinc-700 text-green-500 hover:bg-green-600/20 disabled:opacity-40"
+                      >
+                        <Check size={15} />
+                      </button>
+                      <button
+                        onClick={() => onDecidir(it, false)}
+                        disabled={!!dir}
+                        title="No vendido"
+                        className="btn-anim p-1.5 rounded-md border border-zinc-700 text-red-500 hover:bg-red-600/20 disabled:opacity-40"
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
