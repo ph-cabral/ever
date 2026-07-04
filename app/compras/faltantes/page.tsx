@@ -462,7 +462,10 @@ export default function ComprasFaltantesPage() {
   // del artículo). Apenas la OC lo cubre (descubierto llega a 0 o queda a
   // favor), sale sola de acá — no hace falta desmarcar nada a mano.
   const backRows = useMemo(
-    () => rows.filter((r) => r.extraordinario && r.comprar !== null && r.descubierto > 0),
+    () =>
+      rows
+        .filter((r) => r.extraordinario && r.comprar !== null && r.descubierto > 0)
+        .sort((a, b) => b.importe - a.importe),
     [rows],
   );
 

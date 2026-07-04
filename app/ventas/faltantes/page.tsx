@@ -107,7 +107,9 @@ function agrupar(items: Item[]): Grupo[] {
     g.importe += it.Importe || 0;
     if (!g.clienteNombre && it.ClienteNombre) g.clienteNombre = it.ClienteNombre;
   }
-  return [...m.values()].sort((a, b) => b.pedido - a.pedido);
+  return [...m.values()]
+    .map((g) => ({ ...g, items: [...g.items].sort((x, y) => y.Importe - x.Importe) }))
+    .sort((a, b) => b.importe - a.importe);
 }
 
 interface GrupoListo {
@@ -139,7 +141,9 @@ function agruparListos(items: ItemListo[]): GrupoListo[] {
     g.importe += it.Importe || 0;
     if (!g.clienteNombre && it.ClienteNombre) g.clienteNombre = it.ClienteNombre;
   }
-  return [...m.values()].sort((a, b) => b.pedido - a.pedido);
+  return [...m.values()]
+    .map((g) => ({ ...g, items: [...g.items].sort((x, y) => y.Importe - x.Importe) }))
+    .sort((a, b) => b.importe - a.importe);
 }
 
 export default function VentasFaltantesPage() {
