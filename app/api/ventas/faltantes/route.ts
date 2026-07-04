@@ -208,11 +208,6 @@ export async function GET() {
 
     const out = rows
       .filter((r) => sin.has(`${r.NroPedOrigen}-${r.NroRengOrigen}`))
-      // irrelevante (botón basurero en el front): descarte definitivo, no
-      // vuelve a entrar a Tabla 1 aunque clienteQuiere siga en null.
-      .filter(
-        (r) => !ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`)?.irrelevante,
-      )
       .map((r) => {
         const c = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);
         const extra = extraMap.get(r.CodArticulo);
@@ -247,6 +242,7 @@ export async function GET() {
             c?.fechaArribo ?? ocArribo.get(r.CodArticulo.trim()) ?? null,
           clienteQuiere: c?.clienteQuiere ?? null,
           vendido: c?.vendido ?? null,
+          irrelevante: c?.irrelevante ?? false,
           yaIngreso: ingresados.has(r.CodArticulo.trim()),
         };
       })
@@ -255,7 +251,8 @@ export async function GET() {
           r.clienteQuiere === true &&
           r.fechaArribo !== null &&
           r.yaIngreso &&
-          r.vendido === null,
+          r.vendido === null &&
+          !r.irrelevante,
       );
 
     // existencia=true: error de preparado, no pasa por compras. "Arribado"
@@ -263,9 +260,6 @@ export async function GET() {
     // front). Mismo gate de salida que Tabla 1 (clienteQuiere aún null).
     const enStock = rows
       .filter((r) => con.has(`${r.NroPedOrigen}-${r.NroRengOrigen}`))
-      .filter(
-        (r) => !ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`)?.irrelevante,
-      )
       .map((r) => {
         const c = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);
         return {

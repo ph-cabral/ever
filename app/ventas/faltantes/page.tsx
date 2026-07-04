@@ -31,6 +31,8 @@ import { exportarFaltantesVentas } from "@/lib/ventas/exportFaltantes";
 //   indicadores-api /compras/ingresos) — o sea, ya llegaron físicamente.
 //   Acción (✓ vendido / ✗ no vendido): cualquiera de las dos respuestas
 //   guarda "vendido" en faltante_control y retira la fila (optimista).
+//   Botón basurero (violeta): "irrelevante" — descarta el renglón sin
+//   marcarlo vendido/no vendido, guarda irrelevante=true y retira la fila.
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface Item {
@@ -234,36 +236,6 @@ export default function VentasFaltantesPage() {
     [fecha, load],
   );
 
-  // Botón basurero (Tabla 1, junto a Lo quiere/No lo quiere): "irrelevante",
-  // NO es una decisión del cliente — el renglón no corresponde y se descarta
-  // sin más. Guarda irrelevante=true en faltante_control y retira la fila.
-  const marcarIrrelevante = useCallback(
-    (it: Item) => {
-      setItems((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
-      fetch("/api/deposito/faltantes/control", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fecha,
-          nroPedOrigen: it.NroPedOrigen,
-          nroRengOrigen: it.NroRengOrigen,
-          codArticulo: it.CodArticulo,
-          fechaArribo: it.fechaArribo === "EN_STOCK" ? null : it.fechaArribo,
-          clienteQuiere: null,
-          irrelevante: true,
-        }),
-      })
-        .then((r) => {
-          if (!r.ok) throw new Error();
-        })
-        .catch(() => {
-          setError("No se pudo marcar como irrelevante");
-          load();
-        });
-    },
-    [fecha, load],
-  );
-
   // Tabla 2: guarda "vendido" en preparado.faltante_control (mismo endpoint,
   // ahora acepta ese campo opcional — ver route.ts) y retira la fila, sea cual
   // sea la respuesta (vendido o no vendido). Optimista, igual que decidir().
@@ -318,6 +290,36 @@ export default function VentasFaltantesPage() {
         })
         .catch(() => {
           setError("No se pudo guardar la venta");
+          load();
+        });
+    },
+    [fecha, load],
+  );
+
+  // Botón basurero (Tabla 2, junto a Vendido/No vendido): "irrelevante",
+  // descarta el renglón sin marcarlo vendido/no vendido. Guarda
+  // irrelevante=true en faltante_control y retira la fila.
+  const marcarIrrelevante = useCallback(
+    (it: ItemListo) => {
+      setListos((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
+      fetch("/api/deposito/faltantes/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fecha,
+          nroPedOrigen: it.NroPedOrigen,
+          nroRengOrigen: it.NroRengOrigen,
+          codArticulo: it.CodArticulo,
+          fechaArribo: it.fechaArribo,
+          clienteQuiere: it.clienteQuiere,
+          irrelevante: true,
+        }),
+      })
+        .then((r) => {
+          if (!r.ok) throw new Error();
+        })
+        .catch(() => {
+          setError("No se pudo marcar como irrelevante");
           load();
         });
     },
@@ -436,13 +438,7 @@ export default function VentasFaltantesPage() {
             {!flipped && gruposExtra.length > 0 && (
               <section className="flex flex-col gap-3">
                 {gruposExtra.map((g) => (
-                  <GrupoCard
-                    key={g.key}
-                    g={g}
-                    extra
-                    onDecidir={decidir}
-                    onIrrelevante={marcarIrrelevante}
-                  />
+                  <GrupoCard key={g.key} g={g} extra onDecidir={decidir} />
                 ))}
               </section>
             )}
@@ -450,12 +446,7 @@ export default function VentasFaltantesPage() {
             {!flipped && gruposNormales.length > 0 && (
               <section className="flex flex-col gap-3">
                 {gruposNormales.map((g) => (
-                  <GrupoCard
-                    key={g.key}
-                    g={g}
-                    onDecidir={decidir}
-                    onIrrelevante={marcarIrrelevante}
-                  />
+                  <GrupoCard key={g.key} g={g} onDecidir={decidir} />
                 ))}
               </section>
             )}
@@ -474,7 +465,12 @@ export default function VentasFaltantesPage() {
                   <PackageCheck size={16} /> Listos para vender (ya ingresaron)
                 </h2>
                 {gruposListos.map((g) => (
-                  <GrupoCardListo key={g.key} g={g} onDecidir={decidirVendido} />
+                  <GrupoCardListo
+                    key={g.key}
+                    g={g}
+                    onDecidir={decidirVendido}
+                    onIrrelevante={marcarIrrelevante}
+                  />
                 ))}
               </section>
             )}
@@ -486,13 +482,12 @@ export default function VentasFaltantesPage() {
 }
 
 function GrupoCard({
-  g, extra, vendidoMode, onDecidir, onIrrelevante,
+  g, extra, vendidoMode, onDecidir,
 }: {
   g: Grupo;
   extra?: boolean;
   vendidoMode?: boolean;
   onDecidir: (it: Item, quiere: boolean) => void;
-  onIrrelevante?: (it: Item) => void;
 }) {
   return (
     <div
@@ -561,15 +556,6 @@ function GrupoCard({
                     >
                       <X size={15} />
                     </button>
-                    {onIrrelevante && (
-                      <button
-                        onClick={() => onIrrelevante(it)}
-                        title="Irrelevante — descartar"
-                        className="p-1.5 rounded-md border border-zinc-700 text-violet-600 hover:bg-violet-800/25 hover:text-violet-500"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    )}
                   </div>
                 </td>
               </tr>
@@ -582,10 +568,11 @@ function GrupoCard({
 }
 
 function GrupoCardListo({
-  g, onDecidir,
+  g, onDecidir, onIrrelevante,
 }: {
   g: GrupoListo;
   onDecidir: (it: ItemListo, vendido: boolean) => void;
+  onIrrelevante?: (it: ItemListo) => void;
 }) {
   return (
     <div className="rounded-xl border border-green-900/50 bg-green-500/[0.05] overflow-hidden">
@@ -638,6 +625,15 @@ function GrupoCardListo({
                     >
                       <X size={15} />
                     </button>
+                    {onIrrelevante && (
+                      <button
+                        onClick={() => onIrrelevante(it)}
+                        title="Irrelevante — descartar"
+                        className="p-1.5 rounded-md border border-zinc-700 text-violet-600 hover:bg-violet-800/25 hover:text-violet-500"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
