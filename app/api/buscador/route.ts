@@ -7,6 +7,7 @@ import type {
 } from "@/lib/buscador/types";
 import { buscarGoogle } from "@/lib/buscador/google";
 import { buscarMercadoLibre } from "@/lib/buscador/mercadolibre";
+import { buscarOsm } from "@/lib/buscador/osm";
 import { enriquecer } from "@/lib/buscador/enrich";
 
 export const dynamic = "force-dynamic";
@@ -25,16 +26,16 @@ function parseBody(b: unknown): BuscarParams | null {
     typeof o.provincia === "string" && o.provincia ? o.provincia : "todas";
   const fuentesRaw = Array.isArray(o.fuentes)
     ? o.fuentes
-    : ["google", "mercadolibre"];
+    : ["google", "mercadolibre", "osm"];
   const fuentes = fuentesRaw.filter(
-    (f): f is Fuente => f === "google" || f === "mercadolibre",
+    (f): f is Fuente => f === "google" || f === "mercadolibre" || f === "osm",
   );
   const meses =
     typeof o.meses === "number" && o.meses > 0 ? Math.min(o.meses, 36) : 12;
   return {
     q,
     provincia,
-    fuentes: fuentes.length ? fuentes : ["google", "mercadolibre"],
+    fuentes: fuentes.length ? fuentes : ["google", "mercadolibre", "osm"],
     enriquecer: o.enriquecer !== false,
     meses,
   };
@@ -125,6 +126,17 @@ export async function POST(req: Request) {
         buscarMercadoLibre({
           q: params.q,
           provincia: params.provincia,
+          meses: params.meses,
+          signal: ctrl.signal,
+        }),
+      );
+    }
+
+    if (params.fuentes.includes("osm")) {
+      tareas.push(
+        buscarOsm({
+          q: params.q,
+          provincia: params.provincia,
           signal: ctrl.signal,
         }),
       );
@@ -132,7 +144,7 @@ export async function POST(req: Request) {
 
     const resultados = await Promise.all(tareas);
     const mapa = new Map<string, Prospecto>();
-    const porFuente: Record<Fuente, number> = { google: 0, mercadolibre: 0 };
+    const porFuente: Record<Fuente, number> = { google: 0, mercadolibre: 0, osm: 0 };
     for (const r of resultados) {
       if (r.warning) warnings.push(r.warning);
       for (const p of r.prospectos) porFuente[p.fuente]++;

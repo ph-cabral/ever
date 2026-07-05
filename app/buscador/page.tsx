@@ -75,7 +75,7 @@ interface Progreso {
 export default function BuscadorPage() {
   const [q, setQ] = useState("");
   const [provincia, setProvincia] = useState("todas");
-  const [fuentes, setFuentes] = useState({ google: true, mercadolibre: true });
+  const [fuentes, setFuentes] = useState({ google: true, mercadolibre: true, osm: true });
   const [enriquecer, setEnriquecer] = useState(true);
   const [meses, setMeses] = useState(12);
 
@@ -109,6 +109,7 @@ export default function BuscadorPage() {
     const fuentesArr: Fuente[] = [];
     if (fuentes.google) fuentesArr.push("google");
     if (fuentes.mercadolibre) fuentesArr.push("mercadolibre");
+    if (fuentes.osm) fuentesArr.push("osm");
     if (fuentesArr.length === 0) {
       toast.error("Elegí al menos una fuente.");
       return;
@@ -289,6 +290,16 @@ export default function BuscadorPage() {
                 className="accent-yellow-400"
               />
               MercadoLibre <span className="text-zinc-600">(vendedores y publicaciones)</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer text-zinc-300">
+              <input
+                type="checkbox"
+                checked={fuentes.osm}
+                onChange={(e) => setFuentes((f) => ({ ...f, osm: e.target.checked }))}
+                className="accent-yellow-400"
+              />
+              OpenStreetMap{" "}
+              <span className="text-zinc-600">(empresas, gratis, sin API key)</span>
             </label>
             <label className="flex items-center gap-2 cursor-pointer text-zinc-300">
               <input
@@ -474,7 +485,11 @@ export default function BuscadorPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span className="text-xs text-zinc-500">
-                          {p.fuente === "google" ? "Google" : "MercadoLibre"}
+                          {p.fuente === "google"
+                            ? "Google"
+                            : p.fuente === "mercadolibre"
+                              ? "MercadoLibre"
+                              : "OSM"}
                         </span>
                       </td>
                     </tr>

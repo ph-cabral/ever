@@ -98,20 +98,76 @@ export interface MLResult {
   warning?: string;
 }
 
+const MULTIGET_CHUNK = 20; // límite de la API para /items?ids=
+
+/** Antigüedad máxima en meses -> fecha de corte. null si no hay que filtrar. */
+function cutoffDesdeMeses(meses?: number): Date | null {
+  if (!meses || meses <= 0) return null;
+  const d = new Date();
+  d.setMonth(d.getMonth() - meses);
+  return d;
+}
+
+/**
+ * Trae `date_created` de una tanda de items vía multiget (GET /items?ids=).
+ * Best-effort: si un chunk falla, esos ids quedan sin fecha y no se filtran
+ * (se prefiere no perder resultados por un error transitorio de la API).
+ */
+async function fetchFechas(
+  ids: string[],
+  token: string,
+  signal?: AbortSignal,
+): Promise<Map<string, string | null>> {
+  const fechas = new Map<string, string | null>();
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += MULTIGET_CHUNK) {
+    chunks.push(ids.slice(i, i + MULTIGET_CHUNK));
+  }
+
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      if (chunk.length === 0) return;
+      try {
+        const url = `${API}/items?ids=${chunk.join(",")}&attributes=id,date_created`;
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+          cache: "no-store",
+          signal,
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          body?: { id?: string; date_created?: string };
+        }[];
+        for (const r of data) {
+          if (r.body?.id) fechas.set(r.body.id, r.body.date_created ?? null);
+        }
+      } catch {
+        // best-effort, ver comentario arriba
+      }
+    }),
+  );
+
+  return fechas;
+}
+
 /**
  * Busca publicaciones activas por artículo y las agrupa por vendedor.
  * Nota: ML no expone teléfono/email del vendedor por privacidad; el valor está
  * en descubrir vendedores activos, su ubicación y volumen de publicaciones.
+ * `meses` filtra por antigüedad de la publicación (date_created), vía un
+ * lookup adicional a /items (la búsqueda no trae esa fecha).
  */
 export async function buscarMercadoLibre(opts: {
   q: string;
   provincia: string;
   maxPaginas?: number;
+  meses?: number;
   signal?: AbortSignal;
 }): Promise<MLResult> {
   const { q, provincia, signal } = opts;
   const maxPaginas = Math.min(Math.max(opts.maxPaginas ?? 4, 1), 10);
   const filtrarProv = provincia !== "todas" && !!provincia;
+  const cutoff = cutoffDesdeMeses(opts.meses);
 
   const { token, warning } = await getAccessToken(signal);
   if (!token) return { prospectos: [], warning };
@@ -140,9 +196,21 @@ export async function buscarMercadoLibre(opts: {
       const items = data.results ?? [];
       if (items.length === 0) break;
 
+      const fechas = cutoff
+        ? await fetchFechas(
+            items.map((it) => it.id).filter((id): id is string => !!id),
+            token,
+            signal,
+          )
+        : null;
+
       for (const it of items) {
         const prov = matchProvincia(it.address?.state_name);
         if (filtrarProv && prov !== provincia) continue;
+        if (cutoff && it.id) {
+          const fecha = fechas?.get(it.id);
+          if (fecha && new Date(fecha) < cutoff) continue; // publicación vieja
+        }
         const sellerId = it.seller?.id != null ? String(it.seller.id) : null;
         if (!sellerId) continue;
         const key = `ml:${sellerId}`;

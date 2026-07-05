@@ -7,12 +7,19 @@ exportable a Excel.
 
 ## Cómo funciona
 
-Cruza dos fuentes y deduplica:
+Cruza hasta tres fuentes y deduplica:
 
-| Fuente | Qué aporta | Contacto |
-|---|---|---|
-| **Google Maps / Places** | Empresas del rubro: nombre, dirección, teléfono, web, ubicación | Teléfono y web públicos |
-| **MercadoLibre** | Vendedores activos del artículo, ubicación, volumen de publicaciones, precio | ML **no** expone tel/email del vendedor |
+| Fuente | Qué aporta | Contacto | Requiere |
+|---|---|---|---|
+| **Google Maps / Places** | Empresas del rubro: nombre, dirección, teléfono, web, ubicación | Teléfono y web públicos | API key + facturación activa en Google Cloud |
+| **MercadoLibre** | Vendedores activos del artículo, ubicación, volumen de publicaciones, precio | ML **no** expone tel/email del vendedor | Nada (público) u OAuth para más volumen |
+| **OpenStreetMap** | Empresas con el término en el nombre (`name` tag): dirección, tel, web, email si están cargados | Depende de lo que haya cargado en OSM | Nada — sin API key ni facturación |
+
+OSM es la alternativa mientras no tengas `GOOGLE_PLACES_API_KEY` (Google exige tarjeta
+para activar facturación aunque uses el crédito gratis). Ojo: OSM matchea el
+nombre del comercio literalmente contra el artículo buscado (regex), no busca
+por rubro/categoría como Google — mucho menor cobertura, sirve como complemento
+o mientras se resuelve lo de Google, no como reemplazo 1:1.
 
 Si activás "Buscar email / WhatsApp en las webs", para cada empresa con sitio
 web se visita la home y `/contacto` y se intenta extraer email, WhatsApp y
@@ -99,7 +106,13 @@ variables cargadas en el `.env` del server.
 - **"Compradores"** no existe como dato público; se infieren de empresas del rubro.
 - Google limita a **60 resultados por consulta**; por eso se busca por provincia.
 - El filtro "hasta N meses" aplica al universo de publicaciones de ML (avisos
-  activos); Google no expone antigüedad.
+  activos); Google no expone antigüedad. Implementado vía un lookup extra a
+  `/items` (ML no devuelve `date_created` en la búsqueda) — agrega algunas
+  llamadas más por página, pero acotadas por `maxPaginas`.
+- **OSM** no tiene "nombre de persona física" ni de dueño/gerente — igual que
+  Google y ML. No existe fuente pública argentina gratuita confiable para eso
+  (AFIP y el registro de sociedades solo publican razón social/directores, no
+  empleados ni decisores comerciales).
 
 ## Archivos
 
@@ -110,7 +123,8 @@ lib/buscador/types.ts              Tipos + columnas compartidas
 lib/buscador/provincias.ts         24 provincias + matcher
 lib/buscador/util.ts               Dedupe / dominio / teléfono
 lib/buscador/google.ts             Cliente Google Places (New)
-lib/buscador/mercadolibre.ts       Cliente ML + refresh de token
+lib/buscador/mercadolibre.ts       Cliente ML + refresh de token + filtro por meses
+lib/buscador/osm.ts                Cliente OpenStreetMap/Overpass (sin API key)
 lib/buscador/enrich.ts             Extracción email/WhatsApp de webs
 lib/auth/modules.ts                (editado) alta del módulo "buscador"
 ```
