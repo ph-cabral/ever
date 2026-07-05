@@ -12,7 +12,17 @@ import type { Prospecto } from "./types";
 import { matchProvincia } from "./provincias";
 import { claveDedupe } from "./util";
 
-const ENDPOINT = "https://overpass-api.de/api/interpreter";
+// Varios espejos: el principal (overpass-api.de) suele estar saturado o
+// bloquea requests sin User-Agent con un 406. Se prueban en orden.
+const ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.openstreetmap.ru/api/interpreter",
+];
+
+// Overpass (como Nominatim) pide identificar la app con un User-Agent real;
+// sin esto, algunos espejos devuelven 406 Not Acceptable.
+const UA = "EverWearBuscador/1.0 (+https://everwear.com.ar; contacto: sistema@everwear.com.ar)";
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -63,6 +73,48 @@ export interface OsmResult {
 }
 
 /**
+ * Ejecuta la query en Overpass probando cada espejo en orden hasta que uno
+ * responda 200. Body form-urlencoded (`data=...`) + User-Agent identificado:
+ * es el formato más aceptado por los distintos espejos (el raw text/plain a
+ * veces devuelve 406 en overpass-api.de).
+ */
+async function ejecutarQuery(
+  query: string,
+  signal?: AbortSignal,
+): Promise<{ data?: OverpassResp; warning?: string }> {
+  let ultimoError: string | undefined;
+
+  for (const endpoint of ENDPOINTS) {
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+          "User-Agent": UA,
+        },
+        body: `data=${encodeURIComponent(query)}`,
+        cache: "no-store",
+        signal,
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        ultimoError = `${endpoint} ${res.status}: ${detail.slice(0, 160)}`;
+        continue; // probar el siguiente espejo
+      }
+      const data = (await res.json()) as OverpassResp;
+      return { data };
+    } catch (e) {
+      ultimoError = `${endpoint}: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  return {
+    warning: `OpenStreetMap: ${ultimoError ?? "sin respuesta de ningún espejo."}`,
+  };
+}
+
+/**
  * Busca POIs con nombre en OpenStreetMap. Sin API key: Overpass es un
  * servicio público. Si `provincia` es "todas" busca en toda Argentina
  * (área por ISO3166-1=AR); si no, restringe al área admin de esa provincia.
@@ -78,64 +130,44 @@ export async function buscarOsm(opts: {
   if (!q.trim()) return { prospectos: [] };
 
   const query = buildQuery(q, provincia, max);
+  const { data, warning } = await ejecutarQuery(query, signal);
+  if (!data) return { prospectos: [], warning };
 
-  try {
-    const res = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: query,
-      cache: "no-store",
-      signal,
+  const prospectos: Prospecto[] = [];
+
+  for (const el of data.elements ?? []) {
+    const tags = el.tags ?? {};
+    const nombre = tags.name?.trim();
+    if (!nombre) continue;
+
+    const web = tags.website ?? tags["contact:website"] ?? null;
+    const telefono = tags.phone ?? tags["contact:phone"] ?? null;
+    const email = tags.email ?? tags["contact:email"] ?? null;
+    const whatsapp = tags["contact:whatsapp"] ?? null;
+    const provinciaP =
+      provincia !== "todas" && provincia
+        ? provincia
+        : matchProvincia(tags["addr:state"] ?? tags["addr:province"]);
+
+    prospectos.push({
+      id: claveDedupe({ web, telefono, nombre, provincia: provinciaP }),
+      fuente: "osm",
+      tipo: "empresa",
+      nombre,
+      rubro: rubroDe(tags),
+      provincia: provinciaP,
+      localidad: tags["addr:city"] ?? tags["addr:suburb"] ?? null,
+      direccion: direccionDe(tags),
+      telefono,
+      whatsapp,
+      email,
+      web,
+      enlace: `https://www.openstreetmap.org/${el.type}/${el.id}`,
+      precioDesde: null,
+      publicaciones: null,
+      notas: null,
     });
-
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      return {
-        prospectos: [],
-        warning: `OpenStreetMap ${res.status}: ${detail.slice(0, 180)}`,
-      };
-    }
-
-    const data = (await res.json()) as OverpassResp;
-    const prospectos: Prospecto[] = [];
-
-    for (const el of data.elements ?? []) {
-      const tags = el.tags ?? {};
-      const nombre = tags.name?.trim();
-      if (!nombre) continue;
-
-      const web = tags.website ?? tags["contact:website"] ?? null;
-      const telefono = tags.phone ?? tags["contact:phone"] ?? null;
-      const email = tags.email ?? tags["contact:email"] ?? null;
-      const whatsapp = tags["contact:whatsapp"] ?? null;
-      const provinciaP =
-        provincia !== "todas" && provincia
-          ? provincia
-          : matchProvincia(tags["addr:state"] ?? tags["addr:province"]);
-
-      prospectos.push({
-        id: claveDedupe({ web, telefono, nombre, provincia: provinciaP }),
-        fuente: "osm",
-        tipo: "empresa",
-        nombre,
-        rubro: rubroDe(tags),
-        provincia: provinciaP,
-        localidad: tags["addr:city"] ?? tags["addr:suburb"] ?? null,
-        direccion: direccionDe(tags),
-        telefono,
-        whatsapp,
-        email,
-        web,
-        enlace: `https://www.openstreetmap.org/${el.type}/${el.id}`,
-        precioDesde: null,
-        publicaciones: null,
-        notas: null,
-      });
-    }
-
-    return { prospectos: prospectos.slice(0, max) };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { prospectos: [], warning: `OpenStreetMap: ${msg}` };
   }
+
+  return { prospectos: prospectos.slice(0, max) };
 }
