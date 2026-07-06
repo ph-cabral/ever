@@ -83,9 +83,13 @@ cambió, correr el Worker en local con `X_BROWSER_HEADFUL=true npx wrangler dev`
 y mirar el array `debug` de la respuesta (dice en qué paso se cortó).
 
 **Mucho más lento que las otras fuentes** — abre un browser real por
-búsqueda (~10-20 s). Por eso en la vista viene **desactivada por defecto**:
-en modo "Todo el país" (24 requests secuenciales) sería impráctico tenerla
-prendida por defecto. Conviene usarla puntualmente, provincia por provincia.
+búsqueda (~10-20 s), y el free tier de Cloudflare solo permite abrir **1
+browser nuevo cada 20 segundos**. Por eso `app/buscador/page.tsx` la maneja
+distinto al resto: en vez de sumarse al loop por provincia (que en "Todo el
+país" son 24 requests seguidos — voló el límite y dio `429 Rate limit
+exceeded` la primera vez que se probó), se llama **una sola vez por
+búsqueda**, sin importar si elegiste una provincia puntual o "Todo el país".
+También viene **desactivada por defecto** en la vista.
 
 Si activás "Buscar email / WhatsApp en las webs", para cada empresa con sitio
 web se visita la home y `/contacto` y se intenta extraer email, WhatsApp y

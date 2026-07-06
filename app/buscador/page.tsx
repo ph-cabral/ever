@@ -114,70 +114,94 @@ export default function BuscadorPage() {
       toast.error("Escribí un artículo para buscar (ej. poleas).");
       return;
     }
+    // Páginas Amarillas va aparte del resto: abre un browser real por
+    // request y el free tier de Cloudflare solo permite 1 cada 20s. Si
+    // fuera parte del loop por provincia, "Todo el país" dispararía 24
+    // browsers seguidos y volaría el límite (429). Por eso se llama UNA
+    // sola vez, sin importar si se buscó por provincia o todo el país.
     const fuentesArr: Fuente[] = [];
     if (fuentes.google) fuentesArr.push("google");
     if (fuentes.mercadolibre) fuentesArr.push("mercadolibre");
     if (fuentes.osm) fuentesArr.push("osm");
     if (fuentes.cylex) fuentesArr.push("cylex");
-    if (fuentes.paginasamarillas) fuentesArr.push("paginasamarillas");
-    if (fuentesArr.length === 0) {
+    const incluyePA = fuentes.paginasamarillas;
+    if (fuentesArr.length === 0 && !incluyePA) {
       toast.error("Elegí al menos una fuente.");
       return;
     }
 
-    const provs = provincia === "todas" ? PROVINCIAS : [provincia];
+    const provs =
+      fuentesArr.length === 0 ? [] : provincia === "todas" ? PROVINCIAS : [provincia];
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     const mapa = new Map<string, Prospecto>();
     const warnSet = new Set<string>();
+    const totalPasos = provs.length + (incluyePA ? 1 : 0);
 
     setRunning(true);
     setResults([]);
     setWarnings([]);
-    setProgreso({ hechas: 0, total: provs.length, actual: provs[0] });
+    setProgreso({ hechas: 0, total: totalPasos, actual: provs[0] ?? "Páginas Amarillas" });
+
+    async function pedir(prov: string, fuentesReq: Fuente[]): Promise<void> {
+      let data: BuscarResponse | null = null;
+      try {
+        const res = await fetch("/api/buscador", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            q: q.trim(),
+            provincia: prov,
+            fuentes: fuentesReq,
+            enriquecer,
+            meses,
+          }),
+          signal: ctrl.signal,
+        });
+        if (!res.ok) {
+          const e = (await res.json().catch(() => null)) as { error?: string } | null;
+          warnSet.add(`${prov}: ${e?.error ?? `HTTP ${res.status}`}`);
+        } else {
+          data = (await res.json()) as BuscarResponse;
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") throw err;
+        warnSet.add(`${prov}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      if (data) {
+        for (const p of data.results) {
+          const ex = mapa.get(p.id);
+          if (!ex) mapa.set(p.id, p);
+          else mergeClient(ex, p);
+        }
+        for (const w of data.warnings) warnSet.add(w);
+        setResults(ordenar([...mapa.values()]));
+        setWarnings([...warnSet]);
+      }
+    }
 
     try {
       for (let idx = 0; idx < provs.length; idx++) {
         if (ctrl.signal.aborted) break;
         const prov = provs[idx];
-        setProgreso({ hechas: idx, total: provs.length, actual: prov });
-
-        let data: BuscarResponse | null = null;
+        setProgreso({ hechas: idx, total: totalPasos, actual: prov });
         try {
-          const res = await fetch("/api/buscador", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              q: q.trim(),
-              provincia: prov,
-              fuentes: fuentesArr,
-              enriquecer,
-              meses,
-            }),
-            signal: ctrl.signal,
-          });
-          if (!res.ok) {
-            const e = (await res.json().catch(() => null)) as { error?: string } | null;
-            warnSet.add(`${prov}: ${e?.error ?? `HTTP ${res.status}`}`);
-          } else {
-            data = (await res.json()) as BuscarResponse;
-          }
+          await pedir(prov, fuentesArr);
         } catch (err) {
           if (err instanceof Error && err.name === "AbortError") break;
-          warnSet.add(`${prov}: ${err instanceof Error ? err.message : String(err)}`);
-        }
-
-        if (data) {
-          for (const p of data.results) {
-            const ex = mapa.get(p.id);
-            if (!ex) mapa.set(p.id, p);
-            else mergeClient(ex, p);
-          }
-          for (const w of data.warnings) warnSet.add(w);
-          setResults(ordenar([...mapa.values()]));
-          setWarnings([...warnSet]);
         }
       }
+
+      if (incluyePA && !ctrl.signal.aborted) {
+        setProgreso({ hechas: provs.length, total: totalPasos, actual: "Páginas Amarillas" });
+        try {
+          await pedir(provincia, ["paginasamarillas"]);
+        } catch {
+          // AbortError: se canceló, no hay más nada que hacer acá.
+        }
+      }
+
       setProgreso((pr) => (pr ? { ...pr, hechas: pr.total, actual: null } : null));
       if (!ctrl.signal.aborted) {
         toast.success(`${mapa.size} prospectos encontrados.`);
