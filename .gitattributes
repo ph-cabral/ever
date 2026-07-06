@@ -1,0 +1,6 @@
+# Fuerza LF en scripts que corren en el server Linux (deploy.sh, etc.).
+# Sin esto, Git en Windows puede convertir a CRLF y romper el shebang
+# (síntoma: "command not found" al correr ./deploy.sh con sudo/bash).
+*.sh text eol=lf
+Dockerfile* text eol=lf
+docker-compose*.yml text eol=lf
