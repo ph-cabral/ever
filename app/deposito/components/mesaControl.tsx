@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Loader2, AlertTriangle, RefreshCw, ClipboardList } from "lucide-react";
+import { Loader2, AlertTriangle, RefreshCw, ClipboardList, Info } from "lucide-react";
 import {
   PageTitle,
   SectionTitle,
@@ -10,6 +10,7 @@ import {
   Grid,
   ChartBar,
   ChartDonut,
+  Alert,
   PALETTE,
   fmtNum,
   fmtMes,
@@ -144,6 +145,20 @@ export function MesaControlTab() {
         >
           <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refrescar
         </button>
+      </div>
+
+      <div className="mb-5">
+        <Alert tone="amber">
+          <Info size={15} className="mt-0.5 shrink-0" />
+          <span>
+            El total NO es "items únicos controlados": el SP suma una vez por
+            cada controlador asignado al renglón (columnas CodControlador1 /
+            CodControlador2 de origen). Si un ítem pasa por doble control,
+            cuenta 2 veces — por eso el total puede acercarse al doble de lo
+            recolectado en Picking. Es el comportamiento real del reporte de
+            Softech, no un error de esta vista.
+          </span>
+        </Alert>
       </div>
 
       {/* Selector de meses */}

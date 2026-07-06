@@ -151,7 +151,37 @@ def fetch_mesa_control(meses: list[str]) -> dict:
     }
 
 
-# ── Diagnóstico: columnas reales del SP, para confirmar el mapeo de arriba ───
+# ── Diagnóstico: texto real del SP (para ubicar la tabla fuente y poder ──────
+#    contar CADA ítem controlado UNA sola vez, filtrando por Nro. de Factura/
+#    pedido interno, en vez de sumar por CodControlador1+CodControlador2).
+def fetch_mesa_control_sp_definicion() -> dict:
+    """Devuelve el texto T-SQL del SP (sys.sql_modules; si viene vacío, intenta
+    sp_helptext). Con esto se identifica la tabla real de control (columnas de
+    factura/pedido/renglón) para poder armar la consulta de conteo EXACTO
+    (sin duplicar por doble controlador). No modifica nada, sólo lee metadata."""
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        texto = None
+        try:
+            cur.execute(
+                "SELECT OBJECT_DEFINITION(OBJECT_ID(?))", (SP_NOMBRE,)
+            )
+            row = cur.fetchone()
+            texto = row[0] if row else None
+        except Exception:
+            texto = None
+        if not texto:
+            try:
+                cur.execute(f"EXEC sp_helptext '{SP_NOMBRE}'")
+                texto = "".join(r[0] for r in cur.fetchall() if r[0])
+            except Exception as ex:
+                return {"sp": SP_NOMBRE, "definicion": None, "error": str(ex)}
+        return {"sp": SP_NOMBRE, "definicion": texto}
+    finally:
+        conn.close()
+
+
 def fetch_mesa_control_diag(mes: str | None = None) -> dict:
     """Corre el SP para UN mes (default: mes actual) y devuelve las columnas
     crudas + hasta 15 filas de muestra, para confirmar `_detectar_columnas()`."""

@@ -16,7 +16,7 @@ from compras import fetch_ordenes_pendientes
 from ingresos import fetch_remitos_ingreso
 from finanza import fetch_facturacion_dia, fetch_descubrir
 from clientes import fetch_cliente
-from mesa_control import fetch_mesa_control, fetch_mesa_control_diag
+from mesa_control import fetch_mesa_control, fetch_mesa_control_diag, fetch_mesa_control_sp_definicion
 from datetime import date, datetime, timedelta
 
 app = FastAPI()
@@ -497,6 +497,18 @@ def deposito_mesa_control_diag(mes: str | None = Query(default=None)):
     controlador, para confirmar el mapeo de mesa_control.py."""
     try:
         return fetch_mesa_control_diag(mes)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/mesa-control/sp-definicion")
+def deposito_mesa_control_sp_definicion():
+    """Texto T-SQL real del SP RPT_V325_ProductividadPorControlador (sólo
+    lectura de metadata). Sirve para ubicar la tabla fuente de control
+    (columnas de factura/pedido/renglón) y así poder armar un conteo EXACTO
+    de items controlados (sin duplicar por doble controlador) — ver pedido
+    de contaduría sobre la pestaña Mesas de Control."""
+    try:
+        return fetch_mesa_control_sp_definicion()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
