@@ -36,6 +36,10 @@ COPY --from=builder /app/public ./public
 # motores de Prisma (no siempre los detecta el tracing de Next)
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/prisma ./prisma
+# instrumentation.ts tampoco lo detecta el tracing de standalone (bug conocido
+# de Next: https://github.com/vercel/next.js/issues/68740). Sin dependencias
+# externas (solo node:dns), alcanza con copiar el archivo compilado.
+COPY --from=builder /app/.next/server/instrumentation.js ./.next/server/instrumentation.js
 
 # Usuario sin privilegios (la imagen node ya trae el usuario "node")
 USER node
