@@ -7,19 +7,36 @@ exportable a Excel.
 
 ## Cómo funciona
 
-Cruza hasta tres fuentes y deduplica:
+Cruza hasta cuatro fuentes y deduplica:
 
 | Fuente | Qué aporta | Contacto | Requiere |
 |---|---|---|---|
 | **Google Maps / Places** | Empresas del rubro: nombre, dirección, teléfono, web, ubicación | Teléfono y web públicos | API key + facturación activa en Google Cloud |
 | **MercadoLibre** | Vendedores activos del artículo, ubicación, volumen de publicaciones, precio | ML **no** expone tel/email del vendedor | Nada (público) u OAuth para más volumen |
 | **OpenStreetMap** | Empresas con el término en el nombre (`name` tag): dirección, tel, web, email si están cargados | Depende de lo que haya cargado en OSM | Nada — sin API key ni facturación |
+| **Cylex** | Directorio de negocios AR: nombre, dirección, teléfono | Depende de lo que haya cargado el negocio en Cylex | Nada — sin API key, scrapea páginas HTML permitidas por su `robots.txt` |
 
-OSM es la alternativa mientras no tengas `GOOGLE_PLACES_API_KEY` (Google exige tarjeta
-para activar facturación aunque uses el crédito gratis). Ojo: OSM matchea el
-nombre del comercio literalmente contra el artículo buscado (regex), no busca
-por rubro/categoría como Google — mucho menor cobertura, sirve como complemento
-o mientras se resuelve lo de Google, no como reemplazo 1:1.
+OSM y Cylex son alternativas/complemento mientras no tengas `GOOGLE_PLACES_API_KEY`
+(Google exige tarjeta para activar facturación aunque uses el crédito gratis).
+Ojo: ninguna de las dos busca por rubro/categoría como Google — OSM matchea el
+nombre del comercio literalmente contra el artículo buscado (regex) y Cylex
+depende de que el negocio esté cargado con esa palabra clave en su ficha —
+mucho menor cobertura que Google, sirven como complemento o mientras se
+resuelve lo de Google, no como reemplazo 1:1.
+
+**Cylex** (`lib/buscador/cylex.ts`) pega contra `https://www.cylex.com.ar/{palabra}.html`
+(páginas de listado, permitidas por su `robots.txt`) y parsea el HTML con regex
+— no usa su endpoint de búsqueda con filtros (`/s?...`), que el propio
+`robots.txt` del sitio deshabilita. No hay forma de filtrar por provincia del
+lado del servidor (esa limitación viene de ahí), así que trae el listado
+general del artículo y filtra por provincia en memoria matcheando la
+dirección de cada ficha. La estructura del HTML se infirió a mano viendo una
+búsqueda real (06-jul-2026); si en algún momento empieza a traer 0 resultados
+de forma sistemática, probablemente Cylex cambió el markup de la página y hay
+que revisar los regex en `cylex.ts`, no es necesariamente un problema de red.
+Se evaluaron también Brave Search API (perdió su capa gratuita en feb-2026,
+ahora es paga) y DuckDuckGo (sin API oficial, solo scraping frágil de su HTML)
+como fuentes adicionales, pero se descartaron por costo/fragilidad.
 
 Si activás "Buscar email / WhatsApp en las webs", para cada empresa con sitio
 web se visita la home y `/contacto` y se intenta extraer email, WhatsApp y
@@ -125,6 +142,7 @@ lib/buscador/util.ts               Dedupe / dominio / teléfono
 lib/buscador/google.ts             Cliente Google Places (New)
 lib/buscador/mercadolibre.ts       Cliente ML + refresh de token + filtro por meses
 lib/buscador/osm.ts                Cliente OpenStreetMap/Overpass (sin API key)
+lib/buscador/cylex.ts              Cliente Cylex (scraping HTML, sin API key)
 lib/buscador/enrich.ts             Extracción email/WhatsApp de webs
 lib/auth/modules.ts                (editado) alta del módulo "buscador"
 ```

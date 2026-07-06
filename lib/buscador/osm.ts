@@ -82,7 +82,12 @@ async function ejecutarQuery(
   query: string,
   signal?: AbortSignal,
 ): Promise<{ data?: OverpassResp; warning?: string }> {
-  let ultimoError: string | undefined;
+  // Se acumulan los errores de TODOS los espejos (antes solo se guardaba el
+  // último, lo que ocultaba si el problema era puntual de un espejo o algo
+  // más de fondo, como que el servidor no tiene salida a internet hacia
+  // ninguno de los tres dominios — ej. firewall/proxy corporativo con
+  // allowlist).
+  const errores: string[] = [];
 
   for (const endpoint of ENDPOINTS) {
     try {
@@ -99,18 +104,21 @@ async function ejecutarQuery(
       });
       if (!res.ok) {
         const detail = await res.text().catch(() => "");
-        ultimoError = `${endpoint} ${res.status}: ${detail.slice(0, 160)}`;
+        errores.push(`${endpoint} ${res.status}: ${detail.slice(0, 160)}`);
         continue; // probar el siguiente espejo
       }
       const data = (await res.json()) as OverpassResp;
       return { data };
     } catch (e) {
-      ultimoError = `${endpoint}: ${e instanceof Error ? e.message : String(e)}`;
+      errores.push(`${endpoint}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   return {
-    warning: `OpenStreetMap: ${ultimoError ?? "sin respuesta de ningún espejo."}`,
+    warning:
+      errores.length === ENDPOINTS.length
+        ? `OpenStreetMap: fallaron los ${ENDPOINTS.length} espejos — ${errores.join(" | ")}`
+        : `OpenStreetMap: ${errores.join(" | ") || "sin respuesta de ningún espejo."}`,
   };
 }
 

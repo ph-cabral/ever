@@ -8,6 +8,7 @@ import type {
 import { buscarGoogle } from "@/lib/buscador/google";
 import { buscarMercadoLibre } from "@/lib/buscador/mercadolibre";
 import { buscarOsm } from "@/lib/buscador/osm";
+import { buscarCylex } from "@/lib/buscador/cylex";
 import { enriquecer } from "@/lib/buscador/enrich";
 
 export const dynamic = "force-dynamic";
@@ -26,16 +27,17 @@ function parseBody(b: unknown): BuscarParams | null {
     typeof o.provincia === "string" && o.provincia ? o.provincia : "todas";
   const fuentesRaw = Array.isArray(o.fuentes)
     ? o.fuentes
-    : ["google", "mercadolibre", "osm"];
+    : ["google", "mercadolibre", "osm", "cylex"];
   const fuentes = fuentesRaw.filter(
-    (f): f is Fuente => f === "google" || f === "mercadolibre" || f === "osm",
+    (f): f is Fuente =>
+      f === "google" || f === "mercadolibre" || f === "osm" || f === "cylex",
   );
   const meses =
     typeof o.meses === "number" && o.meses > 0 ? Math.min(o.meses, 36) : 12;
   return {
     q,
     provincia,
-    fuentes: fuentes.length ? fuentes : ["google", "mercadolibre", "osm"],
+    fuentes: fuentes.length ? fuentes : ["google", "mercadolibre", "osm", "cylex"],
     enriquecer: o.enriquecer !== false,
     meses,
   };
@@ -142,9 +144,24 @@ export async function POST(req: Request) {
       );
     }
 
+    if (params.fuentes.includes("cylex")) {
+      tareas.push(
+        buscarCylex({
+          q: params.q,
+          provincia: params.provincia,
+          signal: ctrl.signal,
+        }),
+      );
+    }
+
     const resultados = await Promise.all(tareas);
     const mapa = new Map<string, Prospecto>();
-    const porFuente: Record<Fuente, number> = { google: 0, mercadolibre: 0, osm: 0 };
+    const porFuente: Record<Fuente, number> = {
+      google: 0,
+      mercadolibre: 0,
+      osm: 0,
+      cylex: 0,
+    };
     for (const r of resultados) {
       if (r.warning) warnings.push(r.warning);
       for (const p of r.prospectos) porFuente[p.fuente]++;

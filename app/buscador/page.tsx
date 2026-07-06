@@ -75,7 +75,12 @@ interface Progreso {
 export default function BuscadorPage() {
   const [q, setQ] = useState("");
   const [provincia, setProvincia] = useState("todas");
-  const [fuentes, setFuentes] = useState({ google: true, mercadolibre: true, osm: true });
+  const [fuentes, setFuentes] = useState({
+    google: true,
+    mercadolibre: true,
+    osm: true,
+    cylex: true,
+  });
   const [enriquecer, setEnriquecer] = useState(true);
   const [meses, setMeses] = useState(12);
 
@@ -110,6 +115,7 @@ export default function BuscadorPage() {
     if (fuentes.google) fuentesArr.push("google");
     if (fuentes.mercadolibre) fuentesArr.push("mercadolibre");
     if (fuentes.osm) fuentesArr.push("osm");
+    if (fuentes.cylex) fuentesArr.push("cylex");
     if (fuentesArr.length === 0) {
       toast.error("Elegí al menos una fuente.");
       return;
@@ -304,6 +310,16 @@ export default function BuscadorPage() {
             <label className="flex items-center gap-2 cursor-pointer text-zinc-300">
               <input
                 type="checkbox"
+                checked={fuentes.cylex}
+                onChange={(e) => setFuentes((f) => ({ ...f, cylex: e.target.checked }))}
+                className="accent-yellow-400"
+              />
+              Cylex{" "}
+              <span className="text-zinc-600">(directorio de empresas, gratis, sin API key)</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer text-zinc-300">
+              <input
+                type="checkbox"
                 checked={enriquecer}
                 onChange={(e) => setEnriquecer(e.target.checked)}
                 className="accent-yellow-400"
@@ -489,7 +505,9 @@ export default function BuscadorPage() {
                             ? "Google"
                             : p.fuente === "mercadolibre"
                               ? "MercadoLibre"
-                              : "OSM"}
+                              : p.fuente === "cylex"
+                                ? "Cylex"
+                                : "OSM"}
                         </span>
                       </td>
                     </tr>
