@@ -24,8 +24,9 @@ jobs:
           set -euo pipefail
           cd ~/projects/ever
           echo "==> carpeta: $(pwd)"
-          echo "==> git pull"
-          git pull
+          echo "==> git fetch + reset --hard origin/main"
+          git fetch origin main
+          git reset --hard origin/main
           echo "==> docker compose build + up"
           docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
           echo "==> estado de los contenedores"
