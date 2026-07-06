@@ -5,6 +5,7 @@
   // OJO: actualizar a la fecha real del día que se hace el primer deploy.
   "compatibility_date": "2026-07-06",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
   "browser": {
     "binding": "BROWSER"
   },
