@@ -19,10 +19,18 @@ export const maxDuration = 60;
 //   3. Se agrupa por (artículo, PrimerDia) → "lo nuevo de cada día" sin doble
 //      contar (cada renglón cuenta una sola vez, en su día de aparición).
 //   4. Por artículo, "faltan" se ACUMULA día a día (no se resetea): faltan[día] =
-//      faltan[día-1] + nuevoDelDia. Se cubre contra la OC "por llegar" (Magnus,
-//      en vivo). El día que llega la OC (fechaEntrega) y cubrió con sobrante, el
-//      acumulado vuelve a 0 ese mismo día (no se arrastra crédito viejo); si NO
-//      alcanzó a cubrir, el descubierto real sigue acumulando tal cual.
+//      faltan[día-1] + nuevoDelDia. Se cubre contra DOS fuentes en VIVO (no
+//      estimaciones, no la fecha manual de "Arribo"): la OC "por llegar"
+//      (Magnus, ya neta de lo recibido) y el stock físico real del depósito 1
+//      (WMS, ver /deposito/stock-por-articulos). Cualquier día que esas dos
+//      fuentes juntas alcancen a cubrir todo el acumulado, se descarta el
+//      crédito (no se arrastra sobrante a favor) y el artículo vuelve a foja
+//      cero para el próximo ciclo. Si no alcanzan, el descubierto real sigue
+//      acumulando tal cual.
+//   4b. Un artículo con el acumulado ya en 0 (cubierto de verdad, por OC+stock
+//      reales) deja de tener faltante: esa fila NO se manda en la respuesta
+//      (desaparece de toda la vista), salvo el histórico "entregado" que no
+//      pasa por esta regla.
 //   5. Se persiste el consumo por día en preparado.faltante_oc_consumo
 //      (best-effort: si la tabla no está creada aún, la vista igual funciona).
 // ──────────────────────────────────────────────────────────────────────────────
@@ -331,17 +339,25 @@ export async function GET(req: NextRequest) {
   }
 
   // 4) por artículo: acumular el faltante día a día (no se resetea) y cubrirlo
-  //    contra la OC "por llegar" (Magnus, en vivo).
+  //    contra DOS fuentes reales (no estimaciones): la OC "por llegar" (Magnus,
+  //    en vivo, ya neta de lo recibido) y el stock físico actual del depósito 1
+  //    (WMS, en vivo — ver stockMap más abajo).
   //
   //    · faltan (por día) = acumulado de todo lo que sigue sin existencia hasta
   //      ESE día (faltanAcum[día] = faltanAcum[día-1] + nuevoDelDia). Antes solo
   //      mostraba lo nuevo de cada día y por eso "se reseteaba".
-  //    · La OC cubre ese acumulado (cubierto = min(acumulado, ocTotal)).
-  //    · El día en que llega la OC (fechaEntrega) y quedó CUBIERTA con sobrante
-  //      (descubierto = 0), ese sobrante no se arrastra: el acumulado vuelve a 0
-  //      ese mismo día y el ciclo arranca de nuevo al día siguiente. Si en cambio
-  //      NO alcanzó a cubrir (descubierto > 0), el descubierto real NO se
-  //      resetea: sigue acumulando hasta que se cubra con una OC nueva.
+  //    · La OC cubre ese acumulado primero (cubierto = min(acumulado, ocTotal));
+  //      lo que la OC no llega a cubrir, se neta contra el stock físico actual.
+  //    · Cualquier día que esa cobertura real (OC + stock) llegue a cubrir TODO
+  //      el acumulado, se descarta: no se arrastra sobrante a favor del próximo
+  //      ciclo, el artículo vuelve a foja cero (antes esto solo pasaba el día
+  //      EXACTO de "fechaEntrega"; ahora aplica cualquier día, sea por OC, por
+  //      stock, o la suma de ambos). Si no alcanza, el descubierto real NO se
+  //      resetea: sigue acumulando hasta que se cubra de verdad.
+  //    · Un artículo que quedó en 0 (cubierto de verdad) ya no tiene faltante:
+  //      esa fila se excluye de la respuesta más abajo (no aparece en ninguna
+  //      tabla de la vista) — la fecha manual de "Arribo" NO interviene acá,
+  //      solo la cobertura real (OC/stock en vivo).
   //    · Límite conocido: Magnus agrega todas las OC pendientes del artículo en
   //      un solo total con la fecha de entrega MÁS TEMPRANA (ver
   //      indicadores-api/compras.py:fetch_ordenes_pendientes). Si un artículo
@@ -399,21 +415,24 @@ export async function GET(req: NextRequest) {
       acumulado += b.nuevoDelDia;
       let cub = Math.min(Math.max(ocTotal, 0), acumulado);
       let desc = Math.max(acumulado - ocTotal, 0);
+      // El stock físico del depósito 1 (en vivo, WMS) tapa lo que la OC no
+      // cubrió: si ya está en depósito no hace falta esperar una orden de compra.
+      let descNetoStock = Math.max(desc - stock, 0);
 
-      // Llega la OC hoy y cubrió con sobrante → se descarta el crédito, no sigue
-      // a favor para el próximo ciclo. Si no alcanzó, el descubierto queda como está.
-      if (fechaEntrega && b.fecha === fechaEntrega && desc <= 0) {
+      // Cobertura REAL de hoy (OC pendiente actual + stock físico actual, las
+      // dos en vivo — no la fecha manual de "Arribo" ni ninguna estimación):
+      // si ya alcanza para cubrir TODO el acumulado, se descarta el crédito
+      // — no se arrastra sobrante a favor del próximo ciclo, el artículo
+      // vuelve a foja cero. Antes esto solo pasaba el día EXACTO de
+      // "fechaEntrega"; ahora aplica cualquier día que la cobertura real
+      // (por OC, por stock o la suma de ambos) llegue a 0. Si no alcanza, el
+      // descubierto real NO se resetea: sigue acumulando tal cual.
+      if (descNetoStock <= 0) {
         acumulado = 0;
         cub = 0;
         desc = 0;
+        descNetoStock = 0;
       }
-
-      // El stock físico del depósito 1 (en vivo, WMS) puede tapar lo que la OC
-      // no cubrió: si ya está en depósito no hace falta esperar una orden de
-      // compra. "Falta OC"/el color de la fila reflejan este descubierto YA
-      // neto de stock (no se muestra un descubierto que en los hechos ya está
-      // guardado en el depósito).
-      const descNetoStock = Math.max(desc - stock, 0);
 
       b.faltan = r2(acumulado); // acumulado (ya reseteado arriba si correspondía)
       b.cubierto = cub;
@@ -425,12 +444,11 @@ export async function GET(req: NextRequest) {
         b.ocs = oc.NroOCs ?? [];
         if (!b.Proveedor && oc.Proveedor) b.Proveedor = oc.Proveedor;
       }
+      // faltan=0 → cubierto de verdad (esta fila se excluye de la respuesta
+      // más abajo, ver filtro "resuelto"). Se deja "completo" por prolijidad
+      // del tipo, pero no llega a mostrarse.
       b.estado =
-        b.faltan > 0 && descNetoStock <= 0
-          ? "completo"
-          : cub > 0 || stock > 0
-            ? "incompleto"
-            : "sin_orden";
+        descNetoStock <= 0 ? "completo" : cub > 0 || stock > 0 ? "incompleto" : "sin_orden";
     }
     artImporte.set(cod, imp);
   }
@@ -447,6 +465,10 @@ export async function GET(req: NextRequest) {
         descartMap.get(keyArtDia(b.CodArticulo, b.fecha)) ?? descartUltPorArt.get(b.CodArticulo);
       return !descartado;
     })
+    // Ya cubierto de verdad (OC + stock reales, ver punto 4/4b): sin faltante,
+    // no aparece en NINGUNA tabla de la vista. El histórico "entregado" no
+    // pasa por esta regla (b.vivo=false).
+    .filter((b) => !b.vivo || b.faltan > 0)
     .sort((a, c) => {
       const ia = artImporte.get(a.CodArticulo) ?? 0;
       const ic = artImporte.get(c.CodArticulo) ?? 0;

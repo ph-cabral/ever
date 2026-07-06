@@ -815,8 +815,11 @@ export default function ComprasFaltantesPage() {
 
           <div className="w-px h-5 bg-zinc-800 hidden sm:block" />
 
-          {/* "entregado" ya no existe: todo lo marcado sin existencia es demanda viva */}
-          {FILTROS.filter((f) => f.key !== "entregado").map((f) => (
+          {/* "entregado" ya no existe: todo lo marcado sin existencia es demanda viva.
+              "completo" tampoco puede aparecer: un artículo cubierto de verdad
+              (OC+stock reales) ya no tiene faltante y el backend lo excluye de
+              la respuesta (ver faltantes-consumo/route.ts, punto 4b). */}
+          {FILTROS.filter((f) => f.key !== "entregado" && f.key !== "completo").map((f) => (
             <button
               key={f.key}
               onClick={() => setFiltro(f.key)}
