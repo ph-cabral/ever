@@ -16,9 +16,9 @@ export const maxDuration = 60;
 // compras/faltantes-consumo sigan funcionando sin cambios: tratan esa clave como
 // opaca, no como algo específico de Magnus.
 //
-// Gap conocido: Nombre / Importe / TipoArticulo / Linea / Proveedor todavía no
-// tienen fuente en WMS (van vacíos/0) — falta un join a StkFer_Articulos /
-// PrecioVenta si se necesitan en la grilla.
+// Gap conocido: Importe / TipoArticulo / Linea / Proveedor todavía no tienen
+// fuente en WMS (van vacíos/0) — falta un join a PrecioVenta si se necesitan
+// en la grilla. Nombre ya resuelto (join a StkFer_Articulos en indicadores-api).
 interface OtDifRow {
   OTId: number;
   NroMovVenta: number | null;
@@ -28,6 +28,7 @@ interface OtDifRow {
   Vendedor: string;
   Ubicacion: string;
   CodArticulo: string;
+  Nombre: string;
   Renglon: number;
   CantPedida: number;
   CantCumplida: number;
@@ -97,7 +98,7 @@ export async function GET(req: NextRequest) {
       NroRengOrigen: r.Renglon,
       Ubicacion: r.Ubicacion,
       CodArticulo: r.CodArticulo,
-      Nombre: "", // TODO: falta join a StkFer_Articulos
+      Nombre: r.Nombre ?? "",
       CantPend: r.Diferencia,
       Cliente: r.Cliente,
       Importe: 0, // TODO: falta join a PrecioVenta

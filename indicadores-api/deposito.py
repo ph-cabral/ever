@@ -824,6 +824,29 @@ def fetch_ot_diferencias(desde=None, hasta=None):
     pedidos = sorted({int(f["NroMovVenta"]) for f in filas if f.get("NroMovVenta") is not None})
     info = _info_pedidos(pedidos)
 
+    codigos = sorted({_txt(f.get("CodArticulo")) for f in filas if f.get("CodArticulo")})
+    nombres: dict[str, str] = {}
+    if codigos:
+        ph = ",".join("?" for _ in codigos)
+        sql_nombres = f"""
+            SELECT LTRIM(RTRIM(s.CodArticulo)) AS Cod,
+                   ap.Detalle      AS Patron,
+                   s.DetalleMedida AS Medida,
+                   s.UnidadMedida  AS Unidad
+            FROM EVERWEAR.dbo.[StkFer_Articulos]  s
+            LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloPatron
+            WHERE LTRIM(RTRIM(s.CodArticulo)) IN ({ph})
+        """
+        conn_ew = get_connection("EVERWEAR")
+        try:
+            cur_ew = conn_ew.cursor()
+            cur_ew.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+            cur_ew.execute(sql_nombres, codigos)
+            for cod, patron, medida, unidad in cur_ew.fetchall():
+                nombres[_txt(cod)] = " ".join(" ".join(_txt(x) for x in (patron, medida, unidad)).split())
+        finally:
+            conn_ew.close()
+
     rows, excluidas_ot = [], set()
     for f in filas:
         nro = int(f["NroMovVenta"]) if f.get("NroMovVenta") is not None else None
@@ -843,6 +866,7 @@ def fetch_ot_diferencias(desde=None, hasta=None):
             "Renglon":      _int(f.get("Renglon")),
             "Ubicacion":    _txt(f.get("Ubicacion")),
             "CodArticulo":  _txt(f.get("CodArticulo")),
+            "Nombre":       nombres.get(_txt(f.get("CodArticulo")), ""),
             "CantPedida":   pedida,
             "CantCumplida": cumplida,
             "Diferencia":   round(pedida - cumplida, 3),
