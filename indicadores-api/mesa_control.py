@@ -182,6 +182,36 @@ def fetch_mesa_control_sp_definicion() -> dict:
         conn.close()
 
 
+SQL_COLS_TABLA = """
+SELECT COLUMN_NAME, DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = ?
+ORDER BY ORDINAL_POSITION
+"""
+
+
+def fetch_mesa_control_tablas_diag() -> dict:
+    """Columnas reales de Ven_PedImpresoCP y venfer_pedidoReng (las 2 tablas
+    fuente del SP, según fetch_mesa_control_sp_definicion()). Sirve para
+    ubicar la columna de renglón/línea en venfer_pedidoReng y así poder
+    contar cada ítem controlado UNA sola vez (sin el fan-out del JOIN ni el
+    UNION ALL por CodControlador1/CodControlador2 que hace el SP original)."""
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_COLS_TABLA, ("Ven_PedImpresoCP",))
+        ped_cols = [{"col": r[0], "tipo": r[1]} for r in cur.fetchall()]
+        cur.execute(SQL_COLS_TABLA, ("venfer_pedidoReng",))
+        reng_cols = [{"col": r[0], "tipo": r[1]} for r in cur.fetchall()]
+        return {
+            "Ven_PedImpresoCP_columnas": ped_cols,
+            "venfer_pedidoReng_columnas": reng_cols,
+        }
+    finally:
+        conn.close()
+
+
 def fetch_mesa_control_diag(mes: str | None = None) -> dict:
     """Corre el SP para UN mes (default: mes actual) y devuelve las columnas
     crudas + hasta 15 filas de muestra, para confirmar `_detectar_columnas()`."""

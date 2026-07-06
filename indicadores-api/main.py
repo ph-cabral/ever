@@ -16,7 +16,10 @@ from compras import fetch_ordenes_pendientes
 from ingresos import fetch_remitos_ingreso
 from finanza import fetch_facturacion_dia, fetch_descubrir
 from clientes import fetch_cliente
-from mesa_control import fetch_mesa_control, fetch_mesa_control_diag, fetch_mesa_control_sp_definicion
+from mesa_control import (
+    fetch_mesa_control, fetch_mesa_control_diag,
+    fetch_mesa_control_sp_definicion, fetch_mesa_control_tablas_diag,
+)
 from datetime import date, datetime, timedelta
 
 app = FastAPI()
@@ -509,6 +512,15 @@ def deposito_mesa_control_sp_definicion():
     de contaduría sobre la pestaña Mesas de Control."""
     try:
         return fetch_mesa_control_sp_definicion()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/mesa-control/tablas-diag")
+def deposito_mesa_control_tablas_diag():
+    """Columnas reales de Ven_PedImpresoCP y venfer_pedidoReng (tablas fuente
+    del SP de mesa de control), para armar el conteo EXACTO (sin duplicar)."""
+    try:
+        return fetch_mesa_control_tablas_diag()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
