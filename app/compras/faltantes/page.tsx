@@ -136,7 +136,8 @@ function Tabla({
   leaving?: Record<string, "left" | "right">;
 }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-zinc-800">
+    <div className="rounded-xl border border-zinc-800 overflow-hidden">
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-[#1A1A1A] text-zinc-400">
           <tr className="text-left">
@@ -296,6 +297,7 @@ function Tabla({
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
