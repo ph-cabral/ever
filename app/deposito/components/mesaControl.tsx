@@ -17,11 +17,19 @@ import {
 } from "./ui";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Mesas de Control — productividad por Controlador (items controlados),
-// fuente: EVERWEAR.dbo.RPT_V325_ProductividadPorControlador vía
-// /api/deposito/mesa-control (→ indicadores-api → SP en vivo). Solo lectura.
-// Selección de meses por checkbox (no un rango de fechas): el SP se corre una
-// vez por mes elegido para poder comparar meses entre sí.
+// Mesas de Control — renglones (items) controlados, por mes y por Controlador.
+// Fuente: Ven_PedImpresoCP + venfer_pedidoReng (EVERWEAR) vía
+// /api/deposito/mesa-control (→ indicadores-api). Solo lectura.
+//
+// El total_general cuenta cada renglón (NroMovVenta+NroRenglon) UNA sola vez
+// — NO usa el SP RPT_V325_ProductividadPorControlador porque ese SP hace
+// UNION ALL de CodControlador1+CodControlador2 sin deduplicar, y duplicaba el
+// total cuando un pedido tenía doble control. El desglose por_controlador SÍ
+// puede sumar más que total_general en ese caso (el mismo renglón le suma a
+// los 2 controladores), a propósito: es crédito de productividad, no el total.
+//
+// Selección de meses por checkbox (no un rango de fechas): se corre una
+// consulta por mes elegido para poder comparar meses entre sí.
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface PorMes {
@@ -36,7 +44,6 @@ interface PorControlador {
 }
 interface MesaControlData {
   meses: string[];
-  columnas_detectadas: Record<string, string | null> | null;
   por_mes: PorMes[];
   por_controlador: PorControlador[];
   total_general: number;
@@ -136,7 +143,7 @@ export function MesaControlTab() {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <PageTitle
           title="Mesas de Control"
-          sub="Items controlados por Controlador — SP RPT_V325_ProductividadPorControlador (EVERWEAR)"
+          sub="Renglones controlados (exacto) por Controlador — Ven_PedImpresoCP / venfer_pedidoReng (EVERWEAR)"
         />
         <button
           onClick={() => load(seleccionados)}
@@ -148,15 +155,15 @@ export function MesaControlTab() {
       </div>
 
       <div className="mb-5">
-        <Alert tone="amber">
+        <Alert tone="green">
           <Info size={15} className="mt-0.5 shrink-0" />
           <span>
-            El total NO es "items únicos controlados": el SP suma una vez por
-            cada controlador asignado al renglón (columnas CodControlador1 /
-            CodControlador2 de origen). Si un ítem pasa por doble control,
-            cuenta 2 veces — por eso el total puede acercarse al doble de lo
-            recolectado en Picking. Es el comportamiento real del reporte de
-            Softech, no un error de esta vista.
+            "Total controlado" cuenta cada renglón (línea de pedido) una sola
+            vez, sin importar si tuvo 1 o 2 controladores asignados — es el
+            número que reconcilia contra lo preparado/facturado. El desglose
+            por controlador SÍ puede sumar más que el total: un mismo renglón
+            con doble control le suma a los 2 controladores (crédito de
+            productividad), pero no infla el total general.
           </span>
         </Alert>
       </div>
@@ -279,11 +286,11 @@ export function MesaControlTab() {
           </Panel>
 
           <p className="text-[11px] text-zinc-600 mt-6 leading-relaxed">
-            Fuente: EVERWEAR.dbo.RPT_V325_ProductividadPorControlador (agrupa por
-            Centro de Preparación + Controlador, fecha de CIERRE de pedido en CP).
-            Lectura en vivo, solo lectura — no se escribe en Magnus. Las columnas
-            de Centro/Controlador se detectan por nombre; si algo no coincide,
-            confirmar con GET /deposito/mesa-control/diag.
+            Fuente: EVERWEAR.dbo.Ven_PedImpresoCP (CodControlador1/2, FechaControl)
+            + venfer_pedidoReng (renglón/línea), consulta directa — no el SP de
+            Softech (RPT_V325_ProductividadPorControlador), que duplicaba el
+            total al no deduplicar el doble control. Lectura en vivo, solo
+            lectura — no se escribe en Magnus.
           </p>
         </>
       )}

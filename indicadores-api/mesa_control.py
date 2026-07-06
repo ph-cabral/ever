@@ -1,22 +1,25 @@
 """
-Mesa de Control — Productividad por Controlador (EVERWEAR, SOLO LECTURA).
+Mesa de Control — renglones (items) controlados por Controlador (EVERWEAR,
+SOLO LECTURA), para la pestaña "Mesas de Control" de /deposito.
 
-Reproduce el reporte "CONTROL DE PRODUCTIVIDAD POR CONTROLADOR" llamando
-directo al SP fuente: EVERWEAR.dbo.RPT_V325_ProductividadPorControlador
-(agrupa por Centro de Preparación + Controlador, cuenta items controlados,
-toma la fecha de CIERRE de pedido en CP). Ver control_extraccion.py (script
-original que corría a mano en pc-0067, subido a mano por contaduría) — este
-módulo lo expone como API para la vista /deposito (pestaña "Mesas de
-Control"), llamando al SP UNA VEZ POR MES para poder comparar varios meses.
+Origen: contaduría pidió reproducir el reporte "CONTROL DE PRODUCTIVIDAD POR
+CONTROLADOR" (ver control_extraccion.py, script que corría a mano en
+pc-0067) llamando al SP EVERWEAR.dbo.RPT_V325_ProductividadPorControlador.
+CONFIRMADO (26-jun/2026, ver fetch_mesa_control_sp_definicion +
+fetch_mesa_control_tablas_diag) que ese SP duplica: hace JOIN de
+Ven_PedImpresoCP (1 fila/pedido) contra venfer_pedidoReng (1 fila/renglón)
+SIN deduplicar, y además UNION ALL de CodControlador1 + CodControlador2 —
+si un pedido tiene doble control, el total se cuenta 2 veces y NO reconcilia
+contra lo facturado/preparado.
 
-────────────────────────────────────────────────────────────────────────────
-COLUMNAS DEL SP: sólo "CANTIDAD ITEMS CONTROLADOS" está CONFIRMADA (viene
-literal de control_extraccion.py, validado contra el impreso de Mayo 2026).
-El resto (columna de Centro de Preparación, código y nombre de Controlador)
-se ubica por nombre en tiempo de ejecución — ver `_detectar_columnas()`.
-PENDIENTE: correr GET /deposito/mesa-control/diag en producción una vez y,
-si algo no coincide, clavar los nombres exactos ahí abajo en vez de
-autodetectarlos.
+`fetch_mesa_control()` (la función que usa la API) YA NO llama al SP: hace
+una consulta directa a Ven_PedImpresoCP + venfer_pedidoReng contando cada
+renglón (NroMovVenta+NroRenglon) UNA sola vez para el total, y por separado
+el desglose por controlador (que sí puede sumar más que el total si hubo
+doble control — es crédito de productividad, no el total real).
+
+Las funciones basadas en el SP (`_exec_sp`, `_detectar_columnas`,
+`fetch_mesa_control_diag`) se dejan sólo como referencia/diagnóstico.
 ────────────────────────────────────────────────────────────────────────────
 """
 from calendar import monthrange
@@ -88,63 +91,90 @@ def _detectar_columnas(cols: list[str]) -> dict:
     return {"cantidad": cantidad, "centro": centro, "nombre": nombre, "codigo": codigo}
 
 
+# ── Conteo EXACTO (reemplaza al SP) ───────────────────────────────────────────
+# El SP RPT_V325_ProductividadPorControlador (ver fetch_mesa_control_sp_definicion)
+# hace JOIN de Ven_PedImpresoCP (1 fila por pedido) contra venfer_pedidoReng
+# (1 fila por renglón/línea) SIN deduplicar, y encima UNION ALL de
+# CodControlador1 + CodControlador2. Resultado: si un pedido tiene los DOS
+# controladores cargados, TODOS sus renglones se cuentan 2 veces en el total
+# general — no reconcilia contra lo facturado/preparado. Confirmado con
+# GET /deposito/mesa-control/tablas-diag (columnas reales de ambas tablas):
+#   Ven_PedImpresoCP:   NroMovVenta, CodCentroPrep, CodControlador1/2, FechaControl (int Clarion)
+#   venfer_pedidoReng:  NroMovVenta, NroRenglon, CodCentroPrep, CodArticu, ...
+# Acá contamos cada renglón (NroMovVenta+NroRenglon) UNA sola vez para el
+# total; el desglose por controlador sí puede sumarle a los 2 controladores
+# si el pedido tuvo doble control (créditos de productividad), pero eso ya
+# NO infla el total general.
+SQL_RENGLONES_CONTROLADOS = """
+SELECT DISTINCT
+    reng.NroMovVenta, reng.NroRenglon,
+    ped.CodControlador1, ped.CodControlador2
+FROM dbo.Ven_PedImpresoCP ped
+JOIN dbo.venfer_pedidoReng reng
+  ON ped.NroMovVenta   = reng.NroMovVenta
+ AND ped.CodCentroPrep = reng.CodCentroPrep
+WHERE (ped.CodControlador1 > 0 OR ped.CodControlador2 > 0)
+  AND ped.FechaControl BETWEEN dbo.FECHA_SQL2Cla(?) AND dbo.FECHA_SQL2Cla(?)
+"""
+
+SQL_USUARIOS = "SELECT Numero, Nombre FROM dbo.Gen_Usuarios"
+
+
+def _nombres_usuarios(conn) -> dict[int, str]:
+    cur = conn.cursor()
+    cur.execute(SQL_USUARIOS)
+    return {int(r[0]): str(r[1]).strip() for r in cur.fetchall() if r[0] is not None}
+
+
 def fetch_mesa_control(meses: list[str]) -> dict:
-    """Corre el SP una vez por mes (`meses` = ['YYYY-MM', ...]) y agrega:
-      · por_mes         = [{mes, total}]  (suma de todos los controladores/centros)
+    """Cantidad EXACTA de renglones (items) controlados por mes + por
+    controlador — consulta directa a las tablas fuente (no al SP, que
+    duplica). `meses` = ['YYYY-MM', ...]. Devuelve:
+      · por_mes         = [{mes, total}]  (renglones distintos, sin duplicar)
       · por_controlador = [{controlador, codigo, por_mes: {mes: cantidad}, total}]
-    Meses sin datos (o sin corte pasado) quedan en 0. Solo lectura sobre EVERWEAR."""
+        (puede sumar más que el total general si hubo doble control: un mismo
+        renglón le suma a los 2 controladores, pero cuenta 1 sola vez en total_general)
+    Solo lectura sobre EVERWEAR."""
     meses = sorted(set(m.strip() for m in meses if m.strip()))
     if not meses:
-        return {
-            "meses": [], "columnas_detectadas": None,
-            "por_mes": [], "por_controlador": [], "total_general": 0,
-        }
+        return {"meses": [], "por_mes": [], "por_controlador": [], "total_general": 0}
 
     por_mes: dict[str, int] = {m: 0 for m in meses}
-    por_ctrl: dict[str, dict] = {}
-    cols_detectadas: dict | None = None
+    por_ctrl: dict[int, dict] = {}
 
     conn = get_connection("EVERWEAR")
     try:
+        nombres = _nombres_usuarios(conn)
         cur = conn.cursor()
-        cur.execute("SET DATEFORMAT ymd;")
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         for mes in meses:
             d, h = _rango_mes(mes)
             if d > h:
                 continue  # mes futuro, sin datos posibles
-            _exec_sp(cur, d, h)
-            cols, filas = _rows(cur)
-            if cols_detectadas is None:
-                cols_detectadas = _detectar_columnas(cols)
-            det = cols_detectadas
-            idx_cant = cols.index(det["cantidad"]) if det["cantidad"] else None
-            idx_nom = cols.index(det["nombre"]) if det["nombre"] else None
-            idx_cod = cols.index(det["codigo"]) if det["codigo"] else None
-
-            for fila in filas:
-                cant = int(fila[idx_cant] or 0) if idx_cant is not None else 0
-                nombre = (
-                    str(fila[idx_nom]).strip()
-                    if idx_nom is not None and fila[idx_nom] is not None
-                    else None
-                )
-                codigo = fila[idx_cod] if idx_cod is not None else None
-                if not nombre:
-                    nombre = f"Controlador {codigo}" if codigo is not None else "— Sin identificar"
-
-                por_mes[mes] += cant
-                entry = por_ctrl.setdefault(
-                    nombre, {"controlador": nombre, "codigo": codigo, "por_mes": {}, "total": 0}
-                )
-                entry["por_mes"][mes] = entry["por_mes"].get(mes, 0) + cant
-                entry["total"] += cant
+            cur.execute(SQL_RENGLONES_CONTROLADOS, (d, h))
+            filas = cur.fetchall()
+            por_mes[mes] = len(filas)  # cada renglón cuenta 1 sola vez
+            for _nro, _reng, cod1, cod2 in filas:
+                for codigo in (cod1, cod2):
+                    if codigo and codigo > 0:
+                        codigo = int(codigo)
+                        entry = por_ctrl.setdefault(
+                            codigo,
+                            {
+                                "controlador": nombres.get(codigo, f"Controlador {codigo}"),
+                                "codigo": codigo,
+                                "por_mes": {},
+                                "total": 0,
+                            },
+                        )
+                        entry["por_mes"][mes] = entry["por_mes"].get(mes, 0) + 1
+                        entry["total"] += 1
     finally:
         conn.close()
 
     controladores = sorted(por_ctrl.values(), key=lambda x: -x["total"])
     return {
         "meses": meses,
-        "columnas_detectadas": cols_detectadas,
         "por_mes": [{"mes": m, "total": por_mes[m]} for m in meses],
         "por_controlador": controladores,
         "total_general": sum(por_mes.values()),

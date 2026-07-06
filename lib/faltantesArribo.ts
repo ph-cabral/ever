@@ -2,6 +2,15 @@ import { prisma } from "@/lib/prisma";
 
 const API_URL = process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
 
+// Mismo ancla que /api/compras/faltantes-consumo (OC_DESDE_DEFAULT) y
+// /api/ventas/faltantes (OC_DESDE) — mantener sincronizados. La marca
+// existencia=false de un renglón se guarda con la fecha de AQUEL snapshot,
+// que puede ser muy anterior al PrimerDia del bucket que muestra
+// /compras/faltantes (un renglón sigue "vivo" pero se marcó sin existencia
+// hace rato). Si la ventana de lectura arrancara en el PrimerDia del bucket
+// en vez de en el ancla, se perdía justo esa marca vieja.
+const ANCLA = "2026-06-26";
+
 interface FaltRow {
   NroPedOrigen: number;
   NroRengOrigen: number;
@@ -51,8 +60,15 @@ export async function resolveBucketRenglones(
   if (!rows.length) return [];
 
   // última marca de existencia por renglón (mismo patrón que faltantes-consumo).
+  // Ventana desde el ANCLA (no desde primerDia): ver comentario arriba — la
+  // marca puede ser muy anterior al PrimerDia del bucket.
+  // Además: si el renglón nunca se tildó en /deposito/faltantes, no hay marca
+  // acá (undefined) — y esta pantalla no depende de ese check manual, así que
+  // "sin marca" cuenta como sin existencia. Sólo se descarta lo marcado
+  // explícitamente existencia=true (ya confirmado con stock).
+  const desdeMarks = ANCLA < primerDia ? ANCLA : primerDia;
   const marks = await prisma.faltante_existencia.findMany({
-    where: { fecha: { gte: new Date(primerDia), lte: new Date(hasta) } },
+    where: { fecha: { gte: new Date(desdeMarks), lte: new Date(hasta) } },
     select: { nroPedOrigen: true, nroRengOrigen: true, existencia: true, fecha: true },
     orderBy: { fecha: "asc" },
   });
@@ -60,7 +76,7 @@ export async function resolveBucketRenglones(
   for (const m of marks) latest.set(keyLine(m.nroPedOrigen, m.nroRengOrigen), m.existencia);
 
   return rows
-    .filter((r) => latest.get(keyLine(r.NroPedOrigen, r.NroRengOrigen)) === false)
+    .filter((r) => latest.get(keyLine(r.NroPedOrigen, r.NroRengOrigen)) !== true)
     .map((r) => ({
       nroPedOrigen: r.NroPedOrigen,
       nroRengOrigen: r.NroRengOrigen,
