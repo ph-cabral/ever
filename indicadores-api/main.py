@@ -19,6 +19,7 @@ from clientes import fetch_cliente
 from mesa_control import (
     fetch_mesa_control, fetch_mesa_control_diag,
     fetch_mesa_control_sp_definicion, fetch_mesa_control_tablas_diag,
+    fetch_mesa_control_recontroles_diag,
 )
 from datetime import date, datetime, timedelta
 
@@ -521,6 +522,16 @@ def deposito_mesa_control_tablas_diag():
     del SP de mesa de control), para armar el conteo EXACTO (sin duplicar)."""
     try:
         return fetch_mesa_control_tablas_diag()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/mesa-control/recontroles-diag")
+def deposito_mesa_control_recontroles_diag(mes: str | None = Query(default=None)):
+    """Cuántos pedidos tienen más de 1 fila en Ven_PedImpresoCP para el mismo
+    (NroMovVenta, CodCentroPrep) en el mes — confirma el recontrol/reimpresión
+    que explica la diferencia contra la planilla de contaduría."""
+    try:
+        return fetch_mesa_control_recontroles_diag(mes)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

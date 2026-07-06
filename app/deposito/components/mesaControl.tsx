@@ -138,6 +138,15 @@ export function MesaControlTab() {
     .filter((c) => c.cantidad > 0)
     .sort((a, b) => b.cantidad - a.cantidad);
 
+  // Referencia: la suma de controladores puede superar el total exacto si
+  // hubo doble control (mismo renglón acreditado a 2 controladores). No es
+  // un error — se lo aclaramos acá para no confundir al comparar sumas.
+  const sumaControladores = barControladorData.reduce((s, c) => s + c.cantidad, 0);
+  const totalRef = verTodos
+    ? data?.total_general ?? 0
+    : (ultimoMes && data?.por_mes.find((p) => p.mes === ultimoMes)?.total) ?? 0;
+  const dobleControl = sumaControladores - totalRef;
+
   return (
     <div>
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -283,6 +292,16 @@ export function MesaControlTab() {
               angle={-35}
               showValues
             />
+            <p className="text-[11px] text-zinc-600 mt-3">
+              Suma de controladores: {fmtNum(sumaControladores)}
+              {dobleControl > 0 && (
+                <>
+                  {" "}
+                  (+{fmtNum(dobleControl)} por doble control — no es un error,
+                  ver aviso de arriba)
+                </>
+              )}
+            </p>
           </Panel>
 
           <p className="text-[11px] text-zinc-600 mt-6 leading-relaxed">

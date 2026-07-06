@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "everwear-paginasamarillas-scraper",
+  "main": "src/index.ts",
+  // OJO: actualizar a la fecha real del día que se hace el primer deploy.
+  "compatibility_date": "2026-07-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "browser": {
+    "binding": "BROWSER"
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "vars": {
+    // Se puede sobreescribir con `wrangler secret put SHARED_SECRET` en vez
+    // de dejarlo en texto plano acá — recomendado para producción.
+  }
+}

@@ -2,7 +2,7 @@
 // SIN dependencias de Node: se importa tanto en el cliente (vista) como en el
 // server (API y libs de fuentes).
 
-export type Fuente = "google" | "mercadolibre" | "osm" | "cylex";
+export type Fuente = "google" | "mercadolibre" | "osm" | "cylex" | "paginasamarillas";
 
 export type TipoContacto = "empresa" | "vendedor";
 

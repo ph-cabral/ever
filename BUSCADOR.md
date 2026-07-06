@@ -7,7 +7,7 @@ exportable a Excel.
 
 ## Cómo funciona
 
-Cruza hasta cuatro fuentes y deduplica:
+Cruza hasta cinco fuentes y deduplica:
 
 | Fuente | Qué aporta | Contacto | Requiere |
 |---|---|---|---|
@@ -15,6 +15,7 @@ Cruza hasta cuatro fuentes y deduplica:
 | **MercadoLibre** | Vendedores activos del artículo, ubicación, volumen de publicaciones, precio | ML **no** expone tel/email del vendedor | Nada (público) u OAuth para más volumen |
 | **OpenStreetMap** | Empresas con el término en el nombre (`name` tag): dirección, tel, web, email si están cargados | Depende de lo que haya cargado en OSM | Nada — sin API key ni facturación |
 | **Cylex** | Directorio de negocios AR: nombre, dirección, teléfono | Depende de lo que haya cargado el negocio en Cylex | Nada — sin API key, scrapea páginas HTML permitidas por su `robots.txt` |
+| **Páginas Amarillas** | Directorio de negocios AR (mayor cobertura que Cylex): nombre, dirección, teléfono | Depende de lo cargado en el sitio | Cloudflare Worker propio deployado (Puppeteer + Workers AI) — ver más abajo |
 
 OSM y Cylex son alternativas/complemento mientras no tengas `GOOGLE_PLACES_API_KEY`
 (Google exige tarjeta para activar facturación aunque uses el crédito gratis).
@@ -37,6 +38,54 @@ que revisar los regex en `cylex.ts`, no es necesariamente un problema de red.
 Se evaluaron también Brave Search API (perdió su capa gratuita en feb-2026,
 ahora es paga) y DuckDuckGo (sin API oficial, solo scraping frágil de su HTML)
 como fuentes adicionales, pero se descartaron por costo/fragilidad.
+
+### Páginas Amarillas (Cloudflare Browser Rendering + Puppeteer, Worker aparte)
+
+Páginas Amarillas (paginasamarillas.com.ar) es el directorio más grande de AR,
+pero es una SPA (Next.js) cuya búsqueda es **100% client-side**: tocar
+"Buscar" no navega a una URL nueva. Eso descarta tanto un fetch normal (trae
+el shell vacío) como el endpoint simple de Cloudflare (`/json`, que solo abre
+una URL y extrae — no puede tipear ni hacer clic).
+
+La solución: un **Cloudflare Worker aparte** en `workers/paginasamarillas-scraper/`
+que usa Puppeteer (vía Browser Rendering) para escribir en el buscador, tocar
+"Buscar", esperar los resultados, y Workers AI para extraer nombre/dirección/
+teléfono del texto ya renderizado (así no depende de conocer las clases CSS
+exactas del sitio). El server de Next.js le pega por HTTP a este Worker
+(`lib/buscador/paginasamarillas.ts`) — no llama a Cloudflare directo.
+
+**Este Worker es un proyecto separado, con su propio deploy** (no forma parte
+del build/deploy de Next.js ni de `Dockerfile.prod` — corre en la red de
+Cloudflare, no en tu servidor). Para la primera prueba se deploya a mano
+(`npm install`, `wrangler login`, `wrangler deploy` — ver el README de esa
+carpeta). Para que se redeploye solo ante cambios, hay un workflow aparte en
+`.github/workflows/deploy-pa-worker.yml` (dispara solo con cambios dentro de
+`workers/paginasamarillas-scraper/`, usa un secret `CLOUDFLARE_API_TOKEN` del
+repo en vez de login interactivo — pasos de activación en el README de esa
+carpeta).
+
+**Variables de entorno del server de Next.js** (no de Cloudflare — son la URL
+del Worker ya deployado):
+```bash
+PA_WORKER_URL=       # la URL que imprime `wrangler deploy`
+PA_WORKER_SECRET=    # opcional, si protegiste el Worker con `wrangler secret put`
+```
+
+Si falta `PA_WORKER_URL`, la fuente se omite con aviso, igual que Google/ML.
+
+**Riesgo conocido, sin verificar (06-jul-2026):** nunca se pudo abrir Chrome
+para inspeccionar el DOM real del sitio (la extensión no conectó en toda la
+sesión), así que la detección del campo de búsqueda y el botón "Buscar" en
+`workers/paginasamarillas-scraper/src/index.ts` es heurística (por
+placeholder/aria-label/texto visible), no por selectores confirmados. Si esta
+fuente devuelve 0 empresas de forma sistemática, antes de asumir que el sitio
+cambió, correr el Worker en local con `X_BROWSER_HEADFUL=true npx wrangler dev`
+y mirar el array `debug` de la respuesta (dice en qué paso se cortó).
+
+**Mucho más lento que las otras fuentes** — abre un browser real por
+búsqueda (~10-20 s). Por eso en la vista viene **desactivada por defecto**:
+en modo "Todo el país" (24 requests secuenciales) sería impráctico tenerla
+prendida por defecto. Conviene usarla puntualmente, provincia por provincia.
 
 Si activás "Buscar email / WhatsApp en las webs", para cada empresa con sitio
 web se visita la home y `/contacto` y se intenta extraer email, WhatsApp y
@@ -143,6 +192,9 @@ lib/buscador/google.ts             Cliente Google Places (New)
 lib/buscador/mercadolibre.ts       Cliente ML + refresh de token + filtro por meses
 lib/buscador/osm.ts                Cliente OpenStreetMap/Overpass (sin API key)
 lib/buscador/cylex.ts              Cliente Cylex (scraping HTML, sin API key)
+lib/buscador/paginasamarillas.ts   Cliente que le pega al Worker de Cloudflare (ver abajo)
+lib/buscador/cloudflareBrowserRendering.ts  Cliente genérico /json de Cloudflare (sin usar hoy)
 lib/buscador/enrich.ts             Extracción email/WhatsApp de webs
 lib/auth/modules.ts                (editado) alta del módulo "buscador"
+workers/paginasamarillas-scraper/  Cloudflare Worker aparte (Puppeteer + Workers AI) — deploy manual, ver su README
 ```

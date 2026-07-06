@@ -9,6 +9,7 @@ import { buscarGoogle } from "@/lib/buscador/google";
 import { buscarMercadoLibre } from "@/lib/buscador/mercadolibre";
 import { buscarOsm } from "@/lib/buscador/osm";
 import { buscarCylex } from "@/lib/buscador/cylex";
+import { buscarPaginasAmarillas } from "@/lib/buscador/paginasamarillas";
 import { enriquecer } from "@/lib/buscador/enrich";
 
 export const dynamic = "force-dynamic";
@@ -25,19 +26,23 @@ function parseBody(b: unknown): BuscarParams | null {
   if (!q) return null;
   const provincia =
     typeof o.provincia === "string" && o.provincia ? o.provincia : "todas";
-  const fuentesRaw = Array.isArray(o.fuentes)
-    ? o.fuentes
-    : ["google", "mercadolibre", "osm", "cylex"];
-  const fuentes = fuentesRaw.filter(
-    (f): f is Fuente =>
-      f === "google" || f === "mercadolibre" || f === "osm" || f === "cylex",
+  const TODAS_FUENTES: Fuente[] = [
+    "google",
+    "mercadolibre",
+    "osm",
+    "cylex",
+    "paginasamarillas",
+  ];
+  const fuentesRaw = Array.isArray(o.fuentes) ? o.fuentes : TODAS_FUENTES;
+  const fuentes = fuentesRaw.filter((f): f is Fuente =>
+    (TODAS_FUENTES as string[]).includes(f as string),
   );
   const meses =
     typeof o.meses === "number" && o.meses > 0 ? Math.min(o.meses, 36) : 12;
   return {
     q,
     provincia,
-    fuentes: fuentes.length ? fuentes : ["google", "mercadolibre", "osm", "cylex"],
+    fuentes: fuentes.length ? fuentes : TODAS_FUENTES,
     enriquecer: o.enriquecer !== false,
     meses,
   };
@@ -154,6 +159,16 @@ export async function POST(req: Request) {
       );
     }
 
+    if (params.fuentes.includes("paginasamarillas")) {
+      tareas.push(
+        buscarPaginasAmarillas({
+          q: params.q,
+          provincia: params.provincia,
+          signal: ctrl.signal,
+        }),
+      );
+    }
+
     const resultados = await Promise.all(tareas);
     const mapa = new Map<string, Prospecto>();
     const porFuente: Record<Fuente, number> = {
@@ -161,6 +176,7 @@ export async function POST(req: Request) {
       mercadolibre: 0,
       osm: 0,
       cylex: 0,
+      paginasamarillas: 0,
     };
     for (const r of resultados) {
       if (r.warning) warnings.push(r.warning);

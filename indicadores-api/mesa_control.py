@@ -91,22 +91,29 @@ def _detectar_columnas(cols: list[str]) -> dict:
     return {"cantidad": cantidad, "centro": centro, "nombre": nombre, "codigo": codigo}
 
 
-# ── Conteo EXACTO (reemplaza al SP) ───────────────────────────────────────────
+# ── Conteo (reemplaza al SP) ──────────────────────────────────────────────────
 # El SP RPT_V325_ProductividadPorControlador (ver fetch_mesa_control_sp_definicion)
 # hace JOIN de Ven_PedImpresoCP (1 fila por pedido) contra venfer_pedidoReng
-# (1 fila por renglón/línea) SIN deduplicar, y encima UNION ALL de
-# CodControlador1 + CodControlador2. Resultado: si un pedido tiene los DOS
-# controladores cargados, TODOS sus renglones se cuentan 2 veces en el total
-# general — no reconcilia contra lo facturado/preparado. Confirmado con
-# GET /deposito/mesa-control/tablas-diag (columnas reales de ambas tablas):
+# (1 fila por renglón/línea) y UNION ALL de CodControlador1 + CodControlador2
+# en un solo total ciego — no se puede separar "renglones distintos" de
+# "créditos por controlador" a partir de su salida. Acá se reconstruye desde
+# las tablas fuente (confirmadas con /deposito/mesa-control/tablas-diag):
 #   Ven_PedImpresoCP:   NroMovVenta, CodCentroPrep, CodControlador1/2, FechaControl (int Clarion)
 #   venfer_pedidoReng:  NroMovVenta, NroRenglon, CodCentroPrep, CodArticu, ...
-# Acá contamos cada renglón (NroMovVenta+NroRenglon) UNA sola vez para el
-# total; el desglose por controlador sí puede sumarle a los 2 controladores
-# si el pedido tuvo doble control (créditos de productividad), pero eso ya
-# NO infla el total general.
+#
+# OJO: Ven_PedImpresoCP puede tener MÁS DE UNA fila por (NroMovVenta,
+# CodCentroPrep) — recontrol/reimpresión del mismo pedido. Un SELECT DISTINCT
+# sobre el join colapsaba esos recontroles y daba un total MENOR al que
+# contaduría ya venía llevando a mano por controlador (confirmado 2026-07:
+# planilla propia vs. esta vista, ~200-300 de diferencia por controlador y
+# mes). Por eso acá NO se deduplica al armar las filas: cada fila del join es
+# un control real y se acredita entera al controlador (igual que la planilla
+# de contaduría). Sólo se deduplica para `por_mes`/`total_general` (por
+# NroMovVenta+NroRenglon), que es el número pensado para reconciliar contra
+# lo facturado/preparado — ese sí no debe inflarse por reglones con 2
+# controladores o por recontroles del mismo renglón.
 SQL_RENGLONES_CONTROLADOS = """
-SELECT DISTINCT
+SELECT
     reng.NroMovVenta, reng.NroRenglon,
     ped.CodControlador1, ped.CodControlador2
 FROM dbo.Ven_PedImpresoCP ped
@@ -127,13 +134,16 @@ def _nombres_usuarios(conn) -> dict[int, str]:
 
 
 def fetch_mesa_control(meses: list[str]) -> dict:
-    """Cantidad EXACTA de renglones (items) controlados por mes + por
-    controlador — consulta directa a las tablas fuente (no al SP, que
-    duplica). `meses` = ['YYYY-MM', ...]. Devuelve:
-      · por_mes         = [{mes, total}]  (renglones distintos, sin duplicar)
+    """Renglones (items) controlados por mes + por controlador — consulta
+    directa a las tablas fuente (no al SP). `meses` = ['YYYY-MM', ...].
+    Devuelve:
+      · por_mes         = [{mes, total}]  (renglones DISTINTOS del mes, sin
+        duplicar por doble controlador ni por recontroles del mismo renglón —
+        pensado para reconciliar contra lo facturado/preparado)
       · por_controlador = [{controlador, codigo, por_mes: {mes: cantidad}, total}]
-        (puede sumar más que el total general si hubo doble control: un mismo
-        renglón le suma a los 2 controladores, pero cuenta 1 sola vez en total_general)
+        (créditos de productividad: CADA control cuenta, incluye recontroles y
+        renglones con doble controlador — por eso puede sumar más que
+        total_general; es el mismo criterio que la planilla de contaduría)
     Solo lectura sobre EVERWEAR."""
     meses = sorted(set(m.strip() for m in meses if m.strip()))
     if not meses:
@@ -153,8 +163,10 @@ def fetch_mesa_control(meses: list[str]) -> dict:
                 continue  # mes futuro, sin datos posibles
             cur.execute(SQL_RENGLONES_CONTROLADOS, (d, h))
             filas = cur.fetchall()
-            por_mes[mes] = len(filas)  # cada renglón cuenta 1 sola vez
-            for _nro, _reng, cod1, cod2 in filas:
+
+            renglones_unicos: set[tuple] = set()
+            for nro, nro_reng, cod1, cod2 in filas:
+                renglones_unicos.add((nro, nro_reng))
                 for codigo in (cod1, cod2):
                     if codigo and codigo > 0:
                         codigo = int(codigo)
@@ -169,6 +181,7 @@ def fetch_mesa_control(meses: list[str]) -> dict:
                         )
                         entry["por_mes"][mes] = entry["por_mes"].get(mes, 0) + 1
                         entry["total"] += 1
+            por_mes[mes] = len(renglones_unicos)
     finally:
         conn.close()
 
@@ -178,6 +191,40 @@ def fetch_mesa_control(meses: list[str]) -> dict:
         "por_mes": [{"mes": m, "total": por_mes[m]} for m in meses],
         "por_controlador": controladores,
         "total_general": sum(por_mes.values()),
+    }
+
+
+SQL_RECONTROLES_DIAG = """
+SELECT COUNT(*) AS pedidos_con_recontrol, SUM(cnt) AS filas_extra
+FROM (
+    SELECT NroMovVenta, CodCentroPrep, COUNT(*) AS cnt
+    FROM dbo.Ven_PedImpresoCP
+    WHERE FechaControl BETWEEN dbo.FECHA_SQL2Cla(?) AND dbo.FECHA_SQL2Cla(?)
+    GROUP BY NroMovVenta, CodCentroPrep
+    HAVING COUNT(*) > 1
+) x
+"""
+
+
+def fetch_mesa_control_recontroles_diag(mes: str | None = None) -> dict:
+    """Cuántos pedidos tienen MÁS DE UNA fila en Ven_PedImpresoCP para el mismo
+    (NroMovVenta, CodCentroPrep) en el mes (recontrol/reimpresión). Confirma
+    por qué un SELECT DISTINCT sobre el join undercuenta contra la planilla
+    de contaduría (ver comentario en SQL_RENGLONES_CONTROLADOS)."""
+    mes = mes or datetime.now().strftime("%Y-%m")
+    d, h = _rango_mes(mes)
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_RECONTROLES_DIAG, (d, h))
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    return {
+        "mes": mes,
+        "pedidos_con_recontrol": int(row[0] or 0) if row else 0,
+        "filas_extra": int(row[1] or 0) - int(row[0] or 0) if row and row[0] else 0,
     }
 
 

@@ -80,6 +80,9 @@ export default function BuscadorPage() {
     mercadolibre: true,
     osm: true,
     cylex: true,
+    // Default apagado: abre un browser real por request (~10-20s cada uno).
+    // En modo "todo el país" (24 requests) sería demasiado lento por defecto.
+    paginasamarillas: false,
   });
   const [enriquecer, setEnriquecer] = useState(true);
   const [meses, setMeses] = useState(12);
@@ -116,6 +119,7 @@ export default function BuscadorPage() {
     if (fuentes.mercadolibre) fuentesArr.push("mercadolibre");
     if (fuentes.osm) fuentesArr.push("osm");
     if (fuentes.cylex) fuentesArr.push("cylex");
+    if (fuentes.paginasamarillas) fuentesArr.push("paginasamarillas");
     if (fuentesArr.length === 0) {
       toast.error("Elegí al menos una fuente.");
       return;
@@ -320,6 +324,18 @@ export default function BuscadorPage() {
             <label className="flex items-center gap-2 cursor-pointer text-zinc-300">
               <input
                 type="checkbox"
+                checked={fuentes.paginasamarillas}
+                onChange={(e) =>
+                  setFuentes((f) => ({ ...f, paginasamarillas: e.target.checked }))
+                }
+                className="accent-yellow-400"
+              />
+              Páginas Amarillas{" "}
+              <span className="text-zinc-600">(más lento, requiere Cloudflare configurado)</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer text-zinc-300">
+              <input
+                type="checkbox"
                 checked={enriquecer}
                 onChange={(e) => setEnriquecer(e.target.checked)}
                 className="accent-yellow-400"
@@ -507,7 +523,9 @@ export default function BuscadorPage() {
                               ? "MercadoLibre"
                               : p.fuente === "cylex"
                                 ? "Cylex"
-                                : "OSM"}
+                                : p.fuente === "paginasamarillas"
+                                  ? "Páginas Amarillas"
+                                  : "OSM"}
                         </span>
                       </td>
                     </tr>
