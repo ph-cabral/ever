@@ -6,9 +6,10 @@ import {
   OperariosTab,
   TiempoTab,
 } from "./components/tabs";
+import { MesaControlTab } from "./components/mesaControl";
 import {
   LayoutDashboard, PackageSearch, Repeat, MapPin, Users, Clock,
-  Loader2, RefreshCw, AlertTriangle, FileSpreadsheet,
+  Loader2, RefreshCw, AlertTriangle, FileSpreadsheet, ClipboardList,
 } from "lucide-react";
 import { useDepositoData } from "@/lib/deposito/store";
 import { filterDepositoByOperario } from "@/lib/deposito/parseDeposito";
@@ -20,6 +21,7 @@ const TABS = [
   { id: "reub", label: "Re-Ubicación", icon: MapPin, needs: "prod" },
   { id: "operarios", label: "Operarios", icon: Users, needs: "prod" },
   { id: "tiempo", label: "Tiempo de Pedidos", icon: Clock, needs: "tiempo" },
+  { id: "mesa-control", label: "Mesas de Control", icon: ClipboardList, needs: "mesa" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
@@ -56,7 +58,9 @@ export default function DepositoPage() {
 
   const current = TABS.find((t) => t.id === tab)!;
   const needs = current.needs;
-  const ready = needs === "tiempo" ? !!tiempo : !!viewProd;
+  // "mesa" (Mesas de Control) se maneja sola: fetch propio por mes, no depende
+  // de prod/tiempo (que vienen del store por rango de fechas día a día).
+  const ready = needs === "tiempo" ? !!tiempo : needs === "mesa" ? true : !!viewProd;
 
   return (
     <div className="min-h-screen bg-[#111111] text-white relative">
@@ -88,7 +92,7 @@ export default function DepositoPage() {
           </span>
         </div>
 
-        <div className="flex items-center gap-3 text-sm">
+        <div className={`flex items-center gap-3 text-sm ${tab === "mesa-control" ? "invisible pointer-events-none" : ""}`}>
           <label className="flex items-center gap-1.5 text-zinc-400">
             Desde
             <input
@@ -194,6 +198,7 @@ export default function DepositoPage() {
             )}
             {tab === "operarios" && viewProd && <OperariosTab d={viewProd} />}
             {tab === "tiempo" && tiempo && <TiempoTab d={tiempo} mes="__all__" />}
+            {tab === "mesa-control" && <MesaControlTab />}
           </>
         )}
       </main>

@@ -16,6 +16,7 @@ from compras import fetch_ordenes_pendientes
 from ingresos import fetch_remitos_ingreso
 from finanza import fetch_facturacion_dia, fetch_descubrir
 from clientes import fetch_cliente
+from mesa_control import fetch_mesa_control, fetch_mesa_control_diag
 from datetime import date, datetime, timedelta
 
 app = FastAPI()
@@ -477,6 +478,28 @@ def deposito_resumen_ot(desde: str | None = None, hasta: str | None = None):
         raise HTTPException(503, f"SQL Error: {str(e)}")
     
     
+@app.get("/deposito/mesa-control")
+def deposito_mesa_control(meses: str = Query(..., description="Meses 'YYYY-MM' separados por coma")):
+    """Productividad por Controlador (SP RPT_V325_ProductividadPorControlador),
+    uno o más meses para comparar. `meses`='2026-05,2026-06,2026-07'.
+    Solo lectura sobre EVERWEAR. Ver mesa_control.py."""
+    lista = [m.strip() for m in meses.split(",") if m.strip()]
+    if not lista:
+        raise HTTPException(status_code=400, detail="Falta el parámetro 'meses'")
+    try:
+        return fetch_mesa_control(lista)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/mesa-control/diag")
+def deposito_mesa_control_diag(mes: str | None = Query(default=None)):
+    """Diagnóstico: columnas reales devueltas por el SP de productividad por
+    controlador, para confirmar el mapeo de mesa_control.py."""
+    try:
+        return fetch_mesa_control_diag(mes)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
 @app.get("/deposito/ubicacion-columnas/diag")
 def diag_ubicacion_cols():
     conn = get_connection("WMS")
