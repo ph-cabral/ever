@@ -64,6 +64,7 @@ function mergeInto(mapa: Map<string, Prospecto>, list: Prospecto[]): void {
     ex.localidad ??= p.localidad;
     ex.enlace ??= p.enlace;
     ex.rubro ??= p.rubro;
+    ex.terminoBuscado ??= p.terminoBuscado;
     if (
       p.precioDesde != null &&
       (ex.precioDesde == null || p.precioDesde < ex.precioDesde)

@@ -554,3 +554,18 @@ model sistema_tarjeta {
   @@index([columnaId])
   @@schema("sistema")
 }
+
+// Opciones dinámicas para campos tipo "select" de un tablero (ej: categoría, ubicación
+// en el tablero "sistema"). El usuario las agrega desde la UI con el botón "+"; se
+// guardan por (clave de tablero, nombre de campo) para no pisar otros tableros/campos.
+model sistema_opcion {
+  id        Int      @id @default(autoincrement())
+  clave     String   @db.VarChar(40)
+  campo     String   @db.VarChar(50)
+  valor     String   @db.VarChar(150)
+  orden     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([clave, campo, valor])
+  @@schema("sistema")
+}

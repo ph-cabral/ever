@@ -243,6 +243,7 @@ export async function buscarMercadoLibre(opts: {
             precioDesde: precio,
             publicaciones: 1,
             notas: "Vendedor en MercadoLibre",
+            terminoBuscado: null,
           });
         }
       }

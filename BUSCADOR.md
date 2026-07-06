@@ -1,9 +1,23 @@
 # Buscador de clientes (`/buscador`)
 
-Vista nueva para **prospección comercial**: buscás un artículo (ej. _poleas_), a
-nivel país o por provincia, y obtenés una lista de **empresas** y **vendedores**
-con dirección, teléfono, web y —cuando se puede— email y WhatsApp. Todo
-exportable a Excel.
+Vista nueva para **prospección comercial**: buscás uno o varios artículos (ej.
+_poleas, correas, acoples, mangueras, aceites, bulones_ — separados por
+coma), a nivel país o por provincia, y obtenés una lista de **empresas** y
+**vendedores** con dirección, teléfono, web y —cuando se puede— email y
+WhatsApp. Todo exportable a Excel.
+
+## Varios artículos en una corrida (06-jul-2026)
+
+El input acepta una lista separada por comas. La vista recorre **cada
+término × cada provincia** elegida (todas si se puso "Todo el país") y
+acumula todo en una sola tabla/export — el dedupe existente (por dominio de
+web, teléfono o nombre+provincia, `lib/buscador/util.ts`) hace que una
+empresa que vende varios rubros aparezca **una sola vez**, con la columna
+**Buscado** listando los términos que la encontraron. Ojo con el volumen: 6
+términos × "Todo el país" (24 provincias) son ~144 pasos secuenciales —
+cada uno puede disparar 1 llamada a Google Places (billable, SKU
+Enterprise), así que conviene mirar el costo antes de correrlo así de
+seguido (ver sección de costos más abajo) o acotar por provincia primero.
 
 ## Cómo funciona
 

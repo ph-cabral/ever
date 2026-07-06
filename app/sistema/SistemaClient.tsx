@@ -44,6 +44,8 @@ type CampoDef = {
   t: "text" | "textarea" | "date" | "select";
   opciones?: string[];
   auto?: boolean;
+  /** Si es true, el select muestra un botón "+" para agregar opciones nuevas (persistidas). */
+  extensible?: boolean;
 };
 
 const DEFAULT_SCHEMA: { titleKey: string; fields: CampoDef[] } = {
@@ -61,12 +63,13 @@ const SCHEMAS: Record<string, { titleKey: string; fields: CampoDef[] }> = {
     fields: [
       { k: "fecha", l: "Fecha", t: "date", auto: true },
       { k: "descripcion", l: "Problema / solución", t: "textarea" },
-      { k: "ubicacion", l: "Ubicación", t: "text" },
+      { k: "ubicacion", l: "Ubicación", t: "select", opciones: [], extensible: true },
       {
         k: "categoria",
         l: "Categoría",
         t: "select",
         opciones: ["Impresoras", "Automatización", "Mantenimiento de equipos", "Varios"],
+        extensible: true,
       },
       { k: "importancia", l: "Importancia", t: "select", opciones: ["Alta", "Media", "Baja"] },
     ],
@@ -591,6 +594,30 @@ function ModalTarjeta({
   const [vinc, setVinc] = useState<string>(
     modal.tarjeta?.vinculadoTableroId != null ? String(modal.tarjeta.vinculadoTableroId) : ""
   );
+  // Opciones dinámicas de los selects "extensibles" (categoría, ubicación), por campo.
+  const [opcionesExtra, setOpcionesExtra] = useState<Record<string, string[]>>({});
+
+  useEffect(() => {
+    apiJson(`/api/sistema/opciones?clave=${encodeURIComponent(modal.clave)}`)
+      .then(setOpcionesExtra)
+      .catch(() => {});
+  }, [modal.clave]);
+
+  const agregarOpcion = async (campo: string, label: string) => {
+    const valor = window.prompt(`Nueva opción para "${label}":`);
+    if (!valor || !valor.trim()) return;
+    const v = valor.trim();
+    try {
+      const lista = await apiJson("/api/sistema/opciones", {
+        method: "POST",
+        body: JSON.stringify({ clave: modal.clave, campo, valor: v }),
+      });
+      setOpcionesExtra((p) => ({ ...p, [campo]: lista }));
+    } catch {
+      setOpcionesExtra((p) => ({ ...p, [campo]: Array.from(new Set([...(p[campo] ?? []), v])) }));
+    }
+    setCampos((c) => ({ ...c, [campo]: v }));
+  };
 
   const otros = tableros.filter((t) => t.id !== modal.tableroId);
 
@@ -634,6 +661,19 @@ function ModalTarjeta({
 
           {schema.fields.map((f) => {
             if (f.auto) return null;
+            // valor actual + opciones fijas + dinámicas, sin duplicar (y sin perder un
+            // valor legado que no esté en ninguna lista, para no vaciarlo al editar).
+            const valorActual = campos[f.k];
+            const combinedOptions =
+              f.t === "select"
+                ? Array.from(
+                    new Set([
+                      ...(f.opciones ?? []),
+                      ...(opcionesExtra[f.k] ?? []),
+                      ...(valorActual ? [String(valorActual)] : []),
+                    ])
+                  )
+                : [];
             return (
               <div key={f.k}>
                 <label className="text-xs text-zinc-500 mb-1 block">{f.l}</label>
@@ -643,18 +683,30 @@ function ModalTarjeta({
                     onChange={(e) => setCampos((c) => ({ ...c, [f.k]: e.target.value }))}
                   />
                 ) : f.t === "select" ? (
-                  <select
-                    className="w-full bg-[#0d0d0d] border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100"
-                    value={campos[f.k] ?? ""}
-                    onChange={(e) => setCampos((c) => ({ ...c, [f.k]: e.target.value }))}
-                  >
-                    <option value="">—</option>
-                    {f.opciones?.map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex gap-2">
+                    <select
+                      className="flex-1 min-w-0 bg-[#0d0d0d] border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100"
+                      value={campos[f.k] ?? ""}
+                      onChange={(e) => setCampos((c) => ({ ...c, [f.k]: e.target.value }))}
+                    >
+                      <option value="">—</option>
+                      {combinedOptions.map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                    </select>
+                    {f.extensible && (
+                      <button
+                        type="button"
+                        onClick={() => agregarOpcion(f.k, f.l)}
+                        className="shrink-0 w-9 rounded-md border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 text-sm"
+                        title={`Agregar ${f.l.toLowerCase()}`}
+                      >
+                        ＋
+                      </button>
+                    )}
+                  </div>
                 ) : (
                   <Input
                     type="text"

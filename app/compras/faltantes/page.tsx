@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck, CalendarRange, Check,
   Layers, ChevronDown, ChevronRight, Flag, RotateCw, ShoppingCart, Undo2, CalendarCheck,
-  Download,
+  Download, Trash2,
 } from "lucide-react";
 import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
 
@@ -54,6 +54,7 @@ interface Row {
   vivo: boolean; // false = histórico ya entregado/cubierto
   faltan: number; // acumulado hasta este día (no se resetea día a día)
   nuevoDelDia: number; // lo nuevo que aportó puntualmente este día
+  stock: number; // existencia real en depósito 1 (WMS, en vivo — mismo dato que /deposito/stock)
   cubierto: number;
   descubierto: number;
   importe: number;
@@ -125,11 +126,13 @@ function Tabla({
   data,
   onMark,
   onArribo,
+  onDescartar,
   leaving = {},
 }: {
   data: Row[];
   onMark: (row: Row) => void;
   onArribo: (row: Row, fechaArribo: string | null) => void;
+  onDescartar: (row: Row) => void;
   leaving?: Record<string, "left" | "right">;
 }) {
   return (
@@ -142,12 +145,14 @@ function Tabla({
             <th className="px-3 py-2 font-medium">Artículo</th>
             <th className="px-3 py-2 font-medium">Día</th>
             <th className="px-3 py-2 font-medium text-right">Faltan</th>
+            <th className="px-3 py-2 font-medium text-right">Stock</th>
             <th className="px-3 py-2 font-medium text-right">Cubre OC</th>
             <th className="px-3 py-2 font-medium text-right">Falta OC</th>
             <th className="px-3 py-2 font-medium">Despacho</th>
             <th className="px-3 py-2 font-medium">Proveedor</th>
             <th className="px-3 py-2 font-medium text-right">Importe</th>
             <th className="px-3 py-2 font-medium">Arribo</th>
+            <th className="px-3 py-2 font-medium"></th>
           </tr>
         </thead>
         <tbody>
@@ -209,6 +214,14 @@ function Tabla({
                   )}
                 </td>
                 <td
+                  className={`px-3 py-2 text-right tabular-nums ${
+                    r.stock > 0 ? "text-emerald-400" : "text-zinc-600"
+                  }`}
+                  title="Existencia real en depósito 1, en vivo (mismo dato que /deposito/stock). Si cubre el faltante, la fila queda verde sin esperar una OC."
+                >
+                  {r.stock > 0 ? fmtNum(r.stock) : "—"}
+                </td>
+                <td
                   className={`px-3 py-2 text-right tabular-nums font-medium ${cubiertoCls[r.estado]}`}
                 >
                   {r.cubierto > 0 ? (
@@ -268,6 +281,16 @@ function Tabla({
                     );
                   })()}
                 </td>
+                <td className="px-2 py-2">
+                  <button
+                    onClick={() => onDescartar(r)}
+                    disabled={!!dir}
+                    title="Descartar (no se borra de la base, solo deja de mostrarse acá)"
+                    className="btn-anim text-zinc-600 hover:text-red-400 p-1 disabled:opacity-40"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </td>
               </tr>
             );
           })}
@@ -313,6 +336,7 @@ function TablaExtraordinarios({
             <th className="px-3 py-2 font-medium">Artículo</th>
             <th className="px-3 py-2 font-medium">Día</th>
             <th className="px-3 py-2 font-medium text-right">Faltan</th>
+            <th className="px-3 py-2 font-medium text-right">Stock</th>
             <th className="px-3 py-2 font-medium text-right">Falta OC</th>
             <th className="px-3 py-2 font-medium">Proveedor</th>
             <th className="px-3 py-2 font-medium text-right">Importe</th>
@@ -334,6 +358,13 @@ function TablaExtraordinarios({
                 <td className="px-3 py-2 text-zinc-100">{r.Nombre}</td>
                 <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">{fmtAr(r.fecha)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-100">{fmtNum(r.faltan)}</td>
+                <td
+                  className={`px-3 py-2 text-right tabular-nums ${
+                    r.stock > 0 ? "text-emerald-400" : "text-zinc-600"
+                  }`}
+                >
+                  {r.stock > 0 ? fmtNum(r.stock) : "—"}
+                </td>
                 <td className="px-3 py-2 text-right tabular-nums text-red-300/90">
                   {r.descubierto > 0 ? fmtNum(r.descubierto) : "—"}
                 </td>
@@ -495,6 +526,35 @@ export default function ComprasFaltantesPage() {
     }
   }, []);
 
+  // Descartar: saca la fila de CUALQUIER tabla de la vista (principal, agrupada
+  // por proveedor y extraordinarios), pero NO borra nada de la base — solo
+  // guarda la marca en preparado.faltante_descartado (/api/compras/faltantes-
+  // descartar) y faltantes-consumo la excluye de ahí en adelante. Optimista:
+  // se anima y se saca de `rows` ya; si el POST falla, se reinserta + avisa.
+  const descartarFaltante = useCallback((row: Row) => {
+    const k = rowKey(row);
+    setLeaving((m) => ({ ...m, [k]: "right" }));
+    window.setTimeout(async () => {
+      setRows((rs) => rs.filter((r) => rowKey(r) !== k));
+      setLeaving((m) => {
+        const n = { ...m };
+        delete n[k];
+        return n;
+      });
+      try {
+        const res = await fetch("/api/compras/faltantes-descartar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fecha: row.fecha, codArticulo: row.CodArticulo, descartado: true }),
+        });
+        if (!res.ok) throw new Error();
+      } catch {
+        setRows((rs) => [...rs, row]);
+        setError("No se pudo descartar el renglón");
+      }
+    }, EXIT_MS);
+  }, []);
+
   // Tabla principal: nunca muestra lo marcado extraordinario.
   const frontRows = useMemo(() => rows.filter((r) => !r.extraordinario), [rows]);
   // Reverso de la tarjeta: extraordinario, ya decidido (comprar !== null) Y
@@ -515,10 +575,39 @@ export default function ComprasFaltantesPage() {
     return c as Record<Filtro, number>;
   }, [frontRows]);
 
-  // Orden por valor (importe desc), siempre.
+  // Orden jerárquico, SIEMPRE (esté o no activo "Agrupar por proveedor"):
+  //   1. Proveedor, por su importe TOTAL desc (mismo criterio que el acordeón).
+  //   2. Artículo (CodArticulo), por su importe TOTAL desc dentro del proveedor.
+  //   3. Día asc dentro del artículo.
+  // Ordenar por el importe de cada FILA (como antes) rompe la agrupación: dos
+  // días del mismo artículo con $ distinto quedaban separados por otro
+  // artículo en el medio. Con el importe TOTAL por proveedor/artículo como
+  // clave, los renglones de un mismo artículo (y de un mismo proveedor) quedan
+  // siempre contiguos y el orden por $ no se pierde (se agrupa, no se ignora).
   const visibles = useMemo(() => {
     const base = filtro === "todos" ? frontRows : frontRows.filter((r) => r.estado === filtro);
-    return [...base].sort((a, b) => b.importe - a.importe);
+
+    const provImporte = new Map<string, number>();
+    const artImporte = new Map<string, number>();
+    for (const r of base) {
+      const prov = r.Proveedor || "Sin proveedor";
+      provImporte.set(prov, (provImporte.get(prov) ?? 0) + r.importe);
+      artImporte.set(r.CodArticulo, (artImporte.get(r.CodArticulo) ?? 0) + r.importe);
+    }
+
+    return [...base].sort((a, b) => {
+      const provA = a.Proveedor || "Sin proveedor";
+      const provB = b.Proveedor || "Sin proveedor";
+      const dProv = (provImporte.get(provB) ?? 0) - (provImporte.get(provA) ?? 0);
+      if (dProv !== 0) return dProv;
+      if (provA !== provB) return provA < provB ? -1 : 1;
+
+      const dArt = (artImporte.get(b.CodArticulo) ?? 0) - (artImporte.get(a.CodArticulo) ?? 0);
+      if (dArt !== 0) return dArt;
+      if (a.CodArticulo !== b.CodArticulo) return a.CodArticulo < b.CodArticulo ? -1 : 1;
+
+      return a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0;
+    });
   }, [frontRows, filtro]);
 
   const exportar = useCallback(() => {
@@ -805,7 +894,7 @@ export default function ComprasFaltantesPage() {
                         </button>
                         {abierto && (
                           <div className="border-t border-zinc-800">
-                            <Tabla data={rs} onMark={marcarExtraordinario} onArribo={guardarArribo} leaving={leaving} />
+                            <Tabla data={rs} onMark={marcarExtraordinario} onArribo={guardarArribo} onDescartar={descartarFaltante} leaving={leaving} />
                           </div>
                         )}
                       </div>
@@ -813,7 +902,7 @@ export default function ComprasFaltantesPage() {
                   })}
                 </div>
               ) : (
-                <Tabla data={visibles} onMark={marcarExtraordinario} onArribo={guardarArribo} leaving={leaving} />
+                <Tabla data={visibles} onMark={marcarExtraordinario} onArribo={guardarArribo} onDescartar={descartarFaltante} leaving={leaving} />
               )}
             </div>
 

@@ -71,6 +71,7 @@ interface Bucket {
   importacion: boolean;
   ocs: string[];
   estado: Estado;
+  stock: number; // existencia real en depósito 1 (WMS, en vivo) — ver /deposito/stock
 }
 
 const keyLine = (p: number, r: number) => `${p}-${r}`;
@@ -241,6 +242,39 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // 2d) marcas "descartar" por (fecha, artículo) — igual criterio que extraMap
+  // (match exacto + fallback a la más nueva del artículo, porque el día del
+  // bucket "rueda" según el rango consultado). Best-effort: si la tabla no
+  // está creada aún (prisma/sql/faltante_descartado.sql sin aplicar), la vista
+  // sigue funcionando sin descartar nada. NO borra ninguna fila de ninguna
+  // tabla: solo se usa para excluir el bucket de la respuesta (ver filtro más
+  // abajo), por eso no aparece en ninguna tabla de la vista (principal,
+  // agrupada por proveedor ni extraordinarios).
+  const descartMap = new Map<string, boolean>();
+  const descartUltPorArt = new Map<string, boolean>();
+  let descartWarn = false;
+  if (faltRows.length && desdeMarks && hastaMarks) {
+    try {
+      const descartRows = await prisma.$queryRaw<
+        { fecha: Date; codArticulo: string; descartado: boolean }[]
+      >`
+        SELECT fecha, "codArticulo", descartado
+        FROM preparado.faltante_descartado
+        WHERE fecha BETWEEN ${new Date(desdeMarks)} AND ${new Date(hastaMarks)}
+        ORDER BY "updatedAt" ASC
+      `;
+      for (const d of descartRows) {
+        const dia = d.fecha.toISOString().slice(0, 10);
+        const val = !!d.descartado;
+        descartMap.set(keyArtDia(d.codArticulo, dia), val);
+        descartUltPorArt.set(d.codArticulo, val); // asc → queda la más nueva
+      }
+    } catch (e) {
+      descartWarn = true;
+      console.error("read faltante_descartado", e);
+    }
+  }
+
   // 3) agrupar lo "sin existencia" por (artículo, primer día)
   const buckets = new Map<string, Bucket>();
   for (const it of faltRows) {
@@ -277,6 +311,7 @@ export async function GET(req: NextRequest) {
         importacion: false,
         ocs: [],
         estado: "sin_orden",
+        stock: 0,
       };
       buckets.set(k, b);
     }
@@ -318,16 +353,41 @@ export async function GET(req: NextRequest) {
     arr.push(b);
     porArt.set(b.CodArticulo, arr);
   }
+
+  // 3b) stock real del depósito 1 (WMS, en vivo) para los artículos en pantalla
+  // (mismo dato que /deposito/stock). Si ya está físicamente en depósito, el
+  // faltante se puede dar por cubierto sin esperar una OC — ver más abajo.
+  // Best-effort: si el servicio no responde, sigue funcionando con stock=0
+  // (se comporta igual que antes de este cambio).
+  let stockWarn = false;
+  const stockMap = new Map<string, number>();
+  const codigosUnicos = [...porArt.keys()];
+  if (codigosUnicos.length) {
+    try {
+      const stockUrl = `${API_URL}/deposito/stock-por-articulos?codigos=${encodeURIComponent(codigosUnicos.join(","))}`;
+      const stockJson = await getJson(stockUrl);
+      for (const r of (stockJson.rows ?? []) as { CodArticulo: string; Stock: number }[]) {
+        const cod = String(r.CodArticulo ?? "").trim();
+        if (cod) stockMap.set(cod, r.Stock || 0);
+      }
+    } catch (e) {
+      stockWarn = true;
+      console.error("read stock-por-articulos", e);
+    }
+  }
+
   const artImporte = new Map<string, number>();
   for (const [cod, arr] of porArt) {
     arr.sort((a, c) => (a.fecha < c.fecha ? -1 : a.fecha > c.fecha ? 1 : 0));
     const oc = ocMap.get(cod);
     const ocTotal = oc?.PorLlegar ?? 0;
     const fechaEntrega = oc?.FechaEntrega ?? null;
+    const stock = stockMap.get(cod) ?? 0;
     let acumulado = 0;
     let imp = 0;
     for (const b of arr) {
       imp += b.importe;
+      b.stock = stock;
       if (!b.vivo) {
         // Histórico ya entregado: cubierto con stock, no consume la OC por llegar.
         b.cubierto = b.faltan;
@@ -348,9 +408,16 @@ export async function GET(req: NextRequest) {
         desc = 0;
       }
 
+      // El stock físico del depósito 1 (en vivo, WMS) puede tapar lo que la OC
+      // no cubrió: si ya está en depósito no hace falta esperar una orden de
+      // compra. "Falta OC"/el color de la fila reflejan este descubierto YA
+      // neto de stock (no se muestra un descubierto que en los hechos ya está
+      // guardado en el depósito).
+      const descNetoStock = Math.max(desc - stock, 0);
+
       b.faltan = r2(acumulado); // acumulado (ya reseteado arriba si correspondía)
       b.cubierto = cub;
-      b.descubierto = desc;
+      b.descubierto = r2(descNetoStock);
       b.ocTotal = ocTotal;
       if (oc) {
         b.fechaEntrega = fechaEntrega;
@@ -359,7 +426,11 @@ export async function GET(req: NextRequest) {
         if (!b.Proveedor && oc.Proveedor) b.Proveedor = oc.Proveedor;
       }
       b.estado =
-        b.faltan > 0 && b.descubierto <= 0 ? "completo" : cub > 0 ? "incompleto" : "sin_orden";
+        b.faltan > 0 && descNetoStock <= 0
+          ? "completo"
+          : cub > 0 || stock > 0
+            ? "incompleto"
+            : "sin_orden";
     }
     artImporte.set(cod, imp);
   }
@@ -371,6 +442,11 @@ export async function GET(req: NextRequest) {
   //    corroborar los que ya se pasaron.
   const rowsOut = [...buckets.values()]
     .filter((b) => conArribo || b.renglones === 0 || b.renglonesConArribo < b.renglones)
+    .filter((b) => {
+      const descartado =
+        descartMap.get(keyArtDia(b.CodArticulo, b.fecha)) ?? descartUltPorArt.get(b.CodArticulo);
+      return !descartado;
+    })
     .sort((a, c) => {
       const ia = artImporte.get(a.CodArticulo) ?? 0;
       const ic = artImporte.get(c.CodArticulo) ?? 0;
@@ -400,6 +476,7 @@ export async function GET(req: NextRequest) {
         importe: r2(b.importe),
         renglones: b.renglones,
         pedidos: b.pedidos.size,
+        stock: r2(b.stock),
         ocTotal: r2(b.ocTotal),
         fechaEntrega: b.fechaEntrega,
         importacion: b.importacion,
@@ -452,5 +529,7 @@ export async function GET(req: NextRequest) {
     ocWarn,
     consumoWarn,
     extraWarn,
+    stockWarn,
+    descartWarn,
   });
 }

@@ -174,6 +174,7 @@ export async function buscarOsm(opts: {
       precioDesde: null,
       publicaciones: null,
       notas: null,
+      terminoBuscado: null,
     });
   }
 

@@ -141,6 +141,7 @@ export async function buscarGoogle(opts: {
           precioDesde: null,
           publicaciones: null,
           notas: null,
+          terminoBuscado: null,
         });
       }
 

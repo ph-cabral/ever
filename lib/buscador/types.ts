@@ -25,6 +25,8 @@ export interface Prospecto {
   precioDesde: number | null; // referencia de precio (ML)
   publicaciones: number | null; // cantidad de avisos del vendedor (ML)
   notas: string | null;
+  /** Término(s) de búsqueda que lo encontraron (ej. "poleas, correas"). Se arma en el cliente al soportar múltiples artículos por corrida. */
+  terminoBuscado: string | null;
 }
 
 export interface BuscarParams {
@@ -59,6 +61,7 @@ export interface BuscarResponse {
 export const COLUMNAS: { key: keyof Prospecto; label: string }[] = [
   { key: "nombre", label: "Nombre" },
   { key: "tipo", label: "Tipo" },
+  { key: "terminoBuscado", label: "Buscado" },
   { key: "rubro", label: "Rubro" },
   { key: "provincia", label: "Provincia" },
   { key: "localidad", label: "Localidad" },

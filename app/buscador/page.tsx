@@ -39,6 +39,19 @@ function ordenar(list: Prospecto[]): Prospecto[] {
   );
 }
 
+function mergeTerminos(actual: string | null, nuevo: string | null): string | null {
+  if (!nuevo) return actual;
+  if (!actual) return nuevo;
+  const set = new Set(
+    actual
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  set.add(nuevo);
+  return [...set].join(", ");
+}
+
 function mergeClient(ex: Prospecto, p: Prospecto): void {
   ex.telefono ??= p.telefono;
   ex.whatsapp ??= p.whatsapp;
@@ -49,6 +62,7 @@ function mergeClient(ex: Prospecto, p: Prospecto): void {
   ex.localidad ??= p.localidad;
   ex.enlace ??= p.enlace;
   ex.rubro ??= p.rubro;
+  ex.terminoBuscado = mergeTerminos(ex.terminoBuscado, p.terminoBuscado);
   if (p.precioDesde != null && (ex.precioDesde == null || p.precioDesde < ex.precioDesde)) {
     ex.precioDesde = p.precioDesde;
   }
@@ -110,15 +124,23 @@ export default function BuscadorPage() {
   }, [results]);
 
   async function ejecutar() {
-    if (!q.trim()) {
-      toast.error("Escribí un artículo para buscar (ej. poleas).");
+    // Soporta varios artículos en una corrida: "poleas, correas, acoples,
+    // mangueras, aceites, bulones" — separados por coma. Se recorren todos
+    // los términos × todas las provincias elegidas y se acumula en un solo
+    // resultado (dedupe por web/teléfono/nombre ya hace que una empresa que
+    // vende varios rubros aparezca una sola vez, con "Buscado" listando
+    // todos los términos que la encontraron).
+    const terminos = [...new Set(q.split(",").map((s) => s.trim()).filter(Boolean))];
+    if (terminos.length === 0) {
+      toast.error("Escribí al menos un artículo para buscar (ej. poleas, correas).");
       return;
     }
     // Páginas Amarillas va aparte del resto: abre un browser real por
     // request y el free tier de Cloudflare solo permite 1 cada 20s. Si
     // fuera parte del loop por provincia, "Todo el país" dispararía 24
     // browsers seguidos y volaría el límite (429). Por eso se llama UNA
-    // sola vez, sin importar si se buscó por provincia o todo el país.
+    // sola vez por término, sin importar si se buscó por provincia o todo
+    // el país.
     const fuentesArr: Fuente[] = [];
     if (fuentes.google) fuentesArr.push("google");
     if (fuentes.mercadolibre) fuentesArr.push("mercadolibre");
@@ -136,21 +158,26 @@ export default function BuscadorPage() {
     abortRef.current = ctrl;
     const mapa = new Map<string, Prospecto>();
     const warnSet = new Set<string>();
-    const totalPasos = provs.length + (incluyePA ? 1 : 0);
+    const pasosPorTermino = provs.length + (incluyePA ? 1 : 0);
+    const totalPasos = pasosPorTermino * terminos.length;
 
     setRunning(true);
     setResults([]);
     setWarnings([]);
-    setProgreso({ hechas: 0, total: totalPasos, actual: provs[0] ?? "Páginas Amarillas" });
+    setProgreso({
+      hechas: 0,
+      total: totalPasos,
+      actual: `${terminos[0]} · ${provs[0] ?? "Páginas Amarillas"}`,
+    });
 
-    async function pedir(prov: string, fuentesReq: Fuente[]): Promise<void> {
+    async function pedir(termino: string, prov: string, fuentesReq: Fuente[]): Promise<void> {
       let data: BuscarResponse | null = null;
       try {
         const res = await fetch("/api/buscador", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            q: q.trim(),
+            q: termino,
             provincia: prov,
             fuentes: fuentesReq,
             enriquecer,
@@ -160,45 +187,54 @@ export default function BuscadorPage() {
         });
         if (!res.ok) {
           const e = (await res.json().catch(() => null)) as { error?: string } | null;
-          warnSet.add(`${prov}: ${e?.error ?? `HTTP ${res.status}`}`);
+          warnSet.add(`${termino} / ${prov}: ${e?.error ?? `HTTP ${res.status}`}`);
         } else {
           data = (await res.json()) as BuscarResponse;
         }
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") throw err;
-        warnSet.add(`${prov}: ${err instanceof Error ? err.message : String(err)}`);
+        warnSet.add(`${termino} / ${prov}: ${err instanceof Error ? err.message : String(err)}`);
       }
 
       if (data) {
         for (const p of data.results) {
+          p.terminoBuscado = termino;
           const ex = mapa.get(p.id);
           if (!ex) mapa.set(p.id, p);
           else mergeClient(ex, p);
         }
-        for (const w of data.warnings) warnSet.add(w);
+        for (const w of data.warnings) warnSet.add(`${termino}: ${w}`);
         setResults(ordenar([...mapa.values()]));
         setWarnings([...warnSet]);
       }
     }
 
     try {
-      for (let idx = 0; idx < provs.length; idx++) {
-        if (ctrl.signal.aborted) break;
-        const prov = provs[idx];
-        setProgreso({ hechas: idx, total: totalPasos, actual: prov });
-        try {
-          await pedir(prov, fuentesArr);
-        } catch (err) {
-          if (err instanceof Error && err.name === "AbortError") break;
+      let paso = 0;
+      terminoLoop: for (const termino of terminos) {
+        for (const prov of provs) {
+          if (ctrl.signal.aborted) break terminoLoop;
+          setProgreso({ hechas: paso, total: totalPasos, actual: `${termino} · ${prov}` });
+          try {
+            await pedir(termino, prov, fuentesArr);
+          } catch (err) {
+            if (err instanceof Error && err.name === "AbortError") break terminoLoop;
+          }
+          paso++;
         }
-      }
 
-      if (incluyePA && !ctrl.signal.aborted) {
-        setProgreso({ hechas: provs.length, total: totalPasos, actual: "Páginas Amarillas" });
-        try {
-          await pedir(provincia, ["paginasamarillas"]);
-        } catch {
-          // AbortError: se canceló, no hay más nada que hacer acá.
+        if (incluyePA && !ctrl.signal.aborted) {
+          setProgreso({
+            hechas: paso,
+            total: totalPasos,
+            actual: `${termino} · Páginas Amarillas`,
+          });
+          try {
+            await pedir(termino, provincia, ["paginasamarillas"]);
+          } catch {
+            // AbortError: se canceló, no hay más nada que hacer acá.
+          }
+          paso++;
         }
       }
 
@@ -244,14 +280,16 @@ export default function BuscadorPage() {
         <div className="bg-[#1A1A1A] border border-zinc-800 rounded-2xl p-5">
           <div className="flex flex-col lg:flex-row gap-3 lg:items-end">
             <div className="flex-1">
-              <label className="block text-xs text-zinc-500 mb-1">Artículo a buscar</label>
+              <label className="block text-xs text-zinc-500 mb-1">
+                Artículo(s) a buscar <span className="text-zinc-600">(separá varios con coma)</span>
+              </label>
               <div className="relative">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
                 <input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && !running && ejecutar()}
-                  placeholder="ej. poleas, rodamientos, mangueras hidráulicas…"
+                  placeholder="ej. poleas, correas, acoples, mangueras, aceites, bulones"
                   className="w-full bg-[#111111] border border-zinc-700 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:border-yellow-400 outline-none"
                 />
               </div>
@@ -423,8 +461,8 @@ export default function BuscadorPage() {
               <Search size={42} className="text-zinc-700" />
               <p className="text-zinc-400 font-medium">Todavía no hay resultados</p>
               <p className="text-zinc-600 text-sm max-w-md">
-                Escribí un artículo, elegí provincia (o todo el país) y tocá Buscar. Después podés
-                exportar todo a Excel.
+                Escribí uno o varios artículos separados por coma, elegí provincia (o todo el
+                país) y tocá Buscar. Después podés exportar todo a Excel.
               </p>
             </div>
           ) : (
@@ -434,6 +472,7 @@ export default function BuscadorPage() {
                   <tr className="text-left">
                     <th className="px-4 py-3 font-medium">Nombre</th>
                     <th className="px-4 py-3 font-medium">Tipo</th>
+                    <th className="px-4 py-3 font-medium">Buscado</th>
                     <th className="px-4 py-3 font-medium">Ubicación</th>
                     <th className="px-4 py-3 font-medium">Dirección</th>
                     <th className="px-4 py-3 font-medium">Teléfono</th>
@@ -469,6 +508,9 @@ export default function BuscadorPage() {
                           {p.tipo === "empresa" ? <Building2 size={11} /> : <Store size={11} />}
                           {p.tipo}
                         </span>
+                      </td>
+                      <td className="px-4 py-3 text-zinc-400 max-w-[160px]">
+                        <span className="line-clamp-2">{p.terminoBuscado ?? "—"}</span>
                       </td>
                       <td className="px-4 py-3 text-zinc-300">
                         <div className="flex items-center gap-1">

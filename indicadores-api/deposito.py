@@ -1551,6 +1551,43 @@ def fetch_stock_deposito1(page: int = 1, page_size: int = 50, q: str | None = No
     return {"page": page, "page_size": page_size, "rows": rows}
 
 
+# ── Stock del depósito 1 para una lista puntual de artículos ──────────────────
+# Usado por /compras/faltantes (columna "Stock"): a diferencia de fetch_stock_
+# deposito1 (paginado, para la vista /deposito/stock), acá se pide el stock
+# EXACTO de los códigos que ya están en pantalla (los que tienen faltante),
+# sin paginar. Mismo criterio: WMS.UbicacionDetalle, UbicacionDepositoId=1.
+def fetch_stock_por_articulos(codigos: list[str]):
+    codigos = [c.strip() for c in codigos if c and c.strip()]
+    if not codigos:
+        return {"rows": []}
+
+    stock: dict[str, float] = {}
+    conn = get_connection("WMS")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        CH = 1000  # OFFSET/parámetros: por las dudas, en tandas (igual que _info_pedidos_resumen)
+        for i in range(0, len(codigos), CH):
+            chunk = codigos[i:i + CH]
+            ph = ",".join("?" for _ in chunk)
+            sql = f"""
+                SELECT LTRIM(RTRIM(u.{UBIC_COL_ART})) AS Cod,
+                       SUM(u.{UBIC_COL_CANT})          AS Stock
+                FROM dbo.{UBIC_TABLA} u
+                WHERE u.{UBIC_COL_DEP} = ?
+                  AND LTRIM(RTRIM(u.{UBIC_COL_ART})) IN ({ph})
+                GROUP BY LTRIM(RTRIM(u.{UBIC_COL_ART}))
+            """
+            cur.execute(sql, [DEPOSITO_CENTRAL] + chunk)
+            for cod, cant in cur.fetchall():
+                stock[_txt(cod)] = float(_safe(cant) or 0)
+    finally:
+        conn.close()
+
+    rows = [{"CodArticulo": cod, "Stock": stock.get(cod, 0.0)} for cod in codigos]
+    return {"rows": rows}
+
+
 # ── Artículos con MÁS DE UNA ubicación asignada (para depurar el maestro) ──────
 # Ubicación asignada = numérica con guión (rack); excluye depósito (letras) y
 # carro (0002, sin guión). El que tenga >1 hay que dejarle una sola.

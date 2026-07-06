@@ -10,6 +10,7 @@ interface Row {
   Proveedor: string | null;
   fecha: string;
   faltan: number;
+  stock: number;
   cubierto: number;
   descubierto: number;
   fechaEntrega: string | null;
@@ -47,6 +48,7 @@ function filaFaltante(r: Row) {
     Proveedor: r.Proveedor || "",
     "Día": r.fecha,
     Faltan: r.faltan,
+    Stock: r.stock,
     "Cubre OC": r.cubierto,
     "Falta OC": r.descubierto,
     Entrega: r.estado === "entregado" ? "Entregado" : r.importacion ? "Importación" : r.fechaEntrega || "",
@@ -62,6 +64,7 @@ function filaExtraordinario(r: Row) {
     "Artículo": r.Nombre,
     "Día": r.fecha,
     Faltan: r.faltan,
+    Stock: r.stock,
     "Falta OC": r.descubierto,
     Proveedor: r.Proveedor || "",
     Importe: r.importe,

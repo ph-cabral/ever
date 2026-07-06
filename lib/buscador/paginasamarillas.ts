@@ -108,6 +108,7 @@ export async function buscarPaginasAmarillas(opts: {
           precioDesde: null,
           publicaciones: null,
           notas: null,
+          terminoBuscado: null,
         };
       });
 

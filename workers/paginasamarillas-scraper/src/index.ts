@@ -49,11 +49,48 @@ interface BusquedaBody {
 const HOME = "https://www.paginasamarillas.com.ar/";
 const MAX_TEXTO_A_IA = 12_000; // recorte para no volar el límite de tokens del modelo.
 
+/**
+ * Si el elemento tiene tamaño >0 y no está con display:none/visibility:hidden.
+ * Sitios responsive suelen duplicar el mismo texto/botón en versión mobile y
+ * desktop, una de las dos oculta por CSS — matchear solo por texto puede
+ * agarrar la copia oculta, que después no es clickeable de verdad.
+ */
+async function esVisible(
+  page: import("@cloudflare/puppeteer").Page,
+  el: ElementHandle<Element>,
+): Promise<boolean> {
+  return page
+    .evaluate((e) => {
+      const r = e.getBoundingClientRect();
+      const style = getComputedStyle(e);
+      return (
+        r.width > 0 &&
+        r.height > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden"
+      );
+    }, el)
+    .catch(() => false);
+}
+
+/** Recolecta TODOS los matches y prefiere uno visible; si ninguno lo es, devuelve el primero igual (mejor intentar que nada). */
+async function elegirVisible(
+  page: import("@cloudflare/puppeteer").Page,
+  candidatos: ElementHandle<Element>[],
+): Promise<ElementHandle<Element> | null> {
+  if (candidatos.length === 0) return null;
+  for (const el of candidatos) {
+    if (await esVisible(page, el)) return el;
+  }
+  return candidatos[0];
+}
+
 async function encontrarInputPorTexto(
   page: import("@cloudflare/puppeteer").Page,
   pistas: string[],
 ): Promise<ElementHandle<Element> | null> {
   const inputs = await page.$$("input");
+  const matches: ElementHandle<Element>[] = [];
   for (const input of inputs) {
     const hint = await page
       .evaluate((el) => {
@@ -61,9 +98,9 @@ async function encontrarInputPorTexto(
         return `${i.placeholder ?? ""} ${i.getAttribute("aria-label") ?? ""} ${i.name ?? ""}`.toLowerCase();
       }, input)
       .catch(() => "");
-    if (pistas.some((p) => hint.includes(p))) return input;
+    if (pistas.some((p) => hint.includes(p))) matches.push(input);
   }
-  return null;
+  return elegirVisible(page, matches);
 }
 
 async function encontrarBotonBuscar(
@@ -72,13 +109,35 @@ async function encontrarBotonBuscar(
   const candidatos = await page.$$(
     "button, a, div[role='button'], span[role='button']",
   );
+  const matches: ElementHandle<Element>[] = [];
   for (const el of candidatos) {
     const texto = await page
       .evaluate((e) => (e.textContent ?? "").trim().toLowerCase(), el)
       .catch(() => "");
-    if (texto === "buscar" || texto === "buscá") return el;
+    if (texto === "buscar" || texto === "buscá") matches.push(el);
   }
-  return null;
+  return elegirVisible(page, matches);
+}
+
+/**
+ * Click "seguro": intenta el click nativo de Puppeteer (simula mouse de
+ * verdad, dispara todos los eventos) y si falla con el clásico error de
+ * Puppeteer ("Node is either not clickable or not an Element" — pasa cuando
+ * el elemento no supera los chequeos de visibilidad/actionability de
+ * Puppeteer aunque exista en el DOM), cae a un click de DOM plano vía
+ * `el.click()` dentro del browser. Menos "realista" pero mucho más tolerante.
+ */
+async function clickSeguro(
+  page: import("@cloudflare/puppeteer").Page,
+  el: ElementHandle<Element>,
+): Promise<"nativo" | "fallback-dom"> {
+  try {
+    await el.click();
+    return "nativo";
+  } catch {
+    await page.evaluate((e) => (e as HTMLElement).click(), el);
+    return "fallback-dom";
+  }
 }
 
 async function extraerConIA(env: Env, q: string, textoPagina: string): Promise<Empresa[]> {
@@ -157,8 +216,8 @@ async function buscar(
     if (!boton) {
       throw new Error("No se encontró el botón 'Buscar' (revisar heurística de texto en index.ts)");
     }
-    await boton.click();
-    debug.push("botón Buscar clickeado");
+    const tipoClick = await clickSeguro(page, boton);
+    debug.push(`botón Buscar clickeado (${tipoClick})`);
 
     await page.waitForNetworkIdle({ idleTime: 1200, timeout: 20_000 }).catch(() => {
       debug.push("timeout esperando networkIdle tras buscar (puede ser normal)");

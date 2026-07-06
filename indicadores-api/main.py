@@ -10,7 +10,7 @@ from deposito import (
     fetch_ot_diferencias,
     fetch_wms_estados, fetch_wms_estados_diag,
     fetch_articulo_ubicaciones, fetch_articulos_multi_ubicacion,
-    fetch_stock_deposito1,
+    fetch_stock_deposito1, fetch_stock_por_articulos,
 )
 from compras import fetch_ordenes_pendientes
 from ingresos import fetch_remitos_ingreso
@@ -251,6 +251,17 @@ def deposito_stock(
     """Stock del depósito 1 (central), paginado: código, nombre, stock, proveedor."""
     try:
         return fetch_stock_deposito1(page, page_size, q)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/stock-por-articulos")
+def deposito_stock_por_articulos(codigos: str = Query(...)):
+    """Stock del depósito 1 (central) para una lista puntual de códigos
+    (separados por coma), sin paginar. Usado por /compras/faltantes para
+    mostrar la existencia real al lado de lo marcado 'sin existencia'."""
+    try:
+        lista = [c for c in codigos.split(",") if c.strip()]
+        return fetch_stock_por_articulos(lista)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

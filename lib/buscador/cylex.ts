@@ -125,6 +125,7 @@ function parsePagina(html: string): Prospecto[] {
       precioDesde: null,
       publicaciones: null,
       notas: null,
+      terminoBuscado: null,
     });
   }
   return prospectos;
