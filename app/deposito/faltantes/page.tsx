@@ -355,9 +355,8 @@ export default function FaltantesPage() {
               <CardDetalle
                 it={current}
                 estado={estados[keyOf(current)] ?? "pendiente"}
-                tipos={tipos}
-                novedadId={novedades[keyOf(current)] ?? null}
-                onNovedad={(id) => saveNovedad(current, id)}
+                cantidad={cantidades[keyOf(current)] ?? null}
+                onCantidad={(v) => saveCantidad(current, v)}
                 onUbic={() => setUbicArt(current.CodArticulo)}
               />
             </div>
@@ -757,16 +756,14 @@ function Row({
 function CardDetalle({
   it,
   estado,
-  tipos,
-  novedadId,
-  onNovedad,
+  cantidad,
+  onCantidad,
   onUbic,
 }: {
   it: Item;
   estado: Estado;
-  tipos: Tipo[];
-  novedadId: number | null;
-  onNovedad: (id: number | null) => void;
+  cantidad: number | null;
+  onCantidad: (v: number | null) => void;
   onUbic: () => void;
 }) {
   return (
@@ -790,13 +787,17 @@ function CardDetalle({
       </button>
       <div className="mb-4">
         <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1.5">
-          Novedad
+          Cantidad
         </div>
-        <NovedadSelect
-          tipos={tipos}
-          value={novedadId}
-          onChange={onNovedad}
-          className="w-full bg-[#1f1f1f] border border-zinc-700 rounded-lg px-3 py-3 text-base text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer"
+        <input
+          type="number"
+          inputMode="decimal"
+          defaultValue={cantidad ?? ""}
+          onBlur={(ev) => {
+            const v = ev.target.value;
+            onCantidad(v === "" ? null : Number(v));
+          }}
+          className="w-full bg-[#1f1f1f] border border-zinc-700 rounded-lg px-3 py-3 text-base text-zinc-100 focus:border-yellow-400 outline-none"
         />
       </div>
       <Row label="Ubicación" value={it.Ubicacion ?? "—"} big />
