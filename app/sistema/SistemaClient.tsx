@@ -877,7 +877,10 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
   const totalHrsLabel = `${Math.floor(totalMin / 60)}h ${totalMin % 60}m`;
 
   const sisPorEstado = countBy(sCards, (c) => c.colNombre);
-  const sisPorCategoria = countBy(sCards, (c) => c.campos.categoria);
+  const sisPorCategoria = countBy(sCards, (c) => c.campos.categoria).sort((a, b) => b.value - a.value);
+  const sisPorUbicacion = countBy(sCards, (c) => c.campos.ubicacion).sort((a, b) => b.value - a.value);
+  const topCategoria = sisPorCategoria[0];
+  const topUbicacion = sisPorUbicacion[0];
   const sfPorEstado = countBy(sfCards, (c) => c.colNombre);
   const sfPorSistema = countBy(sfCards, (c) => c.campos.sistema);
   const burenPorUbic = countBy(bCards, (c) => c.campos.ubicacion);
@@ -889,6 +892,14 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
         <Kpi value={orquestadas.length} label="Orquestado por Sistema (vinculadas)" />
         <Kpi value={`${pctSolved}%`} label="Softech resuelto" />
         <Kpi value={avgDays} label="Softech: días promedio de resolución" />
+        <Kpi
+          value={topCategoria ? topCategoria.name : "—"}
+          label={`Categoría más frecuente — Sistema${topCategoria ? ` (${topCategoria.value})` : ""}`}
+        />
+        <Kpi
+          value={topUbicacion ? topUbicacion.name : "—"}
+          label={`Ubicación más frecuente — Sistema${topUbicacion ? ` (${topUbicacion.value})` : ""}`}
+        />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -947,17 +958,27 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
         </ChartBox>
 
         <ChartBox title="Sistema interno — por categoría">
-          <BarChart data={sisPorCategoria}>
-            <CartesianGrid stroke="#27272a" />
-            <XAxis dataKey="name" stroke="#9aa1b1" fontSize={11} interval={0} angle={-20} textAnchor="end" height={50} />
-            <YAxis stroke="#9aa1b1" fontSize={12} allowDecimals={false} />
-            <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }} />
-            <Bar dataKey="value">
+          <PieChart>
+            <Pie data={sisPorCategoria} dataKey="value" nameKey="name" outerRadius={80} label={({ name, value }) => `${name}: ${value}`}>
               {sisPorCategoria.map((_, i) => (
                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
               ))}
-            </Bar>
-          </BarChart>
+            </Pie>
+            <Legend wrapperStyle={{ fontSize: 11, color: "#9aa1b1" }} />
+            <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }} />
+          </PieChart>
+        </ChartBox>
+
+        <ChartBox title="Sistema interno — por ubicación">
+          <PieChart>
+            <Pie data={sisPorUbicacion} dataKey="value" nameKey="name" outerRadius={80} label={({ name, value }) => `${name}: ${value}`}>
+              {sisPorUbicacion.map((_, i) => (
+                <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
+              ))}
+            </Pie>
+            <Legend wrapperStyle={{ fontSize: 11, color: "#9aa1b1" }} />
+            <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }} />
+          </PieChart>
         </ChartBox>
 
         <ChartBox title="Softech — por estado">
