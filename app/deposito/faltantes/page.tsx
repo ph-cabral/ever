@@ -67,7 +67,7 @@ export default function FaltantesPage() {
   const [cantidades, setCantidades] = useState<Record<string, number | null>>({}); // cantidad por renglón
   const [idx, setIdx] = useState(0); // puntero del flujo móvil
   const [undoStack, setUndoStack] = useState<
-    { key: string; prev: Estado; idx: number }[]
+    { keys: string[]; prev: Record<string, Estado>; idx: number }[]
   >([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -205,6 +205,56 @@ export default function FaltantesPage() {
     [fecha],
   );
 
+  // Versiones "grupo" (PC): aplican el mismo valor a todos los renglones
+  // agrupados por artículo — sigue guardando por (pedido, renglón) como antes.
+  const saveCantidadGroup = useCallback(
+    (group: Item[], cantidad: number | null) => {
+      setCantidades((m) => {
+        const n = { ...m };
+        for (const it of group) n[keyOf(it)] = cantidad;
+        return n;
+      });
+      for (const it of group) {
+        fetch("/api/deposito/faltantes/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fecha,
+            nroPedOrigen: it.NroPedOrigen,
+            nroRengOrigen: it.NroRengOrigen,
+            codArticulo: it.CodArticulo,
+            cantidad,
+          }),
+        }).catch(() => setError("No se pudo guardar la cantidad"));
+      }
+    },
+    [fecha],
+  );
+
+  const saveNovedadGroup = useCallback(
+    (group: Item[], novedadId: number | null) => {
+      setNovedades((m) => {
+        const n = { ...m };
+        for (const it of group) n[keyOf(it)] = novedadId;
+        return n;
+      });
+      for (const it of group) {
+        fetch("/api/deposito/faltantes/novedad", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fecha,
+            nroPedOrigen: it.NroPedOrigen,
+            nroRengOrigen: it.NroRengOrigen,
+            codArticulo: it.CodArticulo,
+            novedadId,
+          }),
+        }).catch(() => setError("No se pudo guardar la novedad"));
+      }
+    },
+    [fecha],
+  );
+
   // Celular: marca y avanza al siguiente. La tarjeta actual sale volando hacia
   // el costado (verde → derecha, rojo → izquierda) y recién ahí avanza el
   // puntero — así hay tiempo de ver la animación antes de que cambie el dato.
@@ -214,13 +264,11 @@ export default function FaltantesPage() {
       const k = keyOf(it);
       setTransitioning(true);
       setExitDir(existencia ? "right" : "left");
+      const prev = estados[k] ?? "pendiente";
       setEstados((s) => ({ ...s, [k]: existencia ? "si" : "no" }));
       void persist(it, existencia);
       window.setTimeout(() => {
-        setUndoStack((u) => [
-          ...u,
-          { key: k, prev: estados[k] ?? "pendiente", idx },
-        ]);
+        setUndoStack((u) => [...u, { keys: [k], prev: { [k]: prev }, idx }]);
         setIdx((i) => Math.min(i + 1, items.length));
         setExitDir(null);
         setTransitioning(false);
@@ -229,16 +277,23 @@ export default function FaltantesPage() {
     [estados, idx, items.length, persist, transitioning],
   );
 
-  // PC: marca por fila sin mover el puntero móvil.
-  const markRow = useCallback(
-    (it: Item, existencia: boolean) => {
-      const k = keyOf(it);
-      setUndoStack((u) => [
-        ...u,
-        { key: k, prev: estados[k] ?? "pendiente", idx },
-      ]);
-      setEstados((s) => ({ ...s, [k]: existencia ? "si" : "no" }));
-      void persist(it, existencia);
+  // PC: marca todos los renglones de un artículo agrupado a la vez (un solo
+  // chequeo de stock aplica a todos los pedidos pendientes de ese artículo).
+  const markGroup = useCallback(
+    (group: Item[], existencia: boolean) => {
+      const prev: Record<string, Estado> = {};
+      const keys = group.map((it) => {
+        const k = keyOf(it);
+        prev[k] = estados[k] ?? "pendiente";
+        return k;
+      });
+      setUndoStack((u) => [...u, { keys, prev, idx }]);
+      setEstados((s) => {
+        const n = { ...s };
+        for (const k of keys) n[k] = existencia ? "si" : "no";
+        return n;
+      });
+      for (const it of group) void persist(it, existencia);
     },
     [estados, idx, persist],
   );
@@ -249,33 +304,39 @@ export default function FaltantesPage() {
     setUndoStack((u) => u.slice(0, -1));
     setEstados((s) => {
       const n = { ...s };
-      if (last.prev === "pendiente") delete n[last.key];
-      else n[last.key] = last.prev;
+      for (const k of last.keys) {
+        const p = last.prev[k];
+        if (p === "pendiente") delete n[k];
+        else n[k] = p;
+      }
       return n;
     });
     setIdx(last.idx);
-    const [ped, reng] = last.key.split("-").map(Number);
-    const body =
-      last.prev === "pendiente"
-        ? {
-            method: "DELETE",
-            payload: { fecha, nroPedOrigen: ped, nroRengOrigen: reng },
-          }
-        : {
-            method: "POST",
-            payload: {
-              fecha,
-              nroPedOrigen: ped,
-              nroRengOrigen: reng,
-              codArticulo: "",
-              existencia: last.prev === "si",
-            },
-          };
-    fetch("/api/deposito/faltantes/check", {
-      method: body.method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body.payload),
-    }).catch(() => setError("No se pudo deshacer"));
+    for (const k of last.keys) {
+      const p = last.prev[k];
+      const [ped, reng] = k.split("-").map(Number);
+      const body =
+        p === "pendiente"
+          ? {
+              method: "DELETE",
+              payload: { fecha, nroPedOrigen: ped, nroRengOrigen: reng },
+            }
+          : {
+              method: "POST",
+              payload: {
+                fecha,
+                nroPedOrigen: ped,
+                nroRengOrigen: reng,
+                codArticulo: "",
+                existencia: p === "si",
+              },
+            };
+      fetch("/api/deposito/faltantes/check", {
+        method: body.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body.payload),
+      }).catch(() => setError("No se pudo deshacer"));
+    }
   }, [undoStack, fecha]);
 
   const counts = useMemo(() => {
@@ -288,6 +349,18 @@ export default function FaltantesPage() {
     }
     return { si, no, pend: items.length - si - no, total: items.length };
   }, [items, estados]);
+
+  // PC: agrupa los renglones por artículo — una fila por CodArticulo, sin
+  // perder de vista a qué preparadores/clientes les faltó (se listan todos).
+  const grupos = useMemo(() => {
+    const map = new Map<string, Item[]>();
+    for (const it of items) {
+      const arr = map.get(it.CodArticulo);
+      if (arr) arr.push(it);
+      else map.set(it.CodArticulo, [it]);
+    }
+    return Array.from(map.values());
+  }, [items]);
 
   const current = items[idx];
   const hay = items.length > 0;
@@ -483,11 +556,36 @@ export default function FaltantesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((it) => {
-                    const e = estados[keyOf(it)] ?? "pendiente";
+                  {grupos.map((group) => {
+                    const first = group[0];
+                    const allSi = group.every(
+                      (it) => (estados[keyOf(it)] ?? "pendiente") === "si",
+                    );
+                    const allNo = group.every(
+                      (it) => (estados[keyOf(it)] ?? "pendiente") === "no",
+                    );
+                    const e: Estado = allSi ? "si" : allNo ? "no" : "pendiente";
+                    const cantTotal = group.reduce(
+                      (s, it) => s + (it.CantPend || 0),
+                      0,
+                    );
+                    const ubicaciones = Array.from(
+                      new Set(group.map((it) => String(it.Ubicacion ?? "—"))),
+                    );
+                    const preparadores = Array.from(
+                      new Set(group.map((it) => it.Preparador || "—")),
+                    );
+                    const cantidadGrupo =
+                      group
+                        .map((it) => cantidades[keyOf(it)])
+                        .find((v) => v !== null && v !== undefined) ?? null;
+                    const novedadGrupo =
+                      group
+                        .map((it) => novedades[keyOf(it)])
+                        .find((v) => v !== null && v !== undefined) ?? null;
                     return (
                       <tr
-                        key={keyOf(it)}
+                        key={first.CodArticulo}
                         className={`border-t border-zinc-800/70 transition-colors duration-300 animate-in fade-in duration-300 ${
                           e === "si"
                             ? "bg-green-950/30"
@@ -500,38 +598,56 @@ export default function FaltantesPage() {
                           <Pill e={e} />
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
-                          {it.Ubicacion ?? "—"}
+                          {ubicaciones.join(", ")}
                         </td>
                         <td className="px-3 py-2 font-mono text-zinc-300">
                           <button
-                            onClick={() => setUbicArt(it.CodArticulo)}
+                            onClick={() => setUbicArt(first.CodArticulo)}
                             title="Ver ubicaciones"
                             className="chip-anim inline-flex items-center gap-1 hover:text-yellow-400"
                           >
                             <MapPin size={13} className="text-zinc-500" />
-                            {it.CodArticulo}
+                            {first.CodArticulo}
                           </button>
                         </td>
-                        <td className="px-3 py-2 text-zinc-100">{it.Nombre}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">
-                          {fmtNum(it.CantPend)}
+                        <td className="px-3 py-2 text-zinc-100">
+                          {first.Nombre}
                         </td>
-                        <td className="px-3 py-2 text-zinc-300">{it.Cliente ?? "—"}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {fmtNum(cantTotal)}
+                        </td>
+                        <td className="px-3 py-2 text-zinc-300">
+                          <div className="flex flex-col gap-0.5">
+                            {group.map((it) => (
+                              <span key={keyOf(it)} className="text-xs">
+                                {it.Cliente ?? "—"}{" "}
+                                <span className="text-zinc-500">
+                                  ({fmtNum(it.CantPend)})
+                                </span>
+                              </span>
+                            ))}
+                          </div>
+                        </td>
                         <td className="px-3 py-2 text-right">
                           <input
                             type="number"
                             inputMode="decimal"
-                            value={cantidades[keyOf(it)] ?? ""}
+                            value={cantidadGrupo ?? ""}
                             onChange={(ev) => {
                               const v = ev.target.value;
-                              setCantidades((m) => ({
-                                ...m,
-                                [keyOf(it)]: v === "" ? null : Number(v),
-                              }));
+                              const val = v === "" ? null : Number(v);
+                              setCantidades((m) => {
+                                const n = { ...m };
+                                for (const it of group) n[keyOf(it)] = val;
+                                return n;
+                              });
                             }}
                             onBlur={(ev) => {
                               const v = ev.target.value;
-                              saveCantidad(it, v === "" ? null : Number(v));
+                              saveCantidadGroup(
+                                group,
+                                v === "" ? null : Number(v),
+                              );
                             }}
                             className="w-20 bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-right text-zinc-100 focus:border-yellow-400 outline-none"
                           />
@@ -543,20 +659,26 @@ export default function FaltantesPage() {
                         {/* <td className="px-3 py-2 text-zinc-400">{it.TipoArticulo || "—"}</td> */}
                         {/* <td className="px-3 py-2 text-zinc-400">{it.Linea ?? "—"}</td> */}
                         <td className="px-3 py-2 text-zinc-400">
-                          {it.Preparador || "—"}
+                          <div className="flex flex-col gap-0.5">
+                            {preparadores.map((p, i) => (
+                              <span key={i} className="text-xs">
+                                {p}
+                              </span>
+                            ))}
+                          </div>
                         </td>
                         {/* <td className="px-3 py-2 text-zinc-400">{it.Proveedor || "—"}</td> */}
                         <td className="px-3 py-2">
                           <NovedadSelect
                             tipos={tipos}
-                            value={novedades[keyOf(it)] ?? null}
-                            onChange={(id) => saveNovedad(it, id)}
+                            value={novedadGrupo}
+                            onChange={(id) => saveNovedadGroup(group, id)}
                           />
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex items-center justify-center gap-1.5">
                             <button
-                              onClick={() => markRow(it, true)}
+                              onClick={() => markGroup(group, true)}
                               title="En existencia"
                               className={`btn-anim p-1.5 rounded-md border ${
                                 e === "si"
@@ -567,7 +689,7 @@ export default function FaltantesPage() {
                               <Check size={15} />
                             </button>
                             <button
-                              onClick={() => markRow(it, false)}
+                              onClick={() => markGroup(group, false)}
                               title="Sin existencia"
                               className={`btn-anim p-1.5 rounded-md border ${
                                 e === "no"

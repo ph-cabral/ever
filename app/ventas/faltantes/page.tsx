@@ -201,6 +201,12 @@ export default function VentasFaltantesPage() {
     load();
   }, [load]);
 
+  // Auto-refresh cada 1 min.
+  useEffect(() => {
+    const t = setInterval(load, 60_000);
+    return () => clearInterval(t);
+  }, [load]);
+
   // Guarda clienteQuiere en preparado.faltante_control (mismo endpoint que ya
   // usa /deposito/faltantes/control) y retira la fila de esta tabla, sea cual
   // sea la respuesta. Optimista: si falla el guardado, se vuelve a traer todo.

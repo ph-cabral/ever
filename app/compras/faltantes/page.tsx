@@ -452,6 +452,12 @@ export default function ComprasFaltantesPage() {
     load();
   }, [load]);
 
+  // Auto-refresh cada 1 min.
+  useEffect(() => {
+    const t = setInterval(load, 60_000);
+    return () => clearInterval(t);
+  }, [load]);
+
   // Marcar/desmarcar extraordinario y/o comprar. Optimista: actualiza la UI ya,
   // y si el POST falla revierte + avisa. Clave: (CodArticulo, fecha).
   const toggleMark = useCallback(
