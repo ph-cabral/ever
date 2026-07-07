@@ -144,6 +144,32 @@ export default function SistemaClient() {
 
   const dragCard = useRef<{ id: number } | null>(null);
   const dragCol = useRef<{ id: number } | null>(null);
+  const [draggingCardId, setDraggingCardId] = useState<number | null>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
+  const pointerX = useRef<number | null>(null);
+
+  // auto-scroll horizontal del tablero al arrastrar una tarjeta cerca del borde
+  useEffect(() => {
+    if (draggingCardId == null) return;
+    const EDGE = 90;
+    const MAX_SPEED = 22;
+    let raf: number;
+    const tick = () => {
+      const el = boardRef.current;
+      const x = pointerX.current;
+      if (el && x != null) {
+        const rect = el.getBoundingClientRect();
+        if (x < rect.left + EDGE) {
+          el.scrollLeft -= MAX_SPEED * ((rect.left + EDGE - x) / EDGE);
+        } else if (x > rect.right - EDGE) {
+          el.scrollLeft += MAX_SPEED * ((x - (rect.right - EDGE)) / EDGE);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [draggingCardId]);
 
   const cargar = async () => {
     try {
@@ -420,7 +446,13 @@ export default function SistemaClient() {
               )}
             </div>
 
-            <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
+            <div
+              ref={boardRef}
+              className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide"
+              onDragOver={(e) => {
+                pointerX.current = e.clientX;
+              }}
+            >
               {tablero.columnas.map((col) => {
                 const sch = schemaFor(tablero.clave);
                 const titleKey = sch.titleKey;
@@ -430,8 +462,21 @@ export default function SistemaClient() {
                     key={col.id}
                     className="bg-[#161616] border border-zinc-800 rounded-xl w-72 shrink-0 flex flex-col max-h-[calc(100vh-220px)]"
                     onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => {
-                      if (dragCard.current) moverTarjeta(dragCard.current.id, col.id, col.tarjetas.length);
+                    onDrop={(e) => {
+                      if (dragCard.current) {
+                        const cardEls = Array.from(
+                          e.currentTarget.querySelectorAll<HTMLElement>("[data-card-id]")
+                        );
+                        let idx = col.tarjetas.length;
+                        for (let i = 0; i < cardEls.length; i++) {
+                          const rect = cardEls[i].getBoundingClientRect();
+                          if (e.clientY < rect.top + rect.height / 2) {
+                            idx = i;
+                            break;
+                          }
+                        }
+                        moverTarjeta(dragCard.current.id, col.id, idx);
+                      }
                       dragCard.current = null;
                     }}
                   >
@@ -442,6 +487,10 @@ export default function SistemaClient() {
                       onDragOver={(e) => e.preventDefault()}
                       onDrop={(e) => {
                         e.stopPropagation();
+                        if (dragCard.current) {
+                          moverTarjeta(dragCard.current.id, col.id, 0);
+                          dragCard.current = null;
+                        }
                         dragCol.current = null;
                       }}
                     >
@@ -491,8 +540,17 @@ export default function SistemaClient() {
                         return (
                           <div
                             key={card.id}
+                            data-card-id={card.id}
                             draggable
-                            onDragStart={() => (dragCard.current = { id: card.id })}
+                            onDragStart={(e) => {
+                              dragCard.current = { id: card.id };
+                              setDraggingCardId(card.id);
+                              e.dataTransfer.effectAllowed = "move";
+                            }}
+                            onDragEnd={() => {
+                              setDraggingCardId(null);
+                              dragCard.current = null;
+                            }}
                             onDragOver={(e) => e.preventDefault()}
                             onDrop={(e) => {
                               e.stopPropagation();
@@ -510,7 +568,11 @@ export default function SistemaClient() {
                                 tableroId: tablero.id,
                               })
                             }
-                            className="group bg-[#1f1f1f] border border-zinc-800 rounded-lg p-2.5 cursor-pointer hover:border-zinc-600 transition-colors"
+                            className={`group bg-[#1f1f1f] border rounded-lg p-2.5 cursor-pointer transition-all duration-150 ${
+                              draggingCardId === card.id
+                                ? "opacity-40 scale-95 rotate-1 border-rose-500 shadow-lg shadow-black/50"
+                                : "border-zinc-800 hover:border-zinc-600"
+                            }`}
                           >
                             {partnerId != null && (
                               <span className="inline-block mb-1 text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-500/30">
@@ -519,7 +581,13 @@ export default function SistemaClient() {
                             )}
                             <p className="text-sm text-zinc-100 whitespace-pre-line">{first}</p>
                             {rest.length > 0 && (
-                              <div className="grid grid-rows-[0fr] group-hover:grid-rows-[1fr] transition-[grid-template-rows] duration-300 ease-in-out">
+                              <div
+                                className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
+                                  draggingCardId == null
+                                    ? "grid-rows-[0fr] group-hover:grid-rows-[1fr]"
+                                    : "grid-rows-[0fr]"
+                                }`}
+                              >
                                 <p className="overflow-hidden text-sm text-zinc-300 whitespace-pre-line">
                                   {rest.join("\n")}
                                 </p>
