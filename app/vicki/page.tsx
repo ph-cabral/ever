@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -24,6 +24,62 @@ function isAwaitingEmployeeData(messages: Msg[]) {
   const last = [...messages].reverse().find((m) => m.role === "assistant");
   if (!last) return false;
   return /Foto tomada/i.test(last.content);
+}
+
+function parseInlineBold(line: string, keyBase: string) {
+  const boldRegex = /\*\*(.+?)\*\*/g;
+  const nodes: React.ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let idx = 0;
+  while ((m = boldRegex.exec(line)) !== null) {
+    if (m.index > last) nodes.push(line.slice(last, m.index));
+    nodes.push(
+      <strong key={`${keyBase}-b${idx++}`} className="font-semibold text-white">
+        {m[1]}
+      </strong>,
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) nodes.push(line.slice(last));
+  return nodes;
+}
+
+function renderTextBlock(text: string, keyBase: string) {
+  const cleaned = text.replace("[LOC_PICK]", "");
+  const paragraphs = cleaned.split(/\n{2,}/);
+
+  return paragraphs.map((para, pi) => {
+    const lines = para.split("\n").filter((l) => l.trim() !== "");
+    if (lines.length === 0) return null;
+
+    const isList = lines.every((l) => /^\s*[-•]\s+/.test(l));
+    if (isList) {
+      return (
+        <ul key={`${keyBase}-p${pi}`} className="list-disc pl-5 my-2 space-y-1">
+          {lines.map((l, li) => (
+            <li key={`${keyBase}-p${pi}-l${li}`}>
+              {parseInlineBold(
+                l.replace(/^\s*[-•]\s+/, ""),
+                `${keyBase}-p${pi}-l${li}`,
+              )}
+            </li>
+          ))}
+        </ul>
+      );
+    }
+
+    return (
+      <p key={`${keyBase}-p${pi}`} className="my-2 leading-relaxed first:mt-0 last:mb-0">
+        {lines.map((l, li) => (
+          <Fragment key={`${keyBase}-p${pi}-l${li}`}>
+            {li > 0 && <br />}
+            {parseInlineBold(l, `${keyBase}-p${pi}-l${li}`)}
+          </Fragment>
+        ))}
+      </p>
+    );
+  });
 }
 
 function renderContent(
@@ -73,9 +129,7 @@ function renderContent(
         )}
       </div>
     ) : (
-      <span key={i} className="whitespace-pre-wrap break-all">
-        {p.v.replace("[LOC_PICK]", "")}
-      </span>
+      <div key={i}>{renderTextBlock(p.v, `t${i}`)}</div>
     ),
   );
 }
