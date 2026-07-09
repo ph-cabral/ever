@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Bar,
@@ -144,6 +144,8 @@ export default function SistemaClient() {
   const dragCard = useRef<{ id: number; fromColId: number } | null>(null);
   const dragCol = useRef<{ id: number } | null>(null);
   const [draggingCardId, setDraggingCardId] = useState<number | null>(null);
+  // posición donde se soltaría ahora mismo (solo visual, no toca `tableros` hasta soltar)
+  const [hoverSlot, setHoverSlot] = useState<{ colId: number; index: number } | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const pointerX = useRef<number | null>(null);
 
@@ -266,93 +268,60 @@ export default function SistemaClient() {
   };
 
   // ---------- tarjetas ----------
-  // Reordena solo en memoria (feedback visual instantáneo mientras se arrastra,
-  // sin pegarle a la API en cada pixel de movimiento). Usa forma funcional de
-  // setState para no depender de closures viejas del render anterior.
-  const moverTarjetaLocal = (cardId: number, destColumnaId: number, destIndex: number) => {
-    setTableros((prev) => {
-      let curCol: Columna | undefined;
-      let curIdx = -1;
-      for (const t of prev)
-        for (const c of t.columnas) {
-          const i = c.tarjetas.findIndex((tj) => tj.id === cardId);
-          if (i >= 0) {
-            curCol = c;
-            curIdx = i;
-          }
-        }
-      if (!curCol) return prev;
-      // no-op: ya está en esa posición (compensando el corrimiento al sacarla)
-      let destNormalizado = destIndex;
-      if (curCol.id === destColumnaId && curIdx < destIndex) destNormalizado -= 1;
-      if (curCol.id === destColumnaId && curIdx === destNormalizado) return prev;
-
-      const tcopy: Tablero[] = prev.map((t) => ({
-        ...t,
-        columnas: t.columnas.map((c) => ({ ...c, tarjetas: [...c.tarjetas] })),
-      }));
-
-      let card: Tarjeta | undefined;
-      for (const t of tcopy)
-        for (const c of t.columnas) {
-          const idx = c.tarjetas.findIndex((tj) => tj.id === cardId);
-          if (idx >= 0) {
-            card = c.tarjetas[idx];
-            c.tarjetas.splice(idx, 1);
-          }
-        }
-      if (!card) return prev;
-
-      let destCol: Columna | undefined;
-      for (const t of tcopy) for (const c of t.columnas) if (c.id === destColumnaId) destCol = c;
-      if (!destCol) return prev;
-
-      const idx = Math.max(0, Math.min(destIndex, destCol.tarjetas.length));
-      destCol.tarjetas.splice(idx, 0, { ...card, columnaId: destColumnaId });
-      return tcopy;
-    });
-  };
-
-  // Se llama al soltar: estampa fecha si cambió de columna y persiste el
-  // orden final de la(s) columna(s) tocadas (una sola vez, no por pixel).
+  // Mientras se arrastra NO se toca `tableros` (evita repintar/mover el nodo que
+  // el navegador está arrastrando, cosa que corta el drag nativo a mitad de
+  // camino). Solo se guarda dónde caería (`hoverSlot`) y eso pinta un hueco.
+  // El reacomodo real de datos se hace una sola vez al soltar, en finalizarDrop.
   const finalizarDrop = () => {
     const dc = dragCard.current;
+    const slot = hoverSlot;
     dragCard.current = null;
     setDraggingCardId(null);
+    setHoverSlot(null);
     if (!dc) return;
 
+    const destColId = slot?.colId ?? dc.fromColId;
+    const destIndexRaw = slot?.index ?? 0;
+
+    const tcopy: Tablero[] = tableros.map((t) => ({
+      ...t,
+      columnas: t.columnas.map((c) => ({ ...c, tarjetas: [...c.tarjetas] })),
+    }));
+
+    let card: Tarjeta | undefined;
+    let srcCol: Columna | undefined;
+    for (const t of tcopy)
+      for (const c of t.columnas) {
+        const idx = c.tarjetas.findIndex((tj) => tj.id === dc.id);
+        if (idx >= 0) {
+          card = c.tarjetas[idx];
+          srcCol = c;
+          c.tarjetas.splice(idx, 1);
+        }
+      }
+    if (!card || !srcCol) return;
+
     let destCol: Columna | undefined;
-    for (const t of tableros)
-      for (const c of t.columnas) if (c.tarjetas.some((tj) => tj.id === dc.id)) destCol = c;
+    for (const t of tcopy) for (const c of t.columnas) if (c.id === destColId) destCol = c;
     if (!destCol) return;
 
-    const cambioDeColumna = destCol.id !== dc.fromColId;
-    if (cambioDeColumna) {
-      const nuevaFecha = new Date().toISOString();
-      setTableros((prev) =>
-        prev.map((t) => ({
-          ...t,
-          columnas: t.columnas.map((c) =>
-            c.id !== destCol!.id
-              ? c
-              : {
-                  ...c,
-                  tarjetas: c.tarjetas.map((tj) =>
-                    tj.id === dc.id ? { ...tj, campos: { ...tj.campos, fecha: nuevaFecha } } : tj
-                  ),
-                }
-          ),
-        }))
-      );
+    const idx = Math.max(0, Math.min(destIndexRaw, destCol.tarjetas.length));
+    destCol.tarjetas.splice(idx, 0, {
+      ...card,
+      columnaId: destCol.id,
+      campos:
+        destCol.id !== srcCol.id
+          ? { ...card.campos, fecha: new Date().toISOString() }
+          : card.campos,
+    });
+
+    const cambios: { id: number; columnaId: number; orden: number }[] = [];
+    srcCol.tarjetas.forEach((tj, i) => cambios.push({ id: tj.id, columnaId: srcCol!.id, orden: i }));
+    if (destCol.id !== srcCol.id) {
+      destCol.tarjetas.forEach((tj, i) => cambios.push({ id: tj.id, columnaId: destCol!.id, orden: i }));
     }
 
-    const colsAPersistir = new Set([destCol.id, dc.fromColId]);
-    const cambios: { id: number; columnaId: number; orden: number }[] = [];
-    for (const t of tableros)
-      for (const c of t.columnas)
-        if (colsAPersistir.has(c.id))
-          c.tarjetas.forEach((tj, i) => cambios.push({ id: tj.id, columnaId: c.id, orden: i }));
-
+    setTableros(tcopy);
     if (cambios.length) {
       apiJson("/api/sistema/tarjetas/reorder", {
         method: "PATCH",
@@ -503,9 +472,9 @@ export default function SistemaClient() {
                       );
                       const last = cardEls[cardEls.length - 1];
                       if (!last) {
-                        moverTarjetaLocal(dc.id, col.id, 0);
+                        setHoverSlot({ colId: col.id, index: 0 });
                       } else if (e.clientY > last.getBoundingClientRect().bottom) {
-                        moverTarjetaLocal(dc.id, col.id, col.tarjetas.length);
+                        setHoverSlot({ colId: col.id, index: col.tarjetas.length });
                       }
                     }}
                     onDrop={() => finalizarDrop()}
@@ -514,13 +483,13 @@ export default function SistemaClient() {
                       className="flex items-center justify-between px-3 py-2 border-b border-zinc-800"
                       draggable
                       onDragStart={() => (dragCol.current = { id: col.id })}
-                      onDragOver={(e) => e.preventDefault()}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        if (dragCard.current) setHoverSlot({ colId: col.id, index: 0 });
+                      }}
                       onDrop={(e) => {
                         e.stopPropagation();
-                        if (dragCard.current) {
-                          moverTarjetaLocal(dragCard.current.id, col.id, 0);
-                          finalizarDrop();
-                        }
+                        if (dragCard.current) finalizarDrop();
                         dragCol.current = null;
                       }}
                     >
@@ -558,69 +527,75 @@ export default function SistemaClient() {
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2 scrollbar-hide">
-                      {col.tarjetas.map((card) => {
+                      {col.tarjetas.map((card, cardIdx) => {
                         const txt = String(card.campos[titleKey] || "(sin descripción)");
                         const [first, ...rest] = txt.split("\n");
                         return (
-                          <div
-                            key={card.id}
-                            data-card-id={card.id}
-                            draggable
-                            onDragStart={(e) => {
-                              dragCard.current = { id: card.id, fromColId: col.id };
-                              setDraggingCardId(card.id);
-                              e.dataTransfer.effectAllowed = "move";
-                            }}
-                            onDragEnd={() => finalizarDrop()}
-                            onDragOver={(e) => {
-                              e.preventDefault();
-                              const dc = dragCard.current;
-                              if (!dc || dc.id === card.id) return;
-                              const rect = e.currentTarget.getBoundingClientRect();
-                              const before = e.clientY < rect.top + rect.height / 2;
-                              const idx = col.tarjetas.findIndex((c) => c.id === card.id);
-                              moverTarjetaLocal(dc.id, col.id, before ? idx : idx + 1);
-                            }}
-                            onDrop={(e) => {
-                              e.stopPropagation();
-                              finalizarDrop();
-                            }}
-                            onClick={() =>
-                              setModalTarjeta({
-                                tarjeta: card,
-                                columnaId: col.id,
-                                clave: tablero.clave,
-                                tableroId: tablero.id,
-                              })
-                            }
-                            className={`group bg-[#1f1f1f] border rounded-lg p-2.5 cursor-pointer transition-all duration-150 ${
-                              draggingCardId === card.id
-                                ? "opacity-40 scale-95 rotate-1 border-rose-500 shadow-lg shadow-black/50"
-                                : "border-zinc-800 hover:border-zinc-600"
-                            }`}
-                          >
-                            <p className="text-sm text-zinc-100 whitespace-pre-line">{first}</p>
-                            {rest.length > 0 && (
-                              <div
-                                className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
-                                  draggingCardId == null
-                                    ? "grid-rows-[0fr] group-hover:grid-rows-[1fr]"
-                                    : "grid-rows-[0fr]"
-                                }`}
-                              >
-                                <p className="overflow-hidden text-sm text-zinc-300 whitespace-pre-line">
-                                  {rest.join("\n")}
+                          <Fragment key={card.id}>
+                            {hoverSlot?.colId === col.id && hoverSlot.index === cardIdx && (
+                              <div className="h-14 shrink-0 rounded-lg border-2 border-dashed border-rose-500/50 bg-rose-500/5" />
+                            )}
+                            <div
+                              data-card-id={card.id}
+                              draggable
+                              onDragStart={(e) => {
+                                dragCard.current = { id: card.id, fromColId: col.id };
+                                setDraggingCardId(card.id);
+                                e.dataTransfer.effectAllowed = "move";
+                              }}
+                              onDragEnd={() => finalizarDrop()}
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                const dc = dragCard.current;
+                                if (!dc || dc.id === card.id) return;
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const before = e.clientY < rect.top + rect.height / 2;
+                                setHoverSlot({ colId: col.id, index: before ? cardIdx : cardIdx + 1 });
+                              }}
+                              onDrop={(e) => {
+                                e.stopPropagation();
+                                finalizarDrop();
+                              }}
+                              onClick={() =>
+                                setModalTarjeta({
+                                  tarjeta: card,
+                                  columnaId: col.id,
+                                  clave: tablero.clave,
+                                  tableroId: tablero.id,
+                                })
+                              }
+                              className={`group bg-[#1f1f1f] border rounded-lg p-2.5 cursor-pointer transition-all duration-150 ${
+                                draggingCardId === card.id
+                                  ? "opacity-40 scale-95 rotate-1 border-rose-500 shadow-lg shadow-black/50"
+                                  : "border-zinc-800 hover:border-zinc-600"
+                              }`}
+                            >
+                              <p className="text-sm text-zinc-100 whitespace-pre-line">{first}</p>
+                              {rest.length > 0 && (
+                                <div
+                                  className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
+                                    draggingCardId == null
+                                      ? "grid-rows-[0fr] group-hover:grid-rows-[1fr]"
+                                      : "grid-rows-[0fr]"
+                                  }`}
+                                >
+                                  <p className="overflow-hidden text-sm text-zinc-300 whitespace-pre-line">
+                                    {rest.join("\n")}
+                                  </p>
+                                </div>
+                              )}
+                              {subtitleField && card.campos[subtitleField.k] && (
+                                <p className="text-xs text-zinc-500 mt-1">
+                                  {card.campos[subtitleField.k]}
                                 </p>
-                              </div>
-                            )}
-                            {subtitleField && card.campos[subtitleField.k] && (
-                              <p className="text-xs text-zinc-500 mt-1">
-                                {card.campos[subtitleField.k]}
-                              </p>
-                            )}
-                          </div>
+                              )}
+                            </div>
+                          </Fragment>
                         );
                       })}
+                      {hoverSlot?.colId === col.id && hoverSlot.index === col.tarjetas.length && (
+                        <div className="h-14 shrink-0 rounded-lg border-2 border-dashed border-rose-500/50 bg-rose-500/5" />
+                      )}
                     </div>
 
                     <button
