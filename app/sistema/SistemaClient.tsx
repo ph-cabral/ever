@@ -141,7 +141,7 @@ export default function SistemaClient() {
     tableroId: number;
   } | null>(null);
 
-  const dragCard = useRef<{ id: number } | null>(null);
+  const dragCard = useRef<{ id: number; fromColId: number } | null>(null);
   const dragCol = useRef<{ id: number } | null>(null);
   const [draggingCardId, setDraggingCardId] = useState<number | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -266,52 +266,93 @@ export default function SistemaClient() {
   };
 
   // ---------- tarjetas ----------
-  const moverTarjeta = (cardId: number, destColumnaId: number, destIndex: number) => {
-    const tcopy: Tablero[] = tableros.map((t) => ({
-      ...t,
-      columnas: t.columnas.map((c) => ({ ...c, tarjetas: [...c.tarjetas] })),
-    }));
-
-    let card: Tarjeta | undefined;
-    let srcCol: Columna | undefined;
-    for (const t of tcopy)
-      for (const c of t.columnas) {
-        const idx = c.tarjetas.findIndex((tj) => tj.id === cardId);
-        if (idx >= 0) {
-          card = c.tarjetas[idx];
-          srcCol = c;
-          c.tarjetas.splice(idx, 1);
+  // Reordena solo en memoria (feedback visual instantáneo mientras se arrastra,
+  // sin pegarle a la API en cada pixel de movimiento). Usa forma funcional de
+  // setState para no depender de closures viejas del render anterior.
+  const moverTarjetaLocal = (cardId: number, destColumnaId: number, destIndex: number) => {
+    setTableros((prev) => {
+      let curCol: Columna | undefined;
+      let curIdx = -1;
+      for (const t of prev)
+        for (const c of t.columnas) {
+          const i = c.tarjetas.findIndex((tj) => tj.id === cardId);
+          if (i >= 0) {
+            curCol = c;
+            curIdx = i;
+          }
         }
-      }
-    if (!card || !srcCol) return;
+      if (!curCol) return prev;
+      // no-op: ya está en esa posición (compensando el corrimiento al sacarla)
+      let destNormalizado = destIndex;
+      if (curCol.id === destColumnaId && curIdx < destIndex) destNormalizado -= 1;
+      if (curCol.id === destColumnaId && curIdx === destNormalizado) return prev;
+
+      const tcopy: Tablero[] = prev.map((t) => ({
+        ...t,
+        columnas: t.columnas.map((c) => ({ ...c, tarjetas: [...c.tarjetas] })),
+      }));
+
+      let card: Tarjeta | undefined;
+      for (const t of tcopy)
+        for (const c of t.columnas) {
+          const idx = c.tarjetas.findIndex((tj) => tj.id === cardId);
+          if (idx >= 0) {
+            card = c.tarjetas[idx];
+            c.tarjetas.splice(idx, 1);
+          }
+        }
+      if (!card) return prev;
+
+      let destCol: Columna | undefined;
+      for (const t of tcopy) for (const c of t.columnas) if (c.id === destColumnaId) destCol = c;
+      if (!destCol) return prev;
+
+      const idx = Math.max(0, Math.min(destIndex, destCol.tarjetas.length));
+      destCol.tarjetas.splice(idx, 0, { ...card, columnaId: destColumnaId });
+      return tcopy;
+    });
+  };
+
+  // Se llama al soltar: estampa fecha si cambió de columna y persiste el
+  // orden final de la(s) columna(s) tocadas (una sola vez, no por pixel).
+  const finalizarDrop = () => {
+    const dc = dragCard.current;
+    dragCard.current = null;
+    setDraggingCardId(null);
+    if (!dc) return;
 
     let destCol: Columna | undefined;
-    for (const t of tcopy) for (const c of t.columnas) if (c.id === destColumnaId) destCol = c;
+    for (const t of tableros)
+      for (const c of t.columnas) if (c.tarjetas.some((tj) => tj.id === dc.id)) destCol = c;
     if (!destCol) return;
 
-    const idx = Math.max(0, Math.min(destIndex, destCol.tarjetas.length));
-    destCol.tarjetas.splice(idx, 0, {
-      ...card,
-      columnaId: destColumnaId,
-      campos:
-        destCol.id !== srcCol.id
-          ? { ...card.campos, fecha: new Date().toISOString() }
-          : card.campos,
-    });
-
-    const cambios: { id: number; columnaId: number; orden: number }[] = [];
-    srcCol.tarjetas.forEach((tj, i) => {
-      tj.orden = i;
-      cambios.push({ id: tj.id, columnaId: srcCol!.id, orden: i });
-    });
-    if (destCol.id !== srcCol.id) {
-      destCol.tarjetas.forEach((tj, i) => {
-        tj.orden = i;
-        cambios.push({ id: tj.id, columnaId: destCol!.id, orden: i });
-      });
+    const cambioDeColumna = destCol.id !== dc.fromColId;
+    if (cambioDeColumna) {
+      const nuevaFecha = new Date().toISOString();
+      setTableros((prev) =>
+        prev.map((t) => ({
+          ...t,
+          columnas: t.columnas.map((c) =>
+            c.id !== destCol!.id
+              ? c
+              : {
+                  ...c,
+                  tarjetas: c.tarjetas.map((tj) =>
+                    tj.id === dc.id ? { ...tj, campos: { ...tj.campos, fecha: nuevaFecha } } : tj
+                  ),
+                }
+          ),
+        }))
+      );
     }
 
-    setTableros(tcopy);
+    const colsAPersistir = new Set([destCol.id, dc.fromColId]);
+    const cambios: { id: number; columnaId: number; orden: number }[] = [];
+    for (const t of tableros)
+      for (const c of t.columnas)
+        if (colsAPersistir.has(c.id))
+          c.tarjetas.forEach((tj, i) => cambios.push({ id: tj.id, columnaId: c.id, orden: i }));
+
     if (cambios.length) {
       apiJson("/api/sistema/tarjetas/reorder", {
         method: "PATCH",
@@ -452,24 +493,22 @@ export default function SistemaClient() {
                   <div
                     key={col.id}
                     className="bg-[#161616] border border-zinc-800 rounded-xl w-72 shrink-0 flex flex-col max-h-[calc(100vh-220px)]"
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      if (dragCard.current) {
-                        const cardEls = Array.from(
-                          e.currentTarget.querySelectorAll<HTMLElement>("[data-card-id]")
-                        );
-                        let idx = col.tarjetas.length;
-                        for (let i = 0; i < cardEls.length; i++) {
-                          const rect = cardEls[i].getBoundingClientRect();
-                          if (e.clientY < rect.top + rect.height / 2) {
-                            idx = i;
-                            break;
-                          }
-                        }
-                        moverTarjeta(dragCard.current.id, col.id, idx);
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      const dc = dragCard.current;
+                      if (!dc) return;
+                      // hueco vacío debajo de la última tarjeta (o columna vacía): mandar al final
+                      const cardEls = Array.from(
+                        e.currentTarget.querySelectorAll<HTMLElement>("[data-card-id]")
+                      );
+                      const last = cardEls[cardEls.length - 1];
+                      if (!last) {
+                        moverTarjetaLocal(dc.id, col.id, 0);
+                      } else if (e.clientY > last.getBoundingClientRect().bottom) {
+                        moverTarjetaLocal(dc.id, col.id, col.tarjetas.length);
                       }
-                      dragCard.current = null;
                     }}
+                    onDrop={() => finalizarDrop()}
                   >
                     <div
                       className="flex items-center justify-between px-3 py-2 border-b border-zinc-800"
@@ -479,8 +518,8 @@ export default function SistemaClient() {
                       onDrop={(e) => {
                         e.stopPropagation();
                         if (dragCard.current) {
-                          moverTarjeta(dragCard.current.id, col.id, 0);
-                          dragCard.current = null;
+                          moverTarjetaLocal(dragCard.current.id, col.id, 0);
+                          finalizarDrop();
                         }
                         dragCol.current = null;
                       }}
@@ -528,22 +567,23 @@ export default function SistemaClient() {
                             data-card-id={card.id}
                             draggable
                             onDragStart={(e) => {
-                              dragCard.current = { id: card.id };
+                              dragCard.current = { id: card.id, fromColId: col.id };
                               setDraggingCardId(card.id);
                               e.dataTransfer.effectAllowed = "move";
                             }}
-                            onDragEnd={() => {
-                              setDraggingCardId(null);
-                              dragCard.current = null;
+                            onDragEnd={() => finalizarDrop()}
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              const dc = dragCard.current;
+                              if (!dc || dc.id === card.id) return;
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const before = e.clientY < rect.top + rect.height / 2;
+                              const idx = col.tarjetas.findIndex((c) => c.id === card.id);
+                              moverTarjetaLocal(dc.id, col.id, before ? idx : idx + 1);
                             }}
-                            onDragOver={(e) => e.preventDefault()}
                             onDrop={(e) => {
                               e.stopPropagation();
-                              if (dragCard.current && dragCard.current.id !== card.id) {
-                                const idx = col.tarjetas.findIndex((c) => c.id === card.id);
-                                moverTarjeta(dragCard.current.id, col.id, idx);
-                              }
-                              dragCard.current = null;
+                              finalizarDrop();
                             }}
                             onClick={() =>
                               setModalTarjeta({
