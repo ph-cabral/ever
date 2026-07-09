@@ -14,15 +14,12 @@ export async function PATCH(
     }
 
     const body = await req.json();
-    const { campos, columnaId, orden, vinculadoTableroId } = body;
+    const { campos, columnaId, orden } = body;
 
     const data: Record<string, unknown> = {};
     if (campos !== undefined) data.campos = campos;
     if (columnaId !== undefined) data.columnaId = Number(columnaId);
     if (orden !== undefined) data.orden = Number(orden);
-    if (vinculadoTableroId !== undefined)
-      data.vinculadoTableroId =
-        vinculadoTableroId === null ? null : Number(vinculadoTableroId);
 
     const tarjeta = await prisma.sistema_tarjeta.update({
       where: { id: tarjetaId },

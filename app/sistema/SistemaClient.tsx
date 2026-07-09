@@ -24,7 +24,6 @@ type Tarjeta = {
   id: number;
   columnaId: number;
   tableroId: number;
-  vinculadoTableroId: number | null;
   orden: number;
   campos: Campos;
 };
@@ -187,10 +186,6 @@ export default function SistemaClient() {
 
   const tablero = useMemo(() => tableros.find((t) => t.clave === tab), [tableros, tab]);
 
-  // mapa id->nombre de tablero (para badges)
-  const nombreTab = (id: number | null) =>
-    id == null ? "" : tableros.find((t) => t.id === id)?.nombre ?? "—";
-
   // ---------- tableros ----------
   const crearTablero = async () => {
     const nombre = window.prompt("Nombre del nuevo tablero (empresa/área):");
@@ -321,8 +316,6 @@ export default function SistemaClient() {
       apiJson("/api/sistema/tarjetas/reorder", {
         method: "PATCH",
         body: JSON.stringify({ cambios }),
-        // recargar al terminar: si la tarjeta está vinculada, el otro tablero
-        // muestra la misma fila y debe reflejar el movimiento.
       })
         .then(() => cargar())
         .catch(() => cargar());
@@ -336,14 +329,13 @@ export default function SistemaClient() {
     cargar();
   };
 
-  const guardarTarjeta = async (campos: Campos, vinculadoTableroId: number | null) => {
+  const guardarTarjeta = async (campos: Campos) => {
     if (!modalTarjeta) return;
     if (modalTarjeta.tarjeta) {
       await apiJson(`/api/sistema/tarjetas/${modalTarjeta.tarjeta.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           campos: { ...campos, fecha: new Date().toISOString() },
-          vinculadoTableroId,
         }),
       });
     } else {
@@ -352,7 +344,6 @@ export default function SistemaClient() {
         body: JSON.stringify({
           columnaId: modalTarjeta.columnaId,
           tableroId: modalTarjeta.tableroId,
-          vinculadoTableroId,
           campos: { ...campos, fecha: new Date().toISOString() },
         }),
       });
@@ -531,12 +522,6 @@ export default function SistemaClient() {
                       {col.tarjetas.map((card) => {
                         const txt = String(card.campos[titleKey] || "(sin descripción)");
                         const [first, ...rest] = txt.split("\n");
-                        const partnerId =
-                          card.vinculadoTableroId == null
-                            ? null
-                            : card.tableroId === tablero.id
-                              ? card.vinculadoTableroId
-                              : card.tableroId;
                         return (
                           <div
                             key={card.id}
@@ -574,11 +559,6 @@ export default function SistemaClient() {
                                 : "border-zinc-800 hover:border-zinc-600"
                             }`}
                           >
-                            {partnerId != null && (
-                              <span className="inline-block mb-1 text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-500/30">
-                                ⇄ {nombreTab(partnerId)}
-                              </span>
-                            )}
                             <p className="text-sm text-zinc-100 whitespace-pre-line">{first}</p>
                             {rest.length > 0 && (
                               <div
@@ -646,7 +626,6 @@ export default function SistemaClient() {
 
 function ModalTarjeta({
   modal,
-  tableros,
   onClose,
   onSave,
   onDelete,
@@ -654,14 +633,11 @@ function ModalTarjeta({
   modal: { tarjeta: Tarjeta | null; columnaId: number; clave: string; tableroId: number };
   tableros: Tablero[];
   onClose: () => void;
-  onSave: (campos: Campos, vinculadoTableroId: number | null) => void;
+  onSave: (campos: Campos) => void;
   onDelete?: () => void;
 }) {
   const schema = schemaFor(modal.clave);
   const [campos, setCampos] = useState<Campos>(modal.tarjeta?.campos ?? {});
-  const [vinc, setVinc] = useState<string>(
-    modal.tarjeta?.vinculadoTableroId != null ? String(modal.tarjeta.vinculadoTableroId) : ""
-  );
   // Opciones dinámicas de los selects "extensibles" (categoría, ubicación), por campo.
   const [opcionesExtra, setOpcionesExtra] = useState<Record<string, string[]>>({});
 
@@ -687,8 +663,6 @@ function ModalTarjeta({
     setCampos((c) => ({ ...c, [campo]: v }));
   };
 
-  const otros = tableros.filter((t) => t.id !== modal.tableroId);
-
   return (
     <div
       className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
@@ -706,26 +680,6 @@ function ModalTarjeta({
           <p className="text-xs text-zinc-500 mb-1">
             Fecha: {campos.fecha ? new Date(campos.fecha).toLocaleString() : "—"}
           </p>
-
-          <div>
-            <label className="text-xs text-zinc-500 mb-1 block">Vincular con tablero</label>
-            <select
-              className="w-full bg-[#0d0d0d] border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100"
-              value={vinc}
-              onChange={(e) => setVinc(e.target.value)}
-            >
-              <option value="">— ninguno —</option>
-              {otros.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.nombre}
-                </option>
-              ))}
-            </select>
-            <p className="text-[11px] text-zinc-600 mt-1">
-              Si la vinculás, la tarjeta aparece también en ese tablero y se mueve a la par. La
-              métrica cuenta para el tablero vinculado (orquestado por éste).
-            </p>
-          </div>
 
           {schema.fields.map((f) => {
             if (f.auto) return null;
@@ -799,7 +753,7 @@ function ModalTarjeta({
             <Button variant="outline" size="sm" onClick={onClose}>
               Cancelar
             </Button>
-            <Button size="sm" onClick={() => onSave(campos, vinc === "" ? null : Number(vinc))}>
+            <Button size="sm" onClick={() => onSave(campos)}>
               Guardar
             </Button>
           </div>
@@ -832,27 +786,17 @@ function ChartBox({ title, children }: { title: string; children: React.ReactNod
 type CardM = Tarjeta & { colNombre: string };
 
 function Metricas({ tableros }: { tableros: Tablero[] }) {
-  // aplanar todas las tarjetas con su columna; deduplicar por id (una vinculada
-  // vive en 2 tableros, pero es la misma fila → contar una sola vez).
+  // aplanar todas las tarjetas con su columna; deduplicar por id.
   const all: CardM[] = tableros.flatMap((t) =>
     t.columnas.flatMap((c) => c.tarjetas.map((tj) => ({ ...tj, colNombre: c.nombre })))
   );
   const unicas = Array.from(new Map(all.map((tj) => [tj.id, tj])).values());
 
-  const nombreTab = (id: number | null) =>
-    id == null ? "—" : tableros.find((t) => t.id === id)?.nombre ?? "—";
   const idDe = (clave: string) => tableros.find((t) => t.clave === clave)?.id;
-  // a quién le cuenta la tarea: al vinculado si existe, si no a su dueño.
-  const cuentaPara = (tj: CardM) => tj.vinculadoTableroId ?? tj.tableroId;
-  const cardsDe = (id?: number) => (id == null ? [] : unicas.filter((tj) => cuentaPara(tj) === id));
+  const cardsDe = (id?: number) => (id == null ? [] : unicas.filter((tj) => tj.tableroId === id));
 
   const totalCards = unicas.length;
 
-  // ----- Orquestado: tareas con vínculo (las que un tablero llevó por otra empresa) -----
-  const orquestadas = unicas.filter((tj) => tj.vinculadoTableroId != null);
-  const orquestadoPorEmpresa = countBy(orquestadas, (tj) => nombreTab(tj.vinculadoTableroId));
-
-  // casos por empresa (conteo correcto: lo vinculado suma a la empresa vinculada)
   const porEmpresa = tableros.map((t) => ({ name: t.nombre, value: cardsDe(t.id).length }));
 
   // ----- métricas específicas existentes (si los tableros existen) -----
@@ -889,7 +833,6 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
     <div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <Kpi value={totalCards} label="Casos totales registrados" />
-        <Kpi value={orquestadas.length} label="Orquestado por Sistema (vinculadas)" />
         <Kpi value={`${pctSolved}%`} label="Softech resuelto" />
         <Kpi value={avgDays} label="Softech: días promedio de resolución" />
         <Kpi
@@ -911,20 +854,6 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
             <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }} />
             <Bar dataKey="value">
               {porEmpresa.map((_, i) => (
-                <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ChartBox>
-
-        <ChartBox title="Orquestado — empresas (por separado)">
-          <BarChart data={orquestadoPorEmpresa}>
-            <CartesianGrid stroke="#27272a" />
-            <XAxis dataKey="name" stroke="#9aa1b1" fontSize={12} />
-            <YAxis stroke="#9aa1b1" fontSize={12} allowDecimals={false} />
-            <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }} />
-            <Bar dataKey="value">
-              {orquestadoPorEmpresa.map((_, i) => (
                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
               ))}
             </Bar>

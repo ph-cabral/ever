@@ -19,10 +19,8 @@ export async function GET() {
         ocultas.filter((o) => o.tableroId === t.id).map((o) => o.columnaId),
       );
       const visibles = columnas.filter((c) => !hidden.has(c.id));
-      // tarjetas que pertenecen a este tablero: propias o vinculadas hacia él
-      const propias = tarjetas.filter(
-        (tj) => tj.tableroId === t.id || tj.vinculadoTableroId === t.id,
-      );
+      // tarjetas que pertenecen a este tablero
+      const propias = tarjetas.filter((tj) => tj.tableroId === t.id);
       return {
         ...t,
         columnasGlobales: columnas, // para el config de visibilidad

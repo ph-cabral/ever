@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-   const { columnaId, campos, tableroId, vinculadoTableroId } = body;
+   const { columnaId, campos, tableroId } = body;
    if (!columnaId || !tableroId)
      return NextResponse.json(
        { error: "Falta columnaId/tableroId" },
@@ -22,7 +22,6 @@ const tarjeta = await prisma.sistema_tarjeta.create({
   data: {
     columnaId: Number(columnaId),
     tableroId: Number(tableroId),
-    vinculadoTableroId: vinculadoTableroId ? Number(vinculadoTableroId) : null,
     orden,
     campos: campos ?? {},
   },
