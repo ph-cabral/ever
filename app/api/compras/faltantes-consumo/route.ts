@@ -44,6 +44,8 @@ interface FaltRow {
   Importe: number;
   Linea: string | number | null;
   Proveedor: string | null;
+  Cliente: string | number | null;
+  ClienteNombre: string | null;
   Fecha: string | null; // snapshot más nuevo del renglón en el rango
   PrimerDia: string | null; // primera aparición en el rango
   Vivo?: number; // 1 = sigue pendiente; 0 = histórico ya entregado/cubierto
@@ -63,6 +65,7 @@ interface Bucket {
   Nombre: string;
   Linea: string | number | null;
   Proveedor: string | null;
+  clientes: Map<string, { nombre: string | null; cant: number }>;
   fecha: string; // PrimerDia (día del faltante)
   vivo: boolean; // false = histórico ya entregado/cubierto
   faltan: number; // acumulado (ver punto 4 más abajo), no solo lo nuevo del día
@@ -303,6 +306,7 @@ export async function GET(req: NextRequest) {
         Nombre: it.Nombre,
         Linea: it.Linea ?? null,
         Proveedor: it.Proveedor,
+        clientes: new Map(),
         fecha: dia,
         vivo,
         faltan: 0,
@@ -328,6 +332,12 @@ export async function GET(req: NextRequest) {
     b.importe += it.Importe || 0;
     b.renglones += 1;
     b.pedidos.add(it.NroPedOrigen);
+    const codCli = it.Cliente != null && it.Cliente !== "" ? String(it.Cliente) : null;
+    if (codCli) {
+      const prevCli = b.clientes.get(codCli);
+      if (prevCli) prevCli.cant += it.CantPend || 0;
+      else b.clientes.set(codCli, { nombre: it.ClienteNombre ?? null, cant: it.CantPend || 0 });
+    }
     const arribo = arriboPorRenglon.get(keyLine(it.NroPedOrigen, it.NroRengOrigen));
     if (arribo) {
       b.renglonesConArribo += 1;
@@ -489,6 +499,7 @@ export async function GET(req: NextRequest) {
         Nombre: b.Nombre,
         Linea: b.Linea,
         Proveedor: b.Proveedor,
+        clientes: Array.from(b.clientes, ([cod, v]) => ({ cod, nombre: v.nombre, cant: r2(v.cant) })),
         fecha: b.fecha,
         vivo: b.vivo,
         faltan: r2(b.faltan), // acumulado hasta este día (ver punto 4)

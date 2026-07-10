@@ -32,3 +32,11 @@ ALTER TABLE preparado.faltante_control
 ALTER TABLE preparado.faltante_control
   ADD COLUMN IF NOT EXISTS "irrelevante" BOOLEAN,
   ADD COLUMN IF NOT EXISTS "irrelevanteAt" TIMESTAMPTZ;
+
+-- duplicado: descarte de VENTAS en /ventas/faltantes ("Tabla 1", botón
+-- "Duplicado") — el renglón existe porque la factura se duplicó, no es un
+-- faltante real. Igual patrón que irrelevante: NULL = no aplica, true = sale
+-- de la tabla y no vuelve a entrar. Aplicar a mano en Postgres.
+ALTER TABLE preparado.faltante_control
+  ADD COLUMN IF NOT EXISTS "duplicado" BOOLEAN,
+  ADD COLUMN IF NOT EXISTS "duplicadoAt" TIMESTAMPTZ;

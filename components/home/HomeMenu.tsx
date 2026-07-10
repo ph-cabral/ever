@@ -28,12 +28,15 @@ export function HomeMenu({ modules }: { modules: MenuNode[] }) {
   const center = path[path.length - 1] ?? null;
 
   function activate(node: MenuNode) {
-    const t = collapse(node);
+    // El colapso de cadenas de 1 hijo sólo aplica al entrar desde la grilla de
+    // módulos (path vacío). Dentro del árbol, cada nodo se muestra aunque
+    // tenga un solo hijo (ej: Faltantes → Duplicadas orbitando).
+    const t = path.length === 0 ? collapse(node) : node;
     if (t.children.length === 0) {
       router.push(t.href); // hoja: navega directo
       return;
     }
-    setPath((p) => [...p, t]); // tiene ≥2 hijos: se vuelve el centro
+    setPath((p) => [...p, t]); // tiene ≥1 hijo: se vuelve el centro
   }
 
   function back() {

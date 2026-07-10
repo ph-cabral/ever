@@ -98,6 +98,7 @@ def fetch_remitos_ingreso(desde=None):
     LEFT  JOIN EVERWEAR.dbo.Com_Proveedores    pr  ON pr.CodProveed   = cab.CodProveed
     WHERE cab.NroOrdCompra <> 0
       AND cab.FecComprobante >= {corte_dias}
+      AND LTRIM(RTRIM(cab.Estado)) <> 'Anulado'
     """
 
     conn = get_connection("EVERWEAR")

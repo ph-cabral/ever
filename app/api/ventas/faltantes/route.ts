@@ -98,6 +98,7 @@ export async function GET() {
           clienteQuiere: boolean | null;
           vendido: boolean | null;
           irrelevante: boolean | null;
+          duplicado: boolean | null;
         }[]
       >`
         SELECT DISTINCT ON ("nroPedOrigen", "nroRengOrigen")
@@ -105,7 +106,8 @@ export async function GET() {
                to_char("fechaArribo", 'YYYY-MM-DD') AS "fechaArribo",
                "clienteQuiere",
                "vendido",
-               "irrelevante"
+               "irrelevante",
+               "duplicado"
         FROM preparado.faltante_control
         ORDER BY "nroPedOrigen", "nroRengOrigen", "updatedAt" DESC
       `,
@@ -161,6 +163,7 @@ export async function GET() {
         clienteQuiere: boolean | null;
         vendido: boolean | null;
         irrelevante: boolean | null;
+        duplicado: boolean | null;
       }
     >();
     for (const r of ctrlRows)
@@ -169,6 +172,7 @@ export async function GET() {
         clienteQuiere: r.clienteQuiere,
         vendido: r.vendido,
         irrelevante: r.irrelevante,
+        duplicado: r.duplicado,
       });
 
     // Arribo automático por OC: artículo → FechaEntrega de la OC pendiente,
@@ -212,6 +216,11 @@ export async function GET() {
       // a entrar aunque clienteQuiere siga en null.
       .filter(
         (r) => !ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`)?.irrelevante,
+      )
+      // duplicado: factura duplicada (botón "Duplicado"), descarte definitivo
+      // igual que irrelevante — no vuelve a entrar.
+      .filter(
+        (r) => !ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`)?.duplicado,
       )
       .map((r) => {
         const c = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);
@@ -265,6 +274,11 @@ export async function GET() {
       .filter((r) => con.has(`${r.NroPedOrigen}-${r.NroRengOrigen}`))
       .filter(
         (r) => !ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`)?.irrelevante,
+      )
+      // duplicado: factura duplicada (botón "Duplicado"), descarte definitivo
+      // igual que irrelevante — no vuelve a entrar.
+      .filter(
+        (r) => !ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`)?.duplicado,
       )
       .map((r) => {
         const c = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);

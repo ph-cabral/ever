@@ -50,6 +50,7 @@ interface Row {
   Nombre: string;
   Linea: string | number | null;
   Proveedor: string | null;
+  clientes: { cod: string; nombre: string | null; cant: number }[];
   fecha: string; // día del faltante (primera aparición)
   vivo: boolean; // false = histórico ya entregado/cubierto
   faltan: number; // acumulado hasta este día (no se resetea día a día)
@@ -144,6 +145,7 @@ function Tabla({
             <th className="px-3 py-2 font-medium"></th>
             <th className="px-3 py-2 font-medium">Cód.</th>
             <th className="px-3 py-2 font-medium">Artículo</th>
+            <th className="px-3 py-2 font-medium">Línea</th>
             <th className="px-3 py-2 font-medium">Día</th>
             <th className="px-3 py-2 font-medium text-right">Faltan</th>
             <th className="px-3 py-2 font-medium text-right">Stock</th>
@@ -151,6 +153,7 @@ function Tabla({
             <th className="px-3 py-2 font-medium text-right">Falta OC</th>
             <th className="px-3 py-2 font-medium">Despacho</th>
             <th className="px-3 py-2 font-medium">Proveedor</th>
+            <th className="px-3 py-2 font-medium">Cliente</th>
             <th className="px-3 py-2 font-medium text-right">Importe</th>
             <th className="px-3 py-2 font-medium">Arribo</th>
             <th className="px-3 py-2 font-medium"></th>
@@ -193,6 +196,7 @@ function Tabla({
                     )}
                   </span>
                 </td>
+                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{r.Linea ?? "—"}</td>
                 <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">
                   {fmtAr(r.fecha)}
                   {r.pedidos > 1 && (
@@ -251,6 +255,23 @@ function Tabla({
                       : "—"}
                 </td>
                 <td className="px-3 py-2 text-zinc-400">{r.Proveedor || "—"}</td>
+                <td className="px-3 py-2 text-zinc-400">
+                  <div className="flex flex-col gap-0.5">
+                    {r.clientes.length ? (
+                      r.clientes.map((c) => (
+                        <span key={c.cod} className="text-xs whitespace-nowrap">
+                          {c.cod}
+                          {c.nombre ? ` — ${c.nombre}` : ""}
+                          {r.clientes.length > 1 && (
+                            <span className="text-zinc-600"> ({fmtNum(c.cant)})</span>
+                          )}
+                        </span>
+                      ))
+                    ) : (
+                      "—"
+                    )}
+                  </div>
+                </td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
                   ${fmtNum(r.importe)}
                 </td>
@@ -336,11 +357,13 @@ function TablaExtraordinarios({
           <tr className="text-left">
             <th className="px-3 py-2 font-medium">Cód.</th>
             <th className="px-3 py-2 font-medium">Artículo</th>
+            <th className="px-3 py-2 font-medium">Línea</th>
             <th className="px-3 py-2 font-medium">Día</th>
             <th className="px-3 py-2 font-medium text-right">Faltan</th>
             <th className="px-3 py-2 font-medium text-right">Stock</th>
             <th className="px-3 py-2 font-medium text-right">Falta OC</th>
             <th className="px-3 py-2 font-medium">Proveedor</th>
+            <th className="px-3 py-2 font-medium">Cliente</th>
             <th className="px-3 py-2 font-medium text-right">Importe</th>
             <th className="px-3 py-2 font-medium text-center">Extraordinario</th>
             <th className="px-3 py-2 font-medium text-center">Comprar</th>
@@ -358,6 +381,7 @@ function TablaExtraordinarios({
               >
                 <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{r.CodArticulo}</td>
                 <td className="px-3 py-2 text-zinc-100">{r.Nombre}</td>
+                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{r.Linea ?? "—"}</td>
                 <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">{fmtAr(r.fecha)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-100">{fmtNum(r.faltan)}</td>
                 <td
@@ -371,6 +395,23 @@ function TablaExtraordinarios({
                   {r.descubierto > 0 ? fmtNum(r.descubierto) : "—"}
                 </td>
                 <td className="px-3 py-2 text-zinc-400">{r.Proveedor || "—"}</td>
+                <td className="px-3 py-2 text-zinc-400">
+                  <div className="flex flex-col gap-0.5">
+                    {r.clientes.length ? (
+                      r.clientes.map((c) => (
+                        <span key={c.cod} className="text-xs whitespace-nowrap">
+                          {c.cod}
+                          {c.nombre ? ` — ${c.nombre}` : ""}
+                          {r.clientes.length > 1 && (
+                            <span className="text-zinc-600"> ({fmtNum(c.cant)})</span>
+                          )}
+                        </span>
+                      ))
+                    ) : (
+                      "—"
+                    )}
+                  </div>
+                </td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-300">${fmtNum(r.importe)}</td>
                 <td className="px-3 py-2 text-center">
                   <button

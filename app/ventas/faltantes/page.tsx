@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck,
-  Check, X, RotateCw, Download, Trash2,
+  Check, X, RotateCw, Download, Trash2, Copy,
 } from "lucide-react";
 import { exportarFaltantesVentas } from "@/lib/ventas/exportFaltantes";
 
@@ -369,8 +369,43 @@ export default function VentasFaltantesPage() {
     [fecha, load, withExit],
   );
 
+  // Botón "Duplicado" (Tabla 1, ambas secciones): la factura se duplicó, este
+  // renglón no es un faltante real. Guarda duplicado=true y retira la fila,
+  // sin pasar por clienteQuiere (mismo patrón que marcarIrrelevante).
+  const marcarDuplicado = useCallback(
+    (it: Item) => {
+      withExit([keyOf(it)], "left", () => {
+        setItems((rs) => rs.filter((r) => keyOf(r) !== keyOf(it)));
+        fetch("/api/deposito/faltantes/control", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fecha,
+            nroPedOrigen: it.NroPedOrigen,
+            nroRengOrigen: it.NroRengOrigen,
+            codArticulo: it.CodArticulo,
+            fechaArribo: it.fechaArribo === "EN_STOCK" ? null : it.fechaArribo,
+            clienteQuiere: null,
+            duplicado: true,
+          }),
+        })
+          .then((r) => {
+            if (!r.ok) throw new Error();
+          })
+          .catch(() => {
+            setError("No se pudo marcar como duplicado");
+            load();
+          });
+      });
+    },
+    [fecha, load, withExit],
+  );
+
   const extraordinarios = useMemo(() => items.filter((it) => it.extraordinario), [items]);
-  const normales = useMemo(() => items.filter((it) => !it.extraordinario), [items]);
+  const normales = useMemo(
+    () => items.filter((it) => !it.extraordinario && it.fechaArribo !== "EN_STOCK"),
+    [items],
+  );
   const gruposExtra = useMemo(() => agrupar(extraordinarios), [extraordinarios]);
   const gruposNormales = useMemo(() => agrupar(normales), [normales]);
   const gruposListos = useMemo(() => agruparListos(listos), [listos]);
@@ -481,7 +516,15 @@ export default function VentasFaltantesPage() {
             {!flipped && gruposExtra.length > 0 && (
               <section className="flex flex-col gap-3">
                 {gruposExtra.map((g) => (
-                  <GrupoCard key={g.key} g={g} extra onDecidir={decidir} leaving={leaving} />
+                  <GrupoCard
+                    key={g.key}
+                    g={g}
+                    extra
+                    onDecidir={decidir}
+                    onIrrelevante={marcarIrrelevante}
+                    onDuplicado={marcarDuplicado}
+                    leaving={leaving}
+                  />
                 ))}
               </section>
             )}
@@ -489,7 +532,14 @@ export default function VentasFaltantesPage() {
             {!flipped && gruposNormales.length > 0 && (
               <section className="flex flex-col gap-3">
                 {gruposNormales.map((g) => (
-                  <GrupoCard key={g.key} g={g} onDecidir={decidir} leaving={leaving} />
+                  <GrupoCard
+                    key={g.key}
+                    g={g}
+                    onDecidir={decidir}
+                    onIrrelevante={marcarIrrelevante}
+                    onDuplicado={marcarDuplicado}
+                    leaving={leaving}
+                  />
                 ))}
               </section>
             )}
@@ -527,13 +577,14 @@ export default function VentasFaltantesPage() {
 }
 
 function GrupoCard({
-  g, extra, vendidoMode, onDecidir, onIrrelevante, leaving = {},
+  g, extra, vendidoMode, onDecidir, onIrrelevante, onDuplicado, leaving = {},
 }: {
   g: Grupo;
   extra?: boolean;
   vendidoMode?: boolean;
   onDecidir: (it: Item, quiere: boolean) => void;
   onIrrelevante?: (it: Item) => void;
+  onDuplicado?: (it: Item) => void;
   leaving?: Record<string, "left" | "right">;
 }) {
   return (
@@ -620,6 +671,16 @@ function GrupoCard({
                         className="btn-anim p-1.5 rounded-md border border-zinc-700 text-violet-600 hover:bg-violet-800/25 hover:text-violet-500 disabled:opacity-40"
                       >
                         <Trash2 size={15} />
+                      </button>
+                    )}
+                    {onDuplicado && (
+                      <button
+                        onClick={() => onDuplicado(it)}
+                        disabled={!!dir}
+                        title="Duplicado — factura duplicada, ignorar"
+                        className="btn-anim p-1.5 rounded-md border border-zinc-700 text-amber-600 hover:bg-amber-800/25 hover:text-amber-500 disabled:opacity-40"
+                      >
+                        <Copy size={15} />
                       </button>
                     )}
                   </div>
