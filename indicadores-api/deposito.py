@@ -23,11 +23,14 @@ from db import get_connection
 # columnas reales de OT) y, si hace falta, cambiar SOLO esta constante.
 OT_COL_PEDIDO = "OTNroMovVenta"
 
-# Un pedido/factura "descartado" se reconoce por la DESCRIPCIÓN de su estado en
-# MAGNUS_SITD.dbo.Pedido_Estados (Ped_EstadoDescripcion). Se excluye todo pedido
-# cuya descripción contenga alguno de estos patrones (case-insensitive, LIKE %x%).
-# El diagnóstico lista los estados presentes con su conteo para ajustar esto.
-PATRONES_DESCARTADO: tuple[str, ...] = ("DESCART", "ANULAD")
+# Solo cuentan como faltante los pedidos ya Cerrados o Facturados en Magnus
+# (MAGNUS_SITD.dbo.Pedido_Estados.Ped_EstadoDescripcion). Whitelist en vez de
+# blacklist: todo lo que no sea Cerrado/Facturado (Abierto, Cancelado, etc.)
+# queda afuera. Confirmado 2026-07-10 por conteo real: los 4 estados presentes
+# son Facturados/Abiertos/Cancelados/Cerrados. PATRONES_CANCELADO es un resguardo
+# extra por si algún estado nuevo matchea el whitelist sin ser válido de verdad.
+ESTADOS_VALIDOS: tuple[str, ...] = ("CERRADO", "FACTURADO")
+PATRONES_CANCELADO: tuple[str, ...] = ("CANCEL",)
 
 # Existencia física por ubicación = base WMS, dbo.UbicacionDetalle
 # (artículo + ubicación + cantidad). Ubicacion# de Magnus NO trae cantidad.
@@ -574,10 +577,10 @@ def fetch_faltantes_fechas():
 # PEDIDA del OTItem (confirmar nombre con el diagnóstico) y comparar contra
 # CantCumplida.
 #
-# La exclusión de "facturas descartadas" se hace por el ESTADO del pedido en
-# Magnus: se trae OT.{OT_COL_PEDIDO} = NroMovVenta, se cruza con
-# VenFer_PedidoCabecera/Pedido_Estados (conexión EVERWEAR, como el resto) y se
-# descarta todo pedido cuyo estado matchee PATRONES_DESCARTADO.
+# El filtro por ESTADO del pedido en Magnus se hace vía whitelist: se trae
+# OT.{OT_COL_PEDIDO} = NroMovVenta, se cruza con VenFer_PedidoCabecera/
+# Pedido_Estados (conexión EVERWEAR, como el resto) y solo quedan los pedidos
+# cuyo estado matchee ESTADOS_VALIDOS (Cerrado/Facturado).
 SQL_FALTANTES_OT = """
 WITH it AS (
     SELECT OTId,
@@ -645,9 +648,11 @@ def _rango_ot(desde, hasta):
     return d, h
 
 
-def _es_descartado(estado_desc) -> bool:
+def _es_valido(estado_desc) -> bool:
     s = str(estado_desc or "").upper()
-    return any(p in s for p in PATRONES_DESCARTADO)
+    if any(p in s for p in PATRONES_CANCELADO):
+        return False
+    return any(p in s for p in ESTADOS_VALIDOS)
 
 
 def _info_pedidos(pedidos):
@@ -712,7 +717,7 @@ def fetch_faltantes_ot(desde=None, hasta=None):
         nro = int(o["NroMovVenta"]) if o.get("NroMovVenta") is not None else None
         meta = info.get(nro, {})
         estado = meta.get("Estado")
-        if _es_descartado(estado):
+        if not _es_valido(estado):
             excluidas += 1
             continue
         rows.append({
@@ -851,7 +856,7 @@ def fetch_ot_diferencias(desde=None, hasta=None):
     for f in filas:
         nro = int(f["NroMovVenta"]) if f.get("NroMovVenta") is not None else None
         meta = info.get(nro, {})
-        if _es_descartado(meta.get("Estado")):
+        if not _es_valido(meta.get("Estado")):
             excluidas_ot.add(_int(f.get("OTId")))
             continue
         pedida = float(_safe(f.get("CantPedida")) or 0)
@@ -878,7 +883,7 @@ def fetch_ot_diferencias(desde=None, hasta=None):
 
 
 # Diagnóstico: confirmar el nombre real de la columna pedido en OT y qué estados
-# de Magnus aparecen (para ajustar OT_COL_PEDIDO y PATRONES_DESCARTADO).
+# de Magnus aparecen (para ajustar OT_COL_PEDIDO y ESTADOS_VALIDOS).
 SQL_COLS_TABLA = """
 SELECT COLUMN_NAME, DATA_TYPE
 FROM INFORMATION_SCHEMA.COLUMNS
@@ -891,7 +896,8 @@ def fetch_faltantes_ot_diag():
     """Lista columnas de OT y OTItem (WMS) y, si se puede, los estados de pedido
     presentes en el último día de armado (EVERWEAR). Para confirmar el mapeo."""
     out: dict = {"ot_col_pedido_actual": OT_COL_PEDIDO,
-                 "patrones_descartado": list(PATRONES_DESCARTADO)}
+                 "estados_validos": list(ESTADOS_VALIDOS),
+                 "patrones_cancelado": list(PATRONES_CANCELADO)}
     conn = get_connection("WMS")
     try:
         cur = conn.cursor()
@@ -1355,7 +1361,7 @@ def fetch_resumen_ot(desde=None, hasta=None):
     for o in ots:
         nro = int(o["NroMovVenta"]) if o["NroMovVenta"] is not None else None
         meta = info.get(nro, {})
-        if _es_descartado(meta.get("Estado")) or meta.get("CompCodigo") in COMP_CODIGOS_EXCLUIDOS_RESUMEN:
+        if not _es_valido(meta.get("Estado")) or meta.get("CompCodigo") in COMP_CODIGOS_EXCLUIDOS_RESUMEN:
             ot_descartadas += 1
             continue
         ot_total += 1

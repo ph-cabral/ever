@@ -646,11 +646,29 @@ export default function ComprasFaltantesPage() {
     [rows],
   );
 
-  const conteo = useMemo(() => {
-    const c = { todos: frontRows.length, completo: 0, incompleto: 0, sin_orden: 0, entregado: 0 };
-    for (const r of frontRows) c[r.estado]++;
-    return c as Record<Filtro, number>;
+  // 1 fila por artículo: las filas "vivo" son buckets día a día del MISMO
+  // acumulado (faltan/cubierto/descubierto ya vienen sumados) — se colapsan a
+  // la más reciente por CodArticulo. Las "entregado" (histórico) son hechos
+  // aparte, no acumulan entre sí, así que esas se muestran todas.
+  const porArticulo = useMemo(() => {
+    const ultimaVivaPorArt = new Map<string, Row>();
+    const historicas: Row[] = [];
+    for (const r of frontRows) {
+      if (r.vivo) {
+        const prev = ultimaVivaPorArt.get(r.CodArticulo);
+        if (!prev || r.fecha > prev.fecha) ultimaVivaPorArt.set(r.CodArticulo, r);
+      } else {
+        historicas.push(r);
+      }
+    }
+    return [...historicas, ...ultimaVivaPorArt.values()];
   }, [frontRows]);
+
+  const conteo = useMemo(() => {
+    const c = { todos: porArticulo.length, completo: 0, incompleto: 0, sin_orden: 0, entregado: 0 };
+    for (const r of porArticulo) c[r.estado]++;
+    return c as Record<Filtro, number>;
+  }, [porArticulo]);
 
   // Orden jerárquico, SIEMPRE (esté o no activo "Agrupar por proveedor"):
   //   1. Proveedor, por su importe TOTAL desc (mismo criterio que el acordeón).
@@ -662,7 +680,7 @@ export default function ComprasFaltantesPage() {
   // clave, los renglones de un mismo artículo (y de un mismo proveedor) quedan
   // siempre contiguos y el orden por $ no se pierde (se agrupa, no se ignora).
   const visibles = useMemo(() => {
-    const base = filtro === "todos" ? frontRows : frontRows.filter((r) => r.estado === filtro);
+    const base = filtro === "todos" ? porArticulo : porArticulo.filter((r) => r.estado === filtro);
 
     const provImporte = new Map<string, number>();
     const artImporte = new Map<string, number>();
@@ -685,7 +703,7 @@ export default function ComprasFaltantesPage() {
 
       return a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0;
     });
-  }, [frontRows, filtro]);
+  }, [porArticulo, filtro]);
 
   const exportar = useCallback(() => {
     exportarFaltantesCompras(flipped ? backRows : visibles, {

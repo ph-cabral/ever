@@ -283,7 +283,7 @@ def deposito_faltantes_ot(
 @app.get("/deposito/faltantes-ot/diag")
 def deposito_faltantes_ot_diag():
     """Diagnóstico: columnas reales de OT/OTItem (WMS) para confirmar OT_COL_PEDIDO
-    y los estados de pedido presentes (para ajustar PATRONES_DESCARTADO)."""
+    y los estados de pedido presentes (para ajustar ESTADOS_VALIDOS)."""
     try:
         return fetch_faltantes_ot_diag()
     except Exception as e:
