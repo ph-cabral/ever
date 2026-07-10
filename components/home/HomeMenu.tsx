@@ -11,36 +11,57 @@ export interface MenuNode {
   children: MenuNode[];
 }
 
-/** Colapsa cadenas de un solo hijo: si un nodo tiene exactamente 1 hijo, baja. */
+/** Colapsa cadenas de un solo hijo (sólo al entrar desde la grilla de módulos). */
 function collapse(node: MenuNode): MenuNode {
   let n = node;
   while (n.children.length === 1) n = n.children[0];
   return n;
 }
 
-const RADIUS = 168; // distancia de los botones "explotados" al centro
+const RADIUS = 168; // radio del primer anillo (hijos directos del centro)
+const RADIUS_FALLOFF = 0.6; // cada anillo más profundo (nietos, bisnietos...) es más chico
+
+interface Positioned {
+  node: MenuNode;
+  x: number;
+  y: number;
+  depth: number; // 0 = hijo directo del centro, 1 = nieto, ...
+}
+
+/** Ubica TODO el árbol de un nodo en anillos concéntricos, siempre visible (sin drill). */
+function layout(node: MenuNode, cx: number, cy: number, depth: number): Positioned[] {
+  const kids = node.children;
+  const n = kids.length;
+  if (n === 0) return [];
+  const radius = RADIUS * Math.pow(RADIUS_FALLOFF, depth);
+  const out: Positioned[] = [];
+  kids.forEach((c, i) => {
+    const angle = (-90 + (360 / n) * i) * (Math.PI / 180);
+    const x = cx + Math.cos(angle) * radius;
+    const y = cy + Math.sin(angle) * radius;
+    out.push({ node: c, x, y, depth });
+    out.push(...layout(c, x, y, depth + 1)); // hijos de este hijo orbitan alrededor de él
+  });
+  return out;
+}
 
 export function HomeMenu({ modules }: { modules: MenuNode[] }) {
   const router = useRouter();
-  // path = cadena de nodos "activos"; vacío = grilla de módulos.
-  const [path, setPath] = useState<MenuNode[]>([]);
+  // center = módulo activo (árbol de skills completo); null = grilla de módulos.
+  const [center, setCenter] = useState<MenuNode | null>(null);
 
-  const center = path[path.length - 1] ?? null;
-
-  function activate(node: MenuNode) {
-    // El colapso de cadenas de 1 hijo sólo aplica al entrar desde la grilla de
-    // módulos (path vacío). Dentro del árbol, cada nodo se muestra aunque
-    // tenga un solo hijo (ej: Faltantes → Duplicadas orbitando).
-    const t = path.length === 0 ? collapse(node) : node;
+  function enter(node: MenuNode) {
+    // El colapso de cadenas de 1 hijo sólo aplica al entrar desde la grilla.
+    const t = collapse(node);
     if (t.children.length === 0) {
-      router.push(t.href); // hoja: navega directo
+      router.push(t.href); // módulo sin sub-vistas (o cadena de 1 hijo): navega directo
       return;
     }
-    setPath((p) => [...p, t]); // tiene ≥1 hijo: se vuelve el centro
+    setCenter(t);
   }
 
   function back() {
-    setPath((p) => p.slice(0, -1));
+    setCenter(null);
   }
 
   // ---------- Grilla de módulos (nivel base) ----------
@@ -58,7 +79,7 @@ export function HomeMenu({ modules }: { modules: MenuNode[] }) {
         {modules.map((m) => (
           <button
             key={m.href}
-            onClick={() => activate(m)}
+            onClick={() => enter(m)}
             className={`w-56 px-8 py-6 ${m.color ?? "bg-slate-700 hover:bg-slate-600"} text-center text-white text-xl font-semibold rounded-2xl transition-transform hover:scale-105 active:scale-95`}
           >
             {m.label}
@@ -68,14 +89,14 @@ export function HomeMenu({ modules }: { modules: MenuNode[] }) {
     );
   }
 
-  // ---------- Vista drill: centro + hijos "explotando" alrededor ----------
-  const kids = center.children;
-  const n = kids.length;
-  const rootColor = path[0]?.color ?? "bg-slate-700 hover:bg-slate-600";
+  // ---------- Árbol de skills: centro + TODOS los descendientes orbitando ----------
+  const positioned = layout(center, 0, 0, 0);
+  const rootColor = center.color ?? "bg-slate-700 hover:bg-slate-600";
+  const stageHalf = RADIUS + 140; // margen para anillos internos + texto
 
   return (
     <div className="relative w-full flex flex-col items-center">
-      {/* Barra: volver + breadcrumb + cerrar */}
+      {/* Barra: volver + módulo actual + cerrar */}
       <div className="menu-fade-in mb-6 flex w-full max-w-3xl items-center gap-2 px-2">
         <button
           onClick={back}
@@ -83,21 +104,9 @@ export function HomeMenu({ modules }: { modules: MenuNode[] }) {
         >
           <ChevronLeft className="size-4" /> Volver
         </button>
-        <nav className="flex flex-wrap items-center gap-1 text-sm text-white/50">
-          {path.map((p, i) => (
-            <span key={p.href} className="flex items-center gap-1">
-              {i > 0 && <span className="text-white/25">/</span>}
-              <button
-                onClick={() => setPath((prev) => prev.slice(0, i + 1))}
-                className={i === path.length - 1 ? "text-white/90" : "hover:text-white/80"}
-              >
-                {p.label}
-              </button>
-            </span>
-          ))}
-        </nav>
+        <span className="text-sm text-white/90">{center.label}</span>
         <button
-          onClick={() => setPath([])}
+          onClick={back}
           title="Cerrar"
           className="ml-auto rounded-lg p-1.5 text-white/70 hover:bg-white/10 hover:text-white transition-colors"
         >
@@ -105,41 +114,36 @@ export function HomeMenu({ modules }: { modules: MenuNode[] }) {
         </button>
       </div>
 
-      {/* Escenario radial */}
+      {/* Escenario radial: todo el árbol siempre visible, sin cambiar de vista */}
       <div
         className="relative flex items-center justify-center"
-        style={{ width: RADIUS * 2 + 240, height: RADIUS * 2 + 120 }}
+        style={{ width: stageHalf * 2, height: stageHalf * 2 }}
       >
-        {/* Botones hijos: explotan desde el centro */}
-        {kids.map((c, i) => {
-          const angle = (-90 + (360 / n) * i) * (Math.PI / 180);
-          const bx = Math.cos(angle) * RADIUS;
-          const by = Math.sin(angle) * RADIUS;
-          return (
-            // Overlay centra el botón en el centro del escenario; la animación lo "explota" hacia afuera.
-            <div
-              key={c.href}
-              className="pointer-events-none absolute inset-0 flex items-center justify-center"
+        {/* Descendientes: explotan desde el centro, cada anillo más chico según profundidad */}
+        {positioned.map((p, i) => (
+          <div
+            key={p.node.href}
+            className="pointer-events-none absolute inset-0 flex items-center justify-center"
+          >
+            <button
+              onClick={() => router.push(p.node.href)}
+              className={`menu-burst pointer-events-auto rounded-xl bg-white/10 font-medium text-white ring-1 ring-white/15 backdrop-blur hover:bg-white/20 ${
+                p.depth === 0 ? "px-4 py-3 text-sm" : "px-3 py-2 text-xs opacity-90"
+              }`}
+              style={
+                {
+                  "--bx": `${p.x}px`,
+                  "--by": `${p.y}px`,
+                  animationDelay: `${i * 45}ms`,
+                } as CSSProperties
+              }
             >
-              <button
-                onClick={() => activate(c)}
-                className="menu-burst pointer-events-auto rounded-xl bg-white/10 px-4 py-3 text-sm font-medium text-white ring-1 ring-white/15 backdrop-blur hover:bg-white/20"
-                style={
-                  {
-                    "--bx": `${bx}px`,
-                    "--by": `${by}px`,
-                    animationDelay: `${i * 45}ms`,
-                  } as CSSProperties
-                }
-              >
-                {c.label}
-                {c.children.length > 0 && <span className="ml-1 text-white/50">›</span>}
-              </button>
-            </div>
-          );
-        })}
+              {p.node.label}
+            </button>
+          </div>
+        ))}
 
-        {/* Centro: nodo activo (click = entra a su página índice) */}
+        {/* Centro: módulo activo (click = entra a su página índice) */}
         <button
           key={center.href}
           onClick={() => router.push(center.href)}
