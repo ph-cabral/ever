@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck, CalendarRange, Check,
   Layers, ChevronDown, ChevronRight, Flag, RotateCw, ShoppingCart, Undo2, CalendarCheck,
@@ -135,42 +136,44 @@ function ClientesCell({ clientes }: { clientes: Row["clientes"] }) {
       >
         {clientes.length} cliente{clientes.length > 1 ? "s" : ""}
       </button>
-      {open && (
-        <div
-          className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4"
-          onClick={() => setOpen(false)}
-        >
+      {open &&
+        createPortal(
           <div
-            className="bg-[#1A1A1A] border border-zinc-700 rounded-xl max-w-md w-full max-h-[70vh] overflow-y-auto p-4"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4"
+            onClick={() => setOpen(false)}
           >
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-medium text-zinc-200">
-                {clientes.length} cliente{clientes.length > 1 ? "s" : ""}
-              </h3>
-              <button
-                onClick={() => setOpen(false)}
-                className="text-zinc-500 hover:text-zinc-200 p-1"
-              >
-                <X size={16} />
-              </button>
+            <div
+              className="bg-[#1A1A1A] border border-zinc-700 rounded-xl max-w-md w-full max-h-[70vh] overflow-y-auto p-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-zinc-200">
+                  {clientes.length} cliente{clientes.length > 1 ? "s" : ""}
+                </h3>
+                <button
+                  onClick={() => setOpen(false)}
+                  className="text-zinc-500 hover:text-zinc-200 p-1"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <ul className="flex flex-col gap-1.5">
+                {clientes.map((c) => (
+                  <li key={c.cod} className="text-xs text-zinc-300 flex justify-between gap-3">
+                    <span className="truncate">
+                      {c.cod}
+                      {c.nombre ? ` — ${c.nombre}` : ""}
+                    </span>
+                    {clientes.length > 1 && (
+                      <span className="text-zinc-500 shrink-0 tabular-nums">{fmtNum(c.cant)}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </div>
-            <ul className="flex flex-col gap-1.5">
-              {clientes.map((c) => (
-                <li key={c.cod} className="text-xs text-zinc-300 flex justify-between gap-3">
-                  <span className="truncate">
-                    {c.cod}
-                    {c.nombre ? ` — ${c.nombre}` : ""}
-                  </span>
-                  {clientes.length > 1 && (
-                    <span className="text-zinc-500 shrink-0 tabular-nums">{fmtNum(c.cant)}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </>
   );
 }
@@ -192,23 +195,23 @@ function Tabla({
   return (
     <div className="rounded-xl border border-zinc-800 overflow-hidden">
       <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      <table className="w-full min-w-max text-sm">
         <thead className="bg-[#1A1A1A] text-zinc-400">
           <tr className="text-left">
             <th className="px-3 py-2 font-medium"></th>
-            <th className="px-3 py-2 font-medium">Cód.</th>
-            <th className="px-3 py-2 font-medium">Artículo</th>
-            <th className="px-3 py-2 font-medium">Línea</th>
-            <th className="px-3 py-2 font-medium">Día</th>
-            <th className="px-3 py-2 font-medium text-right">Faltan</th>
-            <th className="px-3 py-2 font-medium text-right">Stock</th>
-            <th className="px-3 py-2 font-medium text-right">Cubre OC</th>
-            <th className="px-3 py-2 font-medium text-right">Falta OC</th>
-            <th className="px-3 py-2 font-medium">Despacho</th>
-            <th className="px-3 py-2 font-medium">Proveedor</th>
-            <th className="px-3 py-2 font-medium">Cliente</th>
-            <th className="px-3 py-2 font-medium text-right">Importe</th>
-            <th className="px-3 py-2 font-medium">Arribo</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Cód.</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Artículo</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Línea</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Día</th>
+            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Faltan</th>
+            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Stock</th>
+            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Cubre OC</th>
+            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Falta OC</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Despacho</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Proveedor</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Cliente</th>
+            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Importe</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Arribo</th>
             <th className="px-3 py-2 font-medium"></th>
           </tr>
         </thead>
@@ -239,7 +242,7 @@ function Tabla({
                 <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">
                   {r.CodArticulo}
                 </td>
-                <td className="px-3 py-2 text-zinc-100">
+                <td className="px-3 py-2 text-zinc-100 whitespace-nowrap">
                   <span>
                     {r.Nombre}
                     {nuevoArt && r.ocTotal > 0 && (
@@ -307,11 +310,11 @@ function Tabla({
                         : fmtAr(r.fechaEntrega)
                       : "—"}
                 </td>
-                <td className="px-3 py-2 text-zinc-400">{r.Proveedor || "—"}</td>
-                <td className="px-3 py-2 text-zinc-400">
+                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{r.Proveedor || "—"}</td>
+                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
                   <ClientesCell clientes={r.clientes} />
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                <td className="px-3 py-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
                   ${fmtNum(r.importe)}
                 </td>
                 <td className="px-3 py-2">
@@ -391,21 +394,21 @@ function TablaExtraordinarios({
   }
   return (
     <div className="overflow-x-auto rounded-xl border border-red-900/50">
-      <table className="w-full text-sm">
+      <table className="w-full min-w-max text-sm">
         <thead className="bg-[#1A1A1A] text-zinc-400">
           <tr className="text-left">
-            <th className="px-3 py-2 font-medium">Cód.</th>
-            <th className="px-3 py-2 font-medium">Artículo</th>
-            <th className="px-3 py-2 font-medium">Línea</th>
-            <th className="px-3 py-2 font-medium">Día</th>
-            <th className="px-3 py-2 font-medium text-right">Faltan</th>
-            <th className="px-3 py-2 font-medium text-right">Stock</th>
-            <th className="px-3 py-2 font-medium text-right">Falta OC</th>
-            <th className="px-3 py-2 font-medium">Proveedor</th>
-            <th className="px-3 py-2 font-medium">Cliente</th>
-            <th className="px-3 py-2 font-medium text-right">Importe</th>
-            <th className="px-3 py-2 font-medium text-center">Extraordinario</th>
-            <th className="px-3 py-2 font-medium text-center">Comprar</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Cód.</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Artículo</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Línea</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Día</th>
+            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Faltan</th>
+            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Stock</th>
+            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Falta OC</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Proveedor</th>
+            <th className="px-3 py-2 font-medium whitespace-nowrap">Cliente</th>
+            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Importe</th>
+            <th className="px-3 py-2 font-medium text-center whitespace-nowrap">Extraordinario</th>
+            <th className="px-3 py-2 font-medium text-center whitespace-nowrap">Comprar</th>
           </tr>
         </thead>
         <tbody>
@@ -419,7 +422,7 @@ function TablaExtraordinarios({
                 }`}
               >
                 <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{r.CodArticulo}</td>
-                <td className="px-3 py-2 text-zinc-100">{r.Nombre}</td>
+                <td className="px-3 py-2 text-zinc-100 whitespace-nowrap">{r.Nombre}</td>
                 <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{r.Linea ?? "—"}</td>
                 <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">{fmtAr(r.fecha)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-100">{fmtNum(r.faltan)}</td>
@@ -433,11 +436,11 @@ function TablaExtraordinarios({
                 <td className="px-3 py-2 text-right tabular-nums text-red-300/90">
                   {r.descubierto > 0 ? fmtNum(r.descubierto) : "—"}
                 </td>
-                <td className="px-3 py-2 text-zinc-400">{r.Proveedor || "—"}</td>
-                <td className="px-3 py-2 text-zinc-400">
+                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{r.Proveedor || "—"}</td>
+                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
                   <ClientesCell clientes={r.clientes} />
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-300">${fmtNum(r.importe)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">${fmtNum(r.importe)}</td>
                 <td className="px-3 py-2 text-center">
                   <button
                     onClick={() => onUndo(r)}
@@ -878,7 +881,7 @@ export default function ComprasFaltantesPage() {
         </div>
       </header>
 
-      <main className="max-w-[1200px] mx-auto px-3 md:px-8 py-6">
+      <main className="max-w-[1900px] mx-auto px-3 md:px-8 py-6">
         {/* Selector de rango + filtros por estado */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <div className="flex items-center gap-2 mr-2">
