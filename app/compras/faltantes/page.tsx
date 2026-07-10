@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck, CalendarRange, Check,
   Layers, ChevronDown, ChevronRight, Flag, RotateCw, ShoppingCart, Undo2, CalendarCheck,
-  Download, Trash2,
+  Download, Trash2, X,
 } from "lucide-react";
 import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
 
@@ -121,6 +121,59 @@ const cubiertoCls: Record<Estado, string> = {
   incompleto: "text-amber-400",
   sin_orden: "text-zinc-600",
 };
+
+// Celda "Cliente": en vez de listar nombres (rompía el ancho de la tabla),
+// muestra "n cliente(s)" y abre un modal con el detalle al hacer click.
+function ClientesCell({ clientes }: { clientes: Row["clientes"] }) {
+  const [open, setOpen] = useState(false);
+  if (!clientes.length) return <span className="text-zinc-600">—</span>;
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="text-xs text-zinc-300 hover:text-yellow-400 underline underline-offset-2 decoration-dotted whitespace-nowrap"
+      >
+        {clientes.length} cliente{clientes.length > 1 ? "s" : ""}
+      </button>
+      {open && (
+        <div
+          className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="bg-[#1A1A1A] border border-zinc-700 rounded-xl max-w-md w-full max-h-[70vh] overflow-y-auto p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-zinc-200">
+                {clientes.length} cliente{clientes.length > 1 ? "s" : ""}
+              </h3>
+              <button
+                onClick={() => setOpen(false)}
+                className="text-zinc-500 hover:text-zinc-200 p-1"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <ul className="flex flex-col gap-1.5">
+              {clientes.map((c) => (
+                <li key={c.cod} className="text-xs text-zinc-300 flex justify-between gap-3">
+                  <span className="truncate">
+                    {c.cod}
+                    {c.nombre ? ` — ${c.nombre}` : ""}
+                  </span>
+                  {clientes.length > 1 && (
+                    <span className="text-zinc-500 shrink-0 tabular-nums">{fmtNum(c.cant)}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 // Tabla reutilizable: una sola tabla o el cuerpo de cada acordeón por proveedor.
 function Tabla({
@@ -256,21 +309,7 @@ function Tabla({
                 </td>
                 <td className="px-3 py-2 text-zinc-400">{r.Proveedor || "—"}</td>
                 <td className="px-3 py-2 text-zinc-400">
-                  <div className="flex flex-col gap-0.5">
-                    {r.clientes.length ? (
-                      r.clientes.map((c) => (
-                        <span key={c.cod} className="text-xs whitespace-nowrap">
-                          {c.cod}
-                          {c.nombre ? ` — ${c.nombre}` : ""}
-                          {r.clientes.length > 1 && (
-                            <span className="text-zinc-600"> ({fmtNum(c.cant)})</span>
-                          )}
-                        </span>
-                      ))
-                    ) : (
-                      "—"
-                    )}
-                  </div>
+                  <ClientesCell clientes={r.clientes} />
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
                   ${fmtNum(r.importe)}
@@ -396,21 +435,7 @@ function TablaExtraordinarios({
                 </td>
                 <td className="px-3 py-2 text-zinc-400">{r.Proveedor || "—"}</td>
                 <td className="px-3 py-2 text-zinc-400">
-                  <div className="flex flex-col gap-0.5">
-                    {r.clientes.length ? (
-                      r.clientes.map((c) => (
-                        <span key={c.cod} className="text-xs whitespace-nowrap">
-                          {c.cod}
-                          {c.nombre ? ` — ${c.nombre}` : ""}
-                          {r.clientes.length > 1 && (
-                            <span className="text-zinc-600"> ({fmtNum(c.cant)})</span>
-                          )}
-                        </span>
-                      ))
-                    ) : (
-                      "—"
-                    )}
-                  </div>
+                  <ClientesCell clientes={r.clientes} />
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-300">${fmtNum(r.importe)}</td>
                 <td className="px-3 py-2 text-center">
@@ -989,13 +1014,13 @@ export default function ComprasFaltantesPage() {
         {/* Tarjeta que gira: frente = tabla normal, reverso = extraordinarios */}
         <div className="[perspective:2000px]">
           <div
-            className={`relative grid transition-transform duration-700 ease-in-out [transform-style:preserve-3d] ${
+            className={`relative grid min-w-0 transition-transform duration-700 ease-in-out [transform-style:preserve-3d] ${
               flipped ? "[transform:rotateY(180deg)]" : ""
             }`}
           >
             {/* Frente */}
             <div
-              className={`col-start-1 row-start-1 [backface-visibility:hidden] ${
+              className={`col-start-1 row-start-1 min-w-0 [backface-visibility:hidden] ${
                 flipped ? "pointer-events-none" : ""
               }`}
             >
@@ -1069,7 +1094,7 @@ export default function ComprasFaltantesPage() {
 
             {/* Reverso */}
             <div
-              className={`col-start-1 row-start-1 [backface-visibility:hidden] [transform:rotateY(180deg)] ${
+              className={`col-start-1 row-start-1 min-w-0 [backface-visibility:hidden] [transform:rotateY(180deg)] ${
                 !flipped ? "pointer-events-none" : ""
               }`}
             >
