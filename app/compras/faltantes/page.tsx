@@ -473,97 +473,6 @@ function TablaExtraordinarios({
   );
 }
 
-// Agrupa filas (día a día) por artículo, ordenado por importe TOTAL del
-// artículo desc, y dentro de cada grupo por fecha asc. Pura, sin hooks —
-// la usa AcordeonArticulos ya sea sobre todas las filas o sobre las de un
-// proveedor (cuando "Agrupar por proveedor" está activo).
-function agruparPorArticulo(rows: Row[]) {
-  const m = new Map<string, Row[]>();
-  for (const r of rows) {
-    const arr = m.get(r.CodArticulo);
-    if (arr) arr.push(r);
-    else m.set(r.CodArticulo, [r]);
-  }
-  return [...m.entries()]
-    .map(([cod, rs]) => ({
-      cod,
-      nombre: rs[0]?.Nombre ?? "",
-      rs: [...rs].sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0)),
-      importe: rs.reduce((s, x) => s + x.importe, 0),
-    }))
-    .sort((a, b) => b.importe - a.importe);
-}
-
-// Acordeón por artículo: un card colapsable por CodArticulo (código + nombre +
-// importe total), y adentro la Tabla de siempre con sus días (Faltan/Stock/
-// Arribo/etc. intactos, no se pierde nada, solo se agrupa visualmente).
-// keyPrefix evita choques de key en `cerrados` cuando se anida dentro de un
-// proveedor (agrupar por proveedor → luego por artículo).
-function AcordeonArticulos({
-  data,
-  onMark,
-  onArribo,
-  onDescartar,
-  leaving,
-  cerrados,
-  setCerrados,
-  keyPrefix,
-}: {
-  data: Row[];
-  onMark: (row: Row) => void;
-  onArribo: (row: Row, fechaArribo: string | null) => void;
-  onDescartar: (row: Row) => void;
-  leaving: Record<string, "left" | "right">;
-  cerrados: Record<string, boolean>;
-  setCerrados: (updater: (c: Record<string, boolean>) => Record<string, boolean>) => void;
-  keyPrefix: string;
-}) {
-  const gruposArt = useMemo(() => agruparPorArticulo(data), [data]);
-  return (
-    <div className="flex flex-col gap-2">
-      {gruposArt.map(({ cod, nombre, rs, importe }) => {
-        const key = `${keyPrefix}${cod}`;
-        const abierto = !cerrados[key];
-        return (
-          <div key={key} className="rounded-lg border border-zinc-800/60 overflow-hidden">
-            <button
-              onClick={() => setCerrados((c) => ({ ...c, [key]: abierto }))}
-              className="w-full flex items-center justify-between gap-3 px-4 py-2 bg-[#161616] hover:bg-[#1c1c1c] transition-colors text-left"
-            >
-              <span className="flex items-center gap-2 min-w-0">
-                {abierto ? (
-                  <ChevronDown size={14} className="text-zinc-500 shrink-0" />
-                ) : (
-                  <ChevronRight size={14} className="text-zinc-500 shrink-0" />
-                )}
-                <span className="font-mono text-xs text-zinc-400 shrink-0">{cod}</span>
-                <span className="text-zinc-200 truncate">{nombre}</span>
-                <span className="text-[11px] text-zinc-500 shrink-0">
-                  {rs.length} día{rs.length > 1 ? "s" : ""}
-                </span>
-              </span>
-              <span className="text-sm tabular-nums text-zinc-300 shrink-0">
-                ${fmtNum(importe)}
-              </span>
-            </button>
-            {abierto && (
-              <div className="border-t border-zinc-800/60">
-                <Tabla
-                  data={rs}
-                  onMark={onMark}
-                  onArribo={onArribo}
-                  onDescartar={onDescartar}
-                  leaving={leaving}
-                />
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 export default function ComprasFaltantesPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [fecha, setFecha] = useState<string | null>(null);
@@ -1064,16 +973,13 @@ export default function ComprasFaltantesPage() {
                           </span>
                         </button>
                         {abierto && (
-                          <div className="border-t border-zinc-800 p-2">
-                            <AcordeonArticulos
+                          <div className="border-t border-zinc-800">
+                            <Tabla
                               data={rs}
                               onMark={marcarExtraordinario}
                               onArribo={guardarArribo}
                               onDescartar={descartarFaltante}
                               leaving={leaving}
-                              cerrados={cerrados}
-                              setCerrados={setCerrados}
-                              keyPrefix={`${prov}::`}
                             />
                           </div>
                         )}
@@ -1082,15 +988,12 @@ export default function ComprasFaltantesPage() {
                   })}
                 </div>
               ) : (
-                <AcordeonArticulos
+                <Tabla
                   data={visibles}
                   onMark={marcarExtraordinario}
                   onArribo={guardarArribo}
                   onDescartar={descartarFaltante}
                   leaving={leaving}
-                  cerrados={cerrados}
-                  setCerrados={setCerrados}
-                  keyPrefix=""
                 />
               )}
             </div>
