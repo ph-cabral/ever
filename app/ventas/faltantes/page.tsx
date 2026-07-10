@@ -553,6 +553,7 @@ export default function VentasFaltantesPage() {
                     vendidoMode
                     onDecidir={decidirVendidoTabla1}
                     onIrrelevante={marcarIrrelevante}
+                    onDuplicado={marcarDuplicado}
                     leaving={leaving}
                   />
                 ))}
