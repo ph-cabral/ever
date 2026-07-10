@@ -25,11 +25,26 @@ export async function GET() {
         ...t,
         columnasGlobales: columnas, // para el config de visibilidad
         ocultas: [...hidden],
-        columnas: visibles.map((c) => ({
-          ...c,
-          tableroId: t.id,
-          tarjetas: propias.filter((tj) => tj.columnaId === c.id),
-        })),
+        columnas: visibles.map((c) => {
+          const propiasCol = propias.filter((tj) => tj.columnaId === c.id);
+          const esResuelto = c.nombre.trim().toLowerCase() === "resuelto";
+          const tarjetasCol = esResuelto
+            ? [...propiasCol].sort((a, b) => {
+                const fa = new Date(
+                  ((a.campos as Record<string, unknown>)?.fecha as string) ?? a.createdAt,
+                ).getTime();
+                const fb = new Date(
+                  ((b.campos as Record<string, unknown>)?.fecha as string) ?? b.createdAt,
+                ).getTime();
+                return fb - fa; // más nuevas arriba
+              })
+            : propiasCol;
+          return {
+            ...c,
+            tableroId: t.id,
+            tarjetas: tarjetasCol,
+          };
+        }),
       };
     });
     return NextResponse.json(result);

@@ -86,6 +86,15 @@ interface Bucket {
 }
 
 const keyLine = (p: number, r: number) => `${p}-${r}`;
+// Clave para cruzar contra faltante_existencia (fuente WMS ot-diferencias):
+// NroRengOrigen ahí es OTItemNroRenglon (numeración WMS), distinta del renglón
+// real de Ven_PedRenPendientes que trae `faltRows` (fetch_faltantes viejo,
+// Magnus) — mismo nombre de campo, otra numeración. NroPedOrigen (=NroMovVenta)
+// sí coincide en ambas fuentes, así que se cruza por pedido+artículo (trimeado).
+// Bug real encontrado 2026-07-10 (mismo que /api/ventas/faltantes): con
+// keyLine (por renglón) los "en existencia" marcados en /deposito/faltantes no
+// aparecían del lado de ventas/compras.
+const keyArt = (p: number, cod: string) => `${p}-${cod.trim()}`;
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 // Fecha de corte del cruce: el FIFO arranca acá. Solo se consideran las OC hechas
@@ -186,11 +195,12 @@ export async function GET(req: NextRequest) {
     // new Date('YYYY-MM-DD') = medianoche UTC, igual que se guardan las marcas (@db.Date)
     const marks = await prisma.faltante_existencia.findMany({
       where: { fecha: { gte: new Date(desdeMarks), lte: new Date(hastaMarks) } },
-      select: { nroPedOrigen: true, nroRengOrigen: true, existencia: true, fecha: true },
+      select: { nroPedOrigen: true, codArticulo: true, existencia: true, fecha: true },
       orderBy: { fecha: "asc" },
     });
     const latest = new Map<string, boolean>();
-    for (const m of marks) latest.set(keyLine(m.nroPedOrigen, m.nroRengOrigen), m.existencia);
+    for (const m of marks)
+      latest.set(keyArt(m.nroPedOrigen, m.codArticulo ?? ""), m.existencia);
     for (const [k, ex] of latest) if (ex === false) sinExistencia.add(k);
   }
 
@@ -289,8 +299,8 @@ export async function GET(req: NextRequest) {
   // 3) agrupar lo "sin existencia" por (artículo, primer día)
   const buckets = new Map<string, Bucket>();
   for (const it of faltRows) {
-    if (!sinExistencia.has(keyLine(it.NroPedOrigen, it.NroRengOrigen))) continue;
     const cod = String(it.CodArticulo ?? "").trim();
+    if (!sinExistencia.has(keyArt(it.NroPedOrigen, cod))) continue;
     const dia = it.PrimerDia ?? it.Fecha ?? fecha ?? "";
     if (!cod || !dia) continue;
     // Todo renglón MARCADO "sin existencia" es demanda vigente aunque Vivo=0:

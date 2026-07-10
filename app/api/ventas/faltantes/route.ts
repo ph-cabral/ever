@@ -87,7 +87,7 @@ export async function GET() {
       // por renglón, igual patrón que ctrlRows más abajo.
       prisma.faltante_existencia.findMany({
         where: { fecha: { lte: new Date(hoy) } },
-        select: { nroPedOrigen: true, nroRengOrigen: true, existencia: true, fecha: true },
+        select: { nroPedOrigen: true, codArticulo: true, existencia: true, fecha: true },
         orderBy: { fecha: "asc" },
       }),
       prisma.$queryRaw<
@@ -145,9 +145,18 @@ export async function GET() {
 
     // Última marca de existencia por renglón (existRows viene asc por fecha,
     // sin exact-match — ver comentario arriba).
+    // OJO clave: NroRengOrigen NO sirve acá. faltante_existencia se escribe desde
+    // /deposito/faltantes (fuente WMS ot-diferencias) con nroRengOrigen =
+    // OTItemNroRenglon (numeración interna de WMS), mientras que `rows` de acá
+    // abajo viene del fetch_faltantes VIEJO (Magnus Ven_PedRenPendientes), cuyo
+    // NroRengOrigen es el renglón real del pedido de venta — otra numeración,
+    // mismo nombre de campo. NroPedOrigen (=NroMovVenta) sí coincide en ambas
+    // fuentes, así que se cruza por NroPedOrigen+CodArticulo (trimeado). Bug real
+    // encontrado 2026-07-10: por esto los renglones marcados "En exist." en
+    // /deposito/faltantes no aparecían en /ventas/faltantes "Ingresados".
     const existLatest = new Map<string, boolean | null>();
     for (const r of existRows)
-      existLatest.set(`${r.nroPedOrigen}-${r.nroRengOrigen}`, r.existencia);
+      existLatest.set(`${r.nroPedOrigen}-${(r.codArticulo ?? "").trim()}`, r.existencia);
     const sin = new Set<string>();
     for (const [k, ex] of existLatest) if (ex === false) sin.add(k);
     // existencia=true: fue error de preparado (SÍ había en depósito). No pasa
@@ -211,7 +220,7 @@ export async function GET() {
         });
 
     const out = rows
-      .filter((r) => sin.has(`${r.NroPedOrigen}-${r.NroRengOrigen}`))
+      .filter((r) => sin.has(`${r.NroPedOrigen}-${r.CodArticulo.trim()}`))
       // irrelevante (botón basurero, Tabla 1): descarte definitivo, no vuelve
       // a entrar aunque clienteQuiere siga en null.
       .filter(
@@ -245,7 +254,7 @@ export async function GET() {
     // Tabla 2: sin existencia + clienteQuiere=true + fechaArribo + ya llegó por
     // remito (CodArticulo en /compras/ingresos) + vendido aún sin decidir.
     const listos = rows
-      .filter((r) => sin.has(`${r.NroPedOrigen}-${r.NroRengOrigen}`))
+      .filter((r) => sin.has(`${r.NroPedOrigen}-${r.CodArticulo.trim()}`))
       .map((r) => {
         const c = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);
         return {
@@ -271,7 +280,7 @@ export async function GET() {
     // automático con fechaArribo sintético = "EN_STOCK" (ver fmtAr en el
     // front). Mismo gate de salida que Tabla 1 (clienteQuiere aún null).
     const enStock = rows
-      .filter((r) => con.has(`${r.NroPedOrigen}-${r.NroRengOrigen}`))
+      .filter((r) => con.has(`${r.NroPedOrigen}-${r.CodArticulo.trim()}`))
       .filter(
         (r) => !ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`)?.irrelevante,
       )
