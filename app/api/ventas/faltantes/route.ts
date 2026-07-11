@@ -79,7 +79,7 @@ export async function GET() {
     const fecha: string | null = fj.fecha ?? null;
     if (!fecha) return NextResponse.json({ fecha: null, rows: [] });
 
-    const [existRows, ctrlRows, extraRows, ingresosJson, ocJson] = await Promise.all([
+    const [existRows, ctrlRows, extraRows, ingresosJson, ocJson, wmsRows] = await Promise.all([
       // faltante_existencia SÍ tiene modelo Prisma (columnas reales snake_case,
       // mapeadas) → usar el client, no SQL crudo con comillas camelCase.
       // NO exact-match por fecha: la marca puede haberse escrito con la fecha
@@ -141,6 +141,28 @@ export async function GET() {
       })
         .then((r) => (r.ok ? r.json() : { rows: [] }))
         .catch(() => ({ rows: [] })),
+      // Fallback para "con existencia" (enStock) cuando el renglón ya no
+      // matchea en `rows` (Magnus, fuente vieja) — pasa cuando la marca viene
+      // de WMS ot-diferencias (fuente real de faltante_existencia) y Magnus
+      // ya no lo tiene pendiente. preparado.faltante_wms la persiste
+      // automático GET /api/deposito/faltantes. Best-effort: la tabla puede
+      // no existir aún en algún ambiente.
+      prisma.$queryRaw<
+        {
+          nroPedOrigen: number | null;
+          nroRengOrigen: number;
+          codArticulo: string;
+          cliente: string;
+          cantPedida: unknown;
+          fecha: Date;
+        }[]
+      >`
+        SELECT DISTINCT ON ("nroPedOrigen", "codArticulo")
+               "nroPedOrigen", "nroRengOrigen", "codArticulo", cliente,
+               "cantPedida", fecha
+        FROM preparado.faltante_wms
+        ORDER BY "nroPedOrigen", "codArticulo", "updatedAt" DESC
+      `.catch(() => []),
     ]);
 
     // Última marca de existencia por renglón (existRows viene asc por fecha,
@@ -219,6 +241,36 @@ export async function GET() {
           fecha: r.fecha.toISOString().slice(0, 10),
         });
 
+    // Última fila WMS (faltante_wms) por nroPedOrigen+codArticulo — fallback
+    // de enStock cuando el renglón "con existencia" no matchea en `rows`
+    // (Magnus).
+    const wmsLatest = new Map<
+      string,
+      {
+        nroPedOrigen: number;
+        nroRengOrigen: number;
+        codArticulo: string;
+        cliente: string;
+        cantPedida: number;
+        fecha: string;
+      }
+    >();
+    for (const r of wmsRows) {
+      if (r.nroPedOrigen === null) continue;
+      const cod = (r.codArticulo ?? "").trim();
+      wmsLatest.set(`${r.nroPedOrigen}-${cod}`, {
+        nroPedOrigen: r.nroPedOrigen,
+        nroRengOrigen: r.nroRengOrigen,
+        codArticulo: cod,
+        cliente: r.cliente ?? "",
+        cantPedida: Number(r.cantPedida ?? 0),
+        fecha:
+          r.fecha instanceof Date
+            ? r.fecha.toISOString().slice(0, 10)
+            : String(r.fecha).slice(0, 10),
+      });
+    }
+
     const out = rows
       .filter((r) => sin.has(`${r.NroPedOrigen}-${r.CodArticulo.trim()}`))
       // irrelevante (botón basurero, Tabla 1): descarte definitivo, no vuelve
@@ -279,8 +331,24 @@ export async function GET() {
     // existencia=true: error de preparado, no pasa por compras. "Arribado"
     // automático con fechaArribo sintético = "EN_STOCK" (ver fmtAr en el
     // front). Mismo gate de salida que Tabla 1 (clienteQuiere aún null).
-    const enStock = rows
-      .filter((r) => con.has(`${r.NroPedOrigen}-${r.CodArticulo.trim()}`))
+    //
+    // `con` viene de faltante_existencia, cuya fuente REAL es WMS
+    // ot-diferencias (pedida≠cumplida en la OT) — NO Magnus. `rows` acá abajo
+    // sigue siendo Magnus (fetch_faltantes viejo): un renglón "con existencia"
+    // puede no tener match ahí (ya facturado / fuera de la ventana OC_DESDE en
+    // Magnus) aunque WMS sí lo haya marcado hoy. Por eso arma en dos pasadas:
+    // primero desde `rows` cuando matchea (dato completo, Nombre/Importe
+    // reales); lo que queda sin match se arma desde preparado.faltante_wms
+    // (fallback — Nombre/Importe quedan vacíos, no están en esa tabla, mismo
+    // gap ya aceptado en /api/deposito/faltantes/route.ts).
+    const conKeysConRow = new Set<string>();
+    const enStockDeRows = rows
+      .filter((r) => {
+        const k = `${r.NroPedOrigen}-${r.CodArticulo.trim()}`;
+        if (!con.has(k)) return false;
+        conKeysConRow.add(k);
+        return true;
+      })
       .filter(
         (r) => !ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`)?.irrelevante,
       )
@@ -301,6 +369,34 @@ export async function GET() {
         };
       })
       .filter((r) => r.clienteQuiere === null);
+
+    const enStockDeWms: typeof enStockDeRows = [];
+    for (const [key, ex] of existLatest) {
+      if (ex !== true || conKeysConRow.has(key)) continue;
+      const w = wmsLatest.get(key);
+      if (!w) continue; // ni Magnus ni faltante_wms lo tienen — no hay con qué mostrarlo
+      const c = ctrl.get(`${w.nroPedOrigen}-${w.nroRengOrigen}`);
+      if (c?.irrelevante || c?.duplicado) continue;
+      if ((c?.clienteQuiere ?? null) !== null) continue;
+      enStockDeWms.push({
+        NroPedOrigen: w.nroPedOrigen,
+        NroRengOrigen: w.nroRengOrigen,
+        CodArticulo: w.codArticulo,
+        Nombre: "",
+        CantPend: w.cantPedida,
+        Cliente: w.cliente || null,
+        ClienteNombre: w.cliente || null,
+        Importe: 0,
+        Fecha: w.fecha,
+        fechaArribo: "EN_STOCK" as const,
+        arriboOC: false,
+        clienteQuiere: null,
+        extraordinario: false,
+        extraordinarioFecha: null,
+      });
+    }
+
+    const enStock = [...enStockDeRows, ...enStockDeWms];
 
     return NextResponse.json({ fecha, rows: [...out, ...enStock], listos });
   } catch (error) {
