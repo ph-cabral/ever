@@ -522,7 +522,7 @@ export default function VentasFaltantesPage() {
             {hayPrincipal && (
               <div
                 key={flipped ? "ingresados" : "principal"}
-                className={`flex flex-col gap-6 ${flipped ? "page-in-right" : "page-in-left"}`}
+                className={`flex flex-col gap-6 ${flipped ? "page-turn-fwd" : "page-turn-back"}`}
               >
                 {!flipped && gruposExtra.length > 0 && (
                   <section className="flex flex-col gap-3">
