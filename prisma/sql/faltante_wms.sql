@@ -38,3 +38,16 @@ CREATE TABLE IF NOT EXISTS preparado.faltante_wms (
 
 CREATE INDEX IF NOT EXISTS idx_faltante_wms_fecha ON preparado.faltante_wms (fecha);
 CREATE INDEX IF NOT EXISTS idx_faltante_wms_ped ON preparado.faltante_wms ("nroPedOrigen", "nroRengOrigen");
+
+-- 2026-07-11: indicadores-api YA resolvía Nombre (join StkFer_Articulos) para
+-- la respuesta en vivo de /deposito/ot-diferencias, pero nunca se persistía acá
+-- — se descartaba antes de llegar a Postgres. Se agrega para que el fallback de
+-- "con existencia" (enStock) en /api/ventas/faltantes muestre el artículo.
+-- Aplicar a mano (igual que el resto de este archivo).
+ALTER TABLE preparado.faltante_wms ADD COLUMN IF NOT EXISTS nombre TEXT NOT NULL DEFAULT '';
+
+-- 2026-07-11: Importe aproximado (pedido del usuario) — indicadores-api toma el
+-- ÚLTIMO PrecioVenta visto para ese CodArticulo en CUALQUIER pedido de
+-- Ven_PedRenPendientes (no hay tabla de lista de precios en el proyecto). Puede
+-- no reflejar la lista vigente si cambió desde la última venta registrada.
+ALTER TABLE preparado.faltante_wms ADD COLUMN IF NOT EXISTS importe NUMERIC(14,2) NOT NULL DEFAULT 0;

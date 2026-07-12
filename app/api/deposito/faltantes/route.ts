@@ -16,9 +16,12 @@ export const maxDuration = 60;
 // compras/faltantes-consumo sigan funcionando sin cambios: tratan esa clave como
 // opaca, no como algo específico de Magnus.
 //
-// Gap conocido: Importe / TipoArticulo / Linea / Proveedor todavía no tienen
-// fuente en WMS (van vacíos/0) — falta un join a PrecioVenta si se necesitan
-// en la grilla. Nombre ya resuelto (join a StkFer_Articulos en indicadores-api).
+// Gap conocido: TipoArticulo / Linea / Proveedor todavía no tienen fuente en
+// WMS (van vacíos). Nombre resuelto (join a StkFer_Articulos en
+// indicadores-api). Importe (2026-07-11): aproximado — indicadores-api toma el
+// ÚLTIMO PrecioVenta visto para ese CodArticulo en CUALQUIER pedido de
+// Ven_PedRenPendientes (no necesariamente el de esta OT), no hay tabla de
+// lista de precios en el proyecto.
 interface OtDifRow {
   OTId: number;
   NroMovVenta: number | null;
@@ -33,6 +36,8 @@ interface OtDifRow {
   CantPedida: number;
   CantCumplida: number;
   Diferencia: number;
+  PrecioVenta: number;
+  Importe: number;
 }
 
 export async function GET(req: NextRequest) {
@@ -74,16 +79,18 @@ export async function GET(req: NextRequest) {
     try {
       const values = raw.map(
         (r) =>
-          Prisma.sql`(${r.Fecha}::date, ${r.OTId}, ${r.Renglon}, ${r.NroMovVenta}, ${r.Renglon}, ${r.Operario}, ${String(r.Cliente ?? "")}, ${r.Vendedor}, ${r.Ubicacion}, ${r.CodArticulo}, ${r.CantPedida}, ${r.CantCumplida}, ${r.Diferencia}, now())`,
+          Prisma.sql`(${r.Fecha}::date, ${r.OTId}, ${r.Renglon}, ${r.NroMovVenta}, ${r.Renglon}, ${r.Operario}, ${String(r.Cliente ?? "")}, ${r.Vendedor}, ${r.Ubicacion}, ${r.CodArticulo}, ${r.Nombre ?? ""}, ${r.CantPedida}, ${r.CantCumplida}, ${r.Diferencia}, ${r.Importe ?? 0}, now())`,
       );
       await prisma.$executeRaw`
         INSERT INTO preparado.faltante_wms
-          (fecha, "otId", renglon, "nroPedOrigen", "nroRengOrigen", operario, cliente, vendedor, ubicacion, "codArticulo", "cantPedida", "cantCumplida", diferencia, "updatedAt")
+          (fecha, "otId", renglon, "nroPedOrigen", "nroRengOrigen", operario, cliente, vendedor, ubicacion, "codArticulo", nombre, "cantPedida", "cantCumplida", diferencia, importe, "updatedAt")
         VALUES ${Prisma.join(values)}
         ON CONFLICT ("otId", renglon) DO UPDATE SET
+          nombre         = EXCLUDED.nombre,
           "cantPedida"   = EXCLUDED."cantPedida",
           "cantCumplida" = EXCLUDED."cantCumplida",
           diferencia     = EXCLUDED.diferencia,
+          importe        = EXCLUDED.importe,
           "updatedAt"    = now()
       `;
     } catch (e) {
@@ -101,7 +108,7 @@ export async function GET(req: NextRequest) {
       Nombre: r.Nombre ?? "",
       CantPend: r.Diferencia,
       Cliente: r.Cliente,
-      Importe: 0, // TODO: falta join a PrecioVenta
+      Importe: r.Importe ?? 0, // aproximado — ver comentario arriba
       TipoArticulo: null as string | null,
       Preparador: r.Operario,
       Linea: null as string | number | null,

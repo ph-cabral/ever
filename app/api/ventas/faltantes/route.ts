@@ -152,14 +152,16 @@ export async function GET() {
           nroPedOrigen: number | null;
           nroRengOrigen: number;
           codArticulo: string;
+          nombre: string;
           cliente: string;
           cantPedida: unknown;
+          importe: unknown;
           fecha: Date;
         }[]
       >`
         SELECT DISTINCT ON ("nroPedOrigen", "codArticulo")
-               "nroPedOrigen", "nroRengOrigen", "codArticulo", cliente,
-               "cantPedida", fecha
+               "nroPedOrigen", "nroRengOrigen", "codArticulo", nombre, cliente,
+               "cantPedida", importe, fecha
         FROM preparado.faltante_wms
         ORDER BY "nroPedOrigen", "codArticulo", "updatedAt" DESC
       `.catch(() => []),
@@ -250,8 +252,10 @@ export async function GET() {
         nroPedOrigen: number;
         nroRengOrigen: number;
         codArticulo: string;
+        nombre: string;
         cliente: string;
         cantPedida: number;
+        importe: number;
         fecha: string;
       }
     >();
@@ -262,8 +266,10 @@ export async function GET() {
         nroPedOrigen: r.nroPedOrigen,
         nroRengOrigen: r.nroRengOrigen,
         codArticulo: cod,
+        nombre: r.nombre ?? "",
         cliente: r.cliente ?? "",
         cantPedida: Number(r.cantPedida ?? 0),
+        importe: Number(r.importe ?? 0),
         fecha:
           r.fecha instanceof Date
             ? r.fecha.toISOString().slice(0, 10)
@@ -337,10 +343,11 @@ export async function GET() {
     // sigue siendo Magnus (fetch_faltantes viejo): un renglón "con existencia"
     // puede no tener match ahí (ya facturado / fuera de la ventana OC_DESDE en
     // Magnus) aunque WMS sí lo haya marcado hoy. Por eso arma en dos pasadas:
-    // primero desde `rows` cuando matchea (dato completo, Nombre/Importe
-    // reales); lo que queda sin match se arma desde preparado.faltante_wms
-    // (fallback — Nombre/Importe quedan vacíos, no están en esa tabla, mismo
-    // gap ya aceptado en /api/deposito/faltantes/route.ts).
+    // primero desde `rows` cuando matchea (dato real de Magnus); lo que queda
+    // sin match se arma desde preparado.faltante_wms — Nombre resuelto (join
+    // StkFer_Articulos en indicadores-api) e Importe APROXIMADO (último
+    // PrecioVenta visto para ese CodArticulo en cualquier pedido de
+    // Ven_PedRenPendientes, no hay tabla de lista de precios en el proyecto).
     const conKeysConRow = new Set<string>();
     const enStockDeRows = rows
       .filter((r) => {
@@ -382,11 +389,11 @@ export async function GET() {
         NroPedOrigen: w.nroPedOrigen,
         NroRengOrigen: w.nroRengOrigen,
         CodArticulo: w.codArticulo,
-        Nombre: "",
+        Nombre: w.nombre,
         CantPend: w.cantPedida,
         Cliente: w.cliente || null,
         ClienteNombre: w.cliente || null,
-        Importe: 0,
+        Importe: w.importe,
         Fecha: w.fecha,
         fechaArribo: "EN_STOCK" as const,
         arriboOC: false,

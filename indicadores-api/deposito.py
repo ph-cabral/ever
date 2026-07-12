@@ -852,6 +852,37 @@ def fetch_ot_diferencias(desde=None, hasta=None):
         finally:
             conn_ew.close()
 
+    # Precio aproximado: no hay tabla de lista de precios en el proyecto — se
+    # toma el ÚLTIMO PrecioVenta visto para ese CodArticulo en CUALQUIER pedido
+    # de Ven_PedRenPendientes (no necesariamente el pedido de esta OT, que acá
+    # puede ya no estar pendiente en Magnus). Aproximado a propósito (pedido del
+    # usuario 2026-07-11): puede no reflejar la lista vigente si cambió.
+    precios: dict[str, float] = {}
+    if codigos:
+        ph = ",".join("?" for _ in codigos)
+        sql_precios = f"""
+            SELECT CodArticu, PrecioVenta
+            FROM (
+                SELECT LTRIM(RTRIM(CodArticu)) AS CodArticu, PrecioVenta,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY LTRIM(RTRIM(CodArticu))
+                           ORDER BY FecRegistracion DESC
+                       ) AS rn
+                FROM EVERWEAR.dbo.[Ven_PedRenPendientes]
+                WHERE LTRIM(RTRIM(CodArticu)) IN ({ph})
+            ) t
+            WHERE rn = 1
+        """
+        conn_prec = get_connection("EVERWEAR")
+        try:
+            cur_prec = conn_prec.cursor()
+            cur_prec.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+            cur_prec.execute(sql_precios, codigos)
+            for cod, precio in cur_prec.fetchall():
+                precios[_txt(cod)] = float(_safe(precio) or 0)
+        finally:
+            conn_prec.close()
+
     rows, excluidas_ot = [], set()
     for f in filas:
         nro = int(f["NroMovVenta"]) if f.get("NroMovVenta") is not None else None
@@ -861,6 +892,7 @@ def fetch_ot_diferencias(desde=None, hasta=None):
             continue
         pedida = float(_safe(f.get("CantPedida")) or 0)
         cumplida = float(_safe(f.get("CantCumplida")) or 0)
+        precio = precios.get(_txt(f.get("CodArticulo")), 0.0)
         rows.append({
             "OTId":         _int(f.get("OTId")),
             "NroMovVenta":  nro,
@@ -875,6 +907,8 @@ def fetch_ot_diferencias(desde=None, hasta=None):
             "CantPedida":   pedida,
             "CantCumplida": cumplida,
             "Diferencia":   round(pedida - cumplida, 3),
+            "PrecioVenta":  precio,
+            "Importe":      round(precio * pedida, 2),
         })
 
     resumen = {"renglones": len(rows), "ot": len({r["OTId"] for r in rows}),
