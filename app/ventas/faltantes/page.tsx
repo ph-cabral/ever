@@ -425,6 +425,12 @@ export default function VentasFaltantesPage() {
   }, [items, extraordinarios, listos]);
 
   const hay = items.length > 0 || listos.length > 0;
+  // Bloque switcheable (primera tabla ↔ Ingresados, ver header) — controla si
+  // vale la pena montar el wrapper animado (evita un gap-6 vacío cuando el
+  // lado activo no tiene nada pero "Listos" sí).
+  const hayPrincipal = flipped
+    ? gruposConArribo.length > 0
+    : gruposExtra.length > 0 || gruposNormales.length > 0;
 
   return (
     <div className="min-h-screen bg-[#111111] text-white">
@@ -513,51 +519,58 @@ export default function VentasFaltantesPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-6">
-            {!flipped && gruposExtra.length > 0 && (
-              <section className="flex flex-col gap-3">
-                {gruposExtra.map((g) => (
-                  <GrupoCard
-                    key={g.key}
-                    g={g}
-                    extra
-                    onDecidir={decidir}
-                    onIrrelevante={marcarIrrelevante}
-                    onDuplicado={marcarDuplicado}
-                    leaving={leaving}
-                  />
-                ))}
-              </section>
-            )}
+            {hayPrincipal && (
+              <div
+                key={flipped ? "ingresados" : "principal"}
+                className={`flex flex-col gap-6 ${flipped ? "page-in-right" : "page-in-left"}`}
+              >
+                {!flipped && gruposExtra.length > 0 && (
+                  <section className="flex flex-col gap-3">
+                    {gruposExtra.map((g) => (
+                      <GrupoCard
+                        key={g.key}
+                        g={g}
+                        extra
+                        onDecidir={decidir}
+                        onIrrelevante={marcarIrrelevante}
+                        onDuplicado={marcarDuplicado}
+                        leaving={leaving}
+                      />
+                    ))}
+                  </section>
+                )}
 
-            {!flipped && gruposNormales.length > 0 && (
-              <section className="flex flex-col gap-3">
-                {gruposNormales.map((g) => (
-                  <GrupoCard
-                    key={g.key}
-                    g={g}
-                    onDecidir={decidir}
-                    onIrrelevante={marcarIrrelevante}
-                    onDuplicado={marcarDuplicado}
-                    leaving={leaving}
-                  />
-                ))}
-              </section>
-            )}
+                {!flipped && gruposNormales.length > 0 && (
+                  <section className="flex flex-col gap-3">
+                    {gruposNormales.map((g) => (
+                      <GrupoCard
+                        key={g.key}
+                        g={g}
+                        onDecidir={decidir}
+                        onIrrelevante={marcarIrrelevante}
+                        onDuplicado={marcarDuplicado}
+                        leaving={leaving}
+                      />
+                    ))}
+                  </section>
+                )}
 
-            {flipped && gruposConArribo.length > 0 && (
-              <section className="flex flex-col gap-3">
-                {gruposConArribo.map((g) => (
-                  <GrupoCard
-                    key={g.key}
-                    g={g}
-                    vendidoMode
-                    onDecidir={decidirVendidoTabla1}
-                    onIrrelevante={marcarIrrelevante}
-                    onDuplicado={marcarDuplicado}
-                    leaving={leaving}
-                  />
-                ))}
-              </section>
+                {flipped && gruposConArribo.length > 0 && (
+                  <section className="flex flex-col gap-3">
+                    {gruposConArribo.map((g) => (
+                      <GrupoCard
+                        key={g.key}
+                        g={g}
+                        vendidoMode
+                        onDecidir={decidirVendidoTabla1}
+                        onIrrelevante={marcarIrrelevante}
+                        onDuplicado={marcarDuplicado}
+                        leaving={leaving}
+                      />
+                    ))}
+                  </section>
+                )}
+              </div>
             )}
 
             {gruposListos.length > 0 && (
