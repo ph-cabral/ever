@@ -202,34 +202,6 @@ body {
 .card-out-right { animation: card-out-right 260ms cubic-bezier(0.4, 0, 1, 1) both; }
 .card-out-left  { animation: card-out-left  260ms cubic-bezier(0.4, 0, 1, 1) both; }
 
-/* Cambio de "página" al togglear entre tablas (ej. ventas/faltantes: primera
-   tabla ↔ Ingresados) — efecto "hoja de libro": el bloque saliente se saca
-   del DOM (React key), el entrante gira sobre el eje Y desde el borde
-   (bisagra) hacia el lado por el que "se da vuelta la hoja", como pasar una
-   página. Hacia adelante (Ingresados): bisagra izquierda, la hoja entra desde
-   atrás a la derecha. Hacia atrás (primera tabla): bisagra derecha, entra
-   desde atrás a la izquierda. */
-@keyframes page-turn-fwd {
-  from { opacity: 0; transform: perspective(1400px) rotateY(-100deg); }
-  55%  { opacity: 1; }
-  to   { opacity: 1; transform: perspective(1400px) rotateY(0deg); }
-}
-@keyframes page-turn-back {
-  from { opacity: 0; transform: perspective(1400px) rotateY(100deg); }
-  55%  { opacity: 1; }
-  to   { opacity: 1; transform: perspective(1400px) rotateY(0deg); }
-}
-.page-turn-fwd {
-  transform-origin: left center;
-  backface-visibility: hidden;
-  animation: page-turn-fwd 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-.page-turn-back {
-  transform-origin: right center;
-  backface-visibility: hidden;
-  animation: page-turn-back 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
 /* Botones de ícono (marcar, deshacer, refrescar, cerrar…): al pasar el mouse
    crecen Y se levantan (no solo escala) con un rebote sutil. */
 .btn-anim {
