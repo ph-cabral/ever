@@ -714,6 +714,7 @@ function Combobox({
   const [highlight, setHighlight] = useState(0);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
 
   const openDropdown = () => {
     const r = wrapRef.current?.getBoundingClientRect();
@@ -723,8 +724,12 @@ function Combobox({
 
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
-    // se cierra si el modal (u otro ancestro) scrollea, para no quedar mal ubicado
+    const close = (e: Event) => {
+      // ignorar el scroll interno de la propia lista (rueda del mouse sobre las opciones)
+      if (dropRef.current && e.target instanceof Node && dropRef.current.contains(e.target)) return;
+      setOpen(false);
+    };
+    // se cierra si el modal (u otro ancestro, no la lista) scrollea, para no quedar mal ubicado
     window.addEventListener("scroll", close, true);
     window.addEventListener("resize", close);
     return () => {
@@ -735,7 +740,10 @@ function Combobox({
 
   useEffect(() => {
     const onDocMouseDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t)) return;
+      if (dropRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
@@ -755,7 +763,6 @@ function Combobox({
           openDropdown();
           setHighlight(0);
         }}
-        onFocus={openDropdown}
         onKeyDown={(e) => {
           if (!open || filtradas.length === 0) return;
           if (e.key === "ArrowDown") {
@@ -776,6 +783,7 @@ function Combobox({
       {open && filtradas.length > 0 && pos &&
         createPortal(
           <div
+            ref={dropRef}
             style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
             className="z-50 max-h-48 overflow-y-auto bg-[#1f1f1f] border border-zinc-700 rounded-md shadow-lg"
           >
@@ -841,22 +849,10 @@ function ModalTarjeta({
     setCampos((c) => ({ ...c, [campo]: v }));
   };
 
-  // Al guardar, cualquier valor tipeado a mano en un select "extensible" que no
-  // exista todavía se registra como opción nueva (silencioso), para que la
-  // próxima tarjeta ya lo sugiera en el autocompletado.
+  // Nota: ya no se registra automáticamente al guardar lo tipeado a mano en un
+  // select "extensible" — eso generaba sugerencias basura (typos, valores a medio
+  // escribir). Para agregar una opción nueva y persistente hay que usar el botón "+".
   const handleGuardar = () => {
-    for (const f of schema.fields) {
-      if (f.t !== "select" || !f.extensible) continue;
-      const v = String(campos[f.k] ?? "").trim();
-      if (!v) continue;
-      const conocidas = new Set([...(f.opciones ?? []), ...(opcionesExtra[f.k] ?? [])]);
-      if (!conocidas.has(v)) {
-        apiJson("/api/sistema/opciones", {
-          method: "POST",
-          body: JSON.stringify({ clave: modal.clave, campo: f.k, valor: v }),
-        }).catch(() => {});
-      }
-    }
     onSave(campos);
   };
 
