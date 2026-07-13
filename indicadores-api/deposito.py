@@ -1671,3 +1671,51 @@ def fetch_articulos_multi_ubicacion():
         return {"total": len(rows), "rows": rows}
     finally:
         conn.close()
+
+
+# ── Movimientos por contenedor/TAG, con usuario REAL (/deposito/contenedor) ───
+# Kmov.KmovUsuarioGUID_Regist suele ser una cuenta generica del sistema
+# ('User Anonymous', GUID 81cccf51-2228-45d0-9ab9-1bc33eacfb84 -> se repite en
+# miles de movimientos de anios distintos). El operario real que ubico/movio el
+# contenedor queda en KmovContenedor.KmovContenedorUsuarioGUID (y en
+# KmovReng.KmovRengUsuarioGUID para el mismo renglon), que si mapea a un
+# Personal real via PersonalUserGUID. Caso resuelto 2026-07-13: Kmov 1811457 /
+# TAG AGUA_08 y AGUA_09 -> Carballo Agustin (login acarballo).
+def fetch_movimiento_contenedor(tag: str):
+    tag = (tag or "").strip()
+    conn = get_connection("WMS")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        sql = """
+            SELECT TOP 50
+                   k.KmovId                                       AS KmovId,
+                   k.KmovFechaHora                                 AS Momento,
+                   LTRIM(RTRIM(k.KmovKcodmovCodigo))               AS Codigo,
+                   k.KmovOrdenRecepcion                            AS NroRef,
+                   k.KmovEstado                                    AS Estado,
+                   LTRIM(RTRIM(c.KmovContenedorUbicacionCodigo))   AS Ubicacion,
+                   c.KmovContenedorFechaHoraRegistr                AS MomentoContenedor,
+                   LTRIM(RTRIM(regUser.PersonalNombre))            AS UsuarioRegistroNombre,
+                   LTRIM(RTRIM(regUser.PersonalLoguin))            AS UsuarioRegistroLogin,
+                   LTRIM(RTRIM(realUser.PersonalNombre))           AS UsuarioRealNombre,
+                   LTRIM(RTRIM(realUser.PersonalLoguin))           AS UsuarioRealLogin,
+                   LTRIM(RTRIM(r.KmovRengArticuloId))              AS Articulo,
+                   r.KmovRengCantidad                              AS Cantidad
+            FROM KmovContenedor c
+            JOIN Kmov k               ON k.KmovId = c.KmovId
+            LEFT JOIN Personal regUser  ON regUser.PersonalUserGUID  = k.KmovUsuarioGUID_Regist
+            LEFT JOIN Personal realUser ON realUser.PersonalUserGUID = c.KmovContenedorUsuarioGUID
+            LEFT JOIN KmovReng r
+                   ON r.KmovId = c.KmovId
+                  AND LTRIM(RTRIM(r.KmovRengContenedorAsociado)) = LTRIM(RTRIM(c.KmovContenedorContenedorTAG))
+            WHERE LTRIM(RTRIM(c.KmovContenedorContenedorTAG)) = LTRIM(RTRIM(?))
+            ORDER BY k.KmovFechaHora DESC
+        """
+        cur.execute(sql, (tag,))
+        rows = _rows(cur)
+        for row in rows:
+            row["UsuarioRegistroEsAnonimo"] = row.get("UsuarioRegistroNombre") == "User Anonymous"
+        return {"tag": tag, "total": len(rows), "rows": rows}
+    finally:
+        conn.close()

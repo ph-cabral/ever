@@ -11,6 +11,7 @@ from deposito import (
     fetch_wms_estados, fetch_wms_estados_diag,
     fetch_articulo_ubicaciones, fetch_articulos_multi_ubicacion,
     fetch_stock_deposito1, fetch_stock_por_articulos,
+    fetch_movimiento_contenedor,
 )
 from compras import fetch_ordenes_pendientes
 from ingresos import fetch_remitos_ingreso
@@ -239,6 +240,16 @@ def deposito_articulos_multi_ubicacion():
     """Artículos con más de una ubicación asignada (rack), para depurar el maestro."""
     try:
         return fetch_articulos_multi_ubicacion()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/contenedor")
+def deposito_contenedor(tag: str = Query(...)):
+    """Historial de movimientos de un contenedor/TAG (WMS), con el usuario REAL
+    (Personal) además del usuario de "Registro", que muchas veces es la cuenta
+    genérica del sistema ("User Anonymous")."""
+    try:
+        return fetch_movimiento_contenedor(tag)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
