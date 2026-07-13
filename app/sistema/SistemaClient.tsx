@@ -117,6 +117,10 @@ function mesLabel(m: string) {
   const [y, mo] = m.split("-").map(Number);
   return new Date(y, mo - 1, 1).toLocaleDateString("es-AR", { month: "long", year: "numeric" });
 }
+function mesLabelCorto(m: string) {
+  const [y, mo] = m.split("-").map(Number);
+  return new Date(y, mo - 1, 1).toLocaleDateString("es-AR", { month: "short", year: "2-digit" });
+}
 function timeToMinutes(s?: string | null): number {
   if (!s) return 0;
   const m = String(s).match(/^(\d+):(\d{1,2})$/);
@@ -831,6 +835,60 @@ function ChartBox({ title, children }: { title: string; children: React.ReactNod
   );
 }
 
+function PanelUbicacion({
+  name,
+  cards,
+  offset,
+  onClose,
+}: {
+  name: string;
+  cards: CardM[];
+  offset: number;
+  onClose: () => void;
+}) {
+  const [entrado, setEntrado] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntrado(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  return (
+    <div
+      className="absolute bg-[#1f1f1f] border border-zinc-700 rounded-xl shadow-2xl shadow-black/60 p-3 w-full transition-all duration-300 ease-out overflow-y-auto scrollbar-hide"
+      style={{
+        top: offset * 14,
+        left: offset * 10,
+        right: -offset * 4,
+        zIndex: 20 + offset,
+        maxHeight: 280,
+        transform: entrado ? "translateX(0)" : "translateX(48px)",
+        opacity: entrado ? 1 : 0,
+      }}
+    >
+      <div className="flex items-center justify-between mb-2 sticky top-0 bg-[#1f1f1f]">
+        <h5 className="text-sm font-semibold text-zinc-100 truncate">{name}</h5>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-zinc-500">{cards.length}</span>
+          <button onClick={onClose} className="text-zinc-500 hover:text-rose-400 text-xs" title="Cerrar">
+            ✕
+          </button>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        {cards.map((c) => (
+          <div key={c.id} className="bg-[#161616] border border-zinc-800 rounded-lg p-2">
+            <p className="text-xs text-zinc-200 whitespace-pre-line">{c.campos.descripcion}</p>
+            <p className="text-[10px] text-zinc-500 mt-1">
+              {c.campos.categoria || "—"} · {c.campos.importancia || "—"} · {c.colNombre}
+            </p>
+          </div>
+        ))}
+        {cards.length === 0 && <p className="text-xs text-zinc-600">Sin tarjetas.</p>}
+      </div>
+    </div>
+  );
+}
+
 type CardM = Tarjeta & { colNombre: string };
 
 function Metricas({ tableros }: { tableros: Tablero[] }) {
@@ -851,7 +909,15 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
     .sort()
     .reverse();
 
-  const [mes, setMes] = useState<string>("todos");
+  // opciones[0] = "todos"; opciones[1] = mes en curso; resto = meses cerrados (desc).
+  const opciones = ["todos", mesActual, ...mesesCerrados];
+  const [selectedIndex, setSelectedIndex] = useState(1); // arranca en el mes actual
+  const idx = Math.max(0, Math.min(opciones.length - 1, selectedIndex));
+  const mes = opciones[idx];
+
+  const [pilaUbicacion, setPilaUbicacion] = useState<string[]>([]);
+  const toggleUbicacion = (name: string) =>
+    setPilaUbicacion((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
 
   const unicas =
     mes === "todos"
@@ -900,13 +966,15 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
 
   return (
     <div>
-      <div className="flex justify-end mb-3">
+      {/* selector simple — solo mobile/tablet, en desktop se usa la rueda fija */}
+      <div className="flex justify-end mb-3 lg:hidden">
         <select
           value={mes}
-          onChange={(e) => setMes(e.target.value)}
+          onChange={(e) => setSelectedIndex(Math.max(0, opciones.indexOf(e.target.value)))}
           className="bg-[#161616] border border-zinc-800 rounded-lg text-sm text-zinc-300 px-3 py-1.5"
         >
           <option value="todos">Todos los meses cerrados</option>
+          <option value={mesActual}>{mesLabel(mesActual)} (en curso)</option>
           {mesesCerrados.map((m) => (
             <option key={m} value={m}>
               {mesLabel(m)}
@@ -914,6 +982,8 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
           ))}
         </select>
       </div>
+
+      <RuedaMeses opciones={opciones} selectedIndex={idx} onChange={setSelectedIndex} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <Kpi value={totalCards} label="Casos totales registrados" />
@@ -982,17 +1052,63 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
           </PieChart>
         </ChartBox>
 
-        <ChartBox title="Sistema interno — por ubicación">
-          <PieChart>
-            <Pie data={sisPorUbicacion} dataKey="value" nameKey="name" outerRadius={80} label={({ name, value }) => `${name}: ${value}`}>
-              {sisPorUbicacion.map((_, i) => (
-                <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
-              ))}
-            </Pie>
-            <Legend wrapperStyle={{ fontSize: 11, color: "#9aa1b1" }} />
-            <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }} />
-          </PieChart>
-        </ChartBox>
+        <div className="bg-[#161616] border border-zinc-800 rounded-xl p-4 md:col-span-2 lg:col-span-3">
+          <h4 className="text-sm text-zinc-300 mb-2">
+            Sistema interno — por ubicación{" "}
+            <span className="text-zinc-600 font-normal">(clic en una barra para ver el detalle)</span>
+          </h4>
+          <div className="flex flex-col md:flex-row gap-4">
+            <div style={{ width: "100%", maxWidth: 420, height: Math.max(260, sisPorUbicacion.length * 26) }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={sisPorUbicacion} layout="vertical" margin={{ left: 8, right: 12 }}>
+                  <CartesianGrid stroke="#27272a" horizontal={false} />
+                  <XAxis type="number" stroke="#9aa1b1" fontSize={12} allowDecimals={false} />
+                  <YAxis type="category" dataKey="name" stroke="#9aa1b1" fontSize={11} width={110} />
+                  <Tooltip
+                    cursor={{ fill: "#ffffff0d" }}
+                    contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }}
+                  />
+                  <Bar
+                    dataKey="value"
+                    radius={[0, 4, 4, 0]}
+                    cursor="pointer"
+                    onClick={(d: any) => toggleUbicacion(d.name)}
+                  >
+                    {sisPorUbicacion.map((entry, i) => (
+                      <Cell
+                        key={i}
+                        fill={PALETTE[i % PALETTE.length]}
+                        stroke={pilaUbicacion.includes(entry.name) ? "#fff" : "none"}
+                        strokeWidth={pilaUbicacion.includes(entry.name) ? 2 : 0}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div
+              className="relative flex-1"
+              style={{ minHeight: Math.max(180, Math.min(260, sisPorUbicacion.length * 26)) }}
+            >
+              {pilaUbicacion.length === 0 ? (
+                <p className="text-xs text-zinc-600 h-full flex items-center">
+                  Elegí una ubicación en el gráfico para ver sus tarjetas acá.
+                </p>
+              ) : (
+                pilaUbicacion.map((name, i) => (
+                  <PanelUbicacion
+                    key={name}
+                    name={name}
+                    cards={sCards.filter((c) => (c.campos.ubicacion || "(sin dato)") === name)}
+                    offset={i}
+                    onClose={() => toggleUbicacion(name)}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        </div>
 
         <ChartBox title="Softech — por estado">
           <PieChart>
