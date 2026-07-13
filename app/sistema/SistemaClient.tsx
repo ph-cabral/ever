@@ -103,6 +103,20 @@ function parseDate(s?: string | null): Date | null {
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d;
 }
+const FECHA_FIELD: Record<string, string> = { softech: "inicio" };
+function fechaFieldFor(clave?: string) {
+  return FECHA_FIELD[clave ?? ""] ?? "fecha";
+}
+function mesKey(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function mesAnteriorKey(d: Date) {
+  return mesKey(new Date(d.getFullYear(), d.getMonth() - 1, 1));
+}
+function mesLabel(m: string) {
+  const [y, mo] = m.split("-").map(Number);
+  return new Date(y, mo - 1, 1).toLocaleDateString("es-AR", { month: "long", year: "numeric" });
+}
 function timeToMinutes(s?: string | null): number {
   if (!s) return 0;
   const m = String(s).match(/^(\d+):(\d{1,2})$/);
@@ -458,6 +472,18 @@ export default function SistemaClient() {
                 const sch = schemaFor(tablero.clave);
                 const titleKey = sch.titleKey;
                 const subtitleField = sch.fields.find((f) => f.t === "date");
+                const esColumnaResuelta =
+                  /solucionado/i.test(col.nombre) && !/sin solu/i.test(col.nombre);
+                const mesActualG = mesKey(new Date());
+                const mesCerradoG = mesAnteriorKey(new Date());
+                const tarjetasVisibles = esColumnaResuelta
+                  ? col.tarjetas.filter((card) => {
+                      const d = subtitleField ? parseDate(card.campos[subtitleField.k]) : null;
+                      if (!d) return true;
+                      const mk = mesKey(d);
+                      return mk === mesActualG || mk === mesCerradoG;
+                    })
+                  : col.tarjetas;
                 return (
                   <div
                     key={col.id}
@@ -499,7 +525,13 @@ export default function SistemaClient() {
                         title="Click para renombrar"
                       >
                         {col.nombre}{" "}
-                        <span className="text-zinc-500 font-normal">({col.tarjetas.length})</span>
+                        <span className="text-zinc-500 font-normal">
+                          ({tarjetasVisibles.length}
+                          {esColumnaResuelta && tarjetasVisibles.length !== col.tarjetas.length
+                            ? ` de ${col.tarjetas.length}`
+                            : ""}
+                          )
+                        </span>
                       </button>
                       <div className="flex items-center gap-0.5 text-zinc-500">
                         <button
@@ -527,7 +559,8 @@ export default function SistemaClient() {
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2 scrollbar-hide">
-                      {col.tarjetas.map((card, cardIdx) => {
+                      {tarjetasVisibles.map((card) => {
+                        const cardIdx = col.tarjetas.findIndex((tj) => tj.id === card.id);
                         const txt = String(card.campos[titleKey] || "(sin descripción)");
                         const [first, ...rest] = txt.split("\n");
                         return (
@@ -805,7 +838,28 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
   const all: CardM[] = tableros.flatMap((t) =>
     t.columnas.flatMap((c) => c.tarjetas.map((tj) => ({ ...tj, colNombre: c.nombre })))
   );
-  const unicas = Array.from(new Map(all.map((tj) => [tj.id, tj])).values());
+  const unicasAll = Array.from(new Map(all.map((tj) => [tj.id, tj])).values());
+
+  const claveDe = (tableroId: number) => tableros.find((t) => t.id === tableroId)?.clave;
+  const fechaDe = (tj: CardM) => parseDate(tj.campos[fechaFieldFor(claveDe(tj.tableroId))]);
+
+  const mesActual = mesKey(new Date());
+  const mesesCerrados = Array.from(
+    new Set(unicasAll.map(fechaDe).filter((d): d is Date => !!d).map(mesKey))
+  )
+    .filter((m) => m < mesActual)
+    .sort()
+    .reverse();
+
+  const [mes, setMes] = useState<string>("todos");
+
+  const unicas =
+    mes === "todos"
+      ? unicasAll
+      : unicasAll.filter((tj) => {
+          const d = fechaDe(tj);
+          return d && mesKey(d) === mes;
+        });
 
   const idDe = (clave: string) => tableros.find((t) => t.clave === clave)?.id;
   const cardsDe = (id?: number) => (id == null ? [] : unicas.filter((tj) => tj.tableroId === id));
@@ -846,6 +900,21 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
 
   return (
     <div>
+      <div className="flex justify-end mb-3">
+        <select
+          value={mes}
+          onChange={(e) => setMes(e.target.value)}
+          className="bg-[#161616] border border-zinc-800 rounded-lg text-sm text-zinc-300 px-3 py-1.5"
+        >
+          <option value="todos">Todos los meses cerrados</option>
+          {mesesCerrados.map((m) => (
+            <option key={m} value={m}>
+              {mesLabel(m)}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <Kpi value={totalCards} label="Casos totales registrados" />
         <Kpi value={`${pctSolved}%`} label="Softech resuelto" />

@@ -107,11 +107,22 @@ def _detectar_columnas(cols: list[str]) -> dict:
 # contaduría ya venía llevando a mano por controlador (confirmado 2026-07:
 # planilla propia vs. esta vista, ~200-300 de diferencia por controlador y
 # mes). Por eso acá NO se deduplica al armar las filas: cada fila del join es
-# un control real y se acredita entera al controlador (igual que la planilla
-# de contaduría). Sólo se deduplica para `por_mes`/`total_general` (por
+# un control real y se acredita al controlador (igual que la planilla de
+# contaduría). Sólo se deduplica para `por_mes`/`total_general` (por
 # NroMovVenta+NroRenglon), que es el número pensado para reconciliar contra
-# lo facturado/preparado — ese sí no debe inflarse por reglones con 2
-# controladores o por recontroles del mismo renglón.
+# lo facturado/preparado.
+#
+# CONFIRMADO 2026-07-13 (Pablo + muestra de Ven_PedImpresoCP): un pedido NO
+# se controla 2 veces — lo controla y cierra UNA sola persona. CodControlador1
+# y CodControlador2 vienen SIEMPRE con el mismo valor (el sistema duplica el
+# mismo código en los 2 campos; FechaCierre/HoraCierre = FechaControl/
+# HoraControl, mismo momento). Antes se creditaba cod1 Y cod2 por separado,
+# lo que DUPLICABA cada control al controlador (por_controlador sumaba ~2x
+# total_general). Fix: por fila se arma un set de códigos {cod1, cod2}
+# (dedupe) y se acredita 1 vez por código distinto — si algún día aparece un
+# caso real de 2 controladores distintos en la misma fila, se sigue
+# acreditando a los 2 (no se pierde ese caso), pero el duplicado artificial
+# (cod1==cod2, el caso normal) ya no infla el total.
 SQL_RENGLONES_CONTROLADOS = """
 SELECT
     reng.NroMovVenta, reng.NroRenglon,
@@ -141,9 +152,10 @@ def fetch_mesa_control(meses: list[str]) -> dict:
         duplicar por doble controlador ni por recontroles del mismo renglón —
         pensado para reconciliar contra lo facturado/preparado)
       · por_controlador = [{controlador, codigo, por_mes: {mes: cantidad}, total}]
-        (créditos de productividad: CADA control cuenta, incluye recontroles y
-        renglones con doble controlador — por eso puede sumar más que
-        total_general; es el mismo criterio que la planilla de contaduría)
+        (créditos de productividad: CADA control cuenta, incluye recontroles
+        del mismo renglón — por eso puede sumar más que total_general en ese
+        caso puntual; pero YA NO duplica por CodControlador1==CodControlador2,
+        que es el caso normal — ver comentario arriba de SQL_RENGLONES_CONTROLADOS)
     Solo lectura sobre EVERWEAR."""
     meses = sorted(set(m.strip() for m in meses if m.strip()))
     if not meses:
@@ -167,20 +179,22 @@ def fetch_mesa_control(meses: list[str]) -> dict:
             renglones_unicos: set[tuple] = set()
             for nro, nro_reng, cod1, cod2 in filas:
                 renglones_unicos.add((nro, nro_reng))
-                for codigo in (cod1, cod2):
-                    if codigo and codigo > 0:
-                        codigo = int(codigo)
-                        entry = por_ctrl.setdefault(
-                            codigo,
-                            {
-                                "controlador": nombres.get(codigo, f"Controlador {codigo}"),
-                                "codigo": codigo,
-                                "por_mes": {},
-                                "total": 0,
-                            },
-                        )
-                        entry["por_mes"][mes] = entry["por_mes"].get(mes, 0) + 1
-                        entry["total"] += 1
+                # dedupe: cod1==cod2 en el caso normal (1 sola persona
+                # controló) -> 1 solo crédito. Si algún día son distintos
+                # (control genuino de 2 personas), se acredita a las 2.
+                codigos = {int(c) for c in (cod1, cod2) if c and c > 0}
+                for codigo in codigos:
+                    entry = por_ctrl.setdefault(
+                        codigo,
+                        {
+                            "controlador": nombres.get(codigo, f"Controlador {codigo}"),
+                            "codigo": codigo,
+                            "por_mes": {},
+                            "total": 0,
+                        },
+                    )
+                    entry["por_mes"][mes] = entry["por_mes"].get(mes, 0) + 1
+                    entry["total"] += 1
             por_mes[mes] = len(renglones_unicos)
     finally:
         conn.close()

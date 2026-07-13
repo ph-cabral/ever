@@ -24,9 +24,14 @@ import {
 // El total_general cuenta cada renglón (NroMovVenta+NroRenglon) UNA sola vez
 // — NO usa el SP RPT_V325_ProductividadPorControlador porque ese SP hace
 // UNION ALL de CodControlador1+CodControlador2 sin deduplicar, y duplicaba el
-// total cuando un pedido tenía doble control. El desglose por_controlador SÍ
-// puede sumar más que total_general en ese caso (el mismo renglón le suma a
-// los 2 controladores), a propósito: es crédito de productividad, no el total.
+// total cuando un pedido tenía doble control.
+//
+// CONFIRMADO 2026-07-13: un pedido NO se controla 2 veces (1 sola persona
+// controla y cierra). CodControlador1/2 vienen con el MISMO valor siempre
+// — el backend (mesa_control.py) dedupea por renglón antes de acreditar, así
+// que por_controlador ya no debería sumar ~2x el total. Si igual aparece una
+// pequeña diferencia es por recontrol/reimpresión real del mismo renglón
+// (créditos legítimos), no por el bug viejo.
 //
 // Selección de meses por checkbox (no un rango de fechas): se corre una
 // consulta por mes elegido para poder comparar meses entre sí.
@@ -138,9 +143,10 @@ export function MesaControlTab() {
     .filter((c) => c.cantidad > 0)
     .sort((a, b) => b.cantidad - a.cantidad);
 
-  // Referencia: la suma de controladores puede superar el total exacto si
-  // hubo doble control (mismo renglón acreditado a 2 controladores). No es
-  // un error — se lo aclaramos acá para no confundir al comparar sumas.
+  // Referencia: con el fix de dedupe (backend, 2026-07-13) la suma de
+  // controladores debería ser ~= al total. Si sobra algo es por recontrol/
+  // reimpresión real del mismo renglón (créditos legítimos), no por el bug
+  // viejo de CodControlador1==CodControlador2 duplicando el crédito.
   const sumaControladores = barControladorData.reduce((s, c) => s + c.cantidad, 0);
   const totalRef = verTodos
     ? data?.total_general ?? 0
@@ -168,11 +174,10 @@ export function MesaControlTab() {
           <Info size={15} className="mt-0.5 shrink-0" />
           <span>
             "Total controlado" cuenta cada renglón (línea de pedido) una sola
-            vez, sin importar si tuvo 1 o 2 controladores asignados — es el
-            número que reconcilia contra lo preparado/facturado. El desglose
-            por controlador SÍ puede sumar más que el total: un mismo renglón
-            con doble control le suma a los 2 controladores (crédito de
-            productividad), pero no infla el total general.
+            vez — es el número que reconcilia contra lo preparado/facturado.
+            El desglose por controlador debería sumar prácticamente lo mismo
+            (1 control = 1 persona); si hay una pequeña diferencia es por
+            recontrol/reimpresión real del mismo renglón, no por doble conteo.
           </span>
         </Alert>
       </div>
@@ -297,8 +302,8 @@ export function MesaControlTab() {
               {dobleControl > 0 && (
                 <>
                   {" "}
-                  (+{fmtNum(dobleControl)} por doble control — no es un error,
-                  ver aviso de arriba)
+                  (+{fmtNum(dobleControl)} por recontrol/reimpresión real del
+                  mismo renglón, ver aviso de arriba)
                 </>
               )}
             </p>
@@ -308,8 +313,9 @@ export function MesaControlTab() {
             Fuente: EVERWEAR.dbo.Ven_PedImpresoCP (CodControlador1/2, FechaControl)
             + venfer_pedidoReng (renglón/línea), consulta directa — no el SP de
             Softech (RPT_V325_ProductividadPorControlador), que duplicaba el
-            total al no deduplicar el doble control. Lectura en vivo, solo
-            lectura — no se escribe en Magnus.
+            total al no deduplicar el doble control. Backend dedupea por
+            renglón (CodControlador1==CodControlador2 es 1 solo crédito, no 2).
+            Lectura en vivo, solo lectura — no se escribe en Magnus.
           </p>
         </>
       )}
