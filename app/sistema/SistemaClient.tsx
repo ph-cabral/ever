@@ -876,8 +876,10 @@ function ModalTarjeta({
 
           {schema.fields.map((f) => {
             if (f.auto) return null;
-            // valor actual + opciones fijas + dinámicas, sin duplicar (y sin perder un
-            // valor legado que no esté en ninguna lista, para no vaciarlo al editar).
+            // Solo opciones fijas del schema (curadas) + el valor actual, para no
+            // vaciarlo al editar. Prohibido sugerir datos sueltos tipeados antes
+            // (opcionesExtra / historial en sistema_opcion) — el autocompletado
+            // únicamente ofrece lo que está en el dropdown "de verdad".
             const valorActual = campos[f.k];
             const combinedOptions =
               f.t === "select"
@@ -885,7 +887,6 @@ function ModalTarjeta({
                     const arr = Array.from(
                       new Set([
                         ...(f.opciones ?? []),
-                        ...(opcionesExtra[f.k] ?? []),
                         ...(valorActual ? [String(valorActual)] : []),
                       ])
                     );
