@@ -815,6 +815,93 @@ function ModalTarjeta({
   );
 }
 
+function RuedaMeses({
+  opciones,
+  selectedIndex,
+  onChange,
+}: {
+  opciones: string[];
+  selectedIndex: number;
+  onChange: (i: number) => void;
+}) {
+  const ROW_H = 44;
+  const VISIBLE = 5;
+  const wheelLock = useRef(false);
+
+  const mover = (delta: number) => {
+    onChange(Math.max(0, Math.min(opciones.length - 1, selectedIndex + delta)));
+  };
+
+  const onWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    if (wheelLock.current) return;
+    wheelLock.current = true;
+    mover(e.deltaY > 0 ? 1 : -1);
+    setTimeout(() => {
+      wheelLock.current = false;
+    }, 160);
+  };
+
+  const etiquetaChica = (m: string) => (m === "todos" ? "Todos" : mesLabelCorto(m));
+  const etiquetaGrande = (m: string) => (m === "todos" ? "Todos" : mesLabel(m));
+
+  return (
+    <div className="fixed right-4 top-1/2 -translate-y-1/2 z-30 hidden lg:flex flex-col items-center gap-1 select-none">
+      <button
+        onClick={() => mover(-1)}
+        className="text-zinc-600 hover:text-zinc-200 text-xs leading-none py-1"
+        title="Mes más reciente"
+      >
+        ▲
+      </button>
+
+      <div
+        onWheel={onWheel}
+        className="relative overflow-hidden"
+        style={{ width: 116, height: ROW_H * VISIBLE }}
+      >
+        {/* ventana central, como la mirilla de una rueda de candado */}
+        <div
+          className="pointer-events-none absolute left-0 right-0 border-y border-zinc-700/70 bg-white/[0.03]"
+          style={{ top: ROW_H * 2, height: ROW_H }}
+        />
+        <div
+          className="absolute left-0 right-0 transition-transform duration-300 ease-out"
+          style={{ transform: `translateY(${(2 - selectedIndex) * ROW_H}px)` }}
+        >
+          {opciones.map((m, i) => {
+            const dist = Math.abs(i - selectedIndex);
+            const estilo =
+              dist === 0
+                ? "text-lg font-bold text-rose-400 scale-110"
+                : dist === 1
+                ? "text-sm text-zinc-300"
+                : "text-[11px] text-zinc-600";
+            return (
+              <button
+                key={m}
+                onClick={() => onChange(i)}
+                style={{ height: ROW_H }}
+                className={`w-full flex items-center justify-center text-center px-1 transition-all duration-200 ${estilo}`}
+              >
+                {dist === 0 ? etiquetaGrande(m) : etiquetaChica(m)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <button
+        onClick={() => mover(1)}
+        className="text-zinc-600 hover:text-zinc-200 text-xs leading-none py-1"
+        title="Mes más antiguo"
+      >
+        ▼
+      </button>
+    </div>
+  );
+}
+
 function Kpi({ value, label }: { value: string | number; label: string }) {
   return (
     <div className="bg-[#161616] border border-zinc-800 rounded-xl p-4">
