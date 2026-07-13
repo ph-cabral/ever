@@ -24,6 +24,25 @@ export async function GET(req: Request) {
   }
 }
 
+// DELETE /api/sistema/opciones  { clave, campo, valor }
+// Borra una opción (usado al unificar valores duplicados).
+export async function DELETE(req: Request) {
+  try {
+    const body = await req.json();
+    const clave = String(body.clave ?? "").trim();
+    const campo = String(body.campo ?? "").trim();
+    const valor = String(body.valor ?? "").trim();
+    if (!clave || !campo || !valor) {
+      return NextResponse.json({ error: "Faltan datos" }, { status: 400 });
+    }
+    await prisma.sistema_opcion.deleteMany({ where: { clave, campo, valor } });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("DELETE /api/sistema/opciones", error);
+    return NextResponse.json({ error: "Error interno" }, { status: 500 });
+  }
+}
+
 // POST /api/sistema/opciones  { clave, campo, valor }
 // Agrega una opción nueva (si no existía) y devuelve la lista actualizada de ese campo.
 export async function POST(req: Request) {

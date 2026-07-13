@@ -151,6 +151,7 @@ export default function SistemaClient() {
   const [tab, setTab] = useState<string>("sistema");
   const [msg, setMsg] = useState("");
   const [configCols, setConfigCols] = useState(false);
+  const [unificarAbierto, setUnificarAbierto] = useState(false);
 
   const [modalTarjeta, setModalTarjeta] = useState<{
     tarjeta: Tarjeta | null; // null = creando
@@ -443,6 +444,15 @@ export default function SistemaClient() {
               >
                 ⚙ Columnas visibles
               </button>
+              {schemaFor(tablero.clave).fields.some((f) => f.t === "select" && f.extensible) && (
+                <button
+                  onClick={() => setUnificarAbierto(true)}
+                  className="text-xs text-zinc-400 hover:text-zinc-100 border border-zinc-700 rounded-md px-2 py-1"
+                  title="Unificar valores duplicados (ubicación, categoría)"
+                >
+                  🧹 Unificar valores
+                </button>
+              )}
               {configCols && (
                 <div className="flex flex-wrap gap-2">
                   {tablero.columnasGlobales.map((c) => {
@@ -672,6 +682,93 @@ export default function SistemaClient() {
           onDelete={modalTarjeta.tarjeta ? () => borrarTarjeta(modalTarjeta.tarjeta!.id) : undefined}
         />
       )}
+
+      {unificarAbierto && tablero && (
+        <ModalUnificar
+          tablero={tablero}
+          onClose={() => setUnificarAbierto(false)}
+          onDone={cargar}
+        />
+      )}
+    </div>
+  );
+}
+
+function Combobox({
+  value,
+  options,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  placeholder?: string;
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, []);
+
+  const q = value.trim().toLowerCase();
+  const filtradas = q ? options.filter((o) => o.toLowerCase().includes(q)) : options;
+
+  return (
+    <div className="relative flex-1 min-w-0" ref={wrapRef}>
+      <Input
+        type="text"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+          setHighlight(0);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (!open || filtradas.length === 0) return;
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setHighlight((h) => Math.min(filtradas.length - 1, h + 1));
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlight((h) => Math.max(0, h - 1));
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+            onChange(filtradas[highlight]);
+            setOpen(false);
+          } else if (e.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+      />
+      {open && filtradas.length > 0 && (
+        <div className="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto bg-[#1f1f1f] border border-zinc-700 rounded-md shadow-lg">
+          {filtradas.map((o, i) => (
+            <button
+              key={o}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onChange(o);
+                setOpen(false);
+              }}
+              className={`block w-full text-left px-3 py-1.5 text-sm truncate ${
+                i === highlight ? "bg-zinc-700 text-white" : "text-zinc-200 hover:bg-zinc-800"
+              }`}
+            >
+              {o}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -713,6 +810,25 @@ function ModalTarjeta({
       setOpcionesExtra((p) => ({ ...p, [campo]: Array.from(new Set([...(p[campo] ?? []), v])) }));
     }
     setCampos((c) => ({ ...c, [campo]: v }));
+  };
+
+  // Al guardar, cualquier valor tipeado a mano en un select "extensible" que no
+  // exista todavía se registra como opción nueva (silencioso), para que la
+  // próxima tarjeta ya lo sugiera en el autocompletado.
+  const handleGuardar = () => {
+    for (const f of schema.fields) {
+      if (f.t !== "select" || !f.extensible) continue;
+      const v = String(campos[f.k] ?? "").trim();
+      if (!v) continue;
+      const conocidas = new Set([...(f.opciones ?? []), ...(opcionesExtra[f.k] ?? [])]);
+      if (!conocidas.has(v)) {
+        apiJson("/api/sistema/opciones", {
+          method: "POST",
+          body: JSON.stringify({ clave: modal.clave, campo: f.k, valor: v }),
+        }).catch(() => {});
+      }
+    }
+    onSave(campos);
   };
 
   return (
@@ -758,18 +874,12 @@ function ModalTarjeta({
                   />
                 ) : f.t === "select" ? (
                   <div className="flex gap-2">
-                    <select
-                      className="flex-1 min-w-0 bg-[#0d0d0d] border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100"
-                      value={campos[f.k] ?? ""}
-                      onChange={(e) => setCampos((c) => ({ ...c, [f.k]: e.target.value }))}
-                    >
-                      <option value="">—</option>
-                      {combinedOptions.map((o) => (
-                        <option key={o} value={o}>
-                          {o}
-                        </option>
-                      ))}
-                    </select>
+                    <Combobox
+                      value={String(campos[f.k] ?? "")}
+                      options={combinedOptions}
+                      placeholder="Escribí para buscar o crear…"
+                      onChange={(v) => setCampos((c) => ({ ...c, [f.k]: v }))}
+                    />
                     {f.extensible && (
                       <button
                         type="button"
@@ -805,10 +915,157 @@ function ModalTarjeta({
             <Button variant="outline" size="sm" onClick={onClose}>
               Cancelar
             </Button>
-            <Button size="sm" onClick={() => onSave(campos)}>
+            <Button size="sm" onClick={handleGuardar}>
               Guardar
             </Button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModalUnificar({
+  tablero,
+  onClose,
+  onDone,
+}: {
+  tablero: Tablero;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const schema = schemaFor(tablero.clave);
+  const camposUnificables = schema.fields.filter((f) => f.t === "select" && f.extensible);
+  const [campo, setCampo] = useState(camposUnificables[0]?.k ?? "");
+  const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
+  const [destino, setDestino] = useState("");
+  const [trabajando, setTrabajando] = useState(false);
+  const [error, setError] = useState("");
+
+  const todasLasTarjetas = tablero.columnas.flatMap((c) => c.tarjetas);
+
+  const conteos = Array.from(
+    todasLasTarjetas.reduce((map, t) => {
+      const v = String(t.campos[campo] ?? "").trim();
+      if (!v) return map;
+      map.set(v, (map.get(v) ?? 0) + 1);
+      return map;
+    }, new Map<string, number>())
+  ).sort((a, b) => b[1] - a[1]);
+
+  const toggle = (valor: string) => {
+    setSeleccion((prev) => {
+      const next = new Set(prev);
+      if (next.has(valor)) next.delete(valor);
+      else next.add(valor);
+      return next;
+    });
+    setError("");
+  };
+
+  const unificar = async () => {
+    if (seleccion.size < 2) {
+      setError("Elegí al menos 2 valores para unificar.");
+      return;
+    }
+    const destinoFinal = destino.trim() || Array.from(seleccion)[0];
+    setTrabajando(true);
+    setError("");
+    try {
+      const cambios = todasLasTarjetas.filter(
+        (t) => seleccion.has(String(t.campos[campo] ?? "").trim()) && t.campos[campo] !== destinoFinal
+      );
+      for (const t of cambios) {
+        await apiJson(`/api/sistema/tarjetas/${t.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ campos: { ...t.campos, [campo]: destinoFinal } }),
+        });
+      }
+      await apiJson("/api/sistema/opciones", {
+        method: "POST",
+        body: JSON.stringify({ clave: tablero.clave, campo, valor: destinoFinal }),
+      }).catch(() => {});
+      for (const v of seleccion) {
+        if (v === destinoFinal) continue;
+        await apiJson("/api/sistema/opciones", {
+          method: "DELETE",
+          body: JSON.stringify({ clave: tablero.clave, campo, valor: v }),
+        }).catch(() => {});
+      }
+      onDone();
+      onClose();
+    } catch {
+      setError("Algo falló a mitad de camino. Revisá y reintentá si hace falta.");
+    } finally {
+      setTrabajando(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-[#161616] border border-zinc-800 rounded-xl w-full max-w-md p-5 max-h-[85vh] overflow-y-auto scrollbar-hide"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-base font-semibold mb-1 text-zinc-100">Unificar valores duplicados</h2>
+        <p className="text-xs text-zinc-500 mb-4">
+          Ej: &quot;pc mangueras&quot; y &quot;pc manguera&quot; → elegí ambos y definí el nombre final.
+        </p>
+
+        {camposUnificables.length > 1 && (
+          <div className="mb-3">
+            <label className="text-xs text-zinc-500 mb-1 block">Campo</label>
+            <select
+              value={campo}
+              onChange={(e) => {
+                setCampo(e.target.value);
+                setSeleccion(new Set());
+                setDestino("");
+              }}
+              className="w-full bg-[#0d0d0d] border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100"
+            >
+              {camposUnificables.map((f) => (
+                <option key={f.k} value={f.k}>
+                  {f.l}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-1 mb-3 max-h-64 overflow-y-auto border border-zinc-800 rounded-md p-2">
+          {conteos.length === 0 && (
+            <p className="text-xs text-zinc-600 px-1 py-2">No hay valores cargados en este campo.</p>
+          )}
+          {conteos.map(([valor, n]) => (
+            <label
+              key={valor}
+              className="flex items-center gap-2 text-sm text-zinc-200 px-2 py-1.5 rounded hover:bg-zinc-800/60 cursor-pointer"
+            >
+              <input type="checkbox" checked={seleccion.has(valor)} onChange={() => toggle(valor)} />
+              <span className="flex-1 truncate">{valor}</span>
+              <span className="text-xs text-zinc-500">{n}</span>
+            </label>
+          ))}
+        </div>
+
+        <label className="text-xs text-zinc-500 mb-1 block">Nombre final</label>
+        <Input
+          type="text"
+          value={destino}
+          placeholder={Array.from(seleccion)[0] ?? "Nombre unificado"}
+          onChange={(e) => setDestino(e.target.value)}
+        />
+
+        {error && <p className="text-xs text-amber-400 mt-2">{error}</p>}
+
+        <div className="flex items-center justify-end gap-2 mt-5">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={trabajando}>
+            Cancelar
+          </Button>
+          <Button size="sm" onClick={unificar} disabled={trabajando || seleccion.size < 2}>
+            {trabajando ? "Unificando…" : `Unificar (${seleccion.size})`}
+          </Button>
         </div>
       </div>
     </div>
