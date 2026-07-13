@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   Bar,
@@ -711,7 +712,26 @@ function Combobox({
 }) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+
+  const openDropdown = () => {
+    const r = wrapRef.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    setOpen(true);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    // se cierra si el modal (u otro ancestro) scrollea, para no quedar mal ubicado
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
 
   useEffect(() => {
     const onDocMouseDown = (e: MouseEvent) => {
@@ -732,10 +752,10 @@ function Combobox({
         placeholder={placeholder}
         onChange={(e) => {
           onChange(e.target.value);
-          setOpen(true);
+          openDropdown();
           setHighlight(0);
         }}
-        onFocus={() => setOpen(true)}
+        onFocus={openDropdown}
         onKeyDown={(e) => {
           if (!open || filtradas.length === 0) return;
           if (e.key === "ArrowDown") {
@@ -753,26 +773,31 @@ function Combobox({
           }
         }}
       />
-      {open && filtradas.length > 0 && (
-        <div className="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto bg-[#1f1f1f] border border-zinc-700 rounded-md shadow-lg">
-          {filtradas.map((o, i) => (
-            <button
-              key={o}
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                onChange(o);
-                setOpen(false);
-              }}
-              className={`block w-full text-left px-3 py-1.5 text-sm truncate ${
-                i === highlight ? "bg-zinc-700 text-white" : "text-zinc-200 hover:bg-zinc-800"
-              }`}
-            >
-              {o}
-            </button>
-          ))}
-        </div>
-      )}
+      {open && filtradas.length > 0 && pos &&
+        createPortal(
+          <div
+            style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
+            className="z-50 max-h-48 overflow-y-auto bg-[#1f1f1f] border border-zinc-700 rounded-md shadow-lg"
+          >
+            {filtradas.map((o, i) => (
+              <button
+                key={o}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  onChange(o);
+                  setOpen(false);
+                }}
+                className={`block w-full text-left px-3 py-1.5 text-sm truncate ${
+                  i === highlight ? "bg-zinc-700 text-white" : "text-zinc-200 hover:bg-zinc-800"
+                }`}
+              >
+                {o}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
