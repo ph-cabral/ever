@@ -758,6 +758,9 @@ function Combobox({
         type="text"
         value={value}
         placeholder={placeholder}
+        autoComplete="off"
+        name={`cb-${placeholder}`}
+        data-1p-ignore
         onChange={(e) => {
           onChange(e.target.value);
           openDropdown();
@@ -876,10 +879,8 @@ function ModalTarjeta({
 
           {schema.fields.map((f) => {
             if (f.auto) return null;
-            // Solo opciones fijas del schema (curadas) + el valor actual, para no
-            // vaciarlo al editar. Prohibido sugerir datos sueltos tipeados antes
-            // (opcionesExtra / historial en sistema_opcion) — el autocompletado
-            // únicamente ofrece lo que está en el dropdown "de verdad".
+            // Opciones fijas del schema (curadas) + las extensibles persistidas
+            // (opcionesExtra, ej. ubicación) + el valor actual (para no vaciarlo al editar).
             const valorActual = campos[f.k];
             const combinedOptions =
               f.t === "select"
@@ -887,6 +888,7 @@ function ModalTarjeta({
                     const arr = Array.from(
                       new Set([
                         ...(f.opciones ?? []),
+                        ...(f.extensible ? opcionesExtra[f.k] ?? [] : []),
                         ...(valorActual ? [String(valorActual)] : []),
                       ])
                     );
