@@ -761,6 +761,8 @@ function Combobox({
         autoComplete="off"
         name={`cb-${placeholder}`}
         data-1p-ignore
+        onFocus={openDropdown}
+        onClick={openDropdown}
         onChange={(e) => {
           onChange(e.target.value);
           openDropdown();
