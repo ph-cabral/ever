@@ -819,70 +819,127 @@ function RuedaMeses({
   opciones,
   selectedIndex,
   onChange,
+  orientation,
+  visible,
 }: {
   opciones: string[];
   selectedIndex: number;
   onChange: (i: number) => void;
+  orientation: "vertical" | "horizontal";
+  visible: number;
 }) {
-  const ROW_H = 44;
-  const VISIBLE = 5;
+  const CELL = orientation === "vertical" ? 44 : 88;
+  const mid = Math.floor(visible / 2);
+  const wheelRef = useRef<HTMLDivElement>(null);
   const wheelLock = useRef(false);
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
 
   const mover = (delta: number) => {
     onChange(Math.max(0, Math.min(opciones.length - 1, selectedIndex + delta)));
   };
+  // ref siempre con la última versión de mover/selectedIndex para el listener nativo.
+  const moverRef = useRef(mover);
+  moverRef.current = mover;
 
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    if (wheelLock.current) return;
-    wheelLock.current = true;
-    mover(e.deltaY > 0 ? 1 : -1);
-    setTimeout(() => {
-      wheelLock.current = false;
-    }, 160);
+  // El onWheel de React se registra como passive y no puede frenar el scroll de
+  // la página. Por eso el listener va nativo, con { passive: false }.
+  useEffect(() => {
+    const el = wheelRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      if (wheelLock.current) return;
+      wheelLock.current = true;
+      const delta = orientation === "horizontal" && Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      moverRef.current(delta > 0 ? 1 : -1);
+      setTimeout(() => {
+        wheelLock.current = false;
+      }, 160);
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, [orientation]);
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    const dy = touchStartY.current == null ? 0 : e.changedTouches[0].clientY - touchStartY.current;
+    touchStartX.current = null;
+    touchStartY.current = null;
+    if (orientation === "horizontal") {
+      if (Math.abs(dx) < 24 || Math.abs(dx) < Math.abs(dy)) return;
+      mover(dx < 0 ? 1 : -1);
+    } else {
+      if (Math.abs(dy) < 24 || Math.abs(dy) < Math.abs(dx)) return;
+      mover(dy < 0 ? 1 : -1);
+    }
   };
 
   const etiquetaChica = (m: string) => (m === "todos" ? "Todos" : mesLabelCorto(m));
   const etiquetaGrande = (m: string) => (m === "todos" ? "Todos" : mesLabel(m));
 
+  const vertical = orientation === "vertical";
+
   return (
-    <div className="fixed right-4 top-1/2 -translate-y-1/2 z-30 hidden lg:flex flex-col items-center gap-1 select-none">
+    <div
+      className={
+        vertical
+          ? "fixed right-4 top-1/2 -translate-y-1/2 z-30 hidden lg:flex flex-col items-center gap-1 select-none"
+          : "sticky top-14 z-20 flex lg:hidden items-center justify-center gap-1 select-none bg-[#0d0d0d]/95 backdrop-blur -mx-6 px-6 py-2 mb-3 border-b border-zinc-800"
+      }
+    >
       <button
         onClick={() => mover(-1)}
-        className="text-zinc-600 hover:text-zinc-200 text-xs leading-none py-1"
+        className="text-zinc-600 hover:text-zinc-200 text-xs leading-none px-1 shrink-0"
         title="Mes más reciente"
       >
-        ▲
+        {vertical ? "▲" : "◀"}
       </button>
 
       <div
-        onWheel={onWheel}
+        ref={wheelRef}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
         className="relative overflow-hidden"
-        style={{ width: 116, height: ROW_H * VISIBLE }}
+        style={vertical ? { width: 116, height: CELL * visible } : { width: CELL * visible, height: 52 }}
       >
         {/* ventana central, como la mirilla de una rueda de candado */}
         <div
-          className="pointer-events-none absolute left-0 right-0 border-y border-zinc-700/70 bg-white/[0.03]"
-          style={{ top: ROW_H * 2, height: ROW_H }}
+          className={
+            "pointer-events-none absolute bg-white/[0.03] " +
+            (vertical ? "left-0 right-0 border-y border-zinc-700/70" : "top-0 bottom-0 border-x border-zinc-700/70")
+          }
+          style={vertical ? { top: CELL * mid, height: CELL } : { left: CELL * mid, width: CELL }}
         />
         <div
-          className="absolute left-0 right-0 transition-transform duration-300 ease-out"
-          style={{ transform: `translateY(${(2 - selectedIndex) * ROW_H}px)` }}
+          className={`absolute transition-transform duration-300 ease-out ${
+            vertical ? "left-0 right-0 flex flex-col" : "top-0 bottom-0 flex flex-row"
+          }`}
+          style={{
+            transform: vertical
+              ? `translateY(${(mid - selectedIndex) * CELL}px)`
+              : `translateX(${(mid - selectedIndex) * CELL}px)`,
+          }}
         >
           {opciones.map((m, i) => {
             const dist = Math.abs(i - selectedIndex);
             const estilo =
               dist === 0
-                ? "text-lg font-bold text-rose-400 scale-110"
+                ? "text-base font-bold text-rose-400 scale-110"
                 : dist === 1
-                ? "text-sm text-zinc-300"
-                : "text-[11px] text-zinc-600";
+                ? "text-xs text-zinc-300"
+                : "text-[10px] text-zinc-600";
             return (
               <button
                 key={m}
                 onClick={() => onChange(i)}
-                style={{ height: ROW_H }}
-                className={`w-full flex items-center justify-center text-center px-1 transition-all duration-200 ${estilo}`}
+                style={vertical ? { height: CELL } : { width: CELL }}
+                className={`shrink-0 flex items-center justify-center text-center px-1 transition-all duration-200 ${estilo}`}
               >
                 {dist === 0 ? etiquetaGrande(m) : etiquetaChica(m)}
               </button>
@@ -893,10 +950,10 @@ function RuedaMeses({
 
       <button
         onClick={() => mover(1)}
-        className="text-zinc-600 hover:text-zinc-200 text-xs leading-none py-1"
+        className="text-zinc-600 hover:text-zinc-200 text-xs leading-none px-1 shrink-0"
         title="Mes más antiguo"
       >
-        ▼
+        {vertical ? "▼" : "▶"}
       </button>
     </div>
   );
@@ -1053,24 +1110,22 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
 
   return (
     <div>
-      {/* selector simple — solo mobile/tablet, en desktop se usa la rueda fija */}
-      <div className="flex justify-end mb-3 lg:hidden">
-        <select
-          value={mes}
-          onChange={(e) => setSelectedIndex(Math.max(0, opciones.indexOf(e.target.value)))}
-          className="bg-[#161616] border border-zinc-800 rounded-lg text-sm text-zinc-300 px-3 py-1.5"
-        >
-          <option value="todos">Todos los meses cerrados</option>
-          <option value={mesActual}>{mesLabel(mesActual)} (en curso)</option>
-          {mesesCerrados.map((m) => (
-            <option key={m} value={m}>
-              {mesLabel(m)}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <RuedaMeses opciones={opciones} selectedIndex={idx} onChange={setSelectedIndex} />
+      {/* mobile/tablet: rueda horizontal arriba, 3 meses visibles */}
+      <RuedaMeses
+        opciones={opciones}
+        selectedIndex={idx}
+        onChange={setSelectedIndex}
+        orientation="horizontal"
+        visible={3}
+      />
+      {/* desktop: rueda fija a la derecha, 5 meses visibles */}
+      <RuedaMeses
+        opciones={opciones}
+        selectedIndex={idx}
+        onChange={setSelectedIndex}
+        orientation="vertical"
+        visible={5}
+      />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <Kpi value={totalCards} label="Casos totales registrados" />
