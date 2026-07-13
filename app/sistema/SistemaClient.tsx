@@ -577,6 +577,8 @@ export default function SistemaClient() {
                         const cardIdx = col.tarjetas.findIndex((tj) => tj.id === card.id);
                         const txt = String(card.campos[titleKey] || "(sin descripción)");
                         const [first, ...rest] = txt.split("\n");
+                        const sinUbicacion = tablero.clave === "sistema" && !card.campos.ubicacion;
+                        const sinCategoria = tablero.clave === "sistema" && !card.campos.categoria;
                         return (
                           <Fragment key={card.id}>
                             {hoverSlot?.colId === col.id && hoverSlot.index === cardIdx && (
@@ -611,7 +613,9 @@ export default function SistemaClient() {
                                   tableroId: tablero.id,
                                 })
                               }
-                              className={`group bg-[#1f1f1f] border rounded-lg p-2.5 cursor-pointer transition-all duration-150 ${
+                              className={`group border rounded-lg p-2.5 cursor-pointer transition-all duration-150 ${
+                                sinUbicacion ? "bg-rose-950/40" : sinCategoria ? "bg-amber-950/40" : "bg-[#1f1f1f]"
+                              } ${
                                 draggingCardId === card.id
                                   ? "opacity-40 scale-95 rotate-1 border-rose-500 shadow-lg shadow-black/50"
                                   : "border-zinc-800 hover:border-zinc-600"
@@ -856,13 +860,18 @@ function ModalTarjeta({
             const valorActual = campos[f.k];
             const combinedOptions =
               f.t === "select"
-                ? Array.from(
-                    new Set([
-                      ...(f.opciones ?? []),
-                      ...(opcionesExtra[f.k] ?? []),
-                      ...(valorActual ? [String(valorActual)] : []),
-                    ])
-                  )
+                ? (() => {
+                    const arr = Array.from(
+                      new Set([
+                        ...(f.opciones ?? []),
+                        ...(opcionesExtra[f.k] ?? []),
+                        ...(valorActual ? [String(valorActual)] : []),
+                      ])
+                    );
+                    // Extensibles (ubicación, categoría) se muestran alfabéticas; las de
+                    // orden fijo (ej. importancia) mantienen su orden original.
+                    return f.extensible ? arr.sort((a, b) => a.localeCompare(b, "es")) : arr;
+                  })()
                 : [];
             return (
               <div key={f.k}>
@@ -951,7 +960,7 @@ function ModalUnificar({
       map.set(v, (map.get(v) ?? 0) + 1);
       return map;
     }, new Map<string, number>())
-  ).sort((a, b) => b[1] - a[1]);
+  ).sort((a, b) => a[0].localeCompare(b[0], "es"));
 
   const toggle = (valor: string) => {
     setSeleccion((prev) => {
