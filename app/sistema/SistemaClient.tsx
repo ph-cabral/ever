@@ -20,17 +20,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-type Campos = Record<string, string | null>;
-type Tarjeta = {
+export type Campos = Record<string, string | null>;
+export type Tarjeta = {
   id: number;
   columnaId: number;
   tableroId: number;
   orden: number;
   campos: Campos;
 };
-type Columna = { id: number; tableroId: number; nombre: string; orden: number; tarjetas: Tarjeta[] };
-type ColGlobal = { id: number; nombre: string; orden: number };
-type Tablero = {
+export type Columna = { id: number; tableroId: number; nombre: string; orden: number; tarjetas: Tarjeta[] };
+export type ColGlobal = { id: number; nombre: string; orden: number };
+export type Tablero = {
   id: number;
   clave: string;
   nombre: string;
@@ -38,7 +38,7 @@ type Tablero = {
   columnasGlobales: ColGlobal[];
   ocultas: number[];
 };
-type CampoDef = {
+export type CampoDef = {
   k: string;
   l: string;
   t: "text" | "textarea" | "date" | "select";
@@ -48,7 +48,7 @@ type CampoDef = {
   extensible?: boolean;
 };
 
-const DEFAULT_SCHEMA: { titleKey: string; fields: CampoDef[] } = {
+export const DEFAULT_SCHEMA: { titleKey: string; fields: CampoDef[] } = {
   titleKey: "descripcion",
   fields: [
     { k: "fecha", l: "Fecha", t: "date", auto: true },
@@ -57,7 +57,7 @@ const DEFAULT_SCHEMA: { titleKey: string; fields: CampoDef[] } = {
   ],
 };
 
-const SCHEMAS: Record<string, { titleKey: string; fields: CampoDef[] }> = {
+export const SCHEMAS: Record<string, { titleKey: string; fields: CampoDef[] }> = {
   sistema: {
     titleKey: "descripcion",
     fields: [
@@ -95,11 +95,11 @@ const SCHEMAS: Record<string, { titleKey: string; fields: CampoDef[] }> = {
     ],
   },
 };
-const schemaFor = (clave: string) => SCHEMAS[clave] ?? DEFAULT_SCHEMA;
+export const schemaFor = (clave: string) => SCHEMAS[clave] ?? DEFAULT_SCHEMA;
 
 const PALETTE = ["#5b8def", "#7c5bef", "#3ecf8e", "#e0b341", "#e0556b", "#3ec7cf", "#cf8de0"];
 
-function parseDate(s?: string | null): Date | null {
+export function parseDate(s?: string | null): Date | null {
   if (!s) return null;
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d;
@@ -137,7 +137,7 @@ function countBy<T>(arr: T[], keyFn: (x: T) => string | undefined | null) {
   return Array.from(map.entries()).map(([name, value]) => ({ name, value }));
 }
 
-async function apiJson(url: string, opts?: RequestInit) {
+export async function apiJson(url: string, opts?: RequestInit) {
   const r = await fetch(url, {
     ...opts,
     headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
@@ -397,6 +397,12 @@ export default function SistemaClient() {
           ← Inicio
         </Link>
         <h1 className="font-bold text-rose-500 text-lg">Sistema</h1>
+        <Link
+          href="/sistema/edit"
+          className="text-xs text-zinc-400 hover:text-zinc-100 border border-zinc-700 rounded-md px-2 py-1 ml-auto"
+        >
+          📋 Vista tabla / editar fechas
+        </Link>
         {msg && <span className="text-amber-400 text-sm ml-4">{msg}</span>}
       </header>
 
@@ -699,7 +705,7 @@ export default function SistemaClient() {
   );
 }
 
-function Combobox({
+export function Combobox({
   value,
   options,
   placeholder,

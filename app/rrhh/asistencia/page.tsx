@@ -125,6 +125,17 @@ const calcEstado = (r: Row): "Normal" | "Ausente" | "Revisar" => {
   return "Normal";
 };
 
+const AREA_TONES = [
+  "bg-sky-100 text-sky-800 border-sky-200",
+  "bg-emerald-100 text-emerald-800 border-emerald-200",
+  "bg-amber-100 text-amber-800 border-amber-200",
+  "bg-violet-100 text-violet-800 border-violet-200",
+  "bg-rose-100 text-rose-800 border-rose-200",
+  "bg-cyan-100 text-cyan-800 border-cyan-200",
+  "bg-orange-100 text-orange-800 border-orange-200",
+  "bg-lime-100 text-lime-800 border-lime-200",
+];
+
 const estadoTone = (s: string) => {
   if (s === "Normal")
     return "bg-emerald-100 text-emerald-800 border-emerald-200";
@@ -621,6 +632,15 @@ export default function AsistenciaPage() {
     [rows],
   );
 
+  const marcacionesPorArea = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of rows) {
+      const a = (r.departamento ?? "").trim() || "Sin área";
+      m.set(a, (m.get(a) ?? 0) + (r.eventos_dia ?? 0));
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [rows]);
+
   const filtered = useMemo(() => {
     const q = empleadoDef.trim().toLowerCase();
     return rows.filter((r) => {
@@ -639,6 +659,23 @@ export default function AsistenciaPage() {
           Empleados activos · estado calculado y editable · novedades por día.
         </p>
       </header>
+
+      {marcacionesPorArea.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          {marcacionesPorArea.map(([a, n], i) => (
+            <div
+              key={a}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium",
+                AREA_TONES[i % AREA_TONES.length],
+              )}
+            >
+              <span className="text-sm font-semibold">{n}</span>
+              <span>{a}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
         <Input
