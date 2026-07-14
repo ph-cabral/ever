@@ -1673,7 +1673,13 @@ def fetch_articulos_multi_ubicacion():
         conn.close()
 
 
-# ── Movimientos por contenedor/TAG, con usuario REAL (/deposito/contenedor) ───
+# ── Contenedor por TAG (/deposito/contenedor) ──────────────────────────────
+# Caso NACHO (2026-07-14): un contenedor activo puede no tener NINGUNA fila en
+# KmovContenedor (nunca completó un movimiento con historial), así que buscar
+# solo ahí lo deja invisible. Fuentes reales:
+#   - Contenedor      -> maestro (TAG, estado, ubicación, vencimiento, desarme)
+#   - ContenedorItem  -> contenido actual (artículo + cantidad)
+#   - KmovContenedor  -> historial de movimientos (puede estar vacío)
 # Kmov.KmovUsuarioGUID_Regist suele ser una cuenta generica del sistema
 # ('User Anonymous', GUID 81cccf51-2228-45d0-9ab9-1bc33eacfb84 -> se repite en
 # miles de movimientos de anios distintos). El operario real que ubico/movio el
@@ -1681,13 +1687,41 @@ def fetch_articulos_multi_ubicacion():
 # KmovReng.KmovRengUsuarioGUID para el mismo renglon), que si mapea a un
 # Personal real via PersonalUserGUID. Caso resuelto 2026-07-13: Kmov 1811457 /
 # TAG AGUA_08 y AGUA_09 -> Carballo Agustin (login acarballo).
-def fetch_movimiento_contenedor(tag: str):
+def fetch_contenedor(tag: str):
     tag = (tag or "").strip()
     conn = get_connection("WMS")
     try:
         cur = conn.cursor()
         cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
-        sql = """
+
+        cur.execute("""
+            SELECT TOP 1
+                   LTRIM(RTRIM(c.ContenedorTAG))         AS TAG,
+                   c.ContenedorFechaRegist                AS Registracion,
+                   c.ContenedorFechaVto                   AS Vencimiento,
+                   c.ContenedorEstado                     AS Estado,
+                   LTRIM(RTRIM(c.ContenedorUbicacionCod)) AS Ubicacion,
+                   c.ContenedorUbicacionDep               AS Deposito,
+                   c.ContenedorOrdenRecepcionNro          AS OrdenRecepcion,
+                   c.ContenedorFechaDesarme                AS FechaDesarme,
+                   LTRIM(RTRIM(desUser.PersonalNombre))   AS Desarmo,
+                   c.ContenedorControlCalidad              AS ControlCalidad
+            FROM Contenedor c
+            LEFT JOIN Personal desUser ON desUser.PersonalUserGUID = c.ContenedorUsuarioGUIDDesarme
+            WHERE LTRIM(RTRIM(c.ContenedorTAG)) = LTRIM(RTRIM(?))
+        """, (tag,))
+        info_rows = _rows(cur)
+        info = info_rows[0] if info_rows else None
+
+        cur.execute("""
+            SELECT LTRIM(RTRIM(i.ContenedorItemArticuloId)) AS Articulo,
+                   i.ContenedorItemCantidad                  AS Cantidad
+            FROM ContenedorItem i
+            WHERE LTRIM(RTRIM(i.ContenedorTAG)) = LTRIM(RTRIM(?))
+        """, (tag,))
+        items = _rows(cur)
+
+        cur.execute("""
             SELECT TOP 50
                    k.KmovId                                       AS KmovId,
                    k.KmovFechaHora                                 AS Momento,
@@ -1711,11 +1745,18 @@ def fetch_movimiento_contenedor(tag: str):
                   AND LTRIM(RTRIM(r.KmovRengContenedorAsociado)) = LTRIM(RTRIM(c.KmovContenedorContenedorTAG))
             WHERE LTRIM(RTRIM(c.KmovContenedorContenedorTAG)) = LTRIM(RTRIM(?))
             ORDER BY k.KmovFechaHora DESC
-        """
-        cur.execute(sql, (tag,))
-        rows = _rows(cur)
-        for row in rows:
+        """, (tag,))
+        historial = _rows(cur)
+        for row in historial:
             row["UsuarioRegistroEsAnonimo"] = row.get("UsuarioRegistroNombre") == "User Anonymous"
-        return {"tag": tag, "total": len(rows), "rows": rows}
+
+        encontrado = info is not None or len(items) > 0 or len(historial) > 0
+        return {
+            "tag": tag,
+            "encontrado": encontrado,
+            "info": info,
+            "items": items,
+            "historial": historial,
+        }
     finally:
         conn.close()
