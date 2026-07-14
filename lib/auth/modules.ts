@@ -120,6 +120,8 @@ const ROUTE_MODULE: { prefix: string; mod: ModuleKey }[] = [
   { prefix: "/manguera",        mod: "manguera" },
   { prefix: "/api/manguera",    mod: "manguera" },
   { prefix: "/api/reportes",    mod: "manguera" }, // ranking de cortes
+  { prefix: "/fabrica",         mod: "manguera" },
+  { prefix: "/api/fabrica",     mod: "manguera" },
   { prefix: "/deposito",        mod: "deposito" },
   { prefix: "/api/deposito",    mod: "deposito" },
   { prefix: "/picking",         mod: "picking" },
