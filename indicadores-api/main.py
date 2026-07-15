@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from db import get_connection
 from utils import construir_timestamps, calcular_tiempos, COLUMNAS_TIEMPO
 from deposito import (
@@ -22,6 +23,10 @@ from mesa_control import (
     fetch_mesa_control_sp_definicion, fetch_mesa_control_tablas_diag,
     fetch_mesa_control_recontroles_diag,
 )
+from errores_mesa import (
+    fetch_pedido_lookup, insert_error_mesa, opciones as errores_mesa_opciones,
+    fetch_ubicacion_diag,
+)
 from datetime import date, datetime, timedelta
 
 app = FastAPI()
@@ -29,7 +34,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -564,3 +569,48 @@ def diag_ubicacion_cols():
     cur = conn.cursor()
     cur.execute("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='UbicacionDetalle'")
     return {"columnas": [r[0] for r in cur.fetchall()]}
+
+
+# ── Errores de Mesa de Control (widget de escritorio) ─────────────────────────
+class ErrorMesaIn(BaseModel):
+    nroPedido: int
+    aviso: str
+    detalleError: str
+
+@app.get("/deposito/pedido/{nro}")
+def deposito_pedido(nro: int):
+    """Lookup por Nro Pedido (NroMovVenta): Fecha + Tipo Pedido (Magnus) + OT +
+    N° Armador/Nombre (WMS). Solo lectura. 404 si no existe en Magnus."""
+    try:
+        info = fetch_pedido_lookup(nro)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+    if info is None:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    return info
+
+@app.get("/deposito/errores-mesa/opciones")
+def deposito_errores_mesa_opciones():
+    """Opciones fijas de los selects del widget (Aviso/Mesa, Detalle Error).
+    Ver errores_mesa.py — MESAS / DETALLE_ERROR_OPCIONES."""
+    return errores_mesa_opciones()
+
+@app.post("/deposito/errores-mesa")
+def deposito_errores_mesa_crear(body: ErrorMesaIn):
+    """Alta de un registro de error (Postgres deposito.errores_mesa). Re-resuelve
+    fecha/tipo/OT/armador del lado del server (no confía en el cliente)."""
+    try:
+        return insert_error_mesa(body.nroPedido, body.aviso, body.detalleError)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Error: {str(e)}")
+
+@app.get("/deposito/errores-mesa/ubicacion-diag")
+def deposito_errores_mesa_ubicacion_diag(nro: int | None = Query(default=None)):
+    """Diagnóstico: columna de OT detectada para 'Observaciones'/ubicación
+    (LIKE '%OBSERV%') y, con `nro`, el lookup completo de ese pedido."""
+    try:
+        return fetch_ubicacion_diag(nro)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
