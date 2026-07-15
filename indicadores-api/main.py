@@ -11,7 +11,7 @@ from deposito import (
     fetch_ot_diferencias,
     fetch_wms_estados, fetch_wms_estados_diag,
     fetch_articulo_ubicaciones, fetch_articulos_multi_ubicacion,
-    fetch_stock_deposito1, fetch_stock_por_articulos,
+    fetch_stock_deposito1, fetch_stock_por_articulos, fetch_stock_export,
     fetch_contenedor,
 )
 from compras import fetch_ordenes_pendientes
@@ -265,9 +265,19 @@ def deposito_stock(
     page_size: int = Query(default=50),
     q: str | None = Query(default=None),
 ):
-    """Stock del depósito 1 (central), paginado: código, nombre, stock, proveedor."""
+    """Stock paginado por depósito (1/2/3) + total: código, nombre, stock por
+    depósito, proveedor."""
     try:
         return fetch_stock_deposito1(page, page_size, q)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/stock/export")
+def deposito_stock_export():
+    """Stock COMPLETO (sin paginar, todos los artículos) por depósito 1/2/3 +
+    total. Para el botón 'Exportar Excel' de /deposito/stock."""
+    try:
+        return fetch_stock_export()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

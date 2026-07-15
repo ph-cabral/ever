@@ -114,6 +114,24 @@ function mesKey(d: Date) {
 function mesAnteriorKey(d: Date) {
   return mesKey(new Date(d.getFullYear(), d.getMonth() - 1, 1));
 }
+function normalizar(s: string) {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim();
+}
+// Columnas del tablero "sistema" con orden manual (drag habilitado). El resto
+// de las columnas de ese tablero se autoordenan por fecha (más reciente arriba).
+const COLUMNAS_ORDEN_MANUAL = ["para aprobacion", "pendiente", "en progreso"];
+function esOrdenManual(nombre: string) {
+  return COLUMNAS_ORDEN_MANUAL.includes(normalizar(nombre));
+}
+// Columnas "cerradas" del tablero "sistema": solo muestran tarjetas del mes en curso.
+function esColumnaCerradaSistema(nombre: string) {
+  const n = normalizar(nombre);
+  return n.includes("resuelto") || n.includes("arreglado") || n.includes("sin solucionar");
+}
 function mesLabel(m: string) {
   const [y, mo] = m.split("-").map(Number);
   return new Date(y, mo - 1, 1).toLocaleDateString("es-AR", { month: "long", year: "numeric" });
@@ -493,18 +511,32 @@ export default function SistemaClient() {
                 const sch = schemaFor(tablero.clave);
                 const titleKey = sch.titleKey;
                 const subtitleField = sch.fields.find((f) => f.t === "date");
-                const esColumnaResuelta =
-                  /solucionado/i.test(col.nombre) && !/sin solu/i.test(col.nombre);
+                const esSistema = tablero.clave === "sistema";
+                // Sistema: orden manual solo en "para aprobación" / "pendiente" / "en
+                // progreso"; el resto se autoordena por fecha (más reciente arriba).
+                const ordenManual = esSistema && esOrdenManual(col.nombre);
+                const soloMesActual = esSistema
+                  ? esColumnaCerradaSistema(col.nombre)
+                  : /solucionado/i.test(col.nombre) && !/sin solu/i.test(col.nombre);
                 const mesActualG = mesKey(new Date());
                 const mesCerradoG = mesAnteriorKey(new Date());
-                const tarjetasVisibles = esColumnaResuelta
-                  ? col.tarjetas.filter((card) => {
+
+                const ordenadas = ordenManual
+                  ? col.tarjetas
+                  : [...col.tarjetas].sort((a, b) => {
+                      const da = subtitleField ? parseDate(a.campos[subtitleField.k]) : null;
+                      const db = subtitleField ? parseDate(b.campos[subtitleField.k]) : null;
+                      return (db?.getTime() ?? 0) - (da?.getTime() ?? 0);
+                    });
+
+                const tarjetasVisibles = soloMesActual
+                  ? ordenadas.filter((card) => {
                       const d = subtitleField ? parseDate(card.campos[subtitleField.k]) : null;
                       if (!d) return true;
                       const mk = mesKey(d);
-                      return mk === mesActualG || mk === mesCerradoG;
+                      return esSistema ? mk === mesActualG : mk === mesActualG || mk === mesCerradoG;
                     })
-                  : col.tarjetas;
+                  : ordenadas;
                 return (
                   <div
                     key={col.id}
@@ -548,7 +580,7 @@ export default function SistemaClient() {
                         {col.nombre}{" "}
                         <span className="text-zinc-500 font-normal">
                           ({tarjetasVisibles.length}
-                          {esColumnaResuelta && tarjetasVisibles.length !== col.tarjetas.length
+                          {soloMesActual && tarjetasVisibles.length !== col.tarjetas.length
                             ? ` de ${col.tarjetas.length}`
                             : ""}
                           )
@@ -867,9 +899,19 @@ function ModalTarjeta({
   // Nota: ya no se registra automáticamente al guardar lo tipeado a mano en un
   // select "extensible" — eso generaba sugerencias basura (typos, valores a medio
   // escribir). Para agregar una opción nueva y persistente hay que usar el botón "+".
-  const handleGuardar = () => {
-    onSave(campos);
-  };
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        onSave(campos);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [campos, onClose, onSave]);
 
   return (
     <div
@@ -959,14 +1001,7 @@ function ModalTarjeta({
           ) : (
             <span />
           )}
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={onClose}>
-              Cancelar
-            </Button>
-            <Button size="sm" onClick={handleGuardar}>
-              Guardar
-            </Button>
-          </div>
+          <p className="text-[11px] text-zinc-500">Esc cancela · Ctrl+Enter guarda</p>
         </div>
       </div>
     </div>

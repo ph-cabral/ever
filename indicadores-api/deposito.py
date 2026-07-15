@@ -1507,88 +1507,130 @@ def fetch_articulo_ubicaciones(articulo: str):
         conn.close()
 
 
-# ── Stock total del depósito 1 (central), paginado (/deposito/stock) ──────────
-# Suma UbicacionDetalleCantidad por artículo, filtrado a UbicacionDepositoId=1.
+# ── Stock por depósito (1/2/3) + total, paginado (/deposito/stock) ────────────
+# Suma UbicacionDetalleCantidad por artículo, pivotado por UbicacionDepositoId.
 # Confirmado por diag /deposito/ubicacion-columnas/diag (2026-07-02): UbicacionDetalle
 # SÍ trae columna de depósito (no estaba entre las 3 UBIC_COL_* originales).
+# IDs de depósito fijos, confirmados por el usuario (2026-07-15): 1, 2, 3.
 UBIC_COL_DEP     = "UbicacionDepositoId"
 DEPOSITO_CENTRAL = 1
+DEPOSITOS        = (1, 2, 3)
+
+
+def _sql_pivot_stock(filtro_q: str = "") -> str:
+    """SELECT con 1 columna StockN por cada depósito de DEPOSITOS + StockTotal,
+    agrupado por artículo. Sin OFFSET/FETCH — lo agrega quien pagina."""
+    cols = ",\n               ".join(
+        f"SUM(CASE WHEN u.{UBIC_COL_DEP} = {d} THEN u.{UBIC_COL_CANT} ELSE 0 END) AS Stock{d}"
+        for d in DEPOSITOS
+    )
+    return f"""
+        SELECT LTRIM(RTRIM(u.{UBIC_COL_ART})) AS Cod,
+               {cols},
+               SUM(u.{UBIC_COL_CANT}) AS StockTotal
+        FROM dbo.{UBIC_TABLA} u
+        WHERE 1=1 {filtro_q}
+        GROUP BY LTRIM(RTRIM(u.{UBIC_COL_ART}))
+        HAVING SUM(u.{UBIC_COL_CANT}) > 0
+        ORDER BY Cod
+    """
+
+
+def _run_pivot_query(sql: str, params: list) -> dict[str, dict]:
+    """Ejecuta el pivot de stock y devuelve {Cod: {Stock1: x, Stock2: y, ..., StockTotal: z}}."""
+    conn = get_connection("WMS")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        if params:
+            cur.execute(sql, params)
+        else:
+            cur.execute(sql)
+        stock: dict[str, dict] = {}
+        for row in cur.fetchall():
+            cod = _txt(row[0])
+            vals = {f"Stock{d}": float(_safe(row[1 + i]) or 0) for i, d in enumerate(DEPOSITOS)}
+            vals["StockTotal"] = float(_safe(row[-1]) or 0)
+            stock[cod] = vals
+        return stock
+    finally:
+        conn.close()
+
+
+def _info_articulos(codigos: list[str]) -> dict[str, dict]:
+    """Nombre/Proveedor desde EVERWEAR para una lista de códigos (chunked de a 1000,
+    igual criterio que fetch_stock_por_articulos)."""
+    info: dict[str, dict] = {}
+    if not codigos:
+        return info
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        CH = 1000
+        for i in range(0, len(codigos), CH):
+            chunk = codigos[i:i + CH]
+            ph = ",".join("?" for _ in chunk)
+            sql_info = f"""
+                SELECT LTRIM(RTRIM(s.CodArticulo)) AS Cod,
+                       ap.Detalle      AS Patron,
+                       s.DetalleMedida AS Medida,
+                       s.UnidadMedida  AS Unidad,
+                       pr.RazonSocial  AS Proveedor
+                FROM EVERWEAR.dbo.[StkFer_Articulos]  s
+                LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloPatron
+                LEFT JOIN EVERWEAR.dbo.[Com_Proveedores]   pr ON pr.CodProveed     = s.CodProveedHabitual
+                WHERE LTRIM(RTRIM(s.CodArticulo)) IN ({ph})
+            """
+            cur.execute(sql_info, chunk)
+            for cod, patron, medida, unidad, prov in cur.fetchall():
+                cod = _txt(cod)
+                nombre = " ".join(" ".join(_txt(x) for x in (patron, medida, unidad)).split())
+                info[cod] = {"Nombre": nombre, "Proveedor": _txt(prov)}
+    finally:
+        conn.close()
+    return info
+
+
+def _build_stock_rows(stock: dict[str, dict]) -> list[dict]:
+    """Junta el pivot de WMS con nombre/proveedor de EVERWEAR → filas ordenadas por código."""
+    info = _info_articulos(list(stock.keys()))
+    rows: list[dict] = []
+    for cod, vals in stock.items():
+        meta = info.get(cod, {})
+        row = {"CodArticulo": cod, "Nombre": meta.get("Nombre", "")}
+        row.update(vals)
+        row["Proveedor"] = meta.get("Proveedor", "")
+        rows.append(row)
+    rows.sort(key=lambda r: r["CodArticulo"])
+    return rows
 
 
 def fetch_stock_deposito1(page: int = 1, page_size: int = 50, q: str | None = None):
-    """Stock del depósito 1 paginado: código, nombre, stock (suma de todas sus
-    ubicaciones), proveedor. No trae los 4mil+ artículos de un tiro:
-    Paso 1 (WMS)      -> agrupa por artículo y pagina con OFFSET/FETCH.
+    """Stock paginado por depósito (1/2/3) + total: código, nombre, stock de cada
+    depósito, proveedor. No trae los 4mil+ artículos de un tiro:
+    Paso 1 (WMS)      -> agrupa por artículo (pivot por depósito) y pagina con OFFSET/FETCH.
     Paso 2 (EVERWEAR) -> enriquece SOLO los códigos de esa página (nombre/proveedor)."""
     page = max(1, page)
     page_size = max(1, min(page_size, 200))
     offset = (page - 1) * page_size
 
     filtro_q = f"AND LTRIM(RTRIM(u.{UBIC_COL_ART})) LIKE ?" if q else ""
-    sql_stock = f"""
-        SELECT LTRIM(RTRIM(u.{UBIC_COL_ART})) AS Cod,
-               SUM(u.{UBIC_COL_CANT})          AS Stock
-        FROM dbo.{UBIC_TABLA} u
-        WHERE u.{UBIC_COL_DEP} = ?
-          {filtro_q}
-        GROUP BY LTRIM(RTRIM(u.{UBIC_COL_ART}))
-        HAVING SUM(u.{UBIC_COL_CANT}) > 0
-        ORDER BY Cod
-        OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
-    """
-    params: list = [DEPOSITO_CENTRAL]
-    if q:
-        params.append(f"%{q}%")
-    params += [offset, page_size]
+    sql_stock = _sql_pivot_stock(filtro_q) + " OFFSET ? ROWS FETCH NEXT ? ROWS ONLY"
+    params: list = ([f"%{q}%"] if q else []) + [offset, page_size]
 
-    conn = get_connection("WMS")
-    try:
-        cur = conn.cursor()
-        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
-        cur.execute(sql_stock, params)
-        stock = {_txt(c): float(_safe(s) or 0) for c, s in cur.fetchall()}
-    finally:
-        conn.close()
+    stock = _run_pivot_query(sql_stock, params)
+    return {"page": page, "page_size": page_size, "rows": _build_stock_rows(stock)}
 
-    rows: list[dict] = []
-    if stock:
-        codigos = list(stock.keys())
-        ph = ",".join("?" for _ in codigos)
-        sql_info = f"""
-            SELECT LTRIM(RTRIM(s.CodArticulo)) AS Cod,
-                   ap.Detalle      AS Patron,
-                   s.DetalleMedida AS Medida,
-                   s.UnidadMedida  AS Unidad,
-                   pr.RazonSocial  AS Proveedor
-            FROM EVERWEAR.dbo.[StkFer_Articulos]  s
-            LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloPatron
-            LEFT JOIN EVERWEAR.dbo.[Com_Proveedores]   pr ON pr.CodProveed     = s.CodProveedHabitual
-            WHERE LTRIM(RTRIM(s.CodArticulo)) IN ({ph})
-        """
-        conn = get_connection("EVERWEAR")
-        try:
-            cur = conn.cursor()
-            cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
-            cur.execute(sql_info, codigos)
-            info: dict = {}
-            for cod, patron, medida, unidad, prov in cur.fetchall():
-                cod = _txt(cod)
-                nombre = " ".join(" ".join(_txt(x) for x in (patron, medida, unidad)).split())
-                info[cod] = {"Nombre": nombre, "Proveedor": _txt(prov)}
-        finally:
-            conn.close()
 
-        for cod in codigos:
-            meta = info.get(cod, {})
-            rows.append({
-                "CodArticulo": cod,
-                "Nombre": meta.get("Nombre", ""),
-                "Stock": stock[cod],
-                "Proveedor": meta.get("Proveedor", ""),
-            })
-        rows.sort(key=lambda r: r["CodArticulo"])
-
-    return {"page": page, "page_size": page_size, "rows": rows}
+# ── Stock COMPLETO por depósito (1/2/3) + total, sin paginar ──────────────────
+# Usado por /deposito/stock/export (botón "Exportar Excel"): a diferencia de
+# fetch_stock_deposito1 (paginado, para la vista web), trae el 100% del stock
+# de un tiro. Mismo criterio: WMS.UbicacionDetalle, pivot por depósito.
+def fetch_stock_export():
+    stock = _run_pivot_query(_sql_pivot_stock(), [])
+    rows = _build_stock_rows(stock)
+    return {"total": len(rows), "rows": rows}
 
 
 # ── Stock del depósito 1 para una lista puntual de artículos ──────────────────

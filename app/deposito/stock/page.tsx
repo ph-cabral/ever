@@ -2,19 +2,25 @@
 import { useState, useEffect } from "react";
 import {
   Search, Loader2, AlertTriangle, ChevronLeft, ChevronRight, RefreshCw,
+  Download,
 } from "lucide-react";
 import { PageTitle, Panel, Table, fmtNum } from "../components/ui";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Stock — Depósito Central (depósito 1). +4mil artículos: nunca se traen todos
-// de un tiro, se pagina server-side contra /api/deposito/stock (indicadores-api
-// agrupa+pagina en WMS.UbicacionDetalle, filtrado a UbicacionDepositoId=1).
+// Stock — todos los depósitos (1/2/3) + total. +4mil artículos: la vista nunca
+// trae todos de un tiro, se pagina server-side contra /api/deposito/stock
+// (indicadores-api agrupa+pagina en WMS.UbicacionDetalle, pivot por depósito).
+// El botón "Exportar Excel" sí trae el 100% del stock (sin paginar), vía
+// /api/deposito/stock/export.
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface StockRow {
   CodArticulo: string;
   Nombre: string;
-  Stock: number;
+  Stock1: number;
+  Stock2: number;
+  Stock3: number;
+  StockTotal: number;
   Proveedor: string;
 }
 
@@ -28,6 +34,7 @@ export default function DepositoStockPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
+  const [exporting, setExporting] = useState(false);
 
   // Búsqueda con debounce → resetea a página 1.
   useEffect(() => {
@@ -67,13 +74,36 @@ export default function DepositoStockPage() {
     };
   }, [page, qDebounced, reloadTick]);
 
+  async function handleExport() {
+    setExporting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/deposito/stock/export");
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `stock_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al exportar");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#111111] text-white">
       <main className="max-w-5xl mx-auto px-4 py-6">
         <div className="flex items-start justify-between gap-4 flex-wrap mb-1">
           <PageTitle
-            title="Stock — Depósito Central"
-            sub="Existencia por artículo (depósito 1) · suma de todas sus ubicaciones · SQL en vivo (WMS)"
+            title="Stock — Todos los depósitos"
+            sub="Existencia por artículo y depósito (1/2/3) + total · suma de todas sus ubicaciones · SQL en vivo (WMS)"
           />
           <div className="flex items-center gap-2 mt-1">
             <div className="relative">
@@ -96,6 +126,19 @@ export default function DepositoStockPage() {
             >
               <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
             </button>
+            <button
+              onClick={handleExport}
+              disabled={exporting}
+              title="Exportar 100% del stock a Excel"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 text-sm text-zinc-200 hover:border-yellow-400 disabled:opacity-40 transition-colors"
+            >
+              {exporting ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Download size={14} />
+              )}
+              Exportar Excel
+            </button>
           </div>
         </div>
 
@@ -111,10 +154,28 @@ export default function DepositoStockPage() {
               { key: "CodArticulo", label: "Código" },
               { key: "Nombre", label: "Nombre" },
               {
-                key: "Stock",
-                label: "Stock",
+                key: "Stock1",
+                label: "Depósito 1",
                 num: true,
-                render: (r) => fmtNum(r.Stock),
+                render: (r) => fmtNum(r.Stock1),
+              },
+              {
+                key: "Stock2",
+                label: "Depósito 2",
+                num: true,
+                render: (r) => fmtNum(r.Stock2),
+              },
+              {
+                key: "Stock3",
+                label: "Depósito 3",
+                num: true,
+                render: (r) => fmtNum(r.Stock3),
+              },
+              {
+                key: "StockTotal",
+                label: "Total",
+                num: true,
+                render: (r) => fmtNum(r.StockTotal),
               },
               { key: "Proveedor", label: "Proveedor" },
             ]}
@@ -155,9 +216,10 @@ export default function DepositoStockPage() {
         )}
 
         <p className="text-[11px] text-zinc-600 mt-6 leading-relaxed">
-          Stock = suma de UbicacionDetalleCantidad (WMS) por artículo, filtrado a
-          UbicacionDepositoId=1 (depósito central). Paginado server-side: nunca se
-          traen los +4mil artículos de un tiro.
+          Stock = suma de UbicacionDetalleCantidad (WMS) por artículo, desglosado
+          por UbicacionDepositoId (1/2/3) + Total. Paginado server-side: nunca se
+          traen los +4mil artículos de un tiro. "Exportar Excel" sí trae el 100%
+          del stock, sin paginar.
         </p>
       </main>
     </div>
