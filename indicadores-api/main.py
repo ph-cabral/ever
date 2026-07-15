@@ -597,7 +597,7 @@ def deposito_errores_mesa_listar(
 ):
     """Lista de registros de deposito.errores_mesa (alta desde el widget de
     escritorio), para la vista de depósito. Filtro opcional por rango de
-    fecha; Mesa/Preparador se filtran en el cliente."""
+    fecha; Controlador/Preparador se filtran en el cliente."""
     try:
         return fetch_errores_mesa_list(desde, hasta, limit)
     except Exception as e:
