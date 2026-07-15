@@ -76,9 +76,11 @@ function esRutaPublica(pathname: string, method: string): boolean {
   }
   // Widget de escritorio "Errores Mesa de Control": mismo caso que
   // /api/picking/estado arriba (proceso en background, sin cookie de sesion
-  // de navegador). Alcance minimo: solo estas 3 rutas exactas.
+  // de navegador). Alcance minimo: solo estas rutas exactas.
   if (method === "GET" && /^\/api\/deposito\/pedido\/\d+$/.test(pathname)) return true;
   if (method === "GET" && pathname === "/api/deposito/errores-mesa/opciones") return true;
+  // Pantalla inicial (N° Operario) del widget rediseñado 2026-07-15.
+  if (method === "GET" && pathname === "/api/deposito/errores-mesa/operario") return true;
   if (method === "POST" && pathname === "/api/deposito/errores-mesa") return true;
   return false;
 }
