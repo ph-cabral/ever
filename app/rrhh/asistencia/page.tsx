@@ -632,11 +632,11 @@ export default function AsistenciaPage() {
     [rows],
   );
 
-  const marcacionesPorArea = useMemo(() => {
+  const empleadosPorArea = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of rows) {
       const a = (r.departamento ?? "").trim() || "Sin área";
-      m.set(a, (m.get(a) ?? 0) + (r.eventos_dia ?? 0));
+      m.set(a, (m.get(a) ?? 0) + 1);
     }
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [rows]);
@@ -653,29 +653,35 @@ export default function AsistenciaPage() {
 
   return (
     <div className="container mx-auto px-6 py-8">
-      <header className="mb-6">
-        <h1 className="text-2xl font-medium">Asistencia</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Empleados activos · estado calculado y editable · novedades por día.
-        </p>
-      </header>
-
-      {marcacionesPorArea.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-4">
-          {marcacionesPorArea.map(([a, n], i) => (
-            <div
-              key={a}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium",
-                AREA_TONES[i % AREA_TONES.length],
-              )}
-            >
-              <span className="text-sm font-semibold">{n}</span>
-              <span>{a}</span>
-            </div>
-          ))}
+      <header className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-medium">Asistencia</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Empleados activos · estado calculado y editable · novedades por día.
+          </p>
         </div>
-      )}
+        {empleadosPorArea.length > 0 && (
+          <div className="flex flex-col items-center gap-2 rounded-[2rem] border px-6 py-3">
+            <span className="text-sm font-medium">
+              Total <span className="font-semibold">{rows.length}</span>
+            </span>
+            <div className="flex flex-wrap justify-center gap-2">
+              {empleadosPorArea.map(([a, n], i) => (
+                <div
+                  key={a}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium",
+                    AREA_TONES[i % AREA_TONES.length],
+                  )}
+                >
+                  <span className="text-sm font-semibold">{n}</span>
+                  <span>{a}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </header>
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
         <Input
