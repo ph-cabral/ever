@@ -185,12 +185,14 @@ function Tabla({
   onArribo,
   onDescartar,
   leaving = {},
+  ocultarProveedor = false,
 }: {
   data: Row[];
   onMark: (row: Row) => void;
   onArribo: (row: Row, fechaArribo: string | null) => void;
   onDescartar: (row: Row) => void;
   leaving?: Record<string, "left" | "right">;
+  ocultarProveedor?: boolean;
 }) {
   return (
     <div className="rounded-xl border border-zinc-800 overflow-hidden">
@@ -208,7 +210,9 @@ function Tabla({
             <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Cubre OC</th>
             <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Falta OC</th>
             <th className="px-3 py-2 font-medium whitespace-nowrap">Despacho</th>
-            <th className="px-3 py-2 font-medium whitespace-nowrap">Proveedor</th>
+            {!ocultarProveedor && (
+              <th className="px-3 py-2 font-medium whitespace-nowrap">Proveedor</th>
+            )}
             <th className="px-3 py-2 font-medium whitespace-nowrap">Cliente</th>
             <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Importe</th>
             <th className="px-3 py-2 font-medium whitespace-nowrap">Arribo</th>
@@ -310,7 +314,9 @@ function Tabla({
                         : fmtAr(r.fechaEntrega)
                       : "—"}
                 </td>
-                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{r.Proveedor || "—"}</td>
+                {!ocultarProveedor && (
+                  <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{r.Proveedor || "—"}</td>
+                )}
                 <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
                   <ClientesCell clientes={r.clientes} />
                 </td>
@@ -998,6 +1004,7 @@ export default function ComprasFaltantesPage() {
                               onArribo={guardarArribo}
                               onDescartar={descartarFaltante}
                               leaving={leaving}
+                              ocultarProveedor
                             />
                           </div>
                         )}

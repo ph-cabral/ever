@@ -13,9 +13,14 @@ ever/sql/deposito_errores_mesa.sql). El lookup por Nro Pedido es SOLO LECTURA:
     _col_observaciones_ot) — mismo patrón "candidatos" que ya usa deposito.py
     (OT_candidatos_pedido) para no hardcodear un nombre sin confirmar.
 
-"Aviso/Mesa" y "Detalle Error" son selects manuales (NO se auto-completan) —
-ver MESAS / DETALLE_ERROR_OPCIONES abajo. Pablo: ajustá esas listas a gusto,
-no requiere tocar el widget (las sirve /deposito/errores-mesa/opciones).
+REDISEÑO 2026-07-15 (a pedido de Pablo): se sacó el select de Mesa/Reclamos.
+Ahora, al abrir el widget se pide un N° de operario (el controlador que está
+parado en la mesa) y se resuelve su NOMBRE contra WMS.Personal — mismo origen
+que "nombreArmador" (fetch_operario_nombre abajo) — UNA sola vez por sesión
+del widget. Ese nombre va en la columna que antes era "aviso", ahora
+"controlador". El widget ya no manda un texto de mesa: manda `nroOperario`
+y el server resuelve el nombre (no confía en lo que mande el cliente).
+"Detalle Error" sigue siendo un select manual — ver DETALLE_ERROR_OPCIONES.
 """
 from datetime import date, timedelta
 
@@ -26,8 +31,6 @@ from deposito import OT_COL_PEDIDO
 BASE_DATE = date(1800, 12, 28)
 
 # ── Opciones fijas de los selects ─────────────────────────────────────────────
-MESAS = ["Mesa", "Mesa 1", "Mesa 2", "Mesa 3", "Reclamos"]
-
 # Lista de arranque — AJUSTAR/COMPLETAR a gusto (sin tocar el widget).
 DETALLE_ERROR_OPCIONES = [
     "Diferencia entre art. preparado y pedido",
@@ -140,6 +143,28 @@ def fetch_pedido_lookup(nro_pedido: int) -> dict | None:
     }
 
 
+def fetch_operario_nombre(nro_operario: int) -> str | None:
+    """Nombre del operario/controlador por N° de Personal (WMS.Personal.
+    PersonalId) — mismo origen que nombreArmador arriba. Se resuelve UNA vez
+    al abrir el widget (pantalla de N° Operario), no por pedido. None si no
+    existe."""
+    conn = get_connection("WMS")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(
+            "SELECT PersonalNombre FROM Personal WHERE PersonalId = ?",
+            (nro_operario,),
+        )
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    nombre = (row[0] or "").strip()
+    return nombre or None
+
+
 def fetch_ubicacion_diag(nro_pedido: int | None = None) -> dict:
     """Diagnóstico: qué columna de OT se detectó para 'Observaciones'/ubicación
     y, si se pasa nro_pedido, el valor real que trae para ese pedido. Para
@@ -156,15 +181,19 @@ def fetch_ubicacion_diag(nro_pedido: int | None = None) -> dict:
 
 
 # ── Insert (Postgres) ─────────────────────────────────────────────────────────
-def insert_error_mesa(nro_pedido: int, aviso: str, detalle_error: str) -> dict:
-    """Re-resuelve fecha/tipo/OT/armador del lado del server (no confía en lo
-    que mande el cliente) e inserta 1 fila en deposito.errores_mesa."""
-    aviso = (aviso or "").strip()
+def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) -> dict:
+    """Re-resuelve fecha/tipo/OT/armador del pedido + nombre del controlador
+    (por nro_operario, WMS.Personal) del lado del server (no confía en lo que
+    mande el cliente) e inserta 1 fila en deposito.errores_mesa."""
     detalle_error = (detalle_error or "").strip()
-    if aviso not in MESAS:
-        raise ValueError(f"'aviso' inválido: {aviso!r}")
+    if not nro_operario:
+        raise ValueError("Falta 'nroOperario'")
     if not detalle_error:
         raise ValueError("Falta 'detalleError'")
+
+    controlador = fetch_operario_nombre(nro_operario)
+    if not controlador:
+        raise ValueError(f"Operario {nro_operario} no encontrado")
 
     info = fetch_pedido_lookup(nro_pedido) or {
         "fecha": None, "tipoPedido": None, "ot": None,
@@ -177,13 +206,13 @@ def insert_error_mesa(nro_pedido: int, aviso: str, detalle_error: str) -> dict:
         cur.execute(
             """
             INSERT INTO deposito.errores_mesa
-                ("nroPedido", fecha, "tipoPedido", ot, aviso, "nroArmador", "nombreArmador", ubicacion, "detalleError")
+                ("nroPedido", fecha, "tipoPedido", ot, controlador, "nroArmador", "nombreArmador", ubicacion, "detalleError")
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id, "createdAt"
             """,
             (
                 nro_pedido, info["fecha"], info["tipoPedido"], info["ot"],
-                aviso, info["nroArmador"], info["nombreArmador"], info["ubicacion"], detalle_error,
+                controlador, info["nroArmador"], info["nombreArmador"], info["ubicacion"], detalle_error,
             ),
         )
         new_id, created_at = cur.fetchone()
@@ -194,14 +223,14 @@ def insert_error_mesa(nro_pedido: int, aviso: str, detalle_error: str) -> dict:
     return {
         **info,
         "id": new_id,
-        "aviso": aviso,
+        "controlador": controlador,
         "detalleError": detalle_error,
         "createdAt": created_at.isoformat(),
     }
 
 
 def opciones() -> dict:
-    return {"mesas": MESAS, "detalleError": DETALLE_ERROR_OPCIONES}
+    return {"detalleError": DETALLE_ERROR_OPCIONES}
 
 
 def fetch_errores_mesa_list(
@@ -209,9 +238,9 @@ def fetch_errores_mesa_list(
 ) -> list[dict]:
     """Lista de deposito.errores_mesa para la vista /deposito (tab "Errores de
     Mesa"). Filtro opcional por rango de fecha (columna `fecha`, resuelta del
-    lado del server al insertar). Mesa/Preparador se filtran del lado del
-    cliente con selects poblados a partir de lo ya traído — mismo patrón que
-    el filtro de Operario en app/deposito/page.tsx."""
+    lado del server al insertar). Controlador/Preparador se filtran del lado
+    del cliente con selects poblados a partir de lo ya traído — mismo patrón
+    que el filtro de Operario en app/deposito/page.tsx."""
     conn = get_pg_connection()
     try:
         cur = conn.cursor()
@@ -224,7 +253,7 @@ def fetch_errores_mesa_list(
             where.append("fecha <= %s")
             params.append(hasta)
         sql = (
-            'SELECT id, "nroPedido", fecha, "tipoPedido", ot, aviso, '
+            'SELECT id, "nroPedido", fecha, "tipoPedido", ot, controlador, '
             '"nombreArmador", ubicacion, "detalleError", "createdAt" '
             "FROM deposito.errores_mesa"
         )

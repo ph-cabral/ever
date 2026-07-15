@@ -10,8 +10,10 @@ import { PageTitle, Panel, KPI, Grid, Table, fmtNum, fmtDate } from "./ui";
 // vista es solo lectura + filtros. Fuente: GET /api/deposito/errores-mesa
 // (→ indicadores-api, fetch_errores_mesa_list en errores_mesa.py).
 //
-// A pedido de Pablo: filtrar por Mesa (aviso) y por nombre del preparador
-// (nombreArmador) — NO se muestra N° Armador, solo el nombre.
+// A pedido de Pablo: filtrar por Controlador (quien carga el error, elegido
+// por N° de operario al abrir el widget — reemplazó al viejo select de
+// Mesa/Reclamos) y por nombre del preparador (nombreArmador) — NO se muestra
+// N° Armador, solo el nombre.
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface ErrorMesaRow {
@@ -20,7 +22,7 @@ interface ErrorMesaRow {
   fecha: string | null;
   tipoPedido: string | null;
   ot: number | null;
-  aviso: string;
+  controlador: string;
   nombreArmador: string | null;
   ubicacion: string | null;
   detalleError: string;
@@ -35,7 +37,7 @@ export function ErroresMesaTab() {
   const [error, setError] = useState<string | null>(null);
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
-  const [mesa, setMesa] = useState(ALL);
+  const [controlador, setControlador] = useState(ALL);
   const [preparador, setPreparador] = useState(ALL);
 
   const load = useCallback(async () => {
@@ -67,8 +69,8 @@ export function ErroresMesaTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const mesas = useMemo(
-    () => [...new Set(rows.map((r) => r.aviso).filter(Boolean))].sort(),
+  const controladores = useMemo(
+    () => [...new Set(rows.map((r) => r.controlador).filter(Boolean))].sort(),
     [rows],
   );
   const preparadores = useMemo(
@@ -82,8 +84,8 @@ export function ErroresMesaTab() {
   // Si el filtro elegido ya no está en el set recién traído (ej. cambió el
   // rango de fechas), volver a "Todos" — mismo patrón que Operario en page.tsx.
   useEffect(() => {
-    if (mesa !== ALL && !mesas.includes(mesa)) setMesa(ALL);
-  }, [mesas, mesa]);
+    if (controlador !== ALL && !controladores.includes(controlador)) setControlador(ALL);
+  }, [controladores, controlador]);
   useEffect(() => {
     if (preparador !== ALL && !preparadores.includes(preparador)) setPreparador(ALL);
   }, [preparadores, preparador]);
@@ -92,10 +94,10 @@ export function ErroresMesaTab() {
     () =>
       rows.filter(
         (r) =>
-          (mesa === ALL || r.aviso === mesa) &&
+          (controlador === ALL || r.controlador === controlador) &&
           (preparador === ALL || r.nombreArmador === preparador),
       ),
-    [rows, mesa, preparador],
+    [rows, controlador, preparador],
   );
 
   const motivoTop = useMemo(() => {
@@ -152,16 +154,16 @@ export function ErroresMesaTab() {
             Aplicar fechas
           </button>
           <label className="flex flex-col gap-1 text-[11px] text-zinc-500">
-            Mesa
+            Controlador
             <select
-              value={mesa}
-              onChange={(e) => setMesa(e.target.value)}
-              className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer min-w-[140px]"
+              value={controlador}
+              onChange={(e) => setControlador(e.target.value)}
+              className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer min-w-[180px]"
             >
-              <option value={ALL}>Todas</option>
-              {mesas.map((m) => (
-                <option key={m} value={m}>
-                  {m}
+              <option value={ALL}>Todos</option>
+              {controladores.map((c) => (
+                <option key={c} value={c}>
+                  {c}
                 </option>
               ))}
             </select>
@@ -197,8 +199,13 @@ export function ErroresMesaTab() {
         </div>
       ) : (
         <>
-          <Grid cols={3}>
+          <Grid cols={4}>
             <KPI label="Registros" value={fmtNum(filtered.length)} accent="yellow" />
+            <KPI
+              label="Controladores"
+              value={fmtNum(controladores.length)}
+              accent="neutral"
+            />
             <KPI
               label="Preparadores"
               value={fmtNum(preparadores.length)}
@@ -228,7 +235,7 @@ export function ErroresMesaTab() {
                   num: true,
                   render: (r) => (r.ot != null ? fmtNum(r.ot) : "—"),
                 },
-                { key: "aviso", label: "Aviso" },
+                { key: "controlador", label: "Controlador" },
                 {
                   key: "nombreArmador",
                   label: "Preparador",

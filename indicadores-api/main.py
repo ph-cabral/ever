@@ -25,7 +25,7 @@ from mesa_control import (
 )
 from errores_mesa import (
     fetch_pedido_lookup, insert_error_mesa, opciones as errores_mesa_opciones,
-    fetch_ubicacion_diag, fetch_errores_mesa_list,
+    fetch_ubicacion_diag, fetch_errores_mesa_list, fetch_operario_nombre,
 )
 from datetime import date, datetime, timedelta
 
@@ -574,7 +574,7 @@ def diag_ubicacion_cols():
 # ── Errores de Mesa de Control (widget de escritorio) ─────────────────────────
 class ErrorMesaIn(BaseModel):
     nroPedido: int
-    aviso: str
+    nroOperario: int
     detalleError: str
 
 @app.get("/deposito/pedido/{nro}")
@@ -605,16 +605,29 @@ def deposito_errores_mesa_listar(
 
 @app.get("/deposito/errores-mesa/opciones")
 def deposito_errores_mesa_opciones():
-    """Opciones fijas de los selects del widget (Aviso/Mesa, Detalle Error).
-    Ver errores_mesa.py — MESAS / DETALLE_ERROR_OPCIONES."""
+    """Opciones fijas del select de Detalle Error. Ver errores_mesa.py —
+    DETALLE_ERROR_OPCIONES."""
     return errores_mesa_opciones()
+
+@app.get("/deposito/errores-mesa/operario")
+def deposito_errores_mesa_operario(nro: int = Query(...)):
+    """Nombre del operario/controlador por N° de Personal (WMS), para la
+    pantalla inicial del widget (se pide 1 vez al abrir, no por pedido)."""
+    try:
+        nombre = fetch_operario_nombre(nro)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+    if not nombre:
+        raise HTTPException(status_code=404, detail="Operario no encontrado")
+    return {"nroOperario": nro, "nombre": nombre}
 
 @app.post("/deposito/errores-mesa")
 def deposito_errores_mesa_crear(body: ErrorMesaIn):
     """Alta de un registro de error (Postgres deposito.errores_mesa). Re-resuelve
-    fecha/tipo/OT/armador del lado del server (no confía en el cliente)."""
+    fecha/tipo/OT/armador del pedido + nombre del controlador (nroOperario,
+    WMS.Personal) del lado del server (no confía en el cliente)."""
     try:
-        return insert_error_mesa(body.nroPedido, body.aviso, body.detalleError)
+        return insert_error_mesa(body.nroPedido, body.nroOperario, body.detalleError)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
