@@ -3,8 +3,11 @@ Registro de Errores — Mesa de Control (widget de escritorio). Insert en
 Postgres (schema `deposito`, tabla `errores_mesa`; ver
 ever/sql/deposito_errores_mesa.sql). El lookup por Nro Pedido es SOLO LECTURA:
 
-  · Fecha + Tipo Pedido  ← EVERWEAR.dbo.VenFer_PedidoCabecera + MAGNUS_SITD
-    (mismo join de Origen_Desc que main.py/SQL_QUERY).
+  · Fecha + Tipo Pedido  ← EVERWEAR.dbo.VenFer_PedidoCabecera + MAGNUS_SITD.
+    "Tipo Pedido" = nombre del comprobante (Ven_CodComprobante.DetalleCorto
+    por CompCodigo, NO el código numérico) — mismo join que Comprobante_Desc
+    en main.py/SQL_QUERY. Ajustado 2026-07-15 a pedido de Pablo: antes era
+    el origen de venta (Web/Móvil/Acopio, Vta/Ped_OrigenRegistracion).
   · OT + N° Armador/Nombre ← WMS OT + Personal, mismo patrón que
     deposito.py (OT_COL_PEDIDO, P_Repositor / OTUsuarioGUID_Repositor).
   · Ubicación ← campo "Observaciones" de la pantalla de OT en WMS (confirmado
@@ -46,13 +49,15 @@ DETALLE_ERROR_OPCIONES = [
 ]
 
 # ── Lookup (solo lectura) ─────────────────────────────────────────────────────
+# "TipoPedido" = nombre del comprobante (ej. "Factura A"), no el código
+# numérico — mismo join (CompCodigo -> Ven_CodComprobante.DetalleCorto) que
+# Comprobante_Desc en main.py/SQL_QUERY.
 SQL_PEDIDO_FECHA_TIPO = """
 SELECT
     p.FechaPedido,
-    COALESCE(or1.VtaOrigenDetalle, or2.PedOrigenDetalle) AS TipoPedido
+    cc.DetalleCorto AS TipoPedido
 FROM EVERWEAR.dbo.VenFer_PedidoCabecera p
-LEFT JOIN MAGNUS_SITD.dbo.Vta_OrigenRegistracion or1 ON p.PedOrigenCodigo = or1.VtaOrigenCodigo
-LEFT JOIN MAGNUS_SITD.dbo.Ped_OrigenRegistracion or2 ON p.PedOrigenCodigo = or2.PedOrigenCodigo
+LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc ON p.CompCodigo = cc.CompCodigo
 WHERE p.NroMovVenta = ?
 """
 

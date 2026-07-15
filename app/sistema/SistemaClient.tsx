@@ -710,11 +710,13 @@ export function Combobox({
   options,
   placeholder,
   onChange,
+  autoFocus,
 }: {
   value: string;
   options: string[];
   placeholder?: string;
   onChange: (v: string) => void;
+  autoFocus?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -767,6 +769,7 @@ export function Combobox({
         autoComplete="off"
         name={`cb-${placeholder}`}
         data-1p-ignore
+        autoFocus={autoFocus}
         onFocus={openDropdown}
         onClick={openDropdown}
         onChange={(e) => {
@@ -834,6 +837,7 @@ function ModalTarjeta({
   onDelete?: () => void;
 }) {
   const schema = schemaFor(modal.clave);
+  const primerCampo = schema.fields.find((f) => !f.auto)?.k;
   const [campos, setCampos] = useState<Campos>(modal.tarjeta?.campos ?? {});
   // Opciones dinámicas de los selects "extensibles" (categoría, ubicación), por campo.
   const [opcionesExtra, setOpcionesExtra] = useState<Record<string, string[]>>({});
@@ -911,6 +915,7 @@ function ModalTarjeta({
                 {f.t === "textarea" ? (
                   <Textarea
                     value={campos[f.k] ?? ""}
+                    autoFocus={!modal.tarjeta && f.k === primerCampo}
                     onChange={(e) => setCampos((c) => ({ ...c, [f.k]: e.target.value }))}
                   />
                 ) : f.t === "select" ? (
@@ -919,6 +924,7 @@ function ModalTarjeta({
                       value={String(campos[f.k] ?? "")}
                       options={combinedOptions}
                       placeholder="Escribí para buscar o crear…"
+                      autoFocus={!modal.tarjeta && f.k === primerCampo}
                       onChange={(v) => setCampos((c) => ({ ...c, [f.k]: v }))}
                     />
                     {f.extensible && (
@@ -936,6 +942,7 @@ function ModalTarjeta({
                   <Input
                     type="text"
                     value={campos[f.k] ?? ""}
+                    autoFocus={!modal.tarjeta && f.k === primerCampo}
                     onChange={(e) => setCampos((c) => ({ ...c, [f.k]: e.target.value }))}
                   />
                 )}
