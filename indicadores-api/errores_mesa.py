@@ -202,3 +202,45 @@ def insert_error_mesa(nro_pedido: int, aviso: str, detalle_error: str) -> dict:
 
 def opciones() -> dict:
     return {"mesas": MESAS, "detalleError": DETALLE_ERROR_OPCIONES}
+
+
+def fetch_errores_mesa_list(
+    desde: str | None = None, hasta: str | None = None, limit: int = 1000
+) -> list[dict]:
+    """Lista de deposito.errores_mesa para la vista /deposito (tab "Errores de
+    Mesa"). Filtro opcional por rango de fecha (columna `fecha`, resuelta del
+    lado del server al insertar). Mesa/Preparador se filtran del lado del
+    cliente con selects poblados a partir de lo ya traído — mismo patrón que
+    el filtro de Operario en app/deposito/page.tsx."""
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        where = []
+        params: list = []
+        if desde:
+            where.append("fecha >= %s")
+            params.append(desde)
+        if hasta:
+            where.append("fecha <= %s")
+            params.append(hasta)
+        sql = (
+            'SELECT id, "nroPedido", fecha, "tipoPedido", ot, aviso, '
+            '"nombreArmador", ubicacion, "detalleError", "createdAt" '
+            "FROM deposito.errores_mesa"
+        )
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += ' ORDER BY fecha DESC NULLS LAST, "createdAt" DESC LIMIT %s'
+        params.append(limit)
+        cur.execute(sql, params)
+        cols = [c[0] for c in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    for r in rows:
+        if r.get("fecha") is not None:
+            r["fecha"] = r["fecha"].isoformat()
+        if r.get("createdAt") is not None:
+            r["createdAt"] = r["createdAt"].isoformat()
+    return rows

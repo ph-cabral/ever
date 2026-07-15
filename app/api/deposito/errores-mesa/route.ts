@@ -6,6 +6,38 @@ const API_URL =
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
+// Proxy → FastAPI indicadores-api: lista de deposito.errores_mesa (tab
+// "Errores de Mesa" en /deposito). Filtro opcional por rango de fecha
+// (?desde=YYYY-MM-DD&hasta=YYYY-MM-DD); Mesa/Preparador se filtran en el cliente.
+export async function GET(req: NextRequest) {
+  const desde = req.nextUrl.searchParams.get("desde");
+  const hasta = req.nextUrl.searchParams.get("hasta");
+  const qs = new URLSearchParams();
+  if (desde) qs.set("desde", desde);
+  if (hasta) qs.set("hasta", hasta);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  try {
+    const res = await fetch(`${API_URL}/deposito/errores-mesa${suffix}`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(20000),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      return NextResponse.json(
+        { error: "No se pudo listar el registro de errores", detail: data },
+        { status: res.status },
+      );
+    }
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error("GET /api/deposito/errores-mesa", error);
+    return NextResponse.json(
+      { error: "No se pudo conectar al servicio de depósito" },
+      { status: 503 },
+    );
+  }
+}
+
 // Proxy → FastAPI indicadores-api: alta de un registro de error de Mesa de
 // Control (Postgres deposito.errores_mesa). Ver ever/sql/deposito_errores_mesa.sql.
 export async function POST(req: NextRequest) {

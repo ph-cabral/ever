@@ -25,7 +25,7 @@ from mesa_control import (
 )
 from errores_mesa import (
     fetch_pedido_lookup, insert_error_mesa, opciones as errores_mesa_opciones,
-    fetch_ubicacion_diag,
+    fetch_ubicacion_diag, fetch_errores_mesa_list,
 )
 from datetime import date, datetime, timedelta
 
@@ -588,6 +588,20 @@ def deposito_pedido(nro: int):
     if info is None:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     return info
+
+@app.get("/deposito/errores-mesa")
+def deposito_errores_mesa_listar(
+    desde: str | None = Query(default=None),
+    hasta: str | None = Query(default=None),
+    limit: int = Query(default=1000, le=5000),
+):
+    """Lista de registros de deposito.errores_mesa (alta desde el widget de
+    escritorio), para la vista de depósito. Filtro opcional por rango de
+    fecha; Mesa/Preparador se filtran en el cliente."""
+    try:
+        return fetch_errores_mesa_list(desde, hasta, limit)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Error: {str(e)}")
 
 @app.get("/deposito/errores-mesa/opciones")
 def deposito_errores_mesa_opciones():
