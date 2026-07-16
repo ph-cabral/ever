@@ -34,15 +34,15 @@ model manguera {
 }
 
 model corte {
-  id          Int       @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   metros      Float
-  fecha       DateTime  @default(now())
+  fecha       DateTime @default(now())
   observacion String?
   personalId  Int?
   codigo      String
   trabajoId   Int?
-  personal    personal? @relation(fields: [personalId], references: [id], onDelete: Restrict)
-  trabajo     trabajo?  @relation(fields: [trabajoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  personal    personal? @relation(fields: [personalId], references: [id])
+  trabajo     trabajo?  @relation(fields: [trabajoId], references: [id])
 
   @@index([fecha])
   @@index([personalId])
@@ -99,7 +99,7 @@ model chat_mensajes {
 model legajo {
   id                     Int                      @id @default(autoincrement())
   codigo                 String?                  @unique
-  estado                 String                   @default("draft") @db.VarChar(20)
+  estado                 String                   @default("ACTIVO") @db.VarChar(20)
   personalId             Int?                     @unique
   nombre                 String                   @db.VarChar(100)
   dni                    String?                  @unique @db.VarChar(20)
@@ -185,19 +185,18 @@ model legajo {
   createdAt              DateTime                 @default(now())
   updatedAt              DateTime                 @updatedAt
   employeeNo             String?                  @unique @db.VarChar(50)
-  sectorId               Int?
-  anvizId                String?                  @unique @db.VarChar(20)
   personal               everwear_personal?       @relation(fields: [personalId], references: [id])
-  sectorRel              sector?                  @relation(fields: [sectorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   antecedentesSrt        legajo_antecedente_srt[]
   beneficiarios          legajo_beneficiario[]
   equipos                legajo_equipo[]
   estudios               legajo_estudio[]
   familiares             legajo_familiar[]
   idiomas                legajo_idioma[]
-  usuario                usuario?
+  sectorId               Int?
+  sectorRel              sector?   @relation(fields: [sectorId], references: [id])
   trabajos               trabajo[]
-
+  usuario                usuario?
+  anvizId                String?         @unique @db.VarChar(20)
   @@index([estado])
   @@schema("everwear")
 }
@@ -359,7 +358,7 @@ model user_id_registry {
 model area {
   id        Int      @id @default(autoincrement())
   nombre    String   @unique @db.VarChar(80)
-  createdAt DateTime @default(now()) @db.Timestamp(6)
+  createdAt DateTime @default(now())
   sectores  sector[]
 
   @@schema("everwear")
@@ -369,9 +368,9 @@ model sector {
   id        Int       @id @default(autoincrement())
   nombre    String    @db.VarChar(80)
   areaId    Int
-  createdAt DateTime  @default(now()) @db.Timestamp(6)
+  createdAt DateTime  @default(now())
+  area      area      @relation(fields: [areaId], references: [id])
   legajos   legajo[]
-  area      area      @relation(fields: [areaId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   trabajos  trabajo[]
 
   @@unique([nombre, areaId])
@@ -379,18 +378,19 @@ model sector {
   @@schema("everwear")
 }
 
+// Tabla legada: los clientes ahora se leen en vivo de Magnus
+// (MAGNUS_SITD.dbo.Clientes) desde /manguera/corte. Queda sin uso/relaciones.
 model cliente {
-  numero    Int       @id
-  nombre    String    @db.VarChar(150)
-  createdAt DateTime  @default(now()) @db.Timestamp(6)
-  trabajo   trabajo[]
+  numero    Int      @id
+  nombre    String   @db.VarChar(150)
+  createdAt DateTime @default(now())
 
   @@schema("everwear")
 }
 
 model trabajo {
   id                  Int       @id @default(autoincrement())
-  fechaPedido         DateTime  @default(now()) @db.Timestamp(6)
+  fechaPedido         DateTime  @default(now())
   pedidoTransferencia String?   @db.VarChar(60)
   ordenTrabajo        String?   @db.VarChar(60)
   prioridad           String?   @db.VarChar(20)
@@ -401,27 +401,28 @@ model trabajo {
   legajoId            Int
   sectorId            Int?
   clienteNumero       Int?
-  inicio              DateTime  @default(now()) @db.Timestamp(6)
-  fin                 DateTime? @db.Timestamp(6)
-  createdAt           DateTime  @default(now()) @db.Timestamp(6)
-  updatedAt           DateTime  @default(now()) @updatedAt @db.Timestamp(6)
   clienteNombre       String?   @db.VarChar(150)
+  inicio              DateTime  @default(now())
+  fin                 DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  legajo              legajo    @relation(fields: [legajoId], references: [id])
+  sector              sector?   @relation(fields: [sectorId], references: [id])
   cortes              corte[]
-  cliente             cliente?  @relation(fields: [clienteNumero], references: [numero], onDelete: NoAction, onUpdate: NoAction)
-  legajo              legajo    @relation(fields: [legajoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  sector              sector?   @relation(fields: [sectorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([legajoId])
   @@index([estado])
   @@schema("fabrica")
 }
 
+// Una "ronda" = un sorteo completo. Guarda el plan de instancias (drag&drop)
+// como JSON y agrupa a sus ganadores. Permite historial sin chocar entre sorteos.
 model sorteo_ronda {
   id         Int            @id @default(autoincrement())
   titulo     String?
-  estado     String         @default("armado")
-  instancias Json?
-  createdAt  DateTime       @default(now()) @db.Timestamp(6)
+  estado     String         @default("armado") // armado | sorteando | cerrado
+  instancias Json? // [{ orden, premios: [{ file, nombre, cantidad }] }]  (mejor→peor)
+  createdAt  DateTime       @default(now())
   album      sorteo_album[]
 
   @@schema("everwear")
@@ -430,22 +431,22 @@ model sorteo_ronda {
 model sorteo_album {
   id        Int          @id @default(autoincrement())
   rondaId   Int
-  orden     Int
-  instancia Int          @default(0)
+  ronda     sorteo_ronda @relation(fields: [rondaId], references: [id], onDelete: Cascade)
+  orden     Int // 1..10 = posición/puesto dentro de la ronda
+  instancia Int          @default(0) // a qué instancia del plan pertenece
   dni       String
   nombre    String
-  marco     String       @default("oro")
-  premio    String?
-  premioImg String?
-  createdAt DateTime     @default(now()) @db.Timestamp(6)
-  ronda     sorteo_ronda @relation(fields: [rondaId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  marco     String       @default("oro") // oro | plata | bronce | celeste
+  premio    String? // nombre del premio asignado
+  premioImg String? // archivo en /public/premios
+  createdAt DateTime     @default(now())
 
-  @@unique([rondaId, dni], map: "sorteo_album_rondaid_dni_key")
-  @@unique([rondaId, orden], map: "sorteo_album_rondaid_orden_key")
-  @@index([rondaId], map: "sorteo_album_rondaid_idx")
+  @@unique([rondaId, orden])
+  @@unique([rondaId, dni])
   @@schema("everwear")
 }
 
+// Faltantes: marca por renglón si había o no existencia (vista /deposito/faltantes).
 model faltante_existencia {
   id             Int      @id @default(autoincrement())
   fecha          DateTime @db.Date
@@ -453,51 +454,64 @@ model faltante_existencia {
   nroRengOrigen  Int      @map("nro_reng_origen")
   codArticulo    String?  @map("cod_articulo") @db.VarChar(50)
   existencia     Boolean?
-  creado_en      DateTime @default(now()) @db.Timestamp(6)
-  actualizado_en DateTime @default(now()) @updatedAt @db.Timestamp(6)
   cantidad       Float?
+  creado_en      DateTime @default(now())
+  actualizado_en DateTime @updatedAt
 
-  @@unique([fecha, nroPedOrigen, nroRengOrigen], name: "uniq_faltante", map: "uniq_faltante")
+  @@unique([fecha, nroPedOrigen, nroRengOrigen], name: "uniq_faltante")
   @@schema("preparado")
 }
 
+// Login de la app. Cada usuario se vincula a un legajo existente de everwear.
+// El login es por DNI + contraseña; los permisos salen del sector (ver sector_permiso).
 model usuario {
   id           Int       @id @default(autoincrement())
   legajoId     Int       @unique
   dni          String    @unique @db.VarChar(20)
   nombre       String    @db.VarChar(100)
   passwordHash String
-  rol          String    @default("USUARIO") @db.VarChar(20)
+  rol          String    @default("USUARIO") @db.VarChar(20) // ADMIN | USUARIO
   sector       String?   @db.VarChar(80)
   activo       Boolean   @default(true)
-  ultimoAcceso DateTime? @db.Timestamp(6)
-  createdAt    DateTime  @default(now()) @db.Timestamp(6)
-  updatedAt    DateTime  @default(now()) @updatedAt @db.Timestamp(6)
-  legajo       legajo    @relation(fields: [legajoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  ultimoAcceso DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  legajo       legajo    @relation(fields: [legajoId], references: [id])
 
   @@index([dni])
   @@schema("everwear")
 }
 
+// Mapa editable: qué módulos de la app habilita cada sector.
+// `modulos` es un array JSON de claves de módulo (ver lib/auth/modules.ts).
 model sector_permiso {
   id        Int      @id @default(autoincrement())
   sector    String   @unique @db.VarChar(80)
   modulos   Json     @default("[]")
-  createdAt DateTime @default(now()) @db.Timestamp(6)
-  updatedAt DateTime @default(now()) @updatedAt @db.Timestamp(6)
-  vistas    Json     @default("[]")
-  ocultos   Json     @default("[]")
+  vistas    Json     @default("[]") // hrefs de sub-vistas permitidas
+  ocultos   Json     @default("[]") // keys/hrefs ocultos del inicio (con acceso)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@schema("everwear")
 }
 
+// ===== Módulo "sistema": tablero tipo Trello con columnas GLOBALES + vinculación =====
+// NOTA: este bloque es de referencia. El flujo real es: correr sql/sistema_init.sql y
+// luego sql/sistema_vinculacion.sql contra la base y después `prisma db pull`
+// (multi-schema no soporta `migrate dev`) — eso reescribe este bloque desde la DB real.
+// Columnas son globales (las mismas en todos los tableros). Cada tablero oculta las que
+// no quiere ver (sistema_columna_oculta). Una tarjeta tiene dueño (tableroId) y un
+// vínculo opcional (vinculadoTableroId): si está vinculada aparece en ambos tableros y
+// es la MISMA fila, por eso se mueve a la par. Cuenta para el vinculado (orquestado).
 model sistema_tablero {
-  id              Int                      @id @default(autoincrement())
-  clave           String                   @unique @db.VarChar(40)
-  nombre          String                   @db.VarChar(100)
-  createdAt       DateTime                 @default(now()) @db.Timestamp(6)
+  id            Int                      @id @default(autoincrement())
+  clave         String                   @unique @db.VarChar(40)
+  nombre        String                   @db.VarChar(100)
+  createdAt     DateTime                 @default(now())
+  tarjetas      sistema_tarjeta[]        @relation("tarjetaTablero")
+  vinculadas    sistema_tarjeta[]        @relation("tarjetaVinculado")
   columnasOcultas sistema_columna_oculta[]
-  tarjetas        sistema_tarjeta[]        @relation("tarjetaTablero")
 
   @@schema("sistema")
 }
@@ -506,9 +520,9 @@ model sistema_columna {
   id        Int                      @id @default(autoincrement())
   nombre    String                   @unique @db.VarChar(100)
   orden     Int                      @default(0)
-  createdAt DateTime                 @default(now()) @db.Timestamp(6)
-  ocultaEn  sistema_columna_oculta[]
+  createdAt DateTime                 @default(now())
   tarjetas  sistema_tarjeta[]
+  ocultaEn  sistema_columna_oculta[]
 
   @@schema("sistema")
 }
@@ -516,163 +530,42 @@ model sistema_columna {
 model sistema_columna_oculta {
   tableroId Int
   columnaId Int
-  columna   sistema_columna @relation(fields: [columnaId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  tablero   sistema_tablero @relation(fields: [tableroId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tablero   sistema_tablero @relation(fields: [tableroId], references: [id], onDelete: Cascade)
+  columna   sistema_columna @relation(fields: [columnaId], references: [id], onDelete: Cascade)
 
   @@id([tableroId, columnaId])
   @@schema("sistema")
 }
 
 model sistema_tarjeta {
-  id        Int             @id @default(autoincrement())
-  columnaId Int
-  orden     Int             @default(0)
-  campos    Json            @default("{}")
-  createdAt DateTime        @default(now()) @db.Timestamp(6)
-  updatedAt DateTime        @default(now()) @updatedAt @db.Timestamp(6)
-  tableroId Int
-  columna   sistema_columna @relation(fields: [columnaId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  tablero   sistema_tablero @relation("tarjetaTablero", fields: [tableroId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "sistema_tarjeta_tablero_fk")
+  id                 Int              @id @default(autoincrement())
+  tableroId          Int
+  columnaId          Int
+  vinculadoTableroId Int?
+  orden              Int              @default(0)
+  campos             Json             @default("{}")
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  tablero            sistema_tablero  @relation("tarjetaTablero", fields: [tableroId], references: [id], onDelete: Cascade)
+  vinculado          sistema_tablero? @relation("tarjetaVinculado", fields: [vinculadoTableroId], references: [id], onDelete: SetNull)
+  columna            sistema_columna  @relation(fields: [columnaId], references: [id], onDelete: Cascade)
 
-  @@index([columnaId], map: "idx_sistema_tarjeta_columna")
-  @@index([tableroId], map: "idx_sistema_tarjeta_tablero")
+  @@index([tableroId])
+  @@index([columnaId])
   @@schema("sistema")
 }
 
+// Opciones dinámicas para campos tipo "select" de un tablero (ej: categoría, ubicación
+// en el tablero "sistema"). El usuario las agrega desde la UI con el botón "+"; se
+// guardan por (clave de tablero, nombre de campo) para no pisar otros tableros/campos.
 model sistema_opcion {
   id        Int      @id @default(autoincrement())
   clave     String   @db.VarChar(40)
   campo     String   @db.VarChar(50)
   valor     String   @db.VarChar(150)
   orden     Int      @default(0)
-  createdAt DateTime @default(now()) @db.Timestamp(6)
+  createdAt DateTime @default(now())
 
   @@unique([clave, campo, valor])
   @@schema("sistema")
-}
-
-model estado_diario {
-  id          BigInt   @id @default(autoincrement())
-  employee_no String   @db.VarChar(50)
-  fecha       DateTime @db.Date
-  estado      String?  @db.VarChar(40)
-  dias        Int?
-  updated_at  DateTime @default(now()) @db.Timestamptz(6)
-
-  @@unique([employee_no, fecha], map: "estado_diario_emp_fecha_uk")
-  @@index([fecha], map: "idx_estado_diario_fecha")
-  @@schema("asistencia")
-}
-
-model novedad_diaria {
-  id             BigInt   @id @default(autoincrement())
-  employee_no    String   @db.VarChar(50)
-  fecha          DateTime @db.Date
-  novedad        String?  @db.VarChar(40)
-  horas          Int?
-  updated_at     DateTime @default(now()) @db.Timestamptz(6)
-  minutos_brutos Int?
-  minutos_netos  Int?
-  minutos_rrhh   Int?
-  novedades      Json     @default("[]")
-
-  @@unique([employee_no, fecha], map: "novedad_diaria_emp_fecha_uk")
-  @@index([fecha], map: "idx_novedad_diaria_fecha")
-  @@schema("asistencia")
-}
-
-model faltante_control {
-  id            Int       @id @default(autoincrement())
-  fecha         DateTime  @db.Date
-  nroPedOrigen  Int
-  nroRengOrigen Int
-  codArticulo   String    @default("")
-  fechaArribo   DateTime? @db.Date
-  clienteQuiere Boolean?
-  updatedAt     DateTime  @default(now()) @db.Timestamptz(6)
-  vendido       Boolean?
-  vendidoAt     DateTime? @db.Timestamptz(6)
-  irrelevante   Boolean?
-  irrelevanteAt DateTime? @db.Timestamptz(6)
-
-  @@unique([fecha, nroPedOrigen, nroRengOrigen], map: "uniq_faltante_control")
-  @@index([fecha], map: "idx_faltante_control_fecha")
-  @@schema("preparado")
-}
-
-model faltante_extraordinario {
-  id             Int      @id @default(autoincrement())
-  fecha          DateTime @db.Date
-  codArticulo    String   @default("")
-  extraordinario Boolean  @default(false)
-  comprar        Boolean?
-  updatedAt      DateTime @default(now()) @db.Timestamptz(6)
-
-  @@unique([fecha, codArticulo], map: "uniq_faltante_extraordinario")
-  @@index([fecha], map: "idx_faltante_extraordinario_fecha")
-  @@schema("preparado")
-}
-
-model faltante_novedad {
-  id                    Int                    @id @default(autoincrement())
-  fecha                 DateTime               @db.Date
-  nroPedOrigen          Int
-  nroRengOrigen         Int
-  codArticulo           String                 @default("")
-  novedadId             Int?
-  updatedAt             DateTime               @default(now()) @db.Timestamptz(6)
-  faltante_novedad_tipo faltante_novedad_tipo? @relation(fields: [novedadId], references: [id], onUpdate: NoAction)
-
-  @@unique([fecha, nroPedOrigen, nroRengOrigen], map: "uniq_faltante_novedad")
-  @@index([fecha], map: "idx_faltante_novedad_fecha")
-  @@schema("preparado")
-}
-
-model faltante_novedad_tipo {
-  id               Int                @id @default(autoincrement())
-  nombre           String             @unique
-  orden            Int                @default(0)
-  activo           Boolean            @default(true)
-  createdAt        DateTime           @default(now()) @db.Timestamptz(6)
-  faltante_novedad faltante_novedad[]
-
-  @@schema("preparado")
-}
-
-model faltante_oc_consumo {
-  id          Int      @id @default(autoincrement())
-  fecha       DateTime @db.Date
-  codArticulo String   @default("")
-  faltan      Decimal  @default(0) @db.Decimal(14, 2)
-  ocImputada  Decimal  @default(0) @db.Decimal(14, 2)
-  descubierto Decimal  @default(0) @db.Decimal(14, 2)
-  ocTotal     Decimal  @default(0) @db.Decimal(14, 2)
-  updatedAt   DateTime @default(now()) @db.Timestamptz(6)
-
-  @@unique([fecha, codArticulo], map: "uniq_faltante_oc_consumo")
-  @@index([fecha], map: "idx_faltante_oc_consumo_fecha")
-  @@schema("preparado")
-}
-
-model faltante_wms {
-  id            Int      @id @default(autoincrement())
-  fecha         DateTime @db.Date
-  otId          Int
-  renglon       Int
-  nroPedOrigen  Int?
-  nroRengOrigen Int
-  operario      String   @default("")
-  cliente       String   @default("")
-  vendedor      String   @default("")
-  ubicacion     String   @default("")
-  codArticulo   String   @default("")
-  cantPedida    Decimal  @default(0) @db.Decimal(14, 2)
-  cantCumplida  Decimal  @default(0) @db.Decimal(14, 2)
-  diferencia    Decimal  @default(0) @db.Decimal(14, 2)
-  updatedAt     DateTime @default(now()) @db.Timestamptz(6)
-
-  @@unique([otId, renglon], map: "uniq_faltante_wms")
-  @@index([fecha], map: "idx_faltante_wms_fecha")
-  @@index([nroPedOrigen, nroRengOrigen], map: "idx_faltante_wms_ped")
-  @@schema("preparado")
 }
