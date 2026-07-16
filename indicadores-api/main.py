@@ -590,6 +590,7 @@ class ErrorMesaIn(BaseModel):
 
 class ErrorCalidadIn(BaseModel):
     nroPedido: int
+    nroOperario: int
     detalleError: str
 
 @app.get("/deposito/pedido/{nro}")
@@ -654,7 +655,7 @@ def deposito_errores_mesa_calidad_crear(body: ErrorCalidadIn):
     Ven_PedImpresoCP), no lo pide el widget. NO guarda preparador. Ver
     insert_error_calidad."""
     try:
-        return insert_error_calidad(body.nroPedido, body.detalleError)
+        return insert_error_calidad(body.nroPedido, body.nroOperario, body.detalleError)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

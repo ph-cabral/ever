@@ -271,13 +271,22 @@ def fetch_controlador_pedido(nro_pedido: int) -> dict | None:
         conn.close()
 
 
-def insert_error_calidad(nro_pedido: int, detalle_error: str) -> dict:
+def insert_error_calidad(nro_pedido: int, nro_operario: int, detalle_error: str) -> dict:
     """Alta desde el widget de Calidad. NO guarda preparador (a diferencia de
-    insert_error_mesa) — solo controlador (Magnus) + tipoPedido/OT/ubicación.
-    origen='calidad' para distinguir del widget de Mesa de Control."""
+    insert_error_mesa). `nro_operario` identifica a QUIEN CARGA el registro
+    (pantalla de inicio del widget, igual que Mesa de Control) — se resuelve
+    del lado del server (WMS.Personal, mismo origen que fetch_operario_nombre)
+    y va en `registradoPor`, separado de `controlador` (que acá sale solo de
+    Magnus, no lo tipea nadie). origen='calidad'."""
     detalle_error = (detalle_error or "").strip()
+    if not nro_operario:
+        raise ValueError("Falta 'nroOperario'")
     if not detalle_error:
         raise ValueError("Falta 'detalleError'")
+
+    registrado_por = fetch_operario_nombre(nro_operario)
+    if not registrado_por:
+        raise ValueError(f"Operario {nro_operario} no encontrado")
 
     ctrl = fetch_controlador_pedido(nro_pedido)
     if not ctrl:
@@ -291,11 +300,14 @@ def insert_error_calidad(nro_pedido: int, detalle_error: str) -> dict:
         cur.execute(
             """
             INSERT INTO deposito.errores_mesa
-                ("nroPedido", fecha, "tipoPedido", ot, controlador, ubicacion, "detalleError", origen)
-            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, 'calidad')
+                ("nroPedido", fecha, "tipoPedido", ot, controlador, ubicacion, "detalleError", origen, "registradoPor")
+            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, 'calidad', %s)
             RETURNING id, "createdAt"
             """,
-            (nro_pedido, info["tipoPedido"], info["ot"], ctrl["nombreControlador"], info["ubicacion"], detalle_error),
+            (
+                nro_pedido, info["tipoPedido"], info["ot"], ctrl["nombreControlador"],
+                info["ubicacion"], detalle_error, registrado_por,
+            ),
         )
         new_id, created_at = cur.fetchone()
         conn.commit()
@@ -305,7 +317,8 @@ def insert_error_calidad(nro_pedido: int, detalle_error: str) -> dict:
     return {
         "id": new_id, "nroPedido": nro_pedido, "tipoPedido": info["tipoPedido"],
         "ot": info["ot"], "ubicacion": info["ubicacion"], "controlador": ctrl["nombreControlador"],
-        "detalleError": detalle_error, "origen": "calidad", "createdAt": created_at.isoformat(),
+        "detalleError": detalle_error, "origen": "calidad", "registradoPor": registrado_por,
+        "createdAt": created_at.isoformat(),
     }
 
 

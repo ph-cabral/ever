@@ -43,3 +43,8 @@ ALTER TABLE deposito.errores_mesa ALTER COLUMN controlador TYPE VARCHAR(120);
 -- 2026-07-16: widget Calidad (controla preparado+control) vs widget Mesa de
 -- Control (el actual). origen distingue de dónde vino cada fila.
 ALTER TABLE deposito.errores_mesa ADD COLUMN IF NOT EXISTS origen VARCHAR(20) NOT NULL DEFAULT 'mesa_control';
+
+-- 2026-07-16: widget Calidad pide N° de operario al iniciar (igual que Mesa
+-- de Control) para saber QUIÉN CARGÓ el registro — separado de `controlador`
+-- (que en Calidad se resuelve solo por Magnus, no lo tipea nadie).
+ALTER TABLE deposito.errores_mesa ADD COLUMN IF NOT EXISTS "registradoPor" VARCHAR(120);
