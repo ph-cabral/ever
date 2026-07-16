@@ -635,11 +635,14 @@ export default function AsistenciaPage() {
   const empleadosPorArea = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of rows) {
+      if (!r.check_in) continue; // solo marcados
       const a = (r.departamento ?? "").trim() || "Sin área";
       m.set(a, (m.get(a) ?? 0) + 1);
     }
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [rows]);
+
+  const marcados = useMemo(() => rows.filter((r) => r.check_in).length, [rows]);
 
   const filtered = useMemo(() => {
     const q = empleadoDef.trim().toLowerCase();
@@ -663,7 +666,7 @@ export default function AsistenciaPage() {
         {empleadosPorArea.length > 0 && (
           <div className="flex flex-col items-center gap-2 rounded-[2rem] border px-6 py-3">
             <span className="text-sm font-medium">
-              Total <span className="font-semibold">{rows.length}</span>
+              Total <span className="font-semibold">{marcados}</span>
             </span>
             <div className="flex flex-wrap justify-center gap-2">
               {empleadosPorArea.map(([a, n], i) => (
