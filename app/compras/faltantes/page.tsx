@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
-  Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck, CalendarRange, Check,
+  Loader2, RefreshCw, AlertTriangle, PackageCheck, CalendarRange, Check,
   Layers, ChevronDown, ChevronRight, Flag, RotateCw, ShoppingCart, Undo2, CalendarCheck,
   Download, Trash2, X,
 } from "lucide-react";
@@ -116,12 +116,6 @@ const rowCls: Record<Estado, string> = {
   incompleto: "bg-red-500/10 hover:bg-red-500/[0.16]",
   sin_orden: "hover:bg-zinc-900/50",
 };
-const cubiertoCls: Record<Estado, string> = {
-  completo: "text-green-400",
-  entregado: "text-emerald-400",
-  incompleto: "text-amber-400",
-  sin_orden: "text-zinc-600",
-};
 
 // Celda "Cliente": en vez de listar nombres (rompía el ancho de la tabla),
 // muestra "n cliente(s)" y abre un modal con el detalle al hacer click.
@@ -205,9 +199,7 @@ function Tabla({
             <th className="px-3 py-2 font-medium whitespace-nowrap">Artículo</th>
             <th className="px-3 py-2 font-medium whitespace-nowrap">Línea</th>
             <th className="px-3 py-2 font-medium whitespace-nowrap">Día</th>
-            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Faltan</th>
-            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Stock</th>
-            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Cubre OC</th>
+            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Falta/Stock/OC</th>
             <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Falta OC</th>
             <th className="px-3 py-2 font-medium whitespace-nowrap">Despacho</th>
             {!ocultarProveedor && (
@@ -264,43 +256,25 @@ function Tabla({
                   )}
                 </td>
                 <td
-                  className="px-3 py-2 text-right tabular-nums text-zinc-100"
-                  title={
-                    r.vivo && r.nuevoDelDia !== r.faltan
-                      ? `Acumulado. Nuevo este día: ${fmtNum(r.nuevoDelDia)}`
-                      : undefined
-                  }
+                  className="px-3 py-2 text-right tabular-nums whitespace-nowrap"
+                  title="Faltan / Stock / Cubre OC — existencia real depósito 1 en vivo (mismo dato que /deposito/stock)."
                 >
-                  {fmtNum(r.faltan)}
-                  {r.vivo && r.nuevoDelDia > 0 && r.nuevoDelDia !== r.faltan && (
-                    <span className="ml-1 text-[11px] text-zinc-600">
-                      (+{fmtNum(r.nuevoDelDia)})
-                    </span>
-                  )}
-                </td>
-                <td
-                  className={`px-3 py-2 text-right tabular-nums ${
-                    r.stock > 0 ? "text-emerald-400" : "text-zinc-600"
-                  }`}
-                  title="Existencia real en depósito 1, en vivo (mismo dato que /deposito/stock). Si cubre el faltante, la fila queda verde sin esperar una OC."
-                >
-                  {r.stock > 0 ? fmtNum(r.stock) : "—"}
-                </td>
-                <td
-                  className={`px-3 py-2 text-right tabular-nums font-medium ${cubiertoCls[r.estado]}`}
-                >
-                  {r.cubierto > 0 ? (
-                    <span className="inline-flex items-center gap-1 justify-end">
-                      {r.estado === "entregado" ? (
-                        <Check size={13} className="opacity-80" />
-                      ) : (
-                        <Truck size={13} className="opacity-70" />
-                      )}
-                      {fmtNum(r.cubierto)}
-                    </span>
-                  ) : (
-                    "—"
-                  )}
+                  <span className="text-zinc-100">
+                    {fmtNum(r.faltan)}
+                    {r.vivo && r.nuevoDelDia > 0 && r.nuevoDelDia !== r.faltan && (
+                      <span className="ml-1 text-[11px] text-zinc-600">
+                        (+{fmtNum(r.nuevoDelDia)})
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-zinc-600">/</span>
+                  <span className={r.stock > 0 ? "text-green-400" : "text-zinc-600"}>
+                    {r.stock > 0 ? fmtNum(r.stock) : "—"}
+                  </span>
+                  <span className="text-zinc-600">/</span>
+                  <span className={r.cubierto > 0 ? "text-green-400 font-medium" : "text-zinc-600"}>
+                    {r.cubierto > 0 ? fmtNum(r.cubierto) : "—"}
+                  </span>
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-red-300/90">
                   {r.descubierto > 0 ? fmtNum(r.descubierto) : "—"}
