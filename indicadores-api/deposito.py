@@ -1749,7 +1749,7 @@ def fetch_contenedor(tag: str):
                    LTRIM(RTRIM(desUser.PersonalNombre))   AS Desarmo,
                    c.ContenedorControlCalidad              AS ControlCalidad
             FROM Contenedor c
-            LEFT JOIN Personal desUser ON desUser.PersonalUserGUID = c.ContenedorUsuarioGUIDDesarme
+            LEFT JOIN Personal desUser ON LTRIM(RTRIM(desUser.PersonalUserGUID)) = LTRIM(RTRIM(c.ContenedorUsuarioGUIDDesarme))
             WHERE LTRIM(RTRIM(c.ContenedorTAG)) = LTRIM(RTRIM(?))
         """, (tag,))
         info_rows = _rows(cur)
@@ -1780,8 +1780,8 @@ def fetch_contenedor(tag: str):
                    r.KmovRengCantidad                              AS Cantidad
             FROM KmovContenedor c
             JOIN Kmov k               ON k.KmovId = c.KmovId
-            LEFT JOIN Personal regUser  ON regUser.PersonalUserGUID  = k.KmovUsuarioGUID_Regist
-            LEFT JOIN Personal realUser ON realUser.PersonalUserGUID = c.KmovContenedorUsuarioGUID
+            LEFT JOIN Personal regUser  ON LTRIM(RTRIM(regUser.PersonalUserGUID))  = LTRIM(RTRIM(k.KmovUsuarioGUID_Regist))
+            LEFT JOIN Personal realUser ON LTRIM(RTRIM(realUser.PersonalUserGUID)) = LTRIM(RTRIM(c.KmovContenedorUsuarioGUID))
             LEFT JOIN KmovReng r
                    ON r.KmovId = c.KmovId
                   AND LTRIM(RTRIM(r.KmovRengContenedorAsociado)) = LTRIM(RTRIM(c.KmovContenedorContenedorTAG))

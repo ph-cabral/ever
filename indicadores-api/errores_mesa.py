@@ -159,7 +159,7 @@ def fetch_operario_nombre(nro_operario: int) -> str | None:
         cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cur.execute(
             "SELECT PersonalNombre FROM Personal WHERE PersonalId = ?",
-            (nro_operario,),
+            (str(nro_operario),),
         )
         row = cur.fetchone()
     finally:
