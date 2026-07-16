@@ -376,7 +376,8 @@ def fetch_errores_mesa_list(
             params.append(hasta)
         sql = (
             'SELECT id, "nroPedido", fecha, "tipoPedido", ot, controlador, '
-            '"nombreArmador", ubicacion, "detalleError", origen, "registradoPor", "createdAt" '
+            '"nombreArmador", ubicacion, "detalleError", origen, "registradoPor", '
+            'observacion, "createdAt" '
             "FROM deposito.errores_mesa"
         )
         if where:
@@ -395,3 +396,23 @@ def fetch_errores_mesa_list(
         if r.get("createdAt") is not None:
             r["createdAt"] = r["createdAt"].isoformat()
     return rows
+
+
+def update_observacion(error_id: int, observacion: str) -> dict:
+    """Nota libre editable desde la vista web /deposito (columna al final de
+    la tabla), no desde el widget de escritorio. Reemplaza el valor completo
+    (no append)."""
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE deposito.errores_mesa SET observacion = %s WHERE id = %s RETURNING id",
+            (observacion, error_id),
+        )
+        row = cur.fetchone()
+        conn.commit()
+    finally:
+        conn.close()
+    if not row:
+        raise ValueError(f"Registro {error_id} no encontrado")
+    return {"id": error_id, "observacion": observacion}

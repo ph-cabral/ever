@@ -26,7 +26,7 @@ from mesa_control import (
 from errores_mesa import (
     fetch_pedido_lookup, insert_error_mesa, opciones as errores_mesa_opciones,
     fetch_ubicacion_diag, fetch_errores_mesa_list, fetch_operario_nombre,
-    insert_error_calidad,
+    insert_error_calidad, update_observacion,
 )
 from datetime import date, datetime, timedelta
 
@@ -593,6 +593,9 @@ class ErrorCalidadIn(BaseModel):
     nroOperario: int
     detalleError: str
 
+class ObservacionIn(BaseModel):
+    observacion: str
+
 @app.get("/deposito/pedido/{nro}")
 def deposito_pedido(nro: int):
     """Lookup por Nro Pedido (NroMovVenta): Fecha + Tipo Pedido (Magnus) + OT +
@@ -658,6 +661,17 @@ def deposito_errores_mesa_calidad_crear(body: ErrorCalidadIn):
         return insert_error_calidad(body.nroPedido, body.nroOperario, body.detalleError)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Error: {str(e)}")
+
+@app.patch("/deposito/errores-mesa/{error_id}")
+def deposito_errores_mesa_actualizar_observacion(error_id: int, body: ObservacionIn):
+    """Nota libre (columna observacion), editable desde la vista web /deposito
+    (no desde el widget de escritorio)."""
+    try:
+        return update_observacion(error_id, body.observacion)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Error: {str(e)}")
 

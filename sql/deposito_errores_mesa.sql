@@ -48,3 +48,7 @@ ALTER TABLE deposito.errores_mesa ADD COLUMN IF NOT EXISTS origen VARCHAR(20) NO
 -- de Control) para saber QUIÉN CARGÓ el registro — separado de `controlador`
 -- (que en Calidad se resuelve solo por Magnus, no lo tipea nadie).
 ALTER TABLE deposito.errores_mesa ADD COLUMN IF NOT EXISTS "registradoPor" VARCHAR(120);
+
+-- 2026-07-16: nota libre, editable desde la vista web /deposito (columna al
+-- final de la tabla), no desde el widget de escritorio.
+ALTER TABLE deposito.errores_mesa ADD COLUMN IF NOT EXISTS observacion TEXT;

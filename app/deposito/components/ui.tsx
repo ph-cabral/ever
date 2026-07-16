@@ -93,6 +93,14 @@ export const fmtShort = (n: number | null | undefined, prefix = "$") => {
 
 export const fmtDate = (s: string | null | undefined) => {
   if (!s) return "—";
+  // Fechas date-only (YYYY-MM-DD, ej. columnas DATE de Postgres) las parsea
+  // JS como medianoche UTC; al formatear en es-AR (UTC-3) eso corre 1 día
+  // para atrás. Se arma la fecha con componentes locales para evitar el shift.
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (dateOnly) {
+    const [, y, m, d] = dateOnly;
+    return new Date(Number(y), Number(m) - 1, Number(d)).toLocaleDateString("es-AR");
+  }
   const d = new Date(s);
   return isNaN(d.getTime()) ? s : d.toLocaleDateString("es-AR");
 };

@@ -33,6 +33,7 @@ interface ErrorMesaRow {
   detalleError: string;
   origen: string;
   registradoPor: string | null;
+  observacion: string | null;
   createdAt: string;
 }
 
@@ -47,6 +48,51 @@ function getOperario(r: ErrorMesaRow): string | null {
 }
 
 const ALL = "__all__";
+
+// Celda editable de la columna "Observación" (última): nota libre, editable
+// desde acá (no desde el widget de escritorio). Guarda al perder foco o con
+// Enter, solo si el valor cambió. PATCH /api/deposito/errores-mesa/[id].
+function ObservacionCell({
+  row,
+  onSave,
+}: {
+  row: ErrorMesaRow;
+  onSave: (id: number, observacion: string) => Promise<void>;
+}) {
+  const [value, setValue] = useState(row.observacion ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => setValue(row.observacion ?? ""), [row.observacion]);
+
+  const commit = async () => {
+    const trimmed = value.trim();
+    if (trimmed === (row.observacion ?? "")) return;
+    setSaving(true);
+    try {
+      await onSave(row.id, trimmed);
+    } catch (e) {
+      console.error("PATCH observacion", e);
+      setValue(row.observacion ?? ""); // revierte: no se pudo guardar
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+      }}
+      disabled={saving}
+      placeholder="Agregar nota…"
+      className="w-full min-w-[160px] bg-transparent border border-transparent hover:border-zinc-700 focus:border-yellow-400 rounded px-1.5 py-1 text-zinc-100 outline-none text-[12px] disabled:opacity-50"
+    />
+  );
+}
 
 export function ErroresMesaTab() {
   const [rows, setRows] = useState<ErrorMesaRow[]>([]);
@@ -113,6 +159,19 @@ export function ErroresMesaTab() {
       ),
     [rows, controlador, preparador],
   );
+
+  const saveObservacion = useCallback(async (id: number, observacion: string) => {
+    const res = await fetch(`/api/deposito/errores-mesa/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ observacion }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || `HTTP ${res.status}`);
+    }
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, observacion } : r)));
+  }, []);
 
   const motivoTop = useMemo(() => {
     const m = new Map<string, number>();
@@ -260,6 +319,11 @@ export function ErroresMesaTab() {
                   render: (r) => getOperario(r) ?? "—",
                 },
                 { key: "detalleError", label: "Detalle Error" },
+                {
+                  key: "observacion",
+                  label: "Observación",
+                  render: (r) => <ObservacionCell row={r} onSave={saveObservacion} />,
+                },
               ]}
               rows={filtered}
               max={500}
