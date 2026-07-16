@@ -1553,12 +1553,11 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
 
         <ChartBox title="Sistema interno — por categoría">
           <PieChart>
-            <Pie data={sisPorCategoria} dataKey="value" nameKey="name" outerRadius={80} label={({ name, value }) => `${name}: ${value}`}>
+            <Pie data={sisPorCategoria} dataKey="value" nameKey="name" outerRadius={80}>
               {sisPorCategoria.map((_, i) => (
                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
               ))}
             </Pie>
-            <Legend wrapperStyle={{ fontSize: 11, color: "#9aa1b1" }} />
             <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }} />
           </PieChart>
         </ChartBox>
