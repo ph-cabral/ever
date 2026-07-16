@@ -7,32 +7,69 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = join(ROOT, "app");
 
-// Módulos de primer nivel que son "apps" del home.
-const MODULE_KEYS = ["manguera","deposito","picking","compras","ventas","finanza","rrhh","sorteo","vicki","buscador","sistema"];
-
 // Rutas accesibles pero que NO se listan en el árbol (home/permisos).
 const IGNORE = new Set(["/deposito/faltantes/control"]);
 
 // Etiquetas lindas por segmento (acentos, siglas). Lo que no esté acá va Capitalizado.
 const LABELS = {
-  wms:"WMS", rrhh:"RRHH", evaluacion:"Evaluación", duplicadas:"Duplicadas",
-  faltantes:"Faltantes", pedidos:"Pedidos", stock:"Stock", corte:"Corte",
-  picker:"Picker", armar:"Armar", dashboard:"Dashboard", asistencia:"Asistencia",
-  legajos:"Legajos", relojes:"Relojes",
+  wms: "WMS",
+  rrhh: "RRHH",
+  evaluacion: "Evaluación",
+  duplicadas: "Duplicadas",
+  faltantes: "Faltantes",
+  pedidos: "Pedidos",
+  stock: "Stock",
+  corte: "Corte",
+  picker: "Picker",
+  armar: "Armar",
+  dashboard: "Dashboard",
+  asistencia: "Asistencia",
+  legajos: "Legajos",
+  relojes: "Relojes",
 };
-const label = (seg) => LABELS[seg] ?? seg.charAt(0).toUpperCase() + seg.slice(1);
+const label = (seg) =>
+  LABELS[seg] ?? seg.charAt(0).toUpperCase() + seg.slice(1);
 
-const hasPage = (dir) => ["page.tsx","page.jsx","page.ts"].some((f) => {
-  try { return statSync(join(dir, f)).isFile(); } catch { return false; }
-});
+const hasPage = (dir) =>
+  ["page.tsx", "page.jsx", "page.ts"].some((f) => {
+    try {
+      return statSync(join(dir, f)).isFile();
+    } catch {
+      return false;
+    }
+  });
 const subdirs = (dir) => {
-  let e = []; try { e = readdirSync(dir); } catch { return []; }
+  let e = [];
+  try {
+    e = readdirSync(dir);
+  } catch {
+    return [];
+  }
   return e
-    .filter((n) => !(n.startsWith("[") || n.startsWith("(") || n.startsWith("_") ||
-                     ["api","components","nuevo","editar"].includes(n)))
-    .filter((n) => { try { return statSync(join(dir, n)).isDirectory(); } catch { return false; } })
+    .filter(
+      (n) =>
+        !(
+          n.startsWith("[") ||
+          n.startsWith("(") ||
+          n.startsWith("_") ||
+          ["api", "components", "nuevo", "editar"].includes(n)
+        ),
+    )
+    .filter((n) => {
+      try {
+        return statSync(join(dir, n)).isDirectory();
+      } catch {
+        return false;
+      }
+    })
     .sort();
 };
+
+// Módulos de primer nivel = carpetas de app/ con page.tsx (directo o en subárbol),
+// salvo las técnicas que NUNCA son módulos del home. AJUSTAR esta lista si hace
+// falta (ej: si existe app/login o app/admin y no aparecen todavía, agregalas).
+const EXCLUDE_MODULES = new Set(["admin", "db", "login"]);
+const MODULE_KEYS = subdirs(APP).filter((k) => !EXCLUDE_MODULES.has(k));
 
 // Construye NavNode[] recursivo para las SUB-rutas de una carpeta.
 function walk(dir, href) {
@@ -40,7 +77,10 @@ function walk(dir, href) {
   for (const seg of subdirs(dir)) {
     const childDir = join(dir, seg);
     const childHref = `${href}/${seg}`;
-    if (!hasPage(childDir)) { out.push(...walk(childDir, childHref)); continue; } // carpeta sin page: aplanar hijos
+    if (!hasPage(childDir)) {
+      out.push(...walk(childDir, childHref));
+      continue;
+    } // carpeta sin page: aplanar hijos
     if (IGNORE.has(childHref)) continue;
     const node = { label: label(seg), href: childHref };
     const kids = walk(childDir, childHref);
@@ -53,9 +93,20 @@ function walk(dir, href) {
 const GEN = {};
 for (const key of MODULE_KEYS) GEN[key] = walk(join(APP, key), `/${key}`);
 
-const banner = "// AUTO-GENERADO por scripts/gen-nav.mjs — NO editar a mano.\n" +
+// Módulos detectados, listos para que modules.ts arme los botones del home
+// (label/color se pueden overridear a mano en RAW_MODULES; si no, usa default).
+const GENERATED_MODULES = MODULE_KEYS.map((key) => ({
+  key,
+  label: label(key),
+  href: `/${key}`,
+}));
+
+const banner =
+  "// AUTO-GENERADO por scripts/gen-nav.mjs — NO editar a mano.\n" +
   "// Se regenera en cada dev/build. Escanea app/**/page.tsx.\n";
-const body = `import type { NavNode } from "./modules";\n\n` +
-  `export const GENERATED_CHILDREN: Record<string, NavNode[]> = ${JSON.stringify(GEN, null, 2)};\n`;
+const body =
+  `import type { NavNode } from "./modules";\n\n` +
+  `export const GENERATED_CHILDREN: Record<string, NavNode[]> = ${JSON.stringify(GEN, null, 2)};\n\n` +
+  `export const GENERATED_MODULES: { key: string; label: string; href: string }[] = ${JSON.stringify(GENERATED_MODULES, null, 2)};\n`;
 writeFileSync(join(ROOT, "lib/auth/nav.generated.ts"), banner + body);
 console.log("nav.generated.ts OK");

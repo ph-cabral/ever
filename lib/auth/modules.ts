@@ -3,20 +3,11 @@
 // porque también lo usa el middleware, que corre en el runtime edge.
 
 // Árbol de sub-vistas auto-detectado desde app/**/page.tsx (datos planos, sin Node).
-import { GENERATED_CHILDREN } from "./nav.generated";
+import { GENERATED_CHILDREN, GENERATED_MODULES } from "./nav.generated";
 
-export type ModuleKey =
-  | "manguera"
-  | "deposito"
-  | "picking"
-  | "compras"
-  | "ventas"
-  | "finanza"
-  | "rrhh"
-  | "sorteo"
-  | "vicki"
-  | "buscador"
-  | "sistema";
+// Antes era una unión fija de 11 literales. Pasa a string para permitir módulos
+// nuevos detectados automáticamente (carpetas de app/ vía scripts/gen-nav.mjs).
+export type ModuleKey = string;
 
 // Nodo de navegación (recursivo): una vista puede tener sub-vistas.
 export interface NavNode {
@@ -33,23 +24,103 @@ export interface ModuleDef {
   children?: NavNode[]; // sub-vistas (árbol) para el menú animado del home
 }
 
-// Sólo color + label por módulo. Las sub-vistas (children) se detectan solas
-// escaneando app/**/page.tsx en build (scripts/gen-nav.mjs -> nav.generated.ts).
+// Color/label manual SOLO para los módulos que querés personalizar.
+// Cualquier carpeta nueva en app/ (detectada por gen-nav.mjs) que no esté acá
+// se agrega sola con un color default — no hace falta tocar este archivo.
 const RAW_MODULES: Omit<ModuleDef, "children">[] = [
-  { key: "manguera",    label: "Mangueras",   href: "/manguera",    color: "bg-orange-600 hover:bg-orange-500" },
-  { key: "deposito",    label: "Depósito",    href: "/deposito",    color: "bg-emerald-700 hover:bg-emerald-600" },
-  { key: "picking",     label: "Picking",     href: "/picking",     color: "bg-purple-700 hover:bg-purple-600" },
-  { key: "compras",     label: "Compras",     href: "/compras",     color: "bg-amber-700 hover:bg-amber-600" },
-  { key: "ventas",      label: "Ventas",      href: "/ventas",      color: "bg-red-700 hover:bg-red-600" },
-  { key: "finanza",     label: "Finanzas",    href: "/finanza",     color: "bg-teal-700 hover:bg-teal-600" },
-  { key: "rrhh",        label: "RRHH",        href: "/rrhh",        color: "bg-indigo-700 hover:bg-indigo-600" },
-  { key: "sorteo",      label: "Sorteo",      href: "/sorteo",      color: "bg-pink-700 hover:bg-pink-600" },
-  { key: "vicki",       label: "Vicki",       href: "/vicki",       color: "bg-slate-700 hover:bg-slate-600" },
-  { key: "buscador",    label: "Buscador",    href: "/buscador",    color: "bg-cyan-700 hover:bg-cyan-600" },
-  { key: "sistema",     label: "Sistema",     href: "/sistema",     color: "bg-rose-700 hover:bg-rose-600" },
+  {
+    key: "manguera",
+    label: "Mangueras",
+    href: "/manguera",
+    color: "bg-orange-600 hover:bg-orange-500",
+  },
+  {
+    key: "deposito",
+    label: "Depósito",
+    href: "/deposito",
+    color: "bg-emerald-700 hover:bg-emerald-600",
+  },
+  {
+    key: "picking",
+    label: "Picking",
+    href: "/picking",
+    color: "bg-purple-700 hover:bg-purple-600",
+  },
+  {
+    key: "compras",
+    label: "Compras",
+    href: "/compras",
+    color: "bg-amber-700 hover:bg-amber-600",
+  },
+  {
+    key: "ventas",
+    label: "Ventas",
+    href: "/ventas",
+    color: "bg-red-700 hover:bg-red-600",
+  },
+  {
+    key: "finanza",
+    label: "Finanzas",
+    href: "/finanza",
+    color: "bg-teal-700 hover:bg-teal-600",
+  },
+  {
+    key: "rrhh",
+    label: "RRHH",
+    href: "/rrhh",
+    color: "bg-indigo-700 hover:bg-indigo-600",
+  },
+  {
+    key: "sorteo",
+    label: "Sorteo",
+    href: "/sorteo",
+    color: "bg-pink-700 hover:bg-pink-600",
+  },
+  {
+    key: "vicki",
+    label: "Vicki",
+    href: "/vicki",
+    color: "bg-slate-700 hover:bg-slate-600",
+  },
+  {
+    key: "buscador",
+    label: "Buscador",
+    href: "/buscador",
+    color: "bg-cyan-700 hover:bg-cyan-600",
+  },
+  {
+    key: "sistema",
+    label: "Sistema",
+    href: "/sistema",
+    color: "bg-rose-700 hover:bg-rose-600",
+  },
 ];
 
-export const MODULES: ModuleDef[] = RAW_MODULES.map((m) => ({
+// Paleta default para módulos nuevos que no tienen entrada manual en RAW_MODULES.
+const DEFAULT_COLORS = [
+  "bg-slate-700 hover:bg-slate-600",
+  "bg-cyan-700 hover:bg-cyan-600",
+  "bg-emerald-700 hover:bg-emerald-600",
+  "bg-amber-700 hover:bg-amber-600",
+  "bg-indigo-700 hover:bg-indigo-600",
+  "bg-rose-700 hover:bg-rose-600",
+];
+
+// RAW_MODULES (manual, con color/label a medida) + lo que gen-nav.mjs detectó en
+// app/ y todavía no está en RAW_MODULES (color default, rotando la paleta).
+const ALL_RAW: Omit<ModuleDef, "children">[] = [
+  ...RAW_MODULES,
+  ...GENERATED_MODULES.filter(
+    (g) => !RAW_MODULES.some((m) => m.key === g.key),
+  ).map((g, i) => ({
+    key: g.key,
+    label: g.label,
+    href: g.href,
+    color: DEFAULT_COLORS[i % DEFAULT_COLORS.length],
+  })),
+];
+
+export const MODULES: ModuleDef[] = ALL_RAW.map((m) => ({
   ...m,
   children: GENERATED_CHILDREN[m.key] ?? [],
 }));
@@ -71,7 +142,9 @@ function flattenNodes(mod: ModuleKey, nodes: NavNode[] | undefined): ViewRef[] {
   ]);
 }
 
-export const VIEWS: ViewRef[] = MODULES.flatMap((m) => flattenNodes(m.key, m.children));
+export const VIEWS: ViewRef[] = MODULES.flatMap((m) =>
+  flattenNodes(m.key, m.children),
+);
 
 export const ALL_VIEW_HREFS: string[] = VIEWS.map((v) => v.href);
 
@@ -116,39 +189,43 @@ export interface SessionPayload {
 }
 
 // Prefijo de ruta -> módulo. Cubre la página y su API (/api/<mod>).
+// OJO: esto sigue siendo manual. Un módulo nuevo (auto-detectado arriba) que no
+// tenga entrada acá queda sin protección de permisos en el middleware — agregar
+// las 2 líneas correspondientes cuando se cree una carpeta nueva en app/.
 const ROUTE_MODULE: { prefix: string; mod: ModuleKey }[] = [
-  { prefix: "/manguera",        mod: "manguera" },
-  { prefix: "/api/manguera",    mod: "manguera" },
-  { prefix: "/api/reportes",    mod: "manguera" }, // ranking de cortes
-  { prefix: "/fabrica",         mod: "manguera" },
-  { prefix: "/api/fabrica",     mod: "manguera" },
-  { prefix: "/deposito",        mod: "deposito" },
-  { prefix: "/api/deposito",    mod: "deposito" },
-  { prefix: "/picking",         mod: "picking" },
-  { prefix: "/api/picking",     mod: "picking" },
-  { prefix: "/compras",         mod: "compras" },
-  { prefix: "/api/compras",     mod: "compras" },
-  { prefix: "/ventas",          mod: "ventas" },
-  { prefix: "/api/ventas",      mod: "ventas" },
-  { prefix: "/finanza",         mod: "finanza" },
-  { prefix: "/api/finanza",     mod: "finanza" },
-  { prefix: "/rrhh",            mod: "rrhh" },
-  { prefix: "/api/rrhh",        mod: "rrhh" },
-  { prefix: "/api/foto",        mod: "rrhh" },
-  { prefix: "/sorteo",          mod: "sorteo" },
-  { prefix: "/api/sorteo",      mod: "sorteo" },
-  { prefix: "/vicki",           mod: "vicki" },
-  { prefix: "/api/vicki",       mod: "vicki" },
-  { prefix: "/buscador",        mod: "buscador" },
-  { prefix: "/api/buscador",    mod: "buscador" },
-  { prefix: "/sistema",         mod: "sistema" },
-  { prefix: "/api/sistema",     mod: "sistema" },
+  { prefix: "/manguera", mod: "manguera" },
+  { prefix: "/api/manguera", mod: "manguera" },
+  { prefix: "/api/reportes", mod: "manguera" }, // ranking de cortes
+  { prefix: "/fabrica", mod: "manguera" },
+  { prefix: "/api/fabrica", mod: "manguera" },
+  { prefix: "/deposito", mod: "deposito" },
+  { prefix: "/api/deposito", mod: "deposito" },
+  { prefix: "/picking", mod: "picking" },
+  { prefix: "/api/picking", mod: "picking" },
+  { prefix: "/compras", mod: "compras" },
+  { prefix: "/api/compras", mod: "compras" },
+  { prefix: "/ventas", mod: "ventas" },
+  { prefix: "/api/ventas", mod: "ventas" },
+  { prefix: "/finanza", mod: "finanza" },
+  { prefix: "/api/finanza", mod: "finanza" },
+  { prefix: "/rrhh", mod: "rrhh" },
+  { prefix: "/api/rrhh", mod: "rrhh" },
+  { prefix: "/api/foto", mod: "rrhh" },
+  { prefix: "/sorteo", mod: "sorteo" },
+  { prefix: "/api/sorteo", mod: "sorteo" },
+  { prefix: "/vicki", mod: "vicki" },
+  { prefix: "/api/vicki", mod: "vicki" },
+  { prefix: "/buscador", mod: "buscador" },
+  { prefix: "/api/buscador", mod: "buscador" },
+  { prefix: "/sistema", mod: "sistema" },
+  { prefix: "/api/sistema", mod: "sistema" },
 ];
 
 /** Módulo requerido por una ruta, o null si no exige un módulo en particular. */
 export function moduleForPath(pathname: string): ModuleKey | null {
   for (const r of ROUTE_MODULE) {
-    if (pathname === r.prefix || pathname.startsWith(r.prefix + "/")) return r.mod;
+    if (pathname === r.prefix || pathname.startsWith(r.prefix + "/"))
+      return r.mod;
   }
   return null;
 }
@@ -156,8 +233,10 @@ export function moduleForPath(pathname: string): ModuleKey | null {
 /** Rutas exclusivas de admin (rol ADMIN), además de cualquier /admin/*. */
 export function isAdminPath(pathname: string): boolean {
   return (
-    pathname === "/db" || pathname.startsWith("/db/") ||
-    pathname === "/admin" || pathname.startsWith("/admin/") ||
+    pathname === "/db" ||
+    pathname.startsWith("/db/") ||
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/") ||
     pathname.startsWith("/api/admin") ||
     pathname.startsWith("/api/db")
   );
@@ -166,26 +245,26 @@ export function isAdminPath(pathname: string): boolean {
 // Módulos sugeridos por sector. Se ofrecen como default editable la primera vez;
 // el admin los ajusta en /admin/permisos. La clave se compara en minúsculas.
 export const DEFAULT_SECTOR_MODULOS: Record<string, ModuleKey[]> = {
-  "deposito":          ["deposito", "picking"],
-  "depósito":          ["deposito", "picking"],
-  "logistica":         ["deposito", "picking"],
-  "logística":         ["deposito", "picking"],
-  "fabrica":           ["manguera"],
-  "fábrica":           ["manguera"],
-  "produccion":        ["manguera"],
-  "producción":        ["manguera"],
-  "rrhh":              ["rrhh"],
-  "recursos humanos":  ["rrhh"],
-  "administracion":    ["finanza", "rrhh", "buscador"],
-  "administración":    ["finanza", "rrhh", "buscador"],
-  "sistemas":          ["sistema"],
-  "soporte":           ["sistema"],
-  "finanzas":          ["finanza"],
-  "comercial":         ["buscador"],
-  "ventas":            ["buscador", "ventas"],
-  "gerencia":          ALL_MODULE_KEYS,
-  "direccion":         ALL_MODULE_KEYS,
-  "dirección":         ALL_MODULE_KEYS,
+  deposito: ["deposito", "picking"],
+  depósito: ["deposito", "picking"],
+  logistica: ["deposito", "picking"],
+  logística: ["deposito", "picking"],
+  fabrica: ["manguera"],
+  fábrica: ["manguera"],
+  produccion: ["manguera"],
+  producción: ["manguera"],
+  rrhh: ["rrhh"],
+  "recursos humanos": ["rrhh"],
+  administracion: ["finanza", "rrhh", "buscador"],
+  administración: ["finanza", "rrhh", "buscador"],
+  sistemas: ["sistema"],
+  soporte: ["sistema"],
+  finanzas: ["finanza"],
+  comercial: ["buscador"],
+  ventas: ["buscador", "ventas"],
+  gerencia: ALL_MODULE_KEYS,
+  direccion: ALL_MODULE_KEYS,
+  dirección: ALL_MODULE_KEYS,
 };
 
 export function defaultModulosForSector(sector?: string | null): ModuleKey[] {
