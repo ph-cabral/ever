@@ -148,11 +148,28 @@ def fetch_pedido_lookup(nro_pedido: int) -> dict | None:
     }
 
 
+# def fetch_operario_nombre(nro_operario: int) -> str | None:
+#     """Nombre del operario/controlador por N° de Personal (WMS.Personal.
+#     PersonalId) — mismo origen que nombreArmador arriba. Se resuelve UNA vez
+#     al abrir el widget (pantalla de N° Operario), no por pedido. None si no
+#     existe."""
+#     conn = get_connection("WMS")
+#     try:
+#         cur = conn.cursor()
+#         cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+#         cur.execute(
+#             "SELECT PersonalNombre FROM Personal WHERE PersonalId = ?",
+#             (str(nro_operario),),
+#         )
+#         row = cur.fetchone()
+#     finally:
+#         conn.close()
+#     if not row:
+#         return None
+#     nombre = (row[0] or "").strip()
+#     return nombre or None
+
 def fetch_operario_nombre(nro_operario: int) -> str | None:
-    """Nombre del operario/controlador por N° de Personal (WMS.Personal.
-    PersonalId) — mismo origen que nombreArmador arriba. Se resuelve UNA vez
-    al abrir el widget (pantalla de N° Operario), no por pedido. None si no
-    existe."""
     conn = get_connection("WMS")
     try:
         cur = conn.cursor()
@@ -161,6 +178,20 @@ def fetch_operario_nombre(nro_operario: int) -> str | None:
             "SELECT PersonalNombre FROM Personal WHERE PersonalId = ?",
             (str(nro_operario),),
         )
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    if row:
+        nombre = (row[0] or "").strip()
+        if nombre:
+            return nombre
+
+    # fallback: usuarios de Magnus (controladores/mesa), no siempre están en WMS.Personal
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute("SELECT Nombre FROM dbo.Gen_Usuarios WHERE Numero = ?", (nro_operario,))
         row = cur.fetchone()
     finally:
         conn.close()
