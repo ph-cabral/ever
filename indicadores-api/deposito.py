@@ -1512,33 +1512,35 @@ def fetch_articulo_ubicaciones(articulo: str):
 # Confirmado por diag /deposito/ubicacion-columnas/diag (2026-07-02): UbicacionDetalle
 # SÍ trae columna de depósito (no estaba entre las 3 UBIC_COL_* originales).
 # IDs de depósito fijos, confirmados por el usuario (2026-07-15): 1, 2, 3.
-UBIC_COL_DEP     = "UbicacionDepositoId"
+ARSU_TABLA   = "Stk_ArticSucursalDeposito"
+ARSU_COL_ART = "CodArticulo"
+ARSU_COL_DEP = "Deposito"
+ARSU_COL_STK = "StkReal"
 DEPOSITO_CENTRAL = 1
 DEPOSITOS        = (1, 2, 3)
 
 
 def _sql_pivot_stock(filtro_q: str = "") -> str:
-    """SELECT con 1 columna StockN por cada depósito de DEPOSITOS + StockTotal,
-    agrupado por artículo. Sin OFFSET/FETCH — lo agrega quien pagina."""
     cols = ",\n               ".join(
-        f"SUM(CASE WHEN u.{UBIC_COL_DEP} = {d} THEN u.{UBIC_COL_CANT} ELSE 0 END) AS Stock{d}"
+        f"SUM(CASE WHEN a.{ARSU_COL_DEP} = {d} THEN a.{ARSU_COL_STK} ELSE 0 END) AS Stock{d}"
         for d in DEPOSITOS
     )
+    deps = ",".join(str(d) for d in DEPOSITOS)
     return f"""
-        SELECT LTRIM(RTRIM(u.{UBIC_COL_ART})) AS Cod,
+        SELECT LTRIM(RTRIM(a.{ARSU_COL_ART})) AS Cod,
                {cols},
-               SUM(u.{UBIC_COL_CANT}) AS StockTotal
-        FROM dbo.{UBIC_TABLA} u
-        WHERE 1=1 {filtro_q}
-        GROUP BY LTRIM(RTRIM(u.{UBIC_COL_ART}))
-        HAVING SUM(u.{UBIC_COL_CANT}) > 0
+               SUM(a.{ARSU_COL_STK}) AS StockTotal
+        FROM dbo.{ARSU_TABLA} a
+        WHERE a.{ARSU_COL_DEP} IN ({deps}) {filtro_q}
+        GROUP BY LTRIM(RTRIM(a.{ARSU_COL_ART}))
+        HAVING SUM(a.{ARSU_COL_STK}) > 0
         ORDER BY Cod
     """
 
 
 def _run_pivot_query(sql: str, params: list) -> dict[str, dict]:
     """Ejecuta el pivot de stock y devuelve {Cod: {Stock1: x, Stock2: y, ..., StockTotal: z}}."""
-    conn = get_connection("WMS")
+    conn = get_connection("EVERWEAR")
     try:
         cur = conn.cursor()
         cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")

@@ -36,15 +36,13 @@ BASE_DATE = date(1800, 12, 28)
 # ── Opciones fijas de los selects ─────────────────────────────────────────────
 # Lista de arranque — AJUSTAR/COMPLETAR a gusto (sin tocar el widget).
 DETALLE_ERROR_OPCIONES = [
-    "Diferencia entre art. preparado y pedido",
-    "Diferencia en cantidad recolectada (mayor a pedida)",
-    "Preparó menos cantidad de la que se pedía",
-    "Preparó más cantidad de la que se pedía",
-    "No identifica la mercadería",
-    "No llevó art. de merchandising",
-    "No trajo los cartones",
-    "Mercadería mezclada",
-    "Pone ubicación y no trae la mercadería",
+    "Error en cantidad",
+    "Error en producto",
+    "Producto no conforme",
+    "Pedido incompleto",
+    "Producto sin identificación",
+    "Pedido no encontrado",
+    "Error de mesa",
     "Otro",
 ]
 
