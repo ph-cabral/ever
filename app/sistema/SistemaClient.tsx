@@ -79,7 +79,7 @@ export const SCHEMAS: Record<string, { titleKey: string; fields: CampoDef[] }> =
     fields: [
       { k: "inicio", l: "Inicio", t: "date" },
       { k: "problema", l: "Problema", t: "text" },
-      { k: "sistema", l: "Sistema", t: "text" },
+      { k: "sistema", l: "Sistema", t: "select", opciones: ["Magnus", "Prolixus", "WMS", "ecommerce"] },
       { k: "fin", l: "Fin", t: "date" },
       { k: "origen", l: "Origen del error", t: "text" },
       { k: "accion", l: "Acción / nota", t: "textarea" },
@@ -1553,7 +1553,7 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
 
         <ChartBox title="Sistema interno — por categoría">
           <PieChart>
-            <Pie data={sisPorCategoria} dataKey="value" nameKey="name" outerRadius={80}>
+            <Pie data={sisPorCategoria} dataKey="value" nameKey="name" outerRadius={80} label={({ name }) => name}>
               {sisPorCategoria.map((_, i) => (
                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
               ))}
