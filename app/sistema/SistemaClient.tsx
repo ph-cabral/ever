@@ -377,13 +377,14 @@ export default function SistemaClient() {
     cargar();
   };
 
-  const guardarTarjeta = async (campos: Campos) => {
+  const guardarTarjeta = async (campos: Campos, tableroId?: number) => {
     if (!modalTarjeta) return;
     if (modalTarjeta.tarjeta) {
       await apiJson(`/api/sistema/tarjetas/${modalTarjeta.tarjeta.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           campos: { ...campos, fecha: new Date().toISOString() },
+          ...(tableroId !== undefined && tableroId !== modalTarjeta.tableroId ? { tableroId } : {}),
         }),
       });
     } else {
@@ -391,7 +392,7 @@ export default function SistemaClient() {
         method: "POST",
         body: JSON.stringify({
           columnaId: modalTarjeta.columnaId,
-          tableroId: modalTarjeta.tableroId,
+          tableroId: tableroId ?? modalTarjeta.tableroId,
           campos: { ...campos, fecha: new Date().toISOString() },
         }),
       });
@@ -858,6 +859,7 @@ export function Combobox({
 
 function ModalTarjeta({
   modal,
+  tableros,
   onClose,
   onSave,
   onDelete,
@@ -865,12 +867,16 @@ function ModalTarjeta({
   modal: { tarjeta: Tarjeta | null; columnaId: number; clave: string; tableroId: number };
   tableros: Tablero[];
   onClose: () => void;
-  onSave: (campos: Campos) => void;
+  onSave: (campos: Campos, tableroId?: number) => void;
   onDelete?: () => void;
 }) {
   const schema = schemaFor(modal.clave);
   const primerCampo = schema.fields.find((f) => !f.auto)?.k;
   const [campos, setCampos] = useState<Campos>(modal.tarjeta?.campos ?? {});
+  // Tablero destino: por defecto el actual. Sirve para corregir una tarjeta
+  // creada en el tablero equivocado sin borrarla y rehacerla (columnas son
+  // globales, así que solo cambia el dueño).
+  const [destinoTablero, setDestinoTablero] = useState(modal.tableroId);
   // Opciones dinámicas de los selects "extensibles" (categoría, ubicación), por campo.
   const [opcionesExtra, setOpcionesExtra] = useState<Record<string, string[]>>({});
 
@@ -906,12 +912,12 @@ function ModalTarjeta({
         onClose();
       } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
-        onSave(campos);
+        onSave(campos, destinoTablero);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [campos, onClose, onSave]);
+  }, [campos, destinoTablero, onClose, onSave]);
 
   return (
     <div
@@ -925,6 +931,29 @@ function ModalTarjeta({
         <h2 className="text-base font-semibold mb-4 text-zinc-100">
           {modal.tarjeta ? "Editar tarjeta" : "Nueva tarjeta"}
         </h2>
+
+        {tableros.length > 1 && (
+          <div className="mb-3">
+            <label className="text-xs text-zinc-500 mb-1 block">Tablero</label>
+            <select
+              value={destinoTablero}
+              autoFocus={false}
+              onChange={(e) => setDestinoTablero(Number(e.target.value))}
+              className="w-full bg-[#0d0d0d] border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100"
+            >
+              {tableros.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.nombre}
+                </option>
+              ))}
+            </select>
+            {destinoTablero !== modal.tableroId && (
+              <p className="text-[11px] text-amber-400 mt-1">
+                Se moverá a &quot;{tableros.find((t) => t.id === destinoTablero)?.nombre}&quot; al guardar.
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-col gap-3">
           <p className="text-xs text-zinc-500 mb-1">
