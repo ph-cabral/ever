@@ -235,11 +235,15 @@ export function ErroresMesaTab() {
                   num: true,
                   render: (r) => (r.ot != null ? fmtNum(r.ot) : "—"),
                 },
-                { key: "controlador", label: "Controlador" },
                 {
-                  key: "nombreArmador",
-                  label: "Preparador",
-                  render: (r) => r.nombreArmador ?? "—",
+                  key: "controlador",
+                  label: <>Controlador<br />Preparador</>,
+                  render: (r) => (
+                    <div className="leading-tight">
+                      <div>{r.controlador}</div>
+                      <div className="text-zinc-400">{r.nombreArmador ?? "—"}</div>
+                    </div>
+                  ),
                 },
                 { key: "detalleError", label: "Detalle Error" },
               ]}

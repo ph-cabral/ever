@@ -26,6 +26,7 @@ from mesa_control import (
 from errores_mesa import (
     fetch_pedido_lookup, insert_error_mesa, opciones as errores_mesa_opciones,
     fetch_ubicacion_diag, fetch_errores_mesa_list, fetch_operario_nombre,
+    insert_error_calidad,
 )
 from datetime import date, datetime, timedelta
 
@@ -587,6 +588,10 @@ class ErrorMesaIn(BaseModel):
     nroOperario: int
     detalleError: str
 
+class ErrorCalidadIn(BaseModel):
+    nroPedido: int
+    detalleError: str
+
 @app.get("/deposito/pedido/{nro}")
 def deposito_pedido(nro: int):
     """Lookup por Nro Pedido (NroMovVenta): Fecha + Tipo Pedido (Magnus) + OT +
@@ -638,6 +643,18 @@ def deposito_errores_mesa_crear(body: ErrorMesaIn):
     WMS.Personal) del lado del server (no confía en el cliente)."""
     try:
         return insert_error_mesa(body.nroPedido, body.nroOperario, body.detalleError)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Error: {str(e)}")
+
+@app.post("/deposito/errores-mesa/calidad")
+def deposito_errores_mesa_calidad_crear(body: ErrorCalidadIn):
+    """Alta desde el widget de Calidad: controlador se resuelve solo (Magnus,
+    Ven_PedImpresoCP), no lo pide el widget. NO guarda preparador. Ver
+    insert_error_calidad."""
+    try:
+        return insert_error_calidad(body.nroPedido, body.detalleError)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

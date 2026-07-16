@@ -39,3 +39,7 @@ BEGIN
   END IF;
 END $$;
 ALTER TABLE deposito.errores_mesa ALTER COLUMN controlador TYPE VARCHAR(120);
+
+-- 2026-07-16: widget Calidad (controla preparado+control) vs widget Mesa de
+-- Control (el actual). origen distingue de dónde vino cada fila.
+ALTER TABLE deposito.errores_mesa ADD COLUMN IF NOT EXISTS origen VARCHAR(20) NOT NULL DEFAULT 'mesa_control';

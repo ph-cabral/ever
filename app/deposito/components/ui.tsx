@@ -371,7 +371,7 @@ export function Alert({
 // ─── Tabla genérica ───────────────────────────────────────────────────────────
 export interface Col<T> {
   key: string;
-  label: string;
+  label: React.ReactNode;
   num?: boolean;
   render?: (row: T) => React.ReactNode;
   className?: string;

@@ -212,11 +212,11 @@ def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) ->
             """
             INSERT INTO deposito.errores_mesa
                 ("nroPedido", fecha, "tipoPedido", ot, controlador, "nroArmador", "nombreArmador", ubicacion, "detalleError")
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id, "createdAt"
             """,
             (
-                nro_pedido, info["fecha"], info["tipoPedido"], info["ot"],
+                nro_pedido, info["tipoPedido"], info["ot"],
                 controlador, info["nroArmador"], info["nombreArmador"], info["ubicacion"], detalle_error,
             ),
         )
@@ -231,6 +231,81 @@ def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) ->
         "controlador": controlador,
         "detalleError": detalle_error,
         "createdAt": created_at.isoformat(),
+    }
+
+
+# ── Widget Calidad (controla preparado + control) ─────────────────────────────
+# A diferencia del widget de Mesa de Control (arriba), acá el controlador NO
+# se tipea (no hay pantalla de N° Operario): se resuelve solo por Nro Pedido
+# contra Magnus (Ven_PedImpresoCP.CodControlador1/2, mismo origen que
+# mesa_control.py — cod1==cod2 confirmado ahí). A pedido de Pablo (2026-07-16):
+# esta alta NO guarda preparador (nroArmador/nombreArmador quedan NULL).
+SQL_CONTROLADOR_PEDIDO = """
+SELECT TOP 1 CodControlador1, CodControlador2
+FROM dbo.Ven_PedImpresoCP
+WHERE NroMovVenta = ?
+ORDER BY FechaControl DESC
+"""
+
+
+def fetch_controlador_pedido(nro_pedido: int) -> dict | None:
+    """Controlador real del pedido (Magnus, atado a NroMovVenta). None si el
+    pedido no tiene control registrado."""
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_CONTROLADOR_PEDIDO, (nro_pedido,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        cod1, cod2 = row
+        codigo = int(cod1) if cod1 and cod1 > 0 else (int(cod2) if cod2 and cod2 > 0 else None)
+        if not codigo:
+            return None
+        cur.execute("SELECT Nombre FROM dbo.Gen_Usuarios WHERE Numero = ?", (codigo,))
+        nrow = cur.fetchone()
+        nombre = (nrow[0] or "").strip() if nrow else None
+        return {"nroControlador": codigo, "nombreControlador": nombre or f"Controlador {codigo}"}
+    finally:
+        conn.close()
+
+
+def insert_error_calidad(nro_pedido: int, detalle_error: str) -> dict:
+    """Alta desde el widget de Calidad. NO guarda preparador (a diferencia de
+    insert_error_mesa) — solo controlador (Magnus) + tipoPedido/OT/ubicación.
+    origen='calidad' para distinguir del widget de Mesa de Control."""
+    detalle_error = (detalle_error or "").strip()
+    if not detalle_error:
+        raise ValueError("Falta 'detalleError'")
+
+    ctrl = fetch_controlador_pedido(nro_pedido)
+    if not ctrl:
+        raise ValueError(f"Pedido {nro_pedido} sin controlador registrado en Magnus")
+
+    info = fetch_pedido_lookup(nro_pedido) or {"tipoPedido": None, "ot": None, "ubicacion": None}
+
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO deposito.errores_mesa
+                ("nroPedido", fecha, "tipoPedido", ot, controlador, ubicacion, "detalleError", origen)
+            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, 'calidad')
+            RETURNING id, "createdAt"
+            """,
+            (nro_pedido, info["tipoPedido"], info["ot"], ctrl["nombreControlador"], info["ubicacion"], detalle_error),
+        )
+        new_id, created_at = cur.fetchone()
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "id": new_id, "nroPedido": nro_pedido, "tipoPedido": info["tipoPedido"],
+        "ot": info["ot"], "ubicacion": info["ubicacion"], "controlador": ctrl["nombreControlador"],
+        "detalleError": detalle_error, "origen": "calidad", "createdAt": created_at.isoformat(),
     }
 
 
