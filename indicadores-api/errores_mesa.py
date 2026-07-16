@@ -347,7 +347,7 @@ def fetch_errores_mesa_list(
             params.append(hasta)
         sql = (
             'SELECT id, "nroPedido", fecha, "tipoPedido", ot, controlador, '
-            '"nombreArmador", ubicacion, "detalleError", "createdAt" '
+            '"nombreArmador", ubicacion, "detalleError", origen, "registradoPor", "createdAt" '
             "FROM deposito.errores_mesa"
         )
         if where:

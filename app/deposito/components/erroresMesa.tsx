@@ -5,15 +5,20 @@ import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 import { PageTitle, Panel, KPI, Grid, Table, fmtNum, fmtDate } from "./ui";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Registro de Errores — Mesa de Control (deposito.errores_mesa). El alta se
-// hace desde el widget de escritorio (errores-mesa-widget.ps1/.exe); esta
+// Registro de Errores — Mesa de Control + Calidad (deposito.errores_mesa,
+// origen distingue el widget). El alta se hace desde los widgets de
+// escritorio (errores-mesa-widget.ps1 / errores-calidad-widget.ps1); esta
 // vista es solo lectura + filtros. Fuente: GET /api/deposito/errores-mesa
 // (→ indicadores-api, fetch_errores_mesa_list en errores_mesa.py).
 //
-// A pedido de Pablo: filtrar por Controlador (quien carga el error, elegido
-// por N° de operario al abrir el widget — reemplazó al viejo select de
-// Mesa/Reclamos) y por nombre del preparador (nombreArmador) — NO se muestra
-// N° Armador, solo el nombre.
+// A pedido de Pablo (2026-07-16), 2 columnas con significado distinto según
+// origen (mismo dato de fondo, dos roles distintos):
+//   · Controlador = quién HIZO EL REGISTRO (N° ingresado al abrir el
+//     widget) → mesa_control: columna `controlador` (self-identificado);
+//     calidad: columna `registradoPor` (resuelto por N°, WMS.Personal).
+//   · Operario = sobre quién es el error → mesa_control: `nombreArmador`
+//     (preparador, WMS); calidad: `controlador` (controlador real del
+//     pedido, resuelto solo por Magnus — NO lo tipea nadie).
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface ErrorMesaRow {
@@ -26,7 +31,19 @@ interface ErrorMesaRow {
   nombreArmador: string | null;
   ubicacion: string | null;
   detalleError: string;
+  origen: string;
+  registradoPor: string | null;
   createdAt: string;
+}
+
+// Quién hizo el registro (N° ingresado al abrir el widget).
+function getRegistrador(r: ErrorMesaRow): string | null {
+  return r.origen === "calidad" ? r.registradoPor : r.controlador;
+}
+// Operario sobre el que es el error (preparador en Mesa de Control,
+// controlador real del pedido —Magnus— en Calidad).
+function getOperario(r: ErrorMesaRow): string | null {
+  return r.origen === "calidad" ? r.controlador : r.nombreArmador;
 }
 
 const ALL = "__all__";
@@ -70,14 +87,11 @@ export function ErroresMesaTab() {
   }, []);
 
   const controladores = useMemo(
-    () => [...new Set(rows.map((r) => r.controlador).filter(Boolean))].sort(),
+    () => [...new Set(rows.map(getRegistrador).filter(Boolean) as string[])].sort(),
     [rows],
   );
   const preparadores = useMemo(
-    () =>
-      [
-        ...new Set(rows.map((r) => r.nombreArmador).filter(Boolean) as string[]),
-      ].sort(),
+    () => [...new Set(rows.map(getOperario).filter(Boolean) as string[])].sort(),
     [rows],
   );
 
@@ -94,8 +108,8 @@ export function ErroresMesaTab() {
     () =>
       rows.filter(
         (r) =>
-          (controlador === ALL || r.controlador === controlador) &&
-          (preparador === ALL || r.nombreArmador === preparador),
+          (controlador === ALL || getRegistrador(r) === controlador) &&
+          (preparador === ALL || getOperario(r) === preparador),
       ),
     [rows, controlador, preparador],
   );
@@ -169,7 +183,7 @@ export function ErroresMesaTab() {
             </select>
           </label>
           <label className="flex flex-col gap-1 text-[11px] text-zinc-500">
-            Preparador
+            Operario
             <select
               value={preparador}
               onChange={(e) => setPreparador(e.target.value)}
@@ -207,7 +221,7 @@ export function ErroresMesaTab() {
               accent="neutral"
             />
             <KPI
-              label="Preparadores"
+              label="Operarios"
               value={fmtNum(preparadores.length)}
               accent="neutral"
             />
@@ -237,13 +251,13 @@ export function ErroresMesaTab() {
                 },
                 {
                   key: "controlador",
-                  label: <>Controlador<br />Preparador</>,
-                  render: (r) => (
-                    <div className="leading-tight">
-                      <div>{r.controlador}</div>
-                      <div className="text-zinc-400">{r.nombreArmador ?? "—"}</div>
-                    </div>
-                  ),
+                  label: "Controlador",
+                  render: (r) => getRegistrador(r) ?? "—",
+                },
+                {
+                  key: "operario",
+                  label: "Operario",
+                  render: (r) => getOperario(r) ?? "—",
                 },
                 { key: "detalleError", label: "Detalle Error" },
               ]}
