@@ -81,7 +81,12 @@ export const SCHEMAS: Record<string, { titleKey: string; fields: CampoDef[] }> =
       { k: "problema", l: "Problema", t: "text" },
       { k: "sistema", l: "Sistema", t: "select", opciones: ["Magnus", "Prolixus", "WMS", "ecommerce"] },
       { k: "fin", l: "Fin", t: "date" },
-      { k: "origen", l: "Origen del error", t: "text" },
+      {
+        k: "origen",
+        l: "Origen del error",
+        t: "select",
+        opciones: ["Cliente", "Personal", "Sistema", "Windows", "Desconocimiento"],
+      },
       { k: "accion", l: "Acción / nota", t: "textarea" },
     ],
   },

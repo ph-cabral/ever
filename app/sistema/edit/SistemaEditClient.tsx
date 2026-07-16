@@ -316,6 +316,20 @@ function ModalTarjetaFull({
       .catch(() => {});
   }, [modal.clave]);
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        onSave(campos);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [campos, onClose, onSave]);
+
   const agregarOpcion = async (campo: string, label: string) => {
     const valor = window.prompt(`Nueva opción para "${label}":`);
     if (!valor || !valor.trim()) return;
