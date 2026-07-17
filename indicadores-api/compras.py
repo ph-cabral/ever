@@ -187,3 +187,60 @@ def fetch_ordenes_pendientes(desde=None):
         }
     finally:
         conn.close()
+
+
+def fetch_ordenes_articulos_rango(desde: str, hasta: str):
+    """Artículos con al menos un renglón de Orden de Compra HECHA en el rango
+    [desde, hasta] (por FecMovim de la cabecera) — a diferencia de
+    fetch_ordenes_pendientes, ACÁ NO importa si ya se recibió o sigue
+    pendiente: solo interesa si la OC se generó ese período.
+
+    Para /compras/metricas (funnel mensual: de los artículos faltantes del
+    mes, cuántos tuvieron una OC ese mismo mes). Devuelve solo la lista de
+    CodArticulo distintos (no cantidades) — es lo único que necesita el funnel.
+
+    NOTA rendimiento/riesgo: igual que fetch_ordenes_pendientes, NO hay filtro
+    de fecha en el WHERE de SQL — FecMovim puede venir como int días-Magnus o
+    como datetime nativo según el entorno, y _to_date ya resuelve ambos casos
+    en Python (mismo patrón ya probado en producción en esta función hermana).
+    Acá se pierde el filtro por "pendiente" que acotaba el volumen en esa
+    función, así que esta consulta trae MÁS filas (toda OC histórica). Si se
+    vuelve lento, agregar un corte adicional (p.ej. NroOrdCompra >= umbral).
+    """
+    d1 = datetime.strptime(str(desde)[:10], "%Y-%m-%d").date()
+    d2 = datetime.strptime(str(hasta)[:10], "%Y-%m-%d").date()
+
+    sql = """
+    SELECT
+        cab.FecMovim                  AS FecMovim,
+        LTRIM(RTRIM(r.CodArticulo))   AS CodArticu
+    FROM EVERWEAR.dbo.Com_OrdCompRenglones r
+    INNER JOIN EVERWEAR.dbo.Com_OrdCompCabecera cab ON cab.NroOrdCompra = r.NroOrdCompra
+    """
+
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(sql)
+        cols = [c[0] for c in cur.description]
+
+        arts: set[str] = set()
+        for row in cur.fetchall():
+            d = dict(zip(cols, row))
+            cod = (str(d.get("CodArticu") or "")).strip()
+            if not cod:
+                continue
+            fmov = _to_date(d.get("FecMovim"))
+            if fmov is None or fmov < d1 or fmov > d2:
+                continue
+            arts.add(cod)
+
+        return {
+            "total": len(arts),
+            "articulos": sorted(arts),
+            "desde": d1.isoformat(),
+            "hasta": d2.isoformat(),
+        }
+    finally:
+        conn.close()

@@ -3,10 +3,15 @@
 import type { NavNode } from "./modules";
 
 export const GENERATED_CHILDREN: Record<string, NavNode[]> = {
-  "manguera": [
+  "buscador": [],
+  "compras": [
     {
-      "label": "Corte",
-      "href": "/manguera/corte"
+      "label": "Faltantes",
+      "href": "/compras/faltantes"
+    },
+    {
+      "label": "Métricas",
+      "href": "/compras/metricas"
     }
   ],
   "deposito": [
@@ -41,25 +46,25 @@ export const GENERATED_CHILDREN: Record<string, NavNode[]> = {
       "href": "/deposito/wms"
     }
   ],
+  "fabrica": [
+    {
+      "label": "Faltantes",
+      "href": "/fabrica/faltantes"
+    }
+  ],
+  "finanza": [],
+  "manguera": [
+    {
+      "label": "Corte",
+      "href": "/manguera/corte"
+    }
+  ],
   "picking": [
     {
       "label": "Picker",
       "href": "/picking/picker"
     }
   ],
-  "compras": [
-    {
-      "label": "Faltantes",
-      "href": "/compras/faltantes"
-    }
-  ],
-  "ventas": [
-    {
-      "label": "Faltantes",
-      "href": "/ventas/faltantes"
-    }
-  ],
-  "finanza": [],
   "rrhh": [
     {
       "label": "Asistencia",
@@ -78,13 +83,86 @@ export const GENERATED_CHILDREN: Record<string, NavNode[]> = {
       "href": "/rrhh/relojes"
     }
   ],
+  "sistema": [
+    {
+      "label": "Edit",
+      "href": "/sistema/edit"
+    }
+  ],
   "sorteo": [
     {
       "label": "Armar",
       "href": "/sorteo/armar"
     }
   ],
-  "vicki": [],
-  "buscador": [],
-  "sistema": []
+  "ventas": [
+    {
+      "label": "Faltantes",
+      "href": "/ventas/faltantes"
+    }
+  ],
+  "vicki": []
 };
+
+export const GENERATED_MODULES: { key: string; label: string; href: string }[] = [
+  {
+    "key": "buscador",
+    "label": "Buscador",
+    "href": "/buscador"
+  },
+  {
+    "key": "compras",
+    "label": "Compras",
+    "href": "/compras"
+  },
+  {
+    "key": "deposito",
+    "label": "Deposito",
+    "href": "/deposito"
+  },
+  {
+    "key": "fabrica",
+    "label": "Fabrica",
+    "href": "/fabrica"
+  },
+  {
+    "key": "finanza",
+    "label": "Finanza",
+    "href": "/finanza"
+  },
+  {
+    "key": "manguera",
+    "label": "Manguera",
+    "href": "/manguera"
+  },
+  {
+    "key": "picking",
+    "label": "Picking",
+    "href": "/picking"
+  },
+  {
+    "key": "rrhh",
+    "label": "RRHH",
+    "href": "/rrhh"
+  },
+  {
+    "key": "sistema",
+    "label": "Sistema",
+    "href": "/sistema"
+  },
+  {
+    "key": "sorteo",
+    "label": "Sorteo",
+    "href": "/sorteo"
+  },
+  {
+    "key": "ventas",
+    "label": "Ventas",
+    "href": "/ventas"
+  },
+  {
+    "key": "vicki",
+    "label": "Vicki",
+    "href": "/vicki"
+  }
+];

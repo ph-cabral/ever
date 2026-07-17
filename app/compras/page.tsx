@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PackageX } from "lucide-react";
+import { PackageX, BarChart3 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 
 const accesos = [
@@ -8,6 +8,12 @@ const accesos = [
     icon: PackageX,
     title: "Faltantes",
     desc: "Faltantes de consumo y órdenes de compra.",
+  },
+  {
+    href: "/compras/metricas",
+    icon: BarChart3,
+    title: "Métricas",
+    desc: "Faltantes, OC e ingresos del mes en items.",
   },
 ];
 

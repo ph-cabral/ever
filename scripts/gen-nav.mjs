@@ -17,6 +17,7 @@ const LABELS = {
   evaluacion: "Evaluación",
   duplicadas: "Duplicadas",
   faltantes: "Faltantes",
+  metricas: "Métricas",
   pedidos: "Pedidos",
   stock: "Stock",
   corte: "Corte",

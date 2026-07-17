@@ -67,13 +67,16 @@ def _nro_remito(centro, numero):
     return f"{c:04d}-{n:08d}"
 
 
-def fetch_remitos_ingreso(desde=None):
+def fetch_remitos_ingreso(desde=None, hasta=None):
     """Agrega por artículo los remitos de ingreso x OC ya concretados.
 
     desde = 'YYYY-MM-DD' (o None → hoy - INGRESOS_DIAS_DEFAULT): solo remitos
     con FecComprobante >= esa fecha. /ventas/faltantes pasa la fecha del
     faltante (regla: el artículo "llegó" si hay remito con fecha >= a cuando
-    se detectó el faltante)."""
+    se detectó el faltante).
+    hasta = 'YYYY-MM-DD' opcional: acota también por arriba (FecComprobante
+    <= hasta). Usado por /compras/metricas para acotar a un mes calendario
+    exacto (sin esto, un remito de un mes futuro también contaría)."""
     if desde:
         try:
             corte = datetime.strptime(str(desde)[:10], "%Y-%m-%d").date()
@@ -82,6 +85,15 @@ def fetch_remitos_ingreso(desde=None):
     else:
         corte = date.today() - timedelta(days=INGRESOS_DIAS_DEFAULT)
     corte_dias = (corte - BASE_DATE).days
+
+    hasta_dias = None
+    if hasta:
+        try:
+            hasta_date = datetime.strptime(str(hasta)[:10], "%Y-%m-%d").date()
+            hasta_dias = (hasta_date - BASE_DATE).days
+        except ValueError:
+            hasta_dias = None
+    _hasta_cond = f"AND cab.FecComprobante <= {hasta_dias}" if hasta_dias is not None else ""
 
     sql = f"""
     SELECT
@@ -98,6 +110,7 @@ def fetch_remitos_ingreso(desde=None):
     LEFT  JOIN EVERWEAR.dbo.Com_Proveedores    pr  ON pr.CodProveed   = cab.CodProveed
     WHERE cab.NroOrdCompra <> 0
       AND cab.FecComprobante >= {corte_dias}
+      {_hasta_cond}
       AND LTRIM(RTRIM(cab.Estado)) <> 'Anulado'
     """
 
@@ -146,6 +159,7 @@ def fetch_remitos_ingreso(desde=None):
             "total": len(rows),
             "rows": rows,
             "desde": corte.isoformat(),
+            "hasta": (BASE_DATE + timedelta(days=hasta_dias)).isoformat() if hasta_dias is not None else None,
         }
     finally:
         conn.close()

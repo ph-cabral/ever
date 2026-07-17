@@ -14,7 +14,7 @@ from deposito import (
     fetch_stock_deposito1, fetch_stock_por_articulos, fetch_stock_export,
     fetch_contenedor,
 )
-from compras import fetch_ordenes_pendientes
+from compras import fetch_ordenes_pendientes, fetch_ordenes_articulos_rango
 from ingresos import fetch_remitos_ingreso
 from finanza import fetch_facturacion_dia, fetch_descubrir
 from clientes import fetch_cliente
@@ -344,13 +344,32 @@ def compras_ordenes_pendientes(desde: str | None = Query(default=None)):
 
 # ── Compras: remitos de ingreso x OC ya concretados (lo que "ya llegó") ───────
 @app.get("/compras/ingresos")
-def compras_ingresos(desde: str | None = Query(default=None)):
+def compras_ingresos(
+    desde: str | None = Query(default=None),
+    hasta: str | None = Query(default=None),
+):
     """Remitos de ingreso x OC ya concretados (Com_RemitoCabecera/Renglones),
     agregado por artículo. Fuente verificada: ingresos_extraccion.py.
     Para /ventas/faltantes ("Tabla 2"): confirma que un renglón con fecha de
-    arribo YA llegó físicamente. `desde`='YYYY-MM-DD' (default: hoy-60)."""
+    arribo YA llegó físicamente. `desde`='YYYY-MM-DD' (default: hoy-60).
+    `hasta`='YYYY-MM-DD' opcional (para /compras/metricas: acotar a un mes)."""
     try:
-        return fetch_remitos_ingreso(desde)
+        return fetch_remitos_ingreso(desde, hasta)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+# ── Compras: artículos con OC hecha en un rango (funnel /compras/metricas) ───
+@app.get("/compras/ordenes-mes")
+def compras_ordenes_mes(
+    desde: str = Query(...),
+    hasta: str = Query(...),
+):
+    """Artículos (CodArticulo distintos) con al menos un renglón de OC hecho
+    en [desde, hasta] por FecMovim de la cabecera — sin importar si ya se
+    recibió o sigue pendiente (a diferencia de /compras/ordenes-pendientes).
+    Para /compras/metricas: funnel faltantes del mes → con OC ese mes."""
+    try:
+        return fetch_ordenes_articulos_rango(desde, hasta)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
