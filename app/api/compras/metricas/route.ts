@@ -31,7 +31,26 @@ export const maxDuration = 60;
 //   Los sets B y C (Magnus, indicadores-api) son best-effort: si alguno no
 //   responde, la columna correspondiente (y las que dependen de ella) se
 //   informan en `warn` mas no rompen la vista.
+//
+//   Gráfico de torta (decisión del usuario): clasifica el mismo set A
+//   (Faltantes del mes) en 3 grupos — Importados / Nacionales / EVER WEAR
+//   INDUSTRIAL (proveedor propio, se saca de los otros 2 grupos). Reusa
+//   exactamente las mismas 2 fuentes y la misma precedencia que ya usa
+//   /api/compras/faltantes-consumo para Proveedor/Importación por artículo:
+//     · Proveedor: primero Magnus "faltantes" viejo (GET /deposito/faltantes,
+//       fetch_faltantes), fallback a la OC "por llegar" (GET
+//       /compras/ordenes-pendientes) si el primero no trae proveedor.
+//     · Importación: SOLO sale de /compras/ordenes-pendientes (no hay otra
+//       fuente) — default false (Nacional) si el artículo no tiene OC
+//       asociada, mismo default que ya usa faltantes-consumo.
 // ──────────────────────────────────────────────────────────────────────────────
+
+const PROVEEDOR_OBJETIVO = "ever wear s.a. industrial";
+// Mismo patrón que app/fabrica/faltantes/page.tsx: normaliza acentos/mayúsculas
+// antes de comparar (Magnus no es consistente con el formato del proveedor).
+const norm = (s: string) =>
+  s.toLowerCase().normalize("NFD").replace(new RegExp("[\\u0300-\\u036f]", "g"), "").trim();
+const esProveedorObjetivo = (p: string | null) => !!p && norm(p).includes(PROVEEDOR_OBJETIVO);
 
 async function getJson(url: string) {
   const res = await fetch(url, {
@@ -120,16 +139,69 @@ export async function GET(req: NextRequest) {
   const conOC = faltantes.filter((c) => setB.has(c));
   const ingresados = conOC.filter((c) => setC.has(c));
 
+  // 4) Torta: clasifica el set A (Faltantes) en Importados/Nacionales/EVER
+  // WEAR INDUSTRIAL. Proveedor: Magnus faltantes viejo (best-effort) con
+  // fallback a la OC pendiente; Importación: solo de la OC pendiente.
+  const faltProveedorMap = new Map<string, string | null>();
+  let clasifWarn = false;
+  try {
+    const faltJson = await getJson(
+      `${API_URL}/deposito/faltantes?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}&historico=1`,
+    );
+    for (const r of (faltJson.rows ?? []) as { CodArticulo: string; Proveedor: string | null }[]) {
+      const cod = (r.CodArticulo ?? "").trim();
+      if (!cod) continue;
+      const prev = faltProveedorMap.get(cod);
+      if (!prev && r.Proveedor) faltProveedorMap.set(cod, r.Proveedor);
+    }
+  } catch (e) {
+    clasifWarn = true;
+    console.error("GET /api/compras/metricas — deposito/faltantes (proveedor)", e);
+  }
+
+  const ocInfoMap = new Map<string, { Proveedor: string | null; Importacion: boolean }>();
+  try {
+    const ocPendJson = await getJson(`${API_URL}/compras/ordenes-pendientes`);
+    for (const r of (ocPendJson.rows ?? []) as {
+      CodArticulo: string;
+      Proveedor: string | null;
+      Importacion: boolean;
+    }[]) {
+      const cod = (r.CodArticulo ?? "").trim();
+      if (cod) ocInfoMap.set(cod, { Proveedor: r.Proveedor ?? null, Importacion: !!r.Importacion });
+    }
+  } catch (e) {
+    clasifWarn = true;
+    console.error("GET /api/compras/metricas — ordenes-pendientes (proveedor/importacion)", e);
+  }
+
+  let importados = 0;
+  let nacionales = 0;
+  let fabrica = 0;
+  for (const cod of faltantes) {
+    const oc = ocInfoMap.get(cod);
+    const proveedor = faltProveedorMap.get(cod) || oc?.Proveedor || null;
+    if (esProveedorObjetivo(proveedor)) fabrica++;
+    else if (oc?.Importacion) importados++;
+    else nacionales++;
+  }
+
   return NextResponse.json({
     mes,
     desde,
     hasta,
     ocWarn,
     ingresoWarn,
+    clasifWarn,
     columnas: [
       { key: "faltantes", label: "Faltantes", total: faltantes.length, articulos: faltantes },
       { key: "conOC", label: "Con OC", total: conOC.length, articulos: conOC },
       { key: "ingresados", label: "Ingresados", total: ingresados.length, articulos: ingresados },
+    ],
+    torta: [
+      { key: "importados", label: "Importados", total: importados },
+      { key: "nacionales", label: "Nacionales", total: nacionales },
+      { key: "fabrica", label: "EVER WEAR INDUSTRIAL", total: fabrica },
     ],
   });
 }

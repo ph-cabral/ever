@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import KpiCard from "@/app/rrhh/components/KpiCard";
 import BarChartCard from "@/app/rrhh/components/charts/BarChartCard";
+import PieChartCard from "@/app/rrhh/components/charts/PieChartCard";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/metricas — funnel mensual en ITEMS (artículos distintos, no
@@ -20,13 +21,20 @@ interface Columna {
   total: number;
   articulos: string[];
 }
+interface Grupo {
+  key: string;
+  label: string;
+  total: number;
+}
 interface Resp {
   mes: string;
   desde: string;
   hasta: string;
   ocWarn: boolean;
   ingresoWarn: boolean;
+  clasifWarn: boolean;
   columnas: Columna[];
+  torta: Grupo[];
 }
 
 const fmtMesLabel = (mes: string) => {
@@ -77,6 +85,11 @@ export default function ComprasMetricasPage() {
 
   const chartData = useMemo(
     () => (data?.columnas ?? []).map((c) => ({ name: c.label, value: c.total })),
+    [data],
+  );
+
+  const pieData = useMemo(
+    () => (data?.torta ?? []).filter((g) => g.total > 0).map((g) => ({ name: g.label, value: g.total })),
     [data],
   );
 
@@ -139,7 +152,8 @@ export default function ComprasMetricasPage() {
           <p className="text-zinc-500 text-sm mt-1">
             Cantidad de artículos distintos (items, no unidades) — de los faltantes detectados en{" "}
             {fmtMesLabel(mes)}, cuántos tuvieron una Orden de Compra ese mismo mes y, de esos, cuántos ya
-            ingresaron a la empresa.
+            ingresaron a la empresa. La torta clasifica esos mismos faltantes por origen: Importados,
+            Nacionales o EVER WEAR INDUSTRIAL (proveedor propio, se excluye de los otros dos grupos).
           </p>
         </div>
 
@@ -151,6 +165,12 @@ export default function ComprasMetricasPage() {
               : data?.ocWarn
                 ? "OC no disponible — columna “Con OC” puede estar incompleta"
                 : "Ingresos no disponible — columna “Ingresados” puede estar incompleta"}
+          </div>
+        )}
+        {data?.clasifWarn && (
+          <div className="flex items-center gap-1.5 text-xs text-amber-400/80">
+            <AlertTriangle size={13} />
+            No se pudo clasificar proveedor/importación para algunos artículos — la torta puede estar incompleta
           </div>
         )}
 
@@ -178,29 +198,52 @@ export default function ComprasMetricasPage() {
           />
         </div>
 
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4">
-          {chartData.length > 0 ? (
-            <BarChartCard
-              title={`Items por etapa — ${fmtMesLabel(mes)}`}
-              data={chartData}
-              xKey="name"
-              yKey="value"
-              currency={false}
-              height={340}
-              xAngle={0}
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-              {loading ? (
-                <Loader2 size={36} className="text-yellow-400 animate-spin" />
-              ) : (
-                <PackageCheck size={40} className="text-zinc-700" />
-              )}
-              <p className="text-zinc-500 text-sm">
-                {loading ? "Consultando la base…" : "Sin datos para este mes."}
-              </p>
-            </div>
-          )}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4">
+            {chartData.length > 0 ? (
+              <BarChartCard
+                title={`Items por etapa — ${fmtMesLabel(mes)}`}
+                data={chartData}
+                xKey="name"
+                yKey="value"
+                currency={false}
+                height={340}
+                xAngle={0}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                {loading ? (
+                  <Loader2 size={36} className="text-yellow-400 animate-spin" />
+                ) : (
+                  <PackageCheck size={40} className="text-zinc-700" />
+                )}
+                <p className="text-zinc-500 text-sm">
+                  {loading ? "Consultando la base…" : "Sin datos para este mes."}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4">
+            {pieData.length > 0 ? (
+              <PieChartCard
+                title={`Faltantes por origen — ${fmtMesLabel(mes)}`}
+                data={pieData}
+                height={340}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                {loading ? (
+                  <Loader2 size={36} className="text-yellow-400 animate-spin" />
+                ) : (
+                  <PackageCheck size={40} className="text-zinc-700" />
+                )}
+                <p className="text-zinc-500 text-sm">
+                  {loading ? "Consultando la base…" : "Sin datos para este mes."}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </main>
     </div>
