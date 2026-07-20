@@ -28,6 +28,7 @@ from errores_mesa import (
     fetch_ubicacion_diag, fetch_errores_mesa_list, fetch_operario_nombre,
     insert_error_calidad, update_observacion,
 )
+from rrhh import fetch_cvs_por_mes
 from datetime import date, datetime, timedelta
 
 app = FastAPI()
@@ -700,5 +701,16 @@ def deposito_errores_mesa_ubicacion_diag(nro: int | None = Query(default=None)):
     (LIKE '%OBSERV%') y, con `nro`, el lookup completo de ese pedido."""
     try:
         return fetch_ubicacion_diag(nro)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+
+# ── RRHH: Reclutamiento ────────────────────────────────────────────────────
+@app.get("/rrhh/cvs-por-mes")
+def rrhh_cvs_por_mes(meses: int = Query(default=12, ge=1, le=36)):
+    """CVs recibidos por mes (Postgres rag_system.documento_aprobado,
+    tipo='CV'). Ver rrhh.py."""
+    try:
+        return fetch_cvs_por_mes(meses)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")

@@ -11,6 +11,7 @@ import NominaTab from "@/app/rrhh/components/tabs/NominaTab";
 import AusentismoTab from "@/app/rrhh/components/tabs/AusentismoTab";
 import HsExtrasTab from "@/app/rrhh/components/tabs/HsExtrasTab";
 import ResumenTab from "@/app/rrhh/components/tabs/ResumenTab";
+import ReclutamientoTab from "@/app/rrhh/components/tabs/ReclutamientoTab";
 import { useRrhhData } from "@/lib/rrhh/store";
 import { parseXlsxFile, FILE_TYPE_LABELS, type ParsedFile, type DetectedFileType } from "@/lib/rrhh/parseXlsx";
 
@@ -149,6 +150,7 @@ export default function RrhhDashboardPage() {
     if (tab === "resumen") return <ResumenTab data={data} onUpload={openUpload} />;
     if (tab === "ausentismo") return <AusentismoTab />;
     if (tab === "hs_extras") return <HsExtrasTab />;
+    if (tab === "reclutamiento") return <ReclutamientoTab />;
     const type = TAB_TO_TYPE[tab];
     if (type && data[type]) {
       const f = data[type]!;
