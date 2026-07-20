@@ -1617,7 +1617,14 @@ def fetch_stock_deposito1(page: int = 1, page_size: int = 50, q: str | None = No
     page_size = max(1, min(page_size, 200))
     offset = (page - 1) * page_size
 
-    filtro_q = f"AND LTRIM(RTRIM(u.{UBIC_COL_ART})) LIKE ?" if q else ""
+    # BUG encontrado 2026-07-20 (mismo commit "fix stock" del 16/07 que dejó
+    # fetch_stock_por_articulos rota, ver [[ever-compras-faltantes-stock-bug]]):
+    # este filtro seguía armado con el alias/columna viejos (u.UBIC_COL_ART, de
+    # WMS.UbicacionDetalle) pero _sql_pivot_stock ya solo tiene alias "a" sobre
+    # EVERWEAR.Stk_ArticSucursalDeposito → con q vacío no se nota (no arma el
+    # filtro), pero al buscar algo el SQL queda inválido (alias "u" no existe
+    # en la query) → 503 "Error en API de stock".
+    filtro_q = f"AND LTRIM(RTRIM(a.{ARSU_COL_ART})) LIKE ?" if q else ""
     sql_stock = _sql_pivot_stock(filtro_q) + " OFFSET ? ROWS FETCH NEXT ? ROWS ONLY"
     params: list = ([f"%{q}%"] if q else []) + [offset, page_size]
 
@@ -1639,14 +1646,23 @@ def fetch_stock_export():
 # Usado por /compras/faltantes (columna "Stock"): a diferencia de fetch_stock_
 # deposito1 (paginado, para la vista /deposito/stock), acá se pide el stock
 # EXACTO de los códigos que ya están en pantalla (los que tienen faltante),
-# sin paginar. Mismo criterio: WMS.UbicacionDetalle, UbicacionDepositoId=1.
+# sin paginar. Mismo criterio que fetch_stock_deposito1/fetch_stock_export desde
+# el commit "fix stock" (2026-07-16): EVERWEAR.Stk_ArticSucursalDeposito, no
+# WMS.UbicacionDetalle. BUG encontrado 2026-07-20: esa migración borró la
+# constante UBIC_COL_DEP (quedó reemplazada por ARSU_COL_DEP para la tabla
+# nueva) pero esta función seguía usando UBIC_COL_DEP/UBIC_TABLA/conn "WMS" →
+# NameError en cada llamada → /deposito/stock-por-articulos devolvía 503 →
+# el front lo tragaba silenciosamente (stockWarn, sin mostrarse) y mostraba
+# Stock=0 para TODO artículo en /compras/faltantes aunque hubiera stock real
+# en Magnus (ver caso E730020 TRAX GEAR 8 75W80: Magnus mostraba 12 en CENTRAL
+# y la vista seguía marcando falta).
 def fetch_stock_por_articulos(codigos: list[str]):
     codigos = [c.strip() for c in codigos if c and c.strip()]
     if not codigos:
         return {"rows": []}
 
     stock: dict[str, float] = {}
-    conn = get_connection("WMS")
+    conn = get_connection("EVERWEAR")
     try:
         cur = conn.cursor()
         cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
@@ -1655,12 +1671,12 @@ def fetch_stock_por_articulos(codigos: list[str]):
             chunk = codigos[i:i + CH]
             ph = ",".join("?" for _ in chunk)
             sql = f"""
-                SELECT LTRIM(RTRIM(u.{UBIC_COL_ART})) AS Cod,
-                       SUM(u.{UBIC_COL_CANT})          AS Stock
-                FROM dbo.{UBIC_TABLA} u
-                WHERE u.{UBIC_COL_DEP} = ?
-                  AND LTRIM(RTRIM(u.{UBIC_COL_ART})) IN ({ph})
-                GROUP BY LTRIM(RTRIM(u.{UBIC_COL_ART}))
+                SELECT LTRIM(RTRIM(a.{ARSU_COL_ART})) AS Cod,
+                       SUM(a.{ARSU_COL_STK})          AS Stock
+                FROM dbo.{ARSU_TABLA} a
+                WHERE a.{ARSU_COL_DEP} = ?
+                  AND LTRIM(RTRIM(a.{ARSU_COL_ART})) IN ({ph})
+                GROUP BY LTRIM(RTRIM(a.{ARSU_COL_ART}))
             """
             cur.execute(sql, [DEPOSITO_CENTRAL] + chunk)
             for cod, cant in cur.fetchall():
