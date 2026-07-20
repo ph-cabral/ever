@@ -114,7 +114,20 @@ const rowCls: Record<Estado, string> = {
   completo: "bg-green-500/10 hover:bg-green-500/[0.16]",
   entregado: "bg-emerald-500/10 hover:bg-emerald-500/[0.16]",
   incompleto: "bg-red-500/10 hover:bg-red-500/[0.16]",
-  sin_orden: "hover:bg-zinc-900/50",
+  // sin_orden = stock+OC no cubre nada del faltante (peor caso que "incompleto",
+  // no mejor) → misma fila roja. Antes quedaba neutro y parecía "sin alerta".
+  sin_orden: "bg-red-500/10 hover:bg-red-500/[0.16]",
+};
+// Color del número "cubre OC" dentro de la celda Falta/Stock/OC: verde SOLO si
+// stock+OC cubre TODO el faltante (completo/entregado). Si es cobertura
+// parcial (incompleto) va en ámbar, no verde — mostrarlo en verde cuando la
+// fila sigue con Falta OC en rojo es contradictorio (leía como "ya resuelto").
+// Mismo criterio ya usado en /fabrica/faltantes (cubiertoCls).
+const cubiertoCls: Record<Estado, string> = {
+  completo: "text-green-400 font-medium",
+  entregado: "text-emerald-400 font-medium",
+  incompleto: "text-amber-400 font-medium",
+  sin_orden: "text-zinc-600",
 };
 
 // Celda "Cliente": en vez de listar nombres (rompía el ancho de la tabla),
@@ -272,7 +285,7 @@ function Tabla({
                     {r.stock > 0 ? fmtNum(r.stock) : "—"}
                   </span>
                   <span className="text-zinc-600">/</span>
-                  <span className={r.cubierto > 0 ? "text-green-400 font-medium" : "text-zinc-600"}>
+                  <span className={r.cubierto > 0 ? cubiertoCls[r.estado] : "text-zinc-600"}>
                     {r.cubierto > 0 ? fmtNum(r.cubierto) : "—"}
                   </span>
                 </td>

@@ -20,11 +20,25 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
+    // Para saber qué tarjetas realmente CAMBIAN de columna (y no solo se reordenan
+    // dentro de la misma), comparamos contra el columnaId actual en la base: solo esas
+    // actualizan columnaDesde (fecha de entrada usada para autoordenar columnas sin
+    // orden manual).
+    const actuales = await prisma.sistema_tarjeta.findMany({
+      where: { id: { in: cambios.map((c: { id: number }) => c.id) } },
+      select: { id: true, columnaId: true },
+    });
+    const columnaActualPorId = new Map(actuales.map((t) => [t.id, t.columnaId]));
+
     await prisma.$transaction(
       cambios.map((c: { id: number; columnaId: number; orden: number }) =>
         prisma.sistema_tarjeta.update({
           where: { id: c.id },
-          data: { columnaId: c.columnaId, orden: c.orden },
+          data: {
+            columnaId: c.columnaId,
+            orden: c.orden,
+            ...(columnaActualPorId.get(c.id) !== c.columnaId ? { columnaDesde: new Date() } : {}),
+          },
         })
       )
     );

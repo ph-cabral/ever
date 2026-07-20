@@ -544,6 +544,10 @@ model sistema_tarjeta {
   vinculadoTableroId Int?
   orden              Int              @default(0)
   campos             Json             @default("{}")
+  // Fecha/hora en que la tarjeta entró a su columna actual (se actualiza cada vez que
+  // cambia columnaId, sea por drag&drop o por PATCH externo). Usado para autoordenar
+  // las columnas sin orden manual — no confundir con createdAt (fecha de alta original).
+  columnaDesde       DateTime         @default(now())
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   tablero            sistema_tablero  @relation("tarjetaTablero", fields: [tableroId], references: [id], onDelete: Cascade)

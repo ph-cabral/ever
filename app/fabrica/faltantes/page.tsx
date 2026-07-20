@@ -90,7 +90,8 @@ const rowCls: Record<Estado, string> = {
   completo: "bg-green-500/10 hover:bg-green-500/[0.16]",
   entregado: "bg-emerald-500/10 hover:bg-emerald-500/[0.16]",
   incompleto: "bg-red-500/10 hover:bg-red-500/[0.16]",
-  sin_orden: "hover:bg-zinc-900/50",
+  // sin_orden = stock+OC no cubre nada (peor caso, no neutro) → misma fila roja.
+  sin_orden: "bg-red-500/10 hover:bg-red-500/[0.16]",
 };
 const cubiertoCls: Record<Estado, string> = {
   completo: "text-green-400",

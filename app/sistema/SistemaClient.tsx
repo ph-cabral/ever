@@ -27,6 +27,9 @@ export type Tarjeta = {
   tableroId: number;
   orden: number;
   campos: Campos;
+  // Fecha/hora en que entró a columnaId actual (no confundir con campos.fecha, que es
+  // un campo de negocio editable). Usado para autoordenar columnas sin orden manual.
+  columnaDesde?: string;
 };
 export type Columna = { id: number; tableroId: number; nombre: string; orden: number; tarjetas: Tarjeta[] };
 export type ColGlobal = { id: number; nombre: string; orden: number };
@@ -352,10 +355,10 @@ export default function SistemaClient() {
     destCol.tarjetas.splice(idx, 0, {
       ...card,
       columnaId: destCol.id,
-      campos:
-        destCol.id !== srcCol.id
-          ? { ...card.campos, fecha: new Date().toISOString() }
-          : card.campos,
+      // Optimista: el servidor confirma/persiste columnaDesde en el PATCH de abajo;
+      // esto solo evita un parpadeo de orden hasta que refresque con cargar().
+      columnaDesde:
+        destCol.id !== srcCol.id ? new Date().toISOString() : card.columnaDesde,
     });
 
     const cambios: { id: number; columnaId: number; orden: number }[] = [];
@@ -530,8 +533,9 @@ export default function SistemaClient() {
                 const ordenadas = ordenManual
                   ? col.tarjetas
                   : [...col.tarjetas].sort((a, b) => {
-                      const da = subtitleField ? parseDate(a.campos[subtitleField.k]) : null;
-                      const db = subtitleField ? parseDate(b.campos[subtitleField.k]) : null;
+                      // Autoorden: por fecha/hora de entrada a la columna (no de creación).
+                      const da = parseDate(a.columnaDesde);
+                      const db = parseDate(b.columnaDesde);
                       return (db?.getTime() ?? 0) - (da?.getTime() ?? 0);
                     });
 

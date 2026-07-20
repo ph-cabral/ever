@@ -18,7 +18,19 @@ export async function PATCH(
 
     const data: Record<string, unknown> = {};
     if (campos !== undefined) data.campos = campos;
-    if (columnaId !== undefined) data.columnaId = Number(columnaId);
+    if (columnaId !== undefined) {
+      const nuevaColumnaId = Number(columnaId);
+      data.columnaId = nuevaColumnaId;
+      // Si realmente cambia de columna, marcar la entrada (se usa para autoordenar
+      // las columnas sin orden manual por fecha de entrada, no de creación).
+      const actual = await prisma.sistema_tarjeta.findUnique({
+        where: { id: tarjetaId },
+        select: { columnaId: true },
+      });
+      if (actual && actual.columnaId !== nuevaColumnaId) {
+        data.columnaDesde = new Date();
+      }
+    }
     if (orden !== undefined) data.orden = Number(orden);
     if (tableroId !== undefined) data.tableroId = Number(tableroId);
 
