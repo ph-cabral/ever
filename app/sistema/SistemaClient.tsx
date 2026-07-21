@@ -1394,7 +1394,7 @@ function Kpi({ value, label }: { value: string | number; label: string }) {
 
 function ChartBox({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-[#161616] border border-zinc-800 rounded-xl p-4 h-72">
+    <div className="bg-[#161616] border border-zinc-800 rounded-xl p-4 h-96">
       <h4 className="text-sm text-zinc-300 mb-2">{title}</h4>
       <ResponsiveContainer width="100%" height="100%">
         {children as React.ReactElement}
@@ -1535,7 +1535,6 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
   const topUbicacion = sisPorUbicacion[0];
   const sfPorEstado = countBy(sfCards, (c) => c.colNombre);
   const sfPorSistema = countBy(sfCards, (c) => c.campos.sistema);
-  const burenPorUbic = countBy(bCards, (c) => c.campos.ubicacion);
 
   return (
     <div>
@@ -1570,13 +1569,17 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
         />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <ChartBox title="Casos por empresa (cuenta a quién corresponde)">
           <BarChart data={porEmpresa}>
             <CartesianGrid stroke="#27272a" />
             <XAxis dataKey="name" stroke="#9aa1b1" fontSize={12} />
             <YAxis stroke="#9aa1b1" fontSize={12} allowDecimals={false} />
-            <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }} />
+            <Tooltip
+              contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }}
+              labelStyle={{ color: "#fff" }}
+              itemStyle={{ color: "#fff" }}
+            />
             <Bar dataKey="value">
               {porEmpresa.map((_, i) => (
                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
@@ -1585,44 +1588,38 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
           </BarChart>
         </ChartBox>
 
-        <ChartBox title="Buren: tiempo total sin servicio">
-          <BarChart data={burenPorUbic}>
-            <CartesianGrid stroke="#27272a" />
-            <XAxis dataKey="name" stroke="#9aa1b1" fontSize={12} />
-            <YAxis stroke="#9aa1b1" fontSize={12} allowDecimals={false} />
-            <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }} />
-            <Bar dataKey="value">
-              {burenPorUbic.map((_, i) => (
-                <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ChartBox>
-
         <ChartBox title="Sistema interno — por estado">
           <PieChart>
-            <Pie data={sisPorEstado} dataKey="value" nameKey="name" outerRadius={80}>
+            <Pie data={sisPorEstado} dataKey="value" nameKey="name" outerRadius={110}>
               {sisPorEstado.map((_, i) => (
                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
               ))}
             </Pie>
             <Legend wrapperStyle={{ fontSize: 11, color: "#9aa1b1" }} />
-            <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }} />
+            <Tooltip
+              contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }}
+              labelStyle={{ color: "#fff" }}
+              itemStyle={{ color: "#fff" }}
+            />
           </PieChart>
         </ChartBox>
 
         <ChartBox title="Sistema interno — por categoría">
           <PieChart>
-            <Pie data={sisPorCategoria} dataKey="value" nameKey="name" outerRadius={80} label={({ name }) => name}>
+            <Pie data={sisPorCategoria} dataKey="value" nameKey="name" outerRadius={110} label={({ name }) => name}>
               {sisPorCategoria.map((_, i) => (
                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
               ))}
             </Pie>
-            <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }} />
+            <Tooltip
+              contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }}
+              labelStyle={{ color: "#fff" }}
+              itemStyle={{ color: "#fff" }}
+            />
           </PieChart>
         </ChartBox>
 
-        <div className="bg-[#161616] border border-zinc-800 rounded-xl p-4 md:col-span-2 lg:col-span-3">
+        <div className="bg-[#161616] border border-zinc-800 rounded-xl p-4 md:col-span-2">
           <h4 className="text-sm text-zinc-300 mb-2">
             Sistema interno — por ubicación{" "}
             <span className="text-zinc-600 font-normal">(clic en una barra para ver el detalle)</span>
@@ -1637,6 +1634,8 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
                   <Tooltip
                     cursor={{ fill: "#ffffff0d" }}
                     contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }}
+                    labelStyle={{ color: "#fff" }}
+                    itemStyle={{ color: "#fff" }}
                   />
                   <Bar
                     dataKey="value"
@@ -1682,13 +1681,17 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
 
         <ChartBox title="Softech — por estado">
           <PieChart>
-            <Pie data={sfPorEstado} dataKey="value" nameKey="name" outerRadius={80}>
+            <Pie data={sfPorEstado} dataKey="value" nameKey="name" outerRadius={110}>
               {sfPorEstado.map((_, i) => (
                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
               ))}
             </Pie>
             <Legend wrapperStyle={{ fontSize: 11, color: "#9aa1b1" }} />
-            <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }} />
+            <Tooltip
+              contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }}
+              labelStyle={{ color: "#fff" }}
+              itemStyle={{ color: "#fff" }}
+            />
           </PieChart>
         </ChartBox>
 
@@ -1697,7 +1700,11 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
             <CartesianGrid stroke="#27272a" />
             <XAxis dataKey="name" stroke="#9aa1b1" fontSize={11} interval={0} angle={-20} textAnchor="end" height={50} />
             <YAxis stroke="#9aa1b1" fontSize={12} allowDecimals={false} />
-            <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }} />
+            <Tooltip
+              contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }}
+              labelStyle={{ color: "#fff" }}
+              itemStyle={{ color: "#fff" }}
+            />
             <Bar dataKey="value">
               {sfPorSistema.map((_, i) => (
                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
