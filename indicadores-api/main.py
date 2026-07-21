@@ -612,6 +612,7 @@ class ErrorCalidadIn(BaseModel):
     nroPedido: int
     nroOperario: int
     detalleError: str
+    observacion: str | None = None
 
 class ObservacionIn(BaseModel):
     observacion: str
@@ -675,10 +676,12 @@ def deposito_errores_mesa_crear(body: ErrorMesaIn):
 @app.post("/deposito/errores-mesa/calidad")
 def deposito_errores_mesa_calidad_crear(body: ErrorCalidadIn):
     """Alta desde el widget de Calidad: controlador se resuelve solo (Magnus,
-    Ven_PedImpresoCP), no lo pide el widget. NO guarda preparador. Ver
-    insert_error_calidad."""
+    Ven_PedImpresoCP), no lo pide el widget. `observacion` es opcional (nota
+    libre tipeada en el widget). Ver insert_error_calidad."""
     try:
-        return insert_error_calidad(body.nroPedido, body.nroOperario, body.detalleError)
+        return insert_error_calidad(
+            body.nroPedido, body.nroOperario, body.detalleError, body.observacion
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

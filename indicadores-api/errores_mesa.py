@@ -24,6 +24,17 @@ del widget. Ese nombre va en la columna que antes era "aviso", ahora
 "controlador". El widget ya no manda un texto de mesa: manda `nroOperario`
 y el server resuelve el nombre (no confía en lo que mande el cliente).
 "Detalle Error" sigue siendo un select manual — ver DETALLE_ERROR_OPCIONES.
+
+CAMBIO 2026-07-21 (a pedido de Pablo): la vista /deposito separa "Registrada"
+(quién cargó el error — columna `controlador` de siempre, vía
+fetch_operario_nombre) de "Controlador" (el controlador real del pedido,
+Magnus Ven_PedImpresoCP.CodControlador1/2, vía fetch_controlador_pedido).
+Antes ese dato solo se resolvía para origen='calidad' (mezclado en la misma
+columna `controlador`, mostrado en pantalla como "Operario"); ahora se
+resuelve para AMBOS orígenes y se guarda aparte en "nroControladorReal" /
+"nombreControladorReal" (ver ever/sql/deposito_errores_mesa_controlador_real.sql).
+None si Magnus no tiene control registrado para ese pedido — no bloquea el
+alta en Mesa de Control (si bloquea en Calidad, ver insert_error_calidad).
 """
 from datetime import date, timedelta
 
@@ -234,19 +245,30 @@ def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) ->
         "nroArmador": None, "nombreArmador": None, "ubicacion": None,
     }
 
+    # Controlador real del pedido (Magnus, Ven_PedImpresoCP) — a pedido de
+    # Pablo (2026-07-21) se resuelve también acá, no solo en Calidad, para
+    # distinguir en la vista "Registrada" (quién cargó el error, arriba) de
+    # "Controlador" (el controlador real del pedido). None si Magnus no tiene
+    # control registrado para este pedido — no bloquea el alta.
+    ctrl_real = fetch_controlador_pedido(nro_pedido)
+    nro_controlador_real = ctrl_real["nroControlador"] if ctrl_real else None
+    nombre_controlador_real = ctrl_real["nombreControlador"] if ctrl_real else None
+
     conn = get_pg_connection()
     try:
         cur = conn.cursor()
         cur.execute(
             """
             INSERT INTO deposito.errores_mesa
-                ("nroPedido", fecha, "tipoPedido", ot, controlador, "nroArmador", "nombreArmador", ubicacion, "detalleError")
-            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s)
+                ("nroPedido", fecha, "tipoPedido", ot, controlador, "nroArmador", "nombreArmador",
+                 ubicacion, "detalleError", "nroControladorReal", "nombreControladorReal")
+            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id, "createdAt"
             """,
             (
                 nro_pedido, info["tipoPedido"], info["ot"],
                 controlador, info["nroArmador"], info["nombreArmador"], info["ubicacion"], detalle_error,
+                nro_controlador_real, nombre_controlador_real,
             ),
         )
         new_id, created_at = cur.fetchone()
@@ -259,6 +281,8 @@ def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) ->
         "id": new_id,
         "controlador": controlador,
         "detalleError": detalle_error,
+        "nroControladorReal": nro_controlador_real,
+        "nombreControladorReal": nombre_controlador_real,
         "createdAt": created_at.isoformat(),
     }
 
@@ -300,14 +324,25 @@ def fetch_controlador_pedido(nro_pedido: int) -> dict | None:
         conn.close()
 
 
-def insert_error_calidad(nro_pedido: int, nro_operario: int, detalle_error: str) -> dict:
-    """Alta desde el widget de Calidad. NO guarda preparador (a diferencia de
-    insert_error_mesa). `nro_operario` identifica a QUIEN CARGA el registro
-    (pantalla de inicio del widget, igual que Mesa de Control) — se resuelve
-    del lado del server (WMS.Personal, mismo origen que fetch_operario_nombre)
-    y va en `registradoPor`, separado de `controlador` (que acá sale solo de
-    Magnus, no lo tipea nadie). origen='calidad'."""
+def insert_error_calidad(
+    nro_pedido: int, nro_operario: int, detalle_error: str, observacion: str | None = None
+) -> dict:
+    """Alta desde el widget de Calidad. `nro_operario` identifica a QUIEN CARGA
+    el registro (pantalla de inicio del widget, igual que Mesa de Control) —
+    se resuelve del lado del server (WMS.Personal, mismo origen que
+    fetch_operario_nombre) y va en `registradoPor`, separado de `controlador`
+    (que acá sale solo de Magnus, no lo tipea nadie). origen='calidad'.
+
+    CAMBIO 2026-07-21 (a pedido de Pablo): esta alta ahora SÍ guarda el
+    preparador (nroArmador/nombreArmador, mismo lookup WMS que usa
+    insert_error_mesa — antes se descartaba a propósito, ver docstring vieja
+    "Tampoco guarda preparador"). Es el mismo dato que la vista /deposito
+    muestra como "Operario" para Mesa de Control; unifica el criterio entre
+    los 2 orígenes (ver getOperario en erroresMesa.tsx). También acepta
+    `observacion` opcional (antes solo se podía cargar desde la vista web,
+    ver update_observacion) para que el widget la mande directo al alta."""
     detalle_error = (detalle_error or "").strip()
+    observacion = (observacion or "").strip() or None
     if not nro_operario:
         raise ValueError("Falta 'nroOperario'")
     if not detalle_error:
@@ -321,7 +356,9 @@ def insert_error_calidad(nro_pedido: int, nro_operario: int, detalle_error: str)
     if not ctrl:
         raise ValueError(f"Pedido {nro_pedido} sin controlador registrado en Magnus")
 
-    info = fetch_pedido_lookup(nro_pedido) or {"tipoPedido": None, "ot": None, "ubicacion": None}
+    info = fetch_pedido_lookup(nro_pedido) or {
+        "tipoPedido": None, "ot": None, "nroArmador": None, "nombreArmador": None, "ubicacion": None,
+    }
 
     conn = get_pg_connection()
     try:
@@ -329,13 +366,17 @@ def insert_error_calidad(nro_pedido: int, nro_operario: int, detalle_error: str)
         cur.execute(
             """
             INSERT INTO deposito.errores_mesa
-                ("nroPedido", fecha, "tipoPedido", ot, controlador, ubicacion, "detalleError", origen, "registradoPor")
-            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, 'calidad', %s)
+                ("nroPedido", fecha, "tipoPedido", ot, controlador, "nroArmador", "nombreArmador",
+                 ubicacion, "detalleError", origen, "registradoPor",
+                 "nroControladorReal", "nombreControladorReal", observacion)
+            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, 'calidad', %s, %s, %s, %s)
             RETURNING id, "createdAt"
             """,
             (
                 nro_pedido, info["tipoPedido"], info["ot"], ctrl["nombreControlador"],
+                info.get("nroArmador"), info.get("nombreArmador"),
                 info["ubicacion"], detalle_error, registrado_por,
+                ctrl["nroControlador"], ctrl["nombreControlador"], observacion,
             ),
         )
         new_id, created_at = cur.fetchone()
@@ -346,7 +387,10 @@ def insert_error_calidad(nro_pedido: int, nro_operario: int, detalle_error: str)
     return {
         "id": new_id, "nroPedido": nro_pedido, "tipoPedido": info["tipoPedido"],
         "ot": info["ot"], "ubicacion": info["ubicacion"], "controlador": ctrl["nombreControlador"],
+        "nroArmador": info.get("nroArmador"), "nombreArmador": info.get("nombreArmador"),
         "detalleError": detalle_error, "origen": "calidad", "registradoPor": registrado_por,
+        "nroControladorReal": ctrl["nroControlador"], "nombreControladorReal": ctrl["nombreControlador"],
+        "observacion": observacion,
         "createdAt": created_at.isoformat(),
     }
 
@@ -377,6 +421,7 @@ def fetch_errores_mesa_list(
         sql = (
             'SELECT id, "nroPedido", fecha, "tipoPedido", ot, controlador, '
             '"nombreArmador", ubicacion, "detalleError", origen, "registradoPor", '
+            '"nroControladorReal", "nombreControladorReal", '
             'observacion, "createdAt" '
             "FROM deposito.errores_mesa"
         )

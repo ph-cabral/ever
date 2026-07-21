@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
+import { Loader2, AlertTriangle, RefreshCw, FileSpreadsheet } from "lucide-react";
 import { PageTitle, Panel, KPI, Grid, Table, fmtNum, fmtDate } from "./ui";
+import { exportarErroresMesa } from "@/lib/deposito/exportErroresMesa";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Registro de Errores — Mesa de Control + Calidad (deposito.errores_mesa,
@@ -11,17 +12,27 @@ import { PageTitle, Panel, KPI, Grid, Table, fmtNum, fmtDate } from "./ui";
 // vista es solo lectura + filtros. Fuente: GET /api/deposito/errores-mesa
 // (→ indicadores-api, fetch_errores_mesa_list en errores_mesa.py).
 //
-// A pedido de Pablo (2026-07-16), 2 columnas con significado distinto según
-// origen (mismo dato de fondo, dos roles distintos):
-//   · Controlador = quién HIZO EL REGISTRO (N° ingresado al abrir el
+// A pedido de Pablo, 3 columnas con origen de dato distinto pero mismo
+// criterio para los 2 orígenes desde 2026-07-21:
+//   · Registrada = quién HIZO EL REGISTRO (N° ingresado al abrir el
 //     widget) → mesa_control: columna `controlador` (self-identificado);
 //     calidad: columna `registradoPor` (resuelto por N°, WMS.Personal).
-//   · Operario = sobre quién es el error → mesa_control: `nombreArmador`
-//     (preparador, WMS); calidad: `controlador` (controlador real del
-//     pedido, resuelto solo por Magnus — NO lo tipea nadie).
+//     (Antes esta columna se mostraba como "Controlador" — renombrada
+//     2026-07-21 para no confundirla con la columna "Controlador" real,
+//     ver abajo.)
+//   · Controlador = controlador real del pedido según Magnus
+//     (Ven_PedImpresoCP.CodControlador1/2), resuelto para AMBOS orígenes →
+//     `nombreControladorReal`. Antes solo se resolvía para calidad
+//     (mezclado en `controlador`, mostrado como "Operario"); ahora es una
+//     columna aparte y separada de "Registrada"/"Operario".
+//   · Operario = el operario/preparador de Magnus (WMS OT + Personal,
+//     `nombreArmador`) sobre el que es el error, unificado para AMBOS
+//     orígenes desde 2026-07-21 (antes calidad NO lo guardaba —"Tampoco
+//     guarda preparador"— y esta columna mostraba `controlador`, duplicando
+//     lo que ya se ve en "Controlador").
 // ──────────────────────────────────────────────────────────────────────────────
 
-interface ErrorMesaRow {
+export interface ErrorMesaRow {
   id: number;
   nroPedido: number;
   fecha: string | null;
@@ -33,18 +44,22 @@ interface ErrorMesaRow {
   detalleError: string;
   origen: string;
   registradoPor: string | null;
+  nroControladorReal: number | null;
+  nombreControladorReal: string | null;
   observacion: string | null;
   createdAt: string;
 }
 
-// Quién hizo el registro (N° ingresado al abrir el widget).
-function getRegistrador(r: ErrorMesaRow): string | null {
+// Quién hizo el registro (N° ingresado al abrir el widget). Exportada para
+// reuso en lib/deposito/exportErroresMesa.ts (mismo criterio en pantalla y
+// en el Excel exportado).
+export function getRegistrador(r: ErrorMesaRow): string | null {
   return r.origen === "calidad" ? r.registradoPor : r.controlador;
 }
-// Operario sobre el que es el error (preparador en Mesa de Control,
-// controlador real del pedido —Magnus— en Calidad).
-function getOperario(r: ErrorMesaRow): string | null {
-  return r.origen === "calidad" ? r.controlador : r.nombreArmador;
+// Operario/preparador de Magnus (WMS) sobre el que es el error — mismo
+// campo para los 2 orígenes desde 2026-07-21.
+export function getOperario(r: ErrorMesaRow): string | null {
+  return r.nombreArmador;
 }
 
 const ALL = "__all__";
@@ -188,13 +203,23 @@ export function ErroresMesaTab() {
           title="Registro de Errores — Mesa de Control"
           sub="Altas desde el widget de escritorio · deposito.errores_mesa"
         />
-        <button
-          onClick={load}
-          disabled={loading}
-          className="flex items-center gap-1.5 text-zinc-400 hover:text-yellow-400 transition-colors px-2.5 py-1.5 rounded-md border border-zinc-700 disabled:opacity-40 text-sm"
-        >
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refrescar
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => exportarErroresMesa(filtered, { desde, hasta })}
+            disabled={!filtered.length}
+            title="Exportar a Excel lo que se ve en la tabla (con los filtros activos)"
+            className="flex items-center gap-1.5 text-zinc-400 hover:text-yellow-400 transition-colors px-2.5 py-1.5 rounded-md border border-zinc-700 disabled:opacity-40 text-sm"
+          >
+            <FileSpreadsheet size={14} /> Exportar Excel
+          </button>
+          <button
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-1.5 text-zinc-400 hover:text-yellow-400 transition-colors px-2.5 py-1.5 rounded-md border border-zinc-700 disabled:opacity-40 text-sm"
+          >
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refrescar
+          </button>
+        </div>
       </div>
 
       <Panel title="Filtros" className="mb-5">
@@ -227,7 +252,7 @@ export function ErroresMesaTab() {
             Aplicar fechas
           </button>
           <label className="flex flex-col gap-1 text-[11px] text-zinc-500">
-            Controlador
+            Registrada
             <select
               value={controlador}
               onChange={(e) => setControlador(e.target.value)}
@@ -275,7 +300,7 @@ export function ErroresMesaTab() {
           <Grid cols={4}>
             <KPI label="Registros" value={fmtNum(filtered.length)} accent="yellow" />
             <KPI
-              label="Controladores"
+              label="Registradas"
               value={fmtNum(controladores.length)}
               accent="neutral"
             />
@@ -310,8 +335,13 @@ export function ErroresMesaTab() {
                 },
                 {
                   key: "controlador",
-                  label: "Controlador",
+                  label: "Registrada",
                   render: (r) => getRegistrador(r) ?? "—",
+                },
+                {
+                  key: "controladorReal",
+                  label: "Controlador",
+                  render: (r) => r.nombreControladorReal ?? "—",
                 },
                 {
                   key: "operario",

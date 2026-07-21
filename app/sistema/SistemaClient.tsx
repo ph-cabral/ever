@@ -152,12 +152,6 @@ function mesLabelCorto(m: string) {
   const [y, mo] = m.split("-").map(Number);
   return new Date(y, mo - 1, 1).toLocaleDateString("es-AR", { month: "short", year: "2-digit" });
 }
-function timeToMinutes(s?: string | null): number {
-  if (!s) return 0;
-  const m = String(s).match(/^(\d+):(\d{1,2})$/);
-  if (!m) return 0;
-  return Number(m[1]) * 60 + Number(m[2]);
-}
 function countBy<T>(arr: T[], keyFn: (x: T) => string | undefined | null) {
   const map = new Map<string, number>();
   for (const item of arr) {
@@ -1385,17 +1379,25 @@ function RuedaMeses({
 
 function Kpi({ value, label }: { value: string | number; label: string }) {
   return (
-    <div className="bg-[#161616] border border-zinc-800 rounded-xl p-4">
-      <div className="text-2xl font-bold text-rose-400">{value}</div>
+    <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm">
+      <div className="text-2xl font-bold text-rose-500">{value}</div>
       <div className="text-xs text-zinc-500 mt-1">{label}</div>
     </div>
   );
 }
 
-function ChartBox({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartBox({
+  title,
+  children,
+  className = "",
+}: {
+  title: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="bg-[#161616] border border-zinc-800 rounded-xl p-4 h-96">
-      <h4 className="text-sm text-zinc-300 mb-2">{title}</h4>
+    <div className={`bg-white border border-zinc-200 rounded-xl p-4 h-[30rem] shadow-sm ${className}`}>
+      <h4 className="text-sm text-zinc-700 mb-2">{title}</h4>
       <ResponsiveContainer width="100%" height="100%">
         {children as React.ReactElement}
       </ResponsiveContainer>
@@ -1510,7 +1512,6 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
   // ----- métricas específicas existentes (si los tableros existen) -----
   const sCards = cardsDe(idDe("sistema"));
   const sfCards = cardsDe(idDe("softech"));
-  const bCards = cardsDe(idDe("buren"));
 
   const solvedCount = sfCards.filter(
     (c) => /solucionado/i.test(c.colNombre) && !/sin solu/i.test(c.colNombre)
@@ -1524,9 +1525,6 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
     if (a && b) diffs.push(Math.max(0, (b.getTime() - a.getTime()) / 86400000));
   }
   const avgDays = diffs.length ? (diffs.reduce((a, b) => a + b, 0) / diffs.length).toFixed(1) : "—";
-
-  const totalMin = bCards.reduce((acc, c) => acc + timeToMinutes(c.campos.tiempo), 0);
-  const totalHrsLabel = `${Math.floor(totalMin / 60)}h ${totalMin % 60}m`;
 
   const sisPorEstado = countBy(sCards, (c) => c.colNombre);
   const sisPorCategoria = countBy(sCards, (c) => c.campos.categoria).sort((a, b) => b.value - a.value);
@@ -1569,16 +1567,16 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
         />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <ChartBox title="Casos por empresa (cuenta a quién corresponde)">
           <BarChart data={porEmpresa}>
-            <CartesianGrid stroke="#27272a" />
-            <XAxis dataKey="name" stroke="#9aa1b1" fontSize={12} />
-            <YAxis stroke="#9aa1b1" fontSize={12} allowDecimals={false} />
+            <CartesianGrid stroke="#e4e4e7" />
+            <XAxis dataKey="name" stroke="#71717a" fontSize={12} />
+            <YAxis stroke="#71717a" fontSize={12} allowDecimals={false} />
             <Tooltip
-              contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }}
-              labelStyle={{ color: "#fff" }}
-              itemStyle={{ color: "#fff" }}
+              contentStyle={{ background: "#ffffff", border: "1px solid #e4e4e7" }}
+              labelStyle={{ color: "#18181b" }}
+              itemStyle={{ color: "#18181b" }}
             />
             <Bar dataKey="value">
               {porEmpresa.map((_, i) => (
@@ -1590,52 +1588,52 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
 
         <ChartBox title="Sistema interno — por estado">
           <PieChart>
-            <Pie data={sisPorEstado} dataKey="value" nameKey="name" outerRadius={110}>
+            <Pie data={sisPorEstado} dataKey="value" nameKey="name" outerRadius={130}>
               {sisPorEstado.map((_, i) => (
                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
               ))}
             </Pie>
-            <Legend wrapperStyle={{ fontSize: 11, color: "#9aa1b1" }} />
+            <Legend wrapperStyle={{ fontSize: 11, color: "#52525b" }} />
             <Tooltip
-              contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }}
-              labelStyle={{ color: "#fff" }}
-              itemStyle={{ color: "#fff" }}
+              contentStyle={{ background: "#ffffff", border: "1px solid #e4e4e7" }}
+              labelStyle={{ color: "#18181b" }}
+              itemStyle={{ color: "#18181b" }}
             />
           </PieChart>
         </ChartBox>
 
         <ChartBox title="Sistema interno — por categoría">
           <PieChart>
-            <Pie data={sisPorCategoria} dataKey="value" nameKey="name" outerRadius={110} label={({ name }) => name}>
+            <Pie data={sisPorCategoria} dataKey="value" nameKey="name" outerRadius={130} label={({ name }) => name}>
               {sisPorCategoria.map((_, i) => (
                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
               ))}
             </Pie>
             <Tooltip
-              contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }}
-              labelStyle={{ color: "#fff" }}
-              itemStyle={{ color: "#fff" }}
+              contentStyle={{ background: "#ffffff", border: "1px solid #e4e4e7" }}
+              labelStyle={{ color: "#18181b" }}
+              itemStyle={{ color: "#18181b" }}
             />
           </PieChart>
         </ChartBox>
 
-        <div className="bg-[#161616] border border-zinc-800 rounded-xl p-4 md:col-span-2">
-          <h4 className="text-sm text-zinc-300 mb-2">
+        <div className="bg-white border border-zinc-200 rounded-xl p-4 md:col-span-3 shadow-sm">
+          <h4 className="text-sm text-zinc-700 mb-2">
             Sistema interno — por ubicación{" "}
-            <span className="text-zinc-600 font-normal">(clic en una barra para ver el detalle)</span>
+            <span className="text-zinc-400 font-normal">(clic en una barra para ver el detalle)</span>
           </h4>
           <div className="flex flex-col md:flex-row gap-4">
             <div style={{ width: "100%", maxWidth: 420, height: Math.max(260, sisPorUbicacion.length * 26) }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={sisPorUbicacion} layout="vertical" margin={{ left: 8, right: 12 }}>
-                  <CartesianGrid stroke="#27272a" horizontal={false} />
-                  <XAxis type="number" stroke="#9aa1b1" fontSize={12} allowDecimals={false} />
-                  <YAxis type="category" dataKey="name" stroke="#9aa1b1" fontSize={11} width={110} />
+                  <CartesianGrid stroke="#e4e4e7" horizontal={false} />
+                  <XAxis type="number" stroke="#71717a" fontSize={12} allowDecimals={false} />
+                  <YAxis type="category" dataKey="name" stroke="#71717a" fontSize={11} width={110} />
                   <Tooltip
-                    cursor={{ fill: "#ffffff0d" }}
-                    contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }}
-                    labelStyle={{ color: "#fff" }}
-                    itemStyle={{ color: "#fff" }}
+                    cursor={{ fill: "#0000000d" }}
+                    contentStyle={{ background: "#ffffff", border: "1px solid #e4e4e7" }}
+                    labelStyle={{ color: "#18181b" }}
+                    itemStyle={{ color: "#18181b" }}
                   />
                   <Bar
                     dataKey="value"
@@ -1647,7 +1645,7 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
                       <Cell
                         key={i}
                         fill={PALETTE[i % PALETTE.length]}
-                        stroke={pilaUbicacion.includes(entry.name) ? "#fff" : "none"}
+                        stroke={pilaUbicacion.includes(entry.name) ? "#18181b" : "none"}
                         strokeWidth={pilaUbicacion.includes(entry.name) ? 2 : 0}
                       />
                     ))}
@@ -1681,29 +1679,29 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
 
         <ChartBox title="Softech — por estado">
           <PieChart>
-            <Pie data={sfPorEstado} dataKey="value" nameKey="name" outerRadius={110}>
+            <Pie data={sfPorEstado} dataKey="value" nameKey="name" outerRadius={130}>
               {sfPorEstado.map((_, i) => (
                 <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
               ))}
             </Pie>
-            <Legend wrapperStyle={{ fontSize: 11, color: "#9aa1b1" }} />
+            <Legend wrapperStyle={{ fontSize: 11, color: "#52525b" }} />
             <Tooltip
-              contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }}
-              labelStyle={{ color: "#fff" }}
-              itemStyle={{ color: "#fff" }}
+              contentStyle={{ background: "#ffffff", border: "1px solid #e4e4e7" }}
+              labelStyle={{ color: "#18181b" }}
+              itemStyle={{ color: "#18181b" }}
             />
           </PieChart>
         </ChartBox>
 
-        <ChartBox title="Softech — sistema afectado">
+        <ChartBox title="Softech — sistema afectado" className="md:col-span-2">
           <BarChart data={sfPorSistema}>
-            <CartesianGrid stroke="#27272a" />
-            <XAxis dataKey="name" stroke="#9aa1b1" fontSize={11} interval={0} angle={-20} textAnchor="end" height={50} />
-            <YAxis stroke="#9aa1b1" fontSize={12} allowDecimals={false} />
+            <CartesianGrid stroke="#e4e4e7" />
+            <XAxis dataKey="name" stroke="#71717a" fontSize={11} interval={0} angle={-20} textAnchor="end" height={50} />
+            <YAxis stroke="#71717a" fontSize={12} allowDecimals={false} />
             <Tooltip
-              contentStyle={{ background: "#1a1a1a", border: "1px solid #333" }}
-              labelStyle={{ color: "#fff" }}
-              itemStyle={{ color: "#fff" }}
+              contentStyle={{ background: "#ffffff", border: "1px solid #e4e4e7" }}
+              labelStyle={{ color: "#18181b" }}
+              itemStyle={{ color: "#18181b" }}
             />
             <Bar dataKey="value">
               {sfPorSistema.map((_, i) => (
@@ -1713,10 +1711,6 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
           </BarChart>
         </ChartBox>
       </div>
-
-      <p className="text-xs text-zinc-600 mt-4">
-        Total sin servicio (Buren): {totalHrsLabel}.
-      </p>
     </div>
   );
 }
