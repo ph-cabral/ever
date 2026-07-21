@@ -28,24 +28,32 @@ y el server resuelve el nombre (no confía en lo que mande el cliente).
 CAMBIO 2026-07-21 (a pedido de Pablo): la vista /deposito separa "Registrada"
 (quién cargó el error) de "Controlador" (el controlador real del pedido,
 Magnus Ven_PedImpresoCP.CodControlador1/2, vía fetch_controlador_pedido).
-Antes ese dato solo se resolvía para origen='calidad' (mezclado en la misma
-columna `controlador`, mostrado en pantalla como "Operario"); ahora se
-resuelve para AMBOS orígenes y se guarda aparte en "nroControladorReal" /
-"nombreControladorReal" (ver ever/sql/deposito_errores_mesa_controlador_real.sql).
-None si Magnus no tiene control registrado para ese pedido — no bloquea el
-alta en Mesa de Control (si bloquea en Calidad, ver insert_error_calidad).
+Este dato SOLO se resuelve para origen='calidad' (ver insert_error_calidad) —
+ver "3ra vuelta, REVERTIDA" abajo para por qué Mesa de Control no lo usa.
 
 CAMBIO 2026-07-21, 2da vuelta (a pedido de Pablo): la columna `controlador`
 en sí dejó de guardar a quien carga el registro — eso ahora va en
-`registradoPor` para los 2 orígenes (antes era así solo en Calidad).
-`controlador` pasa a ser SIEMPRE el controlador real (duplicado de
-nombreControladorReal, mismo criterio que ya usaba insert_error_calidad).
-Los registros insertados ANTES de este cambio quedan con el registrante en
+`registradoPor` para los 2 orígenes (antes era así solo en Calidad). Los
+registros insertados ANTES de este cambio quedan con el registrante en
 `controlador` y `registradoPor` NULL — no rompen nada porque el dato sigue
-ahí; el fallback para mostrarlos vive en getRegistrador (erroresMesa.tsx),
-no hace falta backfill en la base para esto (a diferencia de
-nroControladorReal/nombreControladorReal, que sí necesitan backfill porque
-requieren re-consultar Magnus — ver indicadores-api/backfill_controlador_real.py).
+ahí; el fallback para mostrarlos vive en getRegistrador (erroresMesa.tsx).
+
+CAMBIO 2026-07-21, 3ra vuelta, REVERTIDA (a pedido de Pablo): se había hecho
+que `insert_error_mesa` TAMBIÉN resolviera el Controlador real (Magnus) igual
+que Calidad, guardándolo en `controlador` (duplicado de nombreControladorReal).
+Se revirtió: para Mesa de Control, quien carga el widget YA ES el controlador
+parado en la mesa (ver REDISEÑO 2026-07-15 arriba) — resolver el "Controlador
+real" por separado es redundante y en la práctica puede traer un controlador
+DISTINTO del que cargó (Magnus con un control previo del mismo pedido),
+mostrando 2 nombres distintos para lo mismo y confundiendo. Ver docstring de
+insert_error_mesa para el caso real que disparó la reversión. Calidad sigue
+resolviendo y bloqueando por Controlador real (ahí sí aporta, porque quien
+carga Calidad NO es el controlador del pedido) — ver
+indicadores-api/backfill_controlador_real.py para el backfill de esa columna
+en filas viejas (que sigue vigente, no afectado por esta reversión) y
+ever/sql/deposito_errores_mesa_revertir_controlador_mesa.sql para limpiar
+las filas de Mesa de Control que quedaron con este dato de más durante la
+3ra vuelta.
 """
 from datetime import date, timedelta
 
@@ -244,13 +252,23 @@ def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) ->
 
     CAMBIO 2026-07-21 (a pedido de Pablo, 2da vuelta): `controlador` dejó de
     guardar a quien carga el registro — ese dato ahora va en `registradoPor`,
-    mismo criterio que ya usaba `insert_error_calidad`. `controlador` pasa a
-    ser SIEMPRE el controlador real del pedido (Magnus), igual que
-    `nombreControladorReal` (duplicado a propósito, mismo patrón que Calidad
-    — ver abajo). Los registros viejos (antes de este cambio) quedan con el
-    registrante en `controlador` y `registradoPor` NULL; el fallback para
-    mostrarlos vive en el frontend (getRegistrador en erroresMesa.tsx), no
-    hace falta backfill acá porque el dato ya está en la fila."""
+    mismo criterio que ya usaba `insert_error_calidad`.
+
+    CAMBIO 2026-07-21, 3ra vuelta, REVERTIDA (a pedido de Pablo): se había
+    resuelto acá también el "Controlador real" (Magnus, fetch_controlador_pedido)
+    igual que en Calidad — pero para Mesa de Control eso es redundante y
+    confuso: quien carga ESTE widget YA ES el controlador que está parado en
+    la mesa (ver REDISEÑO 2026-07-15 arriba), así que "Registrada" y
+    "Controlador real" deberían coincidir siempre; en la práctica no coinciden
+    (Magnus puede tener un control previo/distinto para el mismo pedido,
+    ej. caso real: Registrada=Pablo Cabral, Controlador real=Mollina Facundo
+    para el mismo pedido) y confunde más de lo que aclara. Se sacó la
+    resolución: `controlador`, "nroControladorReal", "nombreControladorReal"
+    quedan NULL para este origen — la columna "Controlador" de la vista
+    /deposito debe mostrar "—" para Mesa de Control. Esto SOLO aplica a
+    insert_error_mesa; insert_error_calidad sigue resolviendo y bloqueando
+    por Controlador real (ahí sí tiene sentido: quien carga Calidad NO es el
+    controlador del pedido)."""
     detalle_error = (detalle_error or "").strip()
     if not nro_operario:
         raise ValueError("Falta 'nroOperario'")
@@ -266,28 +284,21 @@ def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) ->
         "nroArmador": None, "nombreArmador": None, "ubicacion": None,
     }
 
-    # Controlador real del pedido (Magnus, Ven_PedImpresoCP) — resuelto acá
-    # también (no solo en Calidad) desde 2026-07-21. None si Magnus no tiene
-    # control registrado para este pedido — no bloquea el alta.
-    ctrl_real = fetch_controlador_pedido(nro_pedido)
-    nro_controlador_real = ctrl_real["nroControlador"] if ctrl_real else None
-    nombre_controlador_real = ctrl_real["nombreControlador"] if ctrl_real else None
-
     conn = get_pg_connection()
     try:
         cur = conn.cursor()
         cur.execute(
             """
             INSERT INTO deposito.errores_mesa
-                ("nroPedido", fecha, "tipoPedido", ot, controlador, "nroArmador", "nombreArmador",
-                 ubicacion, "detalleError", "registradoPor", "nroControladorReal", "nombreControladorReal")
-            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ("nroPedido", fecha, "tipoPedido", ot, "nroArmador", "nombreArmador",
+                 ubicacion, "detalleError", "registradoPor")
+            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id, "createdAt"
             """,
             (
                 nro_pedido, info["tipoPedido"], info["ot"],
-                nombre_controlador_real, info["nroArmador"], info["nombreArmador"], info["ubicacion"], detalle_error,
-                registrado_por, nro_controlador_real, nombre_controlador_real,
+                info["nroArmador"], info["nombreArmador"], info["ubicacion"], detalle_error,
+                registrado_por,
             ),
         )
         new_id, created_at = cur.fetchone()
@@ -298,11 +309,11 @@ def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) ->
     return {
         **info,
         "id": new_id,
-        "controlador": nombre_controlador_real,
+        "controlador": None,
         "detalleError": detalle_error,
         "registradoPor": registrado_por,
-        "nroControladorReal": nro_controlador_real,
-        "nombreControladorReal": nombre_controlador_real,
+        "nroControladorReal": None,
+        "nombreControladorReal": None,
         "createdAt": created_at.isoformat(),
     }
 

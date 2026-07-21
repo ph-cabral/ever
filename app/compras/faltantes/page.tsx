@@ -3,8 +3,8 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck, CalendarRange, Check,
-  Layers, ChevronDown, ChevronRight, Flag, RotateCw, ShoppingCart, Undo2, CalendarCheck,
-  Download, Trash2, X,
+  ChevronDown, ChevronRight, Flag, RotateCw, ShoppingCart, Undo2, CalendarCheck,
+  Download, Trash2, X, Globe,
 } from "lucide-react";
 import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
 
@@ -45,6 +45,8 @@ import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
 
 type Estado = "completo" | "incompleto" | "sin_orden" | "entregado";
 type Filtro = "todos" | Estado;
+// Origen del proveedor (r.importacion): cicla Todos → Importados → Nacionales.
+type Origen = "todos" | "importados" | "nacionales";
 
 interface Row {
   CodArticulo: string;
@@ -479,7 +481,7 @@ export default function ComprasFaltantesPage() {
   const [error, setError] = useState<string | null>(null);
   const [ocWarn, setOcWarn] = useState(false);
   const [ocDesde, setOcDesde] = useState<string | null>(null);
-  const [agrupar, setAgrupar] = useState(false); // agrupar por proveedor
+  const [origen, setOrigen] = useState<Origen>("todos"); // filtro por origen del proveedor (importacion)
   const [cerrados, setCerrados] = useState<Record<string, boolean>>({}); // acordeones colapsados
   const [flipped, setFlipped] = useState(false); // girar la tarjeta → ver extraordinarios
   const [leaving, setLeaving] = useState<Record<string, "left" | "right">>({}); // filas saliendo (animación)
@@ -625,6 +627,18 @@ export default function ComprasFaltantesPage() {
     }, EXIT_MS);
   }, []);
 
+  // Cicla el filtro de origen: Todos → Importados → Nacionales → Todos.
+  const ciclarOrigen = useCallback(() => {
+    setOrigen((o) => (o === "todos" ? "importados" : o === "importados" ? "nacionales" : "todos"));
+  }, []);
+  // r.importacion viene de faltantes-consumo (misma fuente que ya usa
+  // /compras/metricas para la torta Importados/Nacionales): true = alguna OC
+  // pendiente del artículo sin fecha pactada (heurística de importación).
+  const pasaOrigen = useCallback(
+    (r: Row) => origen === "todos" || (origen === "importados" ? r.importacion : !r.importacion),
+    [origen],
+  );
+
   // Tabla principal: nunca muestra lo marcado extraordinario.
   const frontRows = useMemo(() => rows.filter((r) => !r.extraordinario), [rows]);
   // Reverso de la tarjeta: extraordinario, ya decidido (comprar !== null) Y
@@ -635,8 +649,9 @@ export default function ComprasFaltantesPage() {
     () =>
       rows
         .filter((r) => r.extraordinario && r.comprar !== null && r.descubierto > 0)
+        .filter(pasaOrigen)
         .sort((a, b) => b.importe - a.importe),
-    [rows],
+    [rows, pasaOrigen],
   );
 
   // 1 fila por artículo: las filas "vivo" son buckets día a día del MISMO
@@ -657,13 +672,21 @@ export default function ComprasFaltantesPage() {
     return [...historicas, ...ultimaVivaPorArt.values()];
   }, [frontRows]);
 
-  const conteo = useMemo(() => {
-    const c = { todos: porArticulo.length, completo: 0, incompleto: 0, sin_orden: 0, entregado: 0 };
-    for (const r of porArticulo) c[r.estado]++;
-    return c as Record<Filtro, number>;
-  }, [porArticulo]);
+  // Filtro de origen aplicado ANTES del conteo por estado, así los números de
+  // los chips Todos/Cubiertos/Parciales/Sin OC reflejan Importados/Nacionales
+  // cuando ese filtro está activo.
+  const porArticuloOrigen = useMemo(
+    () => (origen === "todos" ? porArticulo : porArticulo.filter(pasaOrigen)),
+    [porArticulo, origen, pasaOrigen],
+  );
 
-  // Orden jerárquico, SIEMPRE (esté o no activo "Agrupar por proveedor"):
+  const conteo = useMemo(() => {
+    const c = { todos: porArticuloOrigen.length, completo: 0, incompleto: 0, sin_orden: 0, entregado: 0 };
+    for (const r of porArticuloOrigen) c[r.estado]++;
+    return c as Record<Filtro, number>;
+  }, [porArticuloOrigen]);
+
+  // Orden jerárquico, SIEMPRE (el agrupado por proveedor ahora es permanente):
   //   1. Proveedor, por su importe TOTAL desc (mismo criterio que el acordeón).
   //   2. Artículo (CodArticulo), por su importe TOTAL desc dentro del proveedor.
   //   3. Día asc dentro del artículo.
@@ -673,7 +696,8 @@ export default function ComprasFaltantesPage() {
   // clave, los renglones de un mismo artículo (y de un mismo proveedor) quedan
   // siempre contiguos y el orden por $ no se pierde (se agrupa, no se ignora).
   const visibles = useMemo(() => {
-    const base = filtro === "todos" ? porArticulo : porArticulo.filter((r) => r.estado === filtro);
+    const base =
+      filtro === "todos" ? porArticuloOrigen : porArticuloOrigen.filter((r) => r.estado === filtro);
 
     const provImporte = new Map<string, number>();
     const artImporte = new Map<string, number>();
@@ -696,7 +720,7 @@ export default function ComprasFaltantesPage() {
 
       return a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0;
     });
-  }, [porArticulo, filtro]);
+  }, [porArticuloOrigen, filtro]);
 
   const exportar = useCallback(() => {
     exportarFaltantesCompras(flipped ? backRows : visibles, {
@@ -849,17 +873,18 @@ export default function ComprasFaltantesPage() {
           </button>
 
           <button
-            onClick={() => setAgrupar((v) => !v)}
-            title="Agrupar los faltantes por proveedor en tablas con acordeón"
+            onClick={ciclarOrigen}
+            title="Filtra por origen del proveedor — click para rotar: Todos → Importados → Nacionales"
             className={`chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium ${
-              agrupar
-                ? "bg-sky-500/15 border-sky-400 text-sky-300"
-                : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+              origen === "importados"
+                ? "bg-amber-500/15 border-amber-400 text-amber-300"
+                : origen === "nacionales"
+                  ? "bg-sky-500/15 border-sky-400 text-sky-300"
+                  : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
             }`}
           >
-            <Layers size={14} />
-            Agrupar por proveedor
-            {agrupar && <Check size={13} />}
+            <Globe size={14} />
+            {origen === "todos" ? "Todos los orígenes" : origen === "importados" ? "Importados" : "Nacionales"}
           </button>
 
           <button
@@ -960,7 +985,7 @@ export default function ComprasFaltantesPage() {
                       : "No hay faltantes marcados como “sin existencia”."}
                   </p>
                 </div>
-              ) : agrupar ? (
+              ) : (
                 <div className="flex flex-col gap-3">
                   {grupos.map(({ prov, rs, importe }) => {
                     const abierto = !cerrados[prov];
@@ -999,14 +1024,6 @@ export default function ComprasFaltantesPage() {
                     );
                   })}
                 </div>
-              ) : (
-                <Tabla
-                  data={visibles}
-                  onMark={marcarExtraordinario}
-                  onArribo={guardarArribo}
-                  onDescartar={descartarFaltante}
-                  leaving={leaving}
-                />
               )}
             </div>
 

@@ -12,24 +12,32 @@ import { exportarErroresMesa } from "@/lib/deposito/exportErroresMesa";
 // vista es solo lectura + filtros. Fuente: GET /api/deposito/errores-mesa
 // (→ indicadores-api, fetch_errores_mesa_list en errores_mesa.py).
 //
-// A pedido de Pablo, 3 columnas con mismo criterio para los 2 orígenes desde
-// 2026-07-21 (2 vueltas de cambios el mismo día):
+// A pedido de Pablo, 2026-07-21 (varias vueltas de cambios el mismo día,
+// ver errores_mesa.py para el detalle de cada una):
 //   · Registrada = quién HIZO EL REGISTRO (N° ingresado al abrir el
 //     widget) → columna `registradoPor` para los 2 orígenes (antes, en
 //     Mesa de Control, este dato vivía en `controlador`; se movió en la
-//     2da vuelta — ver insert_error_mesa en errores_mesa.py). Fallback a
-//     `controlador` SOLO para filas de Mesa de Control insertadas ANTES
-//     de ese cambio (`registradoPor` NULL ahí, el dato sigue en
-//     `controlador`) — no aplica a Calidad, que siempre tuvo
+//     2da vuelta). Fallback a `controlador` SOLO para filas de Mesa de
+//     Control insertadas ANTES de ese cambio (`registradoPor` NULL ahí, el
+//     dato sigue en `controlador`) — no aplica a Calidad, que siempre tuvo
 //     `registradoPor` poblado.
 //   · Controlador = controlador real del pedido según Magnus
-//     (Ven_PedImpresoCP.CodControlador1/2) → `nombreControladorReal`,
-//     resuelto para AMBOS orígenes desde la 1ra vuelta. Sin fallback: las
-//     filas viejas sin este dato necesitan re-consultar Magnus, no alcanza
-//     con lo que ya está en la fila — ver backfill_controlador_real.py.
+//     (Ven_PedImpresoCP.CodControlador1/2) → `nombreControladorReal`.
+//     SOLO para origen='calidad' (ver insert_error_calidad) — la 3ra vuelta
+//     lo había resuelto también para Mesa de Control, pero se REVIRTIÓ:
+//     quien carga el widget de Mesa de Control YA ES el controlador, y
+//     Magnus puede traer un controlador previo/distinto para el mismo
+//     pedido, mostrando 2 nombres distintos para lo mismo (caso real:
+//     Registrada=Pablo Cabral, Controlador=Mollina Facundo). Para Mesa de
+//     Control esta columna debe verse vacía ("—"); las filas que quedaron
+//     con este dato de más (día de la 3ra vuelta) se limpian con
+//     ever/sql/deposito_errores_mesa_revertir_controlador_mesa.sql. Sin
+//     fallback para Calidad: las filas viejas sin este dato necesitan
+//     re-consultar Magnus, no alcanza con lo que ya está en la fila — ver
+//     backfill_controlador_real.py.
 //   · Operario = el operario/preparador de Magnus (WMS OT + Personal,
-//     `nombreArmador`) sobre el que es el error, unificado para AMBOS
-//     orígenes desde la 1ra vuelta.
+//     `nombreArmador`) sobre el que es el error, unificado para los 2
+//     orígenes desde la 1ra vuelta (esto no se tocó).
 // ──────────────────────────────────────────────────────────────────────────────
 
 export interface ErrorMesaRow {
@@ -203,7 +211,7 @@ export function ErroresMesaTab() {
     <div>
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <PageTitle
-          title="Registro de Errores — Mesa de Control        PR-CAL008-R3"
+          title="Registro de Errores — Mesa de Control    _    PR-CAL008-R3"
           sub="Altas desde el widget de escritorio · deposito.errores_mesa"
         />
         <div className="flex items-center gap-2">
