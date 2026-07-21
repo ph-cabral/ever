@@ -317,13 +317,27 @@ SQL_CONTROLADOR_PEDIDO = """
 SELECT TOP 1 CodControlador1, CodControlador2
 FROM dbo.Ven_PedImpresoCP
 WHERE NroMovVenta = ?
+  AND (CodControlador1 > 0 OR CodControlador2 > 0)
 ORDER BY FechaControl DESC
 """
 
 
 def fetch_controlador_pedido(nro_pedido: int) -> dict | None:
     """Controlador real del pedido (Magnus, atado a NroMovVenta). None si el
-    pedido no tiene control registrado."""
+    pedido no tiene control registrado.
+
+    FIX 2026-07-21 (bug reportado por Pablo: pedido con control confirmado en
+    Magnus igual daba "sin controlador registrado"): Ven_PedImpresoCP puede
+    tener MÁS DE UNA fila por NroMovVenta (recontrol/reimpresión — mismo caso
+    ya confirmado y filtrado en mesa_control.py, ver SQL_RENGLONES_CONTROLADOS
+    y fetch_mesa_control_recontroles_diag). Sin el filtro `(CodControlador1 > 0
+    OR CodControlador2 > 0)`, un `TOP 1 ORDER BY FechaControl DESC` puede traer
+    una fila de recontrol/reimpresión con los 2 códigos en 0 (control todavía
+    no asignado en esa fila puntual) en vez de la fila anterior que sí tiene
+    el controlador real — sobre todo si ambas filas comparten la misma fecha
+    (FechaControl es date, no datetime, no desempata entre filas del mismo
+    día). Con el filtro, se ignoran las filas sin controlador y se toma la
+    más reciente ENTRE LAS QUE SÍ lo tienen."""
     conn = get_connection("EVERWEAR")
     try:
         cur = conn.cursor()
