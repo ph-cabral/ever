@@ -80,10 +80,14 @@ export const SCHEMAS: Record<string, { titleKey: string; fields: CampoDef[] }> =
   softech: {
     titleKey: "problema",
     fields: [
-      { k: "inicio", l: "Inicio", t: "date" },
+      // Inicio y Fin son automáticos: Inicio se completa solo al crear la tarjeta,
+      // Fin al moverla a cualquier columna que no sea "Pendiente"/"En espera" (ver
+      // esColumnaAbiertaSoftech en las rutas de la API). Ya no se tipean a mano; se
+      // muestran como info de solo lectura arriba del formulario (ModalTarjeta).
+      { k: "inicio", l: "Inicio", t: "date", auto: true },
       { k: "problema", l: "Problema", t: "text" },
       { k: "sistema", l: "Sistema", t: "select", opciones: ["Magnus", "Prolixus", "WMS", "ecommerce"] },
-      { k: "fin", l: "Fin", t: "date" },
+      { k: "fin", l: "Fin", t: "date", auto: true },
       {
         k: "origen",
         l: "Origen del error",
@@ -396,12 +400,19 @@ export default function SistemaClient() {
         }),
       });
     } else {
+      // Timbra la fecha de alta automática al crear: "fecha" para los tableros
+      // genéricos y, si el tablero usa otra clave (softech -> "inicio"), también esa
+      // — nunca se pide a mano. Solo se setea acá, en la creación; no se vuelve a
+      // tocar al editar (para no correrle la fecha de inicio a una tarjeta ya creada).
+      const ff = fechaFieldFor(modalTarjeta.clave);
+      const autoStamp: Campos = { fecha: new Date().toISOString() };
+      if (ff !== "fecha") autoStamp[ff] = new Date().toISOString();
       await apiJson("/api/sistema/tarjetas", {
         method: "POST",
         body: JSON.stringify({
           columnaId: modalTarjeta.columnaId,
           tableroId: tableroId ?? modalTarjeta.tableroId,
-          campos: { ...campos, fecha: new Date().toISOString() },
+          campos: { ...campos, ...autoStamp },
         }),
       });
     }
@@ -881,6 +892,11 @@ function ModalTarjeta({
 }) {
   const schema = schemaFor(modal.clave);
   const primerCampo = schema.fields.find((f) => !f.auto)?.k;
+  // Campo de fecha automática de este tablero ("fecha" en general, "inicio" en
+  // softech) y, si existe, el campo "fin" automático — ambos de solo lectura.
+  const fechaKey = fechaFieldFor(modal.clave);
+  const campoFecha = schema.fields.find((f) => f.k === fechaKey);
+  const campoFin = schema.fields.find((f) => f.k === "fin" && f.auto);
   const [campos, setCampos] = useState<Campos>(modal.tarjeta?.campos ?? {});
   // Tablero destino: por defecto el actual. Sirve para corregir una tarjeta
   // creada en el tablero equivocado sin borrarla y rehacerla (columnas son
@@ -888,12 +904,26 @@ function ModalTarjeta({
   const [destinoTablero, setDestinoTablero] = useState(modal.tableroId);
   // Opciones dinámicas de los selects "extensibles" (categoría, ubicación), por campo.
   const [opcionesExtra, setOpcionesExtra] = useState<Record<string, string[]>>({});
+  // Recorrido completo de columnas (solo tiene sentido si la tarjeta ya existe).
+  const [historial, setHistorial] = useState<
+    { columnaId: number; columnaNombre: string; entradaEn: string }[]
+  >([]);
 
   useEffect(() => {
     apiJson(`/api/sistema/opciones?clave=${encodeURIComponent(modal.clave)}`)
       .then(setOpcionesExtra)
       .catch(() => {});
   }, [modal.clave]);
+
+  useEffect(() => {
+    if (!modal.tarjeta) {
+      setHistorial([]);
+      return;
+    }
+    apiJson(`/api/sistema/tarjetas/${modal.tarjeta.id}/historial`)
+      .then(setHistorial)
+      .catch(() => setHistorial([]));
+  }, [modal.tarjeta]);
 
   const agregarOpcion = async (campo: string, label: string) => {
     const valor = window.prompt(`Nueva opción para "${label}":`);
@@ -966,8 +996,24 @@ function ModalTarjeta({
 
         <div className="flex flex-col gap-3">
           <p className="text-xs text-zinc-500 mb-1">
-            Fecha: {campos.fecha ? new Date(campos.fecha).toLocaleString() : "—"}
+            {campoFecha?.l ?? "Fecha"}:{" "}
+            {campos[fechaKey] ? new Date(campos[fechaKey] as string).toLocaleString() : "—"}
           </p>
+          {campoFin && (
+            <p className="text-xs text-zinc-500 -mt-2 mb-1">
+              {campoFin.l}:{" "}
+              {campos.fin ? new Date(campos.fin as string).toLocaleString() : "— (en curso)"}
+            </p>
+          )}
+          {modal.tarjeta && historial.length > 0 && (
+            <div className="text-[11px] text-zinc-500 -mt-1 mb-1 border-l-2 border-zinc-800 pl-2 flex flex-col gap-0.5">
+              {historial.map((h, i) => (
+                <div key={i}>
+                  Entró a &quot;{h.columnaNombre}&quot; — {new Date(h.entradaEn).toLocaleString()}
+                </div>
+              ))}
+            </div>
+          )}
 
           {schema.fields.map((f) => {
             if (f.auto) return null;
@@ -1433,7 +1479,12 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
 
   // opciones[0] = "todos"; opciones[1] = mes en curso; resto = meses cerrados (desc).
   const opciones = ["todos", mesActual, ...mesesCerrados];
-  const [selectedIndex, setSelectedIndex] = useState(1); // arranca en el mes actual
+  // arranca en "todos": los pie charts "por estado" (sisPorEstado/sfPorEstado,
+  // más abajo) cuentan tarjetas por columna actual, no por mes de creación —
+  // si arrancara filtrado por mes en curso, tarjetas viejas que siguen abiertas
+  // (ej. "En desarrollo") quedaban afuera del conteo apenas se entraba a la
+  // pantalla. El selector de mes sigue disponible para quien quiera acotar.
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const idx = Math.max(0, Math.min(opciones.length - 1, selectedIndex));
   const mes = opciones[idx];
 

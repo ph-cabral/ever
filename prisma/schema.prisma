@@ -497,9 +497,10 @@ model sector_permiso {
 }
 
 // ===== Módulo "sistema": tablero tipo Trello con columnas GLOBALES + vinculación =====
-// NOTA: este bloque es de referencia. El flujo real es: correr sql/sistema_init.sql y
-// luego sql/sistema_vinculacion.sql contra la base y después `prisma db pull`
-// (multi-schema no soporta `migrate dev`) — eso reescribe este bloque desde la DB real.
+// NOTA: este bloque es de referencia. El flujo real es: correr sql/sistema_init.sql,
+// sql/sistema_vinculacion.sql y sql/sistema_columna_historial.sql contra la base y
+// después `prisma db pull` (multi-schema no soporta `migrate dev`) — eso reescribe
+// este bloque desde la DB real.
 // Columnas son globales (las mismas en todos los tableros). Cada tablero oculta las que
 // no quiere ver (sistema_columna_oculta). Una tarjeta tiene dueño (tableroId) y un
 // vínculo opcional (vinculadoTableroId): si está vinculada aparece en ambos tableros y
@@ -517,12 +518,13 @@ model sistema_tablero {
 }
 
 model sistema_columna {
-  id        Int                      @id @default(autoincrement())
-  nombre    String                   @unique @db.VarChar(100)
-  orden     Int                      @default(0)
-  createdAt DateTime                 @default(now())
+  id        Int                         @id @default(autoincrement())
+  nombre    String                      @unique @db.VarChar(100)
+  orden     Int                         @default(0)
+  createdAt DateTime                    @default(now())
   tarjetas  sistema_tarjeta[]
   ocultaEn  sistema_columna_oculta[]
+  historial sistema_columna_historial[]
 
   @@schema("sistema")
 }
@@ -538,24 +540,42 @@ model sistema_columna_oculta {
 }
 
 model sistema_tarjeta {
-  id                 Int              @id @default(autoincrement())
+  id                 Int                         @id @default(autoincrement())
   tableroId          Int
   columnaId          Int
   vinculadoTableroId Int?
-  orden              Int              @default(0)
-  campos             Json             @default("{}")
+  orden              Int                         @default(0)
+  campos             Json                        @default("{}")
   // Fecha/hora en que la tarjeta entró a su columna actual (se actualiza cada vez que
   // cambia columnaId, sea por drag&drop o por PATCH externo). Usado para autoordenar
   // las columnas sin orden manual — no confundir con createdAt (fecha de alta original).
-  columnaDesde       DateTime         @default(now())
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
-  tablero            sistema_tablero  @relation("tarjetaTablero", fields: [tableroId], references: [id], onDelete: Cascade)
-  vinculado          sistema_tablero? @relation("tarjetaVinculado", fields: [vinculadoTableroId], references: [id], onDelete: SetNull)
-  columna            sistema_columna  @relation(fields: [columnaId], references: [id], onDelete: Cascade)
+  columnaDesde       DateTime                    @default(now())
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+  tablero            sistema_tablero             @relation("tarjetaTablero", fields: [tableroId], references: [id], onDelete: Cascade)
+  vinculado          sistema_tablero?            @relation("tarjetaVinculado", fields: [vinculadoTableroId], references: [id], onDelete: SetNull)
+  columna            sistema_columna             @relation(fields: [columnaId], references: [id], onDelete: Cascade)
+  // Recorrido completo: una fila por cada vez que la tarjeta entró a una columna
+  // (a diferencia de columnaDesde, que solo guarda la entrada actual).
+  historial          sistema_columna_historial[]
 
   @@index([tableroId])
   @@index([columnaId])
+  @@schema("sistema")
+}
+
+// Historial de entradas a columna por tarjeta (recorrido completo, no solo la columna
+// actual). Se llena automáticamente desde el backend: al crear la tarjeta (columna
+// inicial) y cada vez que cambia de columna, sea por drag&drop (reorder) o PATCH directo.
+model sistema_columna_historial {
+  id        Int             @id @default(autoincrement())
+  tarjetaId Int
+  columnaId Int
+  entradaEn DateTime        @default(now())
+  tarjeta   sistema_tarjeta @relation(fields: [tarjetaId], references: [id], onDelete: Cascade)
+  columna   sistema_columna @relation(fields: [columnaId], references: [id], onDelete: Cascade)
+
+  @@index([tarjetaId])
   @@schema("sistema")
 }
 

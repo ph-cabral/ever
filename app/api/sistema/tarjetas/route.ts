@@ -18,14 +18,25 @@ export async function POST(req: NextRequest) {
     });
     const orden = (max._max.orden ?? -1) + 1;
 
-const tarjeta = await prisma.sistema_tarjeta.create({
-  data: {
-    columnaId: Number(columnaId),
-    tableroId: Number(tableroId),
-    orden,
-    campos: campos ?? {},
-  },
-});
+    const tarjeta = await prisma.$transaction(async (tx) => {
+      const nueva = await tx.sistema_tarjeta.create({
+        data: {
+          columnaId: Number(columnaId),
+          tableroId: Number(tableroId),
+          orden,
+          campos: campos ?? {},
+        },
+      });
+      // Arranca el historial de columnas con la entrada inicial.
+      await tx.sistema_columna_historial.create({
+        data: {
+          tarjetaId: nueva.id,
+          columnaId: nueva.columnaId,
+          entradaEn: nueva.columnaDesde,
+        },
+      });
+      return nueva;
+    });
 
     return NextResponse.json(tarjeta, { status: 201 });
   } catch (error) {
