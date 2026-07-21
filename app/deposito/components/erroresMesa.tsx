@@ -38,6 +38,13 @@ import { exportarErroresMesa } from "@/lib/deposito/exportErroresMesa";
 //   · Operario = el operario/preparador de Magnus (WMS OT + Personal,
 //     `nombreArmador`) sobre el que es el error, unificado para los 2
 //     orígenes desde la 1ra vuelta (esto no se tocó).
+//
+// Artículos (columna nueva, a pedido de Pablo, mismo día): selector
+// multiple-choice agregado en los 2 widgets — solo muestra los artículos
+// que están en el pedido (WMS OTItem de la OT de Picking, ver
+// fetch_articulos_pedido en errores_mesa.py). Se guarda ya formateado
+// ("código - descripción") en la columna `articulos` (text[], opcional, no
+// bloquea el alta en ningún widget si no se elige nada).
 // ──────────────────────────────────────────────────────────────────────────────
 
 export interface ErrorMesaRow {
@@ -55,6 +62,7 @@ export interface ErrorMesaRow {
   nroControladorReal: number | null;
   nombreControladorReal: string | null;
   observacion: string | null;
+  articulos: string[] | null;
   createdAt: string;
 }
 
@@ -369,6 +377,11 @@ export function ErroresMesaTab() {
                   render: (r) => getOperario(r) ?? "—",
                 },
                 { key: "detalleError", label: "Detalle Error" },
+                {
+                  key: "articulos",
+                  label: "Artículos",
+                  render: (r) => (r.articulos?.length ? r.articulos.join(", ") : "—"),
+                },
                 {
                   key: "observacion",
                   label: "Observación",

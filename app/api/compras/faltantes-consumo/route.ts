@@ -49,6 +49,7 @@ interface FaltRow {
   Fecha: string | null; // snapshot más nuevo del renglón en el rango
   PrimerDia: string | null; // primera aparición en el rango
   Vivo?: number; // 1 = sigue pendiente; 0 = histórico ya entregado/cubierto
+  TipoArticulo?: string | null; // "Nacional"/"Importado"/"Fabrica" (StkFer_Articulos.NacionalImportado, Magnus) o "" si no está cargado
 }
 interface OcRow {
   CodArticulo: string;
@@ -80,6 +81,7 @@ interface Bucket {
   ocTotal: number;
   fechaEntrega: string | null;
   importacion: boolean;
+  tipoArticulo: string | null; // "Nacional"/"Importado"/"Fabrica" (Magnus, StkFer_Articulos.NacionalImportado) — ver clasificación Importados/Nacionales en el front
   ocs: string[];
   estado: Estado;
   stock: number; // existencia real en depósito 1 (WMS, en vivo) — ver /deposito/stock
@@ -331,6 +333,7 @@ export async function GET(req: NextRequest) {
         ocTotal: 0,
         fechaEntrega: null,
         importacion: false,
+        tipoArticulo: (it.TipoArticulo || "").trim() || null,
         ocs: [],
         estado: "sin_orden",
         stock: 0,
@@ -354,6 +357,7 @@ export async function GET(req: NextRequest) {
       if (!b.fechaArriboMin || arribo < b.fechaArriboMin) b.fechaArriboMin = arribo;
     }
     if (!b.Proveedor && it.Proveedor) b.Proveedor = it.Proveedor;
+    if (!b.tipoArticulo && it.TipoArticulo) b.tipoArticulo = it.TipoArticulo.trim() || null;
     if ((b.Linea === null || b.Linea === "") && it.Linea != null && it.Linea !== "")
       b.Linea = it.Linea;
   }
@@ -523,6 +527,7 @@ export async function GET(req: NextRequest) {
         ocTotal: r2(b.ocTotal),
         fechaEntrega: b.fechaEntrega,
         importacion: b.importacion,
+        tipoArticulo: b.tipoArticulo,
         ocs: b.ocs,
         estado: b.estado,
         extraordinario: mark?.extraordinario ?? false,

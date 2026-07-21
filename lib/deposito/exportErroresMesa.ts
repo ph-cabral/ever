@@ -33,6 +33,7 @@ function fila(r: ErrorMesaRow) {
     Controlador: r.nombreControladorReal ?? "",
     Operario: getOperario(r) ?? "",
     "Detalle Error": r.detalleError,
+    Artículos: r.articulos?.length ? r.articulos.join(", ") : "",
     Observación: r.observacion ?? "",
   };
 }

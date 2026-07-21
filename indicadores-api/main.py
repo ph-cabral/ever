@@ -27,6 +27,7 @@ from errores_mesa import (
     fetch_pedido_lookup, insert_error_mesa, opciones as errores_mesa_opciones,
     fetch_ubicacion_diag, fetch_errores_mesa_list, fetch_operario_nombre,
     insert_error_calidad, update_observacion, fetch_controlador_diag,
+    fetch_articulos_pedido,
 )
 from rrhh import fetch_cvs_por_mes
 from datetime import date, datetime, timedelta
@@ -607,12 +608,14 @@ class ErrorMesaIn(BaseModel):
     nroPedido: int
     nroOperario: int
     detalleError: str
+    articulos: list[str] | None = None
 
 class ErrorCalidadIn(BaseModel):
     nroPedido: int
     nroOperario: int
     detalleError: str
     observacion: str | None = None
+    articulos: list[str] | None = None
 
 class ObservacionIn(BaseModel):
     observacion: str
@@ -628,6 +631,16 @@ def deposito_pedido(nro: int):
     if info is None:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     return info
+
+@app.get("/deposito/pedido/{nro}/articulos")
+def deposito_pedido_articulos(nro: int):
+    """Artículos de la OT de Picking del pedido (WMS), para el selector
+    multiple-choice de los widgets de Mesa de Control/Calidad. [] (no 404)
+    si el pedido no tiene OT todavía — no es un error bloqueante."""
+    try:
+        return fetch_articulos_pedido(nro)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
 @app.get("/deposito/errores-mesa")
 def deposito_errores_mesa_listar(
@@ -667,7 +680,9 @@ def deposito_errores_mesa_crear(body: ErrorMesaIn):
     fecha/tipo/OT/armador del pedido + nombre del controlador (nroOperario,
     WMS.Personal) del lado del server (no confía en el cliente)."""
     try:
-        return insert_error_mesa(body.nroPedido, body.nroOperario, body.detalleError)
+        return insert_error_mesa(
+            body.nroPedido, body.nroOperario, body.detalleError, body.articulos
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -680,7 +695,7 @@ def deposito_errores_mesa_calidad_crear(body: ErrorCalidadIn):
     libre tipeada en el widget). Ver insert_error_calidad."""
     try:
         return insert_error_calidad(
-            body.nroPedido, body.nroOperario, body.detalleError, body.observacion
+            body.nroPedido, body.nroOperario, body.detalleError, body.observacion, body.articulos
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

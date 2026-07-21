@@ -67,6 +67,7 @@ interface Row {
   ocTotal: number;
   fechaEntrega: string | null;
   importacion: boolean;
+  tipoArticulo: string | null; // "Nacional"/"Importado"/"Fabrica" (Magnus) — fuente real del filtro Importados/Nacionales
   ocs: string[];
   estado: Estado;
   extraordinario: boolean;
@@ -103,6 +104,26 @@ const DESDE_DEFAULT = "2026-06-26";
 // Clave de fila: (artículo, día) — misma granularidad que usa el backend para
 // marcar extraordinario/comprar (preparado.faltante_extraordinario).
 const rowKey = (r: Pick<Row, "CodArticulo" | "fecha">) => `${r.CodArticulo}__${r.fecha}`;
+
+// Clasificación Importados/Nacionales/Fábrica para el filtro de origen. Usa
+// r.tipoArticulo (Magnus StkFer_Articulos.NacionalImportado, real y por
+// artículo) en vez de r.importacion (heurística por fecha de OC pactada —
+// clasificaba mal proveedores chinos con fecha cargada como "Nacional"; se
+// deja esa heurística intacta para no tocar el query que también usa
+// /compras/metricas). Mismo patrón de normalización/nombre que
+// PROVEEDOR_OBJETIVO en app/api/compras/metricas/route.ts.
+const PROVEEDOR_FABRICA = "ever wear s.a. industrial";
+const normProv = (s: string) =>
+  s.toLowerCase().normalize("NFD").replace(new RegExp("[\\u0300-\\u036f]", "g"), "").trim();
+const esFabrica = (p: string | null) => !!p && normProv(p).includes(PROVEEDOR_FABRICA);
+const origenDe = (r: Row): "importados" | "nacionales" | "fabrica" => {
+  if (esFabrica(r.Proveedor)) return "fabrica";
+  // Sin proveedor identificado → se cuenta como importado (pedido explícito).
+  if (!r.Proveedor) return "importados";
+  if (r.tipoArticulo === "Nacional") return "nacionales";
+  // "Importado" real, o TipoArticulo vacío/desconocido → importados (default conservador).
+  return "importados";
+};
 
 const FILTROS: { key: Filtro; label: string }[] = [
   { key: "todos", label: "Todos" },
@@ -631,11 +652,11 @@ export default function ComprasFaltantesPage() {
   const ciclarOrigen = useCallback(() => {
     setOrigen((o) => (o === "todos" ? "importados" : o === "importados" ? "nacionales" : "todos"));
   }, []);
-  // r.importacion viene de faltantes-consumo (misma fuente que ya usa
-  // /compras/metricas para la torta Importados/Nacionales): true = alguna OC
-  // pendiente del artículo sin fecha pactada (heurística de importación).
+  // "todos" no filtra (se ve de todo, incluida Fábrica); "importados"/
+  // "nacionales" excluyen Fábrica (EVER WEAR S.A. INDUSTRIAL no es ni uno ni
+  // otro — ver origenDe).
   const pasaOrigen = useCallback(
-    (r: Row) => origen === "todos" || (origen === "importados" ? r.importacion : !r.importacion),
+    (r: Row) => origen === "todos" || origenDe(r) === origen,
     [origen],
   );
 

@@ -176,6 +176,92 @@ def fetch_pedido_lookup(nro_pedido: int) -> dict | None:
     }
 
 
+# ── Artículos del pedido (para el selector multiple-choice de los widgets) ────
+# A pedido de Pablo (2026-07-21): en vez de tipear el pedido a mano, ambos
+# widgets (Mesa de Control y Calidad) deben poder elegir 1 o más artículos
+# ENTRE LOS QUE ESTÁN EN ESE PEDIDO, para asociarlos al error cargado.
+# Fuente: renglones de la MISMA OT de Picking que ya resuelve
+# fetch_pedido_lookup (WMS OTItem, OTItemTipo=1 "Recolectar" — mismo filtro
+# que SQL_OT_DIFERENCIAS en deposito.py), no Magnus directo: refleja lo que
+# el preparador efectivamente tuvo que recolectar para este pedido. Nombre
+# del artículo (Patron + Medida + Unidad) vía StkFer_Articulos/StkFer_ArtParamet,
+# mismo patrón CONFIRMADO que ya usa deposito.py (fetch_ot_diferencias, sección
+# "sql_nombres"). Sin verificar en vivo (no hay acceso a Magnus/WMS desde acá).
+SQL_OT_ITEMS = """
+SELECT
+    i.OTItemNroRenglon                    AS Renglon,
+    LTRIM(RTRIM(i.OTItemArticuloId))      AS CodArticulo,
+    i.OTItemCantPedida                    AS CantPedida,
+    LTRIM(RTRIM(i.OTItemUbicacionCodigo)) AS Ubicacion
+FROM OTItem i
+WHERE i.OTId = ?
+  AND i.OTItemTipo = 1          -- Recolectar (mismo filtro que SQL_OT_DIFERENCIAS)
+ORDER BY i.OTItemNroRenglon
+"""
+
+
+def fetch_articulos_pedido(nro_pedido: int) -> list[dict]:
+    """Artículos de la OT de Picking del pedido — para poblar el selector
+    multiple-choice de los widgets. [] (no error) si el pedido no tiene OT
+    de Picking todavía (ej. no llegó a WMS) — los widgets no deben bloquear
+    el alta por esto, es un dato adicional, no obligatorio."""
+    info = fetch_pedido_lookup(nro_pedido)
+    ot = info.get("ot") if info else None
+    if not ot:
+        return []
+
+    conn = get_connection("WMS")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_OT_ITEMS, (ot,))
+        cols = [c[0] for c in cur.description]
+        items = [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    codigos = sorted({(it.get("CodArticulo") or "").strip() for it in items if it.get("CodArticulo")})
+    nombres: dict[str, str] = {}
+    if codigos:
+        conn_ew = get_connection("EVERWEAR")
+        try:
+            cur_ew = conn_ew.cursor()
+            cur_ew.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+            ph = ",".join("?" for _ in codigos)
+            cur_ew.execute(
+                f"""
+                SELECT LTRIM(RTRIM(s.CodArticulo)) AS Cod,
+                       ap.Detalle      AS Patron,
+                       s.DetalleMedida AS Medida,
+                       s.UnidadMedida  AS Unidad
+                FROM EVERWEAR.dbo.[StkFer_Articulos]  s
+                LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloPatron
+                WHERE LTRIM(RTRIM(s.CodArticulo)) IN ({ph})
+                """,
+                codigos,
+            )
+            for cod, patron, medida, unidad in cur_ew.fetchall():
+                nombre = " ".join(" ".join(str(x or "").strip() for x in (patron, medida, unidad)).split())
+                nombres[(cod or "").strip()] = nombre
+        finally:
+            conn_ew.close()
+
+    out = []
+    vistos = set()
+    for it in items:
+        cod = (it.get("CodArticulo") or "").strip()
+        if not cod or cod in vistos:
+            continue
+        vistos.add(cod)
+        out.append({
+            "codArticulo": cod,
+            "descripcion": nombres.get(cod) or cod,
+            "ubicacion": it.get("Ubicacion"),
+            "cantidadPedida": it.get("CantPedida"),
+        })
+    return out
+
+
 # def fetch_operario_nombre(nro_operario: int) -> str | None:
 #     """Nombre del operario/controlador por N° de Personal (WMS.Personal.
 #     PersonalId) — mismo origen que nombreArmador arriba. Se resuelve UNA vez
@@ -229,6 +315,23 @@ def fetch_operario_nombre(nro_operario: int) -> str | None:
     return nombre or None
 
 
+def _normalizar_articulos(articulos: list[str] | None) -> list[str] | None:
+    """Limpia la lista de artículos elegidos en el selector multiple-choice
+    del widget (trim, descarta vacíos, sin duplicados, preserva el orden de
+    selección). None si queda vacía — Postgres guarda NULL, no un array
+    vacío; es un dato opcional, no bloquea el alta en ningún widget."""
+    if not articulos:
+        return None
+    vistos: set[str] = set()
+    out: list[str] = []
+    for a in articulos:
+        a = (a or "").strip()
+        if a and a not in vistos:
+            vistos.add(a)
+            out.append(a)
+    return out or None
+
+
 def fetch_ubicacion_diag(nro_pedido: int | None = None) -> dict:
     """Diagnóstico: qué columna de OT se detectó para 'Observaciones'/ubicación
     y, si se pasa nro_pedido, el valor real que trae para ese pedido. Para
@@ -244,11 +347,35 @@ def fetch_ubicacion_diag(nro_pedido: int | None = None) -> dict:
     return out
 
 
+# Re-resuelve y valida los códigos de artículo que mandó el widget contra
+# fetch_articulos_pedido (mismo criterio "no confiar en el cliente" que el
+# resto del archivo): descarta códigos que no estén en el pedido, arma el
+# string final "código - descripción" del lado del server. Compartido por
+# insert_error_mesa e insert_error_calidad.
+def _resolver_articulos(nro_pedido: int, codigos: list[str] | None) -> list[str] | None:
+    codigos = _normalizar_articulos(codigos)
+    if not codigos:
+        return None
+    disponibles = {a["codArticulo"]: a["descripcion"] for a in fetch_articulos_pedido(nro_pedido)}
+    out = [f"{c} - {disponibles[c]}" for c in codigos if c in disponibles]
+    return out or None
+
+
 # ── Insert (Postgres) ─────────────────────────────────────────────────────────
-def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) -> dict:
+def insert_error_mesa(
+    nro_pedido: int, nro_operario: int, detalle_error: str, articulos: list[str] | None = None
+) -> dict:
     """Re-resuelve fecha/tipo/OT/armador del pedido + nombre de quien carga
     (por nro_operario, WMS.Personal) del lado del server (no confía en lo que
     mande el cliente) e inserta 1 fila en deposito.errores_mesa.
+
+    `articulos` (opcional, a pedido de Pablo 2026-07-21): códigos de
+    artículo elegidos en el selector multiple-choice del widget (ver
+    fetch_articulos_pedido) — se re-validan acá contra el pedido (mismo
+    criterio de no confiar en el cliente que el resto del archivo) y se
+    guardan ya formateados como "código - descripción". No bloquea el alta
+    si viene vacío/ausente, ni si algún código no matchea (se descarta
+    silenciosamente).
 
     CAMBIO 2026-07-21 (a pedido de Pablo, 2da vuelta): `controlador` dejó de
     guardar a quien carga el registro — ese dato ahora va en `registradoPor`,
@@ -283,6 +410,7 @@ def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) ->
         "fecha": None, "tipoPedido": None, "ot": None,
         "nroArmador": None, "nombreArmador": None, "ubicacion": None,
     }
+    articulos_resueltos = _resolver_articulos(nro_pedido, articulos)
 
     conn = get_pg_connection()
     try:
@@ -291,14 +419,14 @@ def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) ->
             """
             INSERT INTO deposito.errores_mesa
                 ("nroPedido", fecha, "tipoPedido", ot, "nroArmador", "nombreArmador",
-                 ubicacion, "detalleError", "registradoPor")
-            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s)
+                 ubicacion, "detalleError", "registradoPor", articulos)
+            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id, "createdAt"
             """,
             (
                 nro_pedido, info["tipoPedido"], info["ot"],
                 info["nroArmador"], info["nombreArmador"], info["ubicacion"], detalle_error,
-                registrado_por,
+                registrado_por, articulos_resueltos,
             ),
         )
         new_id, created_at = cur.fetchone()
@@ -312,6 +440,7 @@ def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) ->
         "controlador": None,
         "detalleError": detalle_error,
         "registradoPor": registrado_por,
+        "articulos": articulos_resueltos,
         "nroControladorReal": None,
         "nombreControladorReal": None,
         "createdAt": created_at.isoformat(),
@@ -402,7 +531,11 @@ def fetch_controlador_diag(nro_pedido: int) -> dict:
 
 
 def insert_error_calidad(
-    nro_pedido: int, nro_operario: int, detalle_error: str, observacion: str | None = None
+    nro_pedido: int,
+    nro_operario: int,
+    detalle_error: str,
+    observacion: str | None = None,
+    articulos: list[str] | None = None,
 ) -> dict:
     """Alta desde el widget de Calidad. `nro_operario` identifica a QUIEN CARGA
     el registro (pantalla de inicio del widget, igual que Mesa de Control) —
@@ -417,7 +550,9 @@ def insert_error_calidad(
     muestra como "Operario" para Mesa de Control; unifica el criterio entre
     los 2 orígenes (ver getOperario en erroresMesa.tsx). También acepta
     `observacion` opcional (antes solo se podía cargar desde la vista web,
-    ver update_observacion) para que el widget la mande directo al alta."""
+    ver update_observacion) y `articulos` opcional (códigos elegidos en el
+    selector multiple-choice del widget, re-validados acá contra el pedido —
+    ver _resolver_articulos) para que el widget los mande directo al alta."""
     detalle_error = (detalle_error or "").strip()
     observacion = (observacion or "").strip() or None
     if not nro_operario:
@@ -436,6 +571,7 @@ def insert_error_calidad(
     info = fetch_pedido_lookup(nro_pedido) or {
         "tipoPedido": None, "ot": None, "nroArmador": None, "nombreArmador": None, "ubicacion": None,
     }
+    articulos_resueltos = _resolver_articulos(nro_pedido, articulos)
 
     conn = get_pg_connection()
     try:
@@ -445,15 +581,15 @@ def insert_error_calidad(
             INSERT INTO deposito.errores_mesa
                 ("nroPedido", fecha, "tipoPedido", ot, controlador, "nroArmador", "nombreArmador",
                  ubicacion, "detalleError", origen, "registradoPor",
-                 "nroControladorReal", "nombreControladorReal", observacion)
-            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, 'calidad', %s, %s, %s, %s)
+                 "nroControladorReal", "nombreControladorReal", observacion, articulos)
+            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, 'calidad', %s, %s, %s, %s, %s)
             RETURNING id, "createdAt"
             """,
             (
                 nro_pedido, info["tipoPedido"], info["ot"], ctrl["nombreControlador"],
                 info.get("nroArmador"), info.get("nombreArmador"),
                 info["ubicacion"], detalle_error, registrado_por,
-                ctrl["nroControlador"], ctrl["nombreControlador"], observacion,
+                ctrl["nroControlador"], ctrl["nombreControlador"], observacion, articulos_resueltos,
             ),
         )
         new_id, created_at = cur.fetchone()
@@ -467,7 +603,7 @@ def insert_error_calidad(
         "nroArmador": info.get("nroArmador"), "nombreArmador": info.get("nombreArmador"),
         "detalleError": detalle_error, "origen": "calidad", "registradoPor": registrado_por,
         "nroControladorReal": ctrl["nroControlador"], "nombreControladorReal": ctrl["nombreControlador"],
-        "observacion": observacion,
+        "observacion": observacion, "articulos": articulos_resueltos,
         "createdAt": created_at.isoformat(),
     }
 
@@ -499,7 +635,7 @@ def fetch_errores_mesa_list(
             'SELECT id, "nroPedido", fecha, "tipoPedido", ot, controlador, '
             '"nombreArmador", ubicacion, "detalleError", origen, "registradoPor", '
             '"nroControladorReal", "nombreControladorReal", '
-            'observacion, "createdAt" '
+            'observacion, articulos, "createdAt" '
             "FROM deposito.errores_mesa"
         )
         if where:

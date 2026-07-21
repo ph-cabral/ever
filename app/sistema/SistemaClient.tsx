@@ -1379,9 +1379,9 @@ function RuedaMeses({
 
 function Kpi({ value, label }: { value: string | number; label: string }) {
   return (
-    <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm">
+    <div className="bg-[#161616] border border-zinc-800 rounded-xl p-4 shadow-sm">
       <div className="text-2xl font-bold text-rose-500">{value}</div>
-      <div className="text-xs text-zinc-500 mt-1">{label}</div>
+      <div className="text-xs text-zinc-400 mt-1">{label}</div>
     </div>
   );
 }
@@ -1396,11 +1396,22 @@ function ChartBox({
   className?: string;
 }) {
   return (
-    <div className={`bg-white border border-zinc-200 rounded-xl p-4 h-[30rem] shadow-sm ${className}`}>
-      <h4 className="text-sm text-zinc-700 mb-2">{title}</h4>
+    <div className={`bg-[#161616] border border-zinc-800 rounded-xl p-4 h-[30rem] shadow-sm ${className}`}>
+      <h4 className="text-sm text-zinc-300 mb-2">{title}</h4>
       <ResponsiveContainer width="100%" height="100%">
         {children as React.ReactElement}
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+function SeccionTablero({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-8">
+      <h3 className="text-rose-400 font-semibold text-sm uppercase tracking-wide mb-3 border-b border-zinc-800 pb-2">
+        {title}
+      </h3>
+      {children}
     </div>
   );
 }
@@ -1534,6 +1545,10 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
   const sfPorEstado = countBy(sfCards, (c) => c.colNombre);
   const sfPorSistema = countBy(sfCards, (c) => c.campos.sistema);
 
+  const sistemaTablero = tableros.find((t) => t.clave === "sistema");
+  const softechTablero = tableros.find((t) => t.clave === "softech");
+  const otrosTableros = tableros.filter((t) => t.clave !== "sistema" && t.clave !== "softech");
+
   return (
     <div>
       {/* mobile/tablet: rueda horizontal arriba, 3 meses visibles */}
@@ -1553,30 +1568,20 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
         visible={5}
       />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      {/* General: todos los sectores/tableros juntos */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <Kpi value={totalCards} label="Casos totales registrados" />
-        <Kpi value={`${pctSolved}%`} label="Softech resuelto" />
-        <Kpi value={avgDays} label="Softech: días promedio de resolución" />
-        <Kpi
-          value={topCategoria ? topCategoria.name : "—"}
-          label={`Categoría más frecuente — Sistema${topCategoria ? ` (${topCategoria.value})` : ""}`}
-        />
-        <Kpi
-          value={topUbicacion ? topUbicacion.name : "—"}
-          label={`Ubicación más frecuente — Sistema${topUbicacion ? ` (${topUbicacion.value})` : ""}`}
-        />
       </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 mb-8">
         <ChartBox title="Casos por empresa (cuenta a quién corresponde)">
           <BarChart data={porEmpresa}>
-            <CartesianGrid stroke="#e4e4e7" />
-            <XAxis dataKey="name" stroke="#71717a" fontSize={12} />
-            <YAxis stroke="#71717a" fontSize={12} allowDecimals={false} />
+            <CartesianGrid stroke="#27272a" />
+            <XAxis dataKey="name" stroke="#a1a1aa" fontSize={12} />
+            <YAxis stroke="#a1a1aa" fontSize={12} allowDecimals={false} />
             <Tooltip
-              contentStyle={{ background: "#ffffff", border: "1px solid #e4e4e7" }}
-              labelStyle={{ color: "#18181b" }}
-              itemStyle={{ color: "#18181b" }}
+              contentStyle={{ background: "#1f1f1f", border: "1px solid #3f3f46" }}
+              labelStyle={{ color: "#f4f4f5" }}
+              itemStyle={{ color: "#f4f4f5" }}
             />
             <Bar dataKey="value">
               {porEmpresa.map((_, i) => (
@@ -1585,132 +1590,201 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
             </Bar>
           </BarChart>
         </ChartBox>
+      </div>
 
-        <ChartBox title="Sistema interno — por estado">
-          <PieChart>
-            <Pie data={sisPorEstado} dataKey="value" nameKey="name" outerRadius={130}>
-              {sisPorEstado.map((_, i) => (
-                <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
-              ))}
-            </Pie>
-            <Legend wrapperStyle={{ fontSize: 11, color: "#52525b" }} />
-            <Tooltip
-              contentStyle={{ background: "#ffffff", border: "1px solid #e4e4e7" }}
-              labelStyle={{ color: "#18181b" }}
-              itemStyle={{ color: "#18181b" }}
+      {sistemaTablero && (
+        <SeccionTablero title={sistemaTablero.nombre}>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <Kpi value={sCards.length} label="Casos registrados" />
+            <Kpi
+              value={topCategoria ? topCategoria.name : "—"}
+              label={`Categoría más frecuente${topCategoria ? ` (${topCategoria.value})` : ""}`}
             />
-          </PieChart>
-        </ChartBox>
-
-        <ChartBox title="Sistema interno — por categoría">
-          <PieChart>
-            <Pie data={sisPorCategoria} dataKey="value" nameKey="name" outerRadius={130} label={({ name }) => name}>
-              {sisPorCategoria.map((_, i) => (
-                <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
-              ))}
-            </Pie>
-            <Tooltip
-              contentStyle={{ background: "#ffffff", border: "1px solid #e4e4e7" }}
-              labelStyle={{ color: "#18181b" }}
-              itemStyle={{ color: "#18181b" }}
+            <Kpi
+              value={topUbicacion ? topUbicacion.name : "—"}
+              label={`Ubicación más frecuente${topUbicacion ? ` (${topUbicacion.value})` : ""}`}
             />
-          </PieChart>
-        </ChartBox>
+          </div>
 
-        <div className="bg-white border border-zinc-200 rounded-xl p-4 md:col-span-3 shadow-sm">
-          <h4 className="text-sm text-zinc-700 mb-2">
-            Sistema interno — por ubicación{" "}
-            <span className="text-zinc-400 font-normal">(clic en una barra para ver el detalle)</span>
-          </h4>
-          <div className="flex flex-col md:flex-row gap-4">
-            <div style={{ width: "100%", maxWidth: 420, height: Math.max(260, sisPorUbicacion.length * 26) }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={sisPorUbicacion} layout="vertical" margin={{ left: 8, right: 12 }}>
-                  <CartesianGrid stroke="#e4e4e7" horizontal={false} />
-                  <XAxis type="number" stroke="#71717a" fontSize={12} allowDecimals={false} />
-                  <YAxis type="category" dataKey="name" stroke="#71717a" fontSize={11} width={110} />
-                  <Tooltip
-                    cursor={{ fill: "#0000000d" }}
-                    contentStyle={{ background: "#ffffff", border: "1px solid #e4e4e7" }}
-                    labelStyle={{ color: "#18181b" }}
-                    itemStyle={{ color: "#18181b" }}
-                  />
-                  <Bar
-                    dataKey="value"
-                    radius={[0, 4, 4, 0]}
-                    cursor="pointer"
-                    onClick={(d: any) => toggleUbicacion(d.name)}
-                  >
-                    {sisPorUbicacion.map((entry, i) => (
-                      <Cell
-                        key={i}
-                        fill={PALETTE[i % PALETTE.length]}
-                        stroke={pilaUbicacion.includes(entry.name) ? "#18181b" : "none"}
-                        strokeWidth={pilaUbicacion.includes(entry.name) ? 2 : 0}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <ChartBox title="Por estado">
+              <PieChart>
+                <Pie data={sisPorEstado} dataKey="value" nameKey="name" outerRadius={130}>
+                  {sisPorEstado.map((_, i) => (
+                    <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
+                  ))}
+                </Pie>
+                <Legend wrapperStyle={{ fontSize: 11, color: "#d4d4d8" }} />
+                <Tooltip
+                  contentStyle={{ background: "#1f1f1f", border: "1px solid #3f3f46" }}
+                  labelStyle={{ color: "#f4f4f5" }}
+                  itemStyle={{ color: "#f4f4f5" }}
+                />
+              </PieChart>
+            </ChartBox>
+
+            <ChartBox title="Por categoría">
+              <PieChart>
+                <Pie
+                  data={sisPorCategoria}
+                  dataKey="value"
+                  nameKey="name"
+                  outerRadius={130}
+                  label={({ name, x, y, textAnchor }: any) => (
+                    <text x={x} y={y} textAnchor={textAnchor} fill="#e4e4e7" fontSize={11}>
+                      {name}
+                    </text>
+                  )}
+                >
+                  {sisPorCategoria.map((_, i) => (
+                    <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={{ background: "#1f1f1f", border: "1px solid #3f3f46" }}
+                  labelStyle={{ color: "#f4f4f5" }}
+                  itemStyle={{ color: "#f4f4f5" }}
+                />
+              </PieChart>
+            </ChartBox>
+
+            <div className="bg-[#161616] border border-zinc-800 rounded-xl p-4 md:col-span-3 shadow-sm">
+              <h4 className="text-sm text-zinc-300 mb-2">
+                Por ubicación{" "}
+                <span className="text-zinc-500 font-normal">(clic en una barra para ver el detalle)</span>
+              </h4>
+              <div className="flex flex-col md:flex-row gap-4">
+                <div style={{ width: "100%", maxWidth: 420, height: Math.max(260, sisPorUbicacion.length * 26) }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={sisPorUbicacion} layout="vertical" margin={{ left: 8, right: 12 }}>
+                      <CartesianGrid stroke="#27272a" horizontal={false} />
+                      <XAxis type="number" stroke="#a1a1aa" fontSize={12} allowDecimals={false} />
+                      <YAxis type="category" dataKey="name" stroke="#a1a1aa" fontSize={11} width={110} />
+                      <Tooltip
+                        cursor={{ fill: "#ffffff0d" }}
+                        contentStyle={{ background: "#1f1f1f", border: "1px solid #3f3f46" }}
+                        labelStyle={{ color: "#f4f4f5" }}
+                        itemStyle={{ color: "#f4f4f5" }}
                       />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+                      <Bar
+                        dataKey="value"
+                        radius={[0, 4, 4, 0]}
+                        cursor="pointer"
+                        onClick={(d: any) => toggleUbicacion(d.name)}
+                      >
+                        {sisPorUbicacion.map((entry, i) => (
+                          <Cell
+                            key={i}
+                            fill={PALETTE[i % PALETTE.length]}
+                            stroke={pilaUbicacion.includes(entry.name) ? "#f4f4f5" : "none"}
+                            strokeWidth={pilaUbicacion.includes(entry.name) ? 2 : 0}
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
 
-            <div
-              className="relative flex-1"
-              style={{ minHeight: Math.max(180, Math.min(260, sisPorUbicacion.length * 26)) }}
-            >
-              {pilaUbicacion.length === 0 ? (
-                <p className="text-xs text-zinc-600 h-full flex items-center">
-                  Elegí una ubicación en el gráfico para ver sus tarjetas acá.
-                </p>
-              ) : (
-                pilaUbicacion.map((name, i) => (
-                  <PanelUbicacion
-                    key={name}
-                    name={name}
-                    cards={sCards.filter((c) => (c.campos.ubicacion || "(sin dato)") === name)}
-                    offset={i}
-                    onClose={() => toggleUbicacion(name)}
-                  />
-                ))
-              )}
+                <div
+                  className="relative flex-1"
+                  style={{ minHeight: Math.max(180, Math.min(260, sisPorUbicacion.length * 26)) }}
+                >
+                  {pilaUbicacion.length === 0 ? (
+                    <p className="text-xs text-zinc-600 h-full flex items-center">
+                      Elegí una ubicación en el gráfico para ver sus tarjetas acá.
+                    </p>
+                  ) : (
+                    pilaUbicacion.map((name, i) => (
+                      <PanelUbicacion
+                        key={name}
+                        name={name}
+                        cards={sCards.filter((c) => (c.campos.ubicacion || "(sin dato)") === name)}
+                        offset={i}
+                        onClose={() => toggleUbicacion(name)}
+                      />
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        </SeccionTablero>
+      )}
 
-        <ChartBox title="Softech — por estado">
-          <PieChart>
-            <Pie data={sfPorEstado} dataKey="value" nameKey="name" outerRadius={130}>
-              {sfPorEstado.map((_, i) => (
-                <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
-              ))}
-            </Pie>
-            <Legend wrapperStyle={{ fontSize: 11, color: "#52525b" }} />
-            <Tooltip
-              contentStyle={{ background: "#ffffff", border: "1px solid #e4e4e7" }}
-              labelStyle={{ color: "#18181b" }}
-              itemStyle={{ color: "#18181b" }}
-            />
-          </PieChart>
-        </ChartBox>
+      {softechTablero && (
+        <SeccionTablero title={softechTablero.nombre}>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <Kpi value={sfCards.length} label="Casos registrados" />
+            <Kpi value={`${pctSolved}%`} label="Resuelto" />
+            <Kpi value={avgDays} label="Días promedio de resolución" />
+          </div>
 
-        <ChartBox title="Softech — sistema afectado" className="md:col-span-2">
-          <BarChart data={sfPorSistema}>
-            <CartesianGrid stroke="#e4e4e7" />
-            <XAxis dataKey="name" stroke="#71717a" fontSize={11} interval={0} angle={-20} textAnchor="end" height={50} />
-            <YAxis stroke="#71717a" fontSize={12} allowDecimals={false} />
-            <Tooltip
-              contentStyle={{ background: "#ffffff", border: "1px solid #e4e4e7" }}
-              labelStyle={{ color: "#18181b" }}
-              itemStyle={{ color: "#18181b" }}
-            />
-            <Bar dataKey="value">
-              {sfPorSistema.map((_, i) => (
-                <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ChartBox>
-      </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <ChartBox title="Por estado">
+              <PieChart>
+                <Pie data={sfPorEstado} dataKey="value" nameKey="name" outerRadius={130}>
+                  {sfPorEstado.map((_, i) => (
+                    <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
+                  ))}
+                </Pie>
+                <Legend wrapperStyle={{ fontSize: 11, color: "#d4d4d8" }} />
+                <Tooltip
+                  contentStyle={{ background: "#1f1f1f", border: "1px solid #3f3f46" }}
+                  labelStyle={{ color: "#f4f4f5" }}
+                  itemStyle={{ color: "#f4f4f5" }}
+                />
+              </PieChart>
+            </ChartBox>
+
+            <ChartBox title="Sistema afectado" className="md:col-span-2">
+              <BarChart data={sfPorSistema}>
+                <CartesianGrid stroke="#27272a" />
+                <XAxis dataKey="name" stroke="#a1a1aa" fontSize={11} interval={0} angle={-20} textAnchor="end" height={50} />
+                <YAxis stroke="#a1a1aa" fontSize={12} allowDecimals={false} />
+                <Tooltip
+                  contentStyle={{ background: "#1f1f1f", border: "1px solid #3f3f46" }}
+                  labelStyle={{ color: "#f4f4f5" }}
+                  itemStyle={{ color: "#f4f4f5" }}
+                />
+                <Bar dataKey="value">
+                  {sfPorSistema.map((_, i) => (
+                    <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ChartBox>
+          </div>
+        </SeccionTablero>
+      )}
+
+      {otrosTableros.map((t) => {
+        const cards = cardsDe(t.id);
+        const porEstado = countBy(cards, (c) => c.colNombre).sort((a, b) => b.value - a.value);
+        return (
+          <SeccionTablero key={t.id} title={t.nombre}>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <Kpi value={cards.length} label="Casos registrados" />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <ChartBox title="Por estado">
+                <PieChart>
+                  <Pie data={porEstado} dataKey="value" nameKey="name" outerRadius={130}>
+                    {porEstado.map((_, i) => (
+                      <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
+                    ))}
+                  </Pie>
+                  <Legend wrapperStyle={{ fontSize: 11, color: "#d4d4d8" }} />
+                  <Tooltip
+                    contentStyle={{ background: "#1f1f1f", border: "1px solid #3f3f46" }}
+                    labelStyle={{ color: "#f4f4f5" }}
+                    itemStyle={{ color: "#f4f4f5" }}
+                  />
+                </PieChart>
+              </ChartBox>
+            </div>
+          </SeccionTablero>
+        );
+      })}
     </div>
   );
 }
