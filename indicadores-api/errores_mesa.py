@@ -358,6 +358,38 @@ def fetch_controlador_pedido(nro_pedido: int) -> dict | None:
         conn.close()
 
 
+SQL_CONTROLADOR_PEDIDO_DIAG = """
+SELECT CodControlador1, CodControlador2, CodCentroPrep, FechaControl
+FROM dbo.Ven_PedImpresoCP
+WHERE NroMovVenta = ?
+ORDER BY FechaControl DESC
+"""
+
+
+def fetch_controlador_diag(nro_pedido: int) -> dict:
+    """Diagnóstico: TODAS las filas de Ven_PedImpresoCP para este pedido, SIN
+    el filtro de fetch_controlador_pedido (para confirmar/descartar el caso
+    de recontrol con códigos en 0, o directamente que no haya ninguna fila —
+    dos causas distintas de "sin controlador registrado" en insert_error_calidad).
+    Devuelve también lo que resuelve fetch_controlador_pedido() con el filtro
+    actual, para comparar. Usar cuando un pedido con control confirmado en
+    Magnus igual da error en el widget de Calidad."""
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_CONTROLADOR_PEDIDO_DIAG, (nro_pedido,))
+        cols = [c[0] for c in cur.description]
+        filas = [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        conn.close()
+    return {
+        "nroPedido": nro_pedido,
+        "filas_Ven_PedImpresoCP": filas,
+        "resuelto_por_fetch_controlador_pedido": fetch_controlador_pedido(nro_pedido),
+    }
+
+
 def insert_error_calidad(
     nro_pedido: int, nro_operario: int, detalle_error: str, observacion: str | None = None
 ) -> dict:

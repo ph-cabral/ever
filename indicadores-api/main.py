@@ -26,7 +26,7 @@ from mesa_control import (
 from errores_mesa import (
     fetch_pedido_lookup, insert_error_mesa, opciones as errores_mesa_opciones,
     fetch_ubicacion_diag, fetch_errores_mesa_list, fetch_operario_nombre,
-    insert_error_calidad, update_observacion,
+    insert_error_calidad, update_observacion, fetch_controlador_diag,
 )
 from rrhh import fetch_cvs_por_mes
 from datetime import date, datetime, timedelta
@@ -704,6 +704,17 @@ def deposito_errores_mesa_ubicacion_diag(nro: int | None = Query(default=None)):
     (LIKE '%OBSERV%') y, con `nro`, el lookup completo de ese pedido."""
     try:
         return fetch_ubicacion_diag(nro)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/errores-mesa/controlador-diag")
+def deposito_errores_mesa_controlador_diag(nro: int = Query(...)):
+    """Diagnóstico: TODAS las filas de Ven_PedImpresoCP para `nro` (sin el
+    filtro de fetch_controlador_pedido) + lo que resuelve esa función. Usar
+    cuando un pedido con control confirmado en Magnus igual da "sin
+    controlador registrado" en el widget de Calidad."""
+    try:
+        return fetch_controlador_diag(nro)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
