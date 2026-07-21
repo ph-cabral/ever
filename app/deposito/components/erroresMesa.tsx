@@ -12,24 +12,24 @@ import { exportarErroresMesa } from "@/lib/deposito/exportErroresMesa";
 // vista es solo lectura + filtros. Fuente: GET /api/deposito/errores-mesa
 // (→ indicadores-api, fetch_errores_mesa_list en errores_mesa.py).
 //
-// A pedido de Pablo, 3 columnas con origen de dato distinto pero mismo
-// criterio para los 2 orígenes desde 2026-07-21:
+// A pedido de Pablo, 3 columnas con mismo criterio para los 2 orígenes desde
+// 2026-07-21 (2 vueltas de cambios el mismo día):
 //   · Registrada = quién HIZO EL REGISTRO (N° ingresado al abrir el
-//     widget) → mesa_control: columna `controlador` (self-identificado);
-//     calidad: columna `registradoPor` (resuelto por N°, WMS.Personal).
-//     (Antes esta columna se mostraba como "Controlador" — renombrada
-//     2026-07-21 para no confundirla con la columna "Controlador" real,
-//     ver abajo.)
+//     widget) → columna `registradoPor` para los 2 orígenes (antes, en
+//     Mesa de Control, este dato vivía en `controlador`; se movió en la
+//     2da vuelta — ver insert_error_mesa en errores_mesa.py). Fallback a
+//     `controlador` SOLO para filas de Mesa de Control insertadas ANTES
+//     de ese cambio (`registradoPor` NULL ahí, el dato sigue en
+//     `controlador`) — no aplica a Calidad, que siempre tuvo
+//     `registradoPor` poblado.
 //   · Controlador = controlador real del pedido según Magnus
-//     (Ven_PedImpresoCP.CodControlador1/2), resuelto para AMBOS orígenes →
-//     `nombreControladorReal`. Antes solo se resolvía para calidad
-//     (mezclado en `controlador`, mostrado como "Operario"); ahora es una
-//     columna aparte y separada de "Registrada"/"Operario".
+//     (Ven_PedImpresoCP.CodControlador1/2) → `nombreControladorReal`,
+//     resuelto para AMBOS orígenes desde la 1ra vuelta. Sin fallback: las
+//     filas viejas sin este dato necesitan re-consultar Magnus, no alcanza
+//     con lo que ya está en la fila — ver backfill_controlador_real.py.
 //   · Operario = el operario/preparador de Magnus (WMS OT + Personal,
 //     `nombreArmador`) sobre el que es el error, unificado para AMBOS
-//     orígenes desde 2026-07-21 (antes calidad NO lo guardaba —"Tampoco
-//     guarda preparador"— y esta columna mostraba `controlador`, duplicando
-//     lo que ya se ve en "Controlador").
+//     orígenes desde la 1ra vuelta.
 // ──────────────────────────────────────────────────────────────────────────────
 
 export interface ErrorMesaRow {
@@ -52,9 +52,12 @@ export interface ErrorMesaRow {
 
 // Quién hizo el registro (N° ingresado al abrir el widget). Exportada para
 // reuso en lib/deposito/exportErroresMesa.ts (mismo criterio en pantalla y
-// en el Excel exportado).
+// en el Excel exportado). Fallback a `controlador` solo para filas viejas
+// de Mesa de Control (de antes del cambio del 2026-07-21 que movió este
+// dato a `registradoPor`) — en Calidad `registradoPor` siempre estuvo
+// poblado, así que ahí el fallback nunca debería activarse.
 export function getRegistrador(r: ErrorMesaRow): string | null {
-  return r.origen === "calidad" ? r.registradoPor : r.controlador;
+  return r.registradoPor ?? (r.origen === "calidad" ? null : r.controlador);
 }
 // Operario/preparador de Magnus (WMS) sobre el que es el error — mismo
 // campo para los 2 orígenes desde 2026-07-21.
@@ -200,7 +203,7 @@ export function ErroresMesaTab() {
     <div>
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <PageTitle
-          title="Registro de Errores — Mesa de Control"
+          title="Registro de Errores — Mesa de Control        PR-CAL008-R3"
           sub="Altas desde el widget de escritorio · deposito.errores_mesa"
         />
         <div className="flex items-center gap-2">
@@ -217,7 +220,8 @@ export function ErroresMesaTab() {
             disabled={loading}
             className="flex items-center gap-1.5 text-zinc-400 hover:text-yellow-400 transition-colors px-2.5 py-1.5 rounded-md border border-zinc-700 disabled:opacity-40 text-sm"
           >
-            <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refrescar
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />{" "}
+            Refrescar
           </button>
         </div>
       </div>
@@ -298,7 +302,11 @@ export function ErroresMesaTab() {
       ) : (
         <>
           <Grid cols={4}>
-            <KPI label="Registros" value={fmtNum(filtered.length)} accent="yellow" />
+            <KPI
+              label="Registros"
+              value={fmtNum(filtered.length)}
+              accent="yellow"
+            />
             <KPI
               label="Registradas"
               value={fmtNum(controladores.length)}
@@ -320,7 +328,11 @@ export function ErroresMesaTab() {
           <div className="mt-5">
             <Table<ErrorMesaRow>
               cols={[
-                { key: "fecha", label: "Fecha", render: (r) => fmtDate(r.fecha) },
+                {
+                  key: "fecha",
+                  label: "Fecha",
+                  render: (r) => fmtDate(r.fecha),
+                },
                 { key: "nroPedido", label: "Nro Pedido", num: true },
                 {
                   key: "tipoPedido",
@@ -352,7 +364,9 @@ export function ErroresMesaTab() {
                 {
                   key: "observacion",
                   label: "Observación",
-                  render: (r) => <ObservacionCell row={r} onSave={saveObservacion} />,
+                  render: (r) => (
+                    <ObservacionCell row={r} onSave={saveObservacion} />
+                  ),
                 },
               ]}
               rows={filtered}

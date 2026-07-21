@@ -26,8 +26,7 @@ y el server resuelve el nombre (no confía en lo que mande el cliente).
 "Detalle Error" sigue siendo un select manual — ver DETALLE_ERROR_OPCIONES.
 
 CAMBIO 2026-07-21 (a pedido de Pablo): la vista /deposito separa "Registrada"
-(quién cargó el error — columna `controlador` de siempre, vía
-fetch_operario_nombre) de "Controlador" (el controlador real del pedido,
+(quién cargó el error) de "Controlador" (el controlador real del pedido,
 Magnus Ven_PedImpresoCP.CodControlador1/2, vía fetch_controlador_pedido).
 Antes ese dato solo se resolvía para origen='calidad' (mezclado en la misma
 columna `controlador`, mostrado en pantalla como "Operario"); ahora se
@@ -35,6 +34,18 @@ resuelve para AMBOS orígenes y se guarda aparte en "nroControladorReal" /
 "nombreControladorReal" (ver ever/sql/deposito_errores_mesa_controlador_real.sql).
 None si Magnus no tiene control registrado para ese pedido — no bloquea el
 alta en Mesa de Control (si bloquea en Calidad, ver insert_error_calidad).
+
+CAMBIO 2026-07-21, 2da vuelta (a pedido de Pablo): la columna `controlador`
+en sí dejó de guardar a quien carga el registro — eso ahora va en
+`registradoPor` para los 2 orígenes (antes era así solo en Calidad).
+`controlador` pasa a ser SIEMPRE el controlador real (duplicado de
+nombreControladorReal, mismo criterio que ya usaba insert_error_calidad).
+Los registros insertados ANTES de este cambio quedan con el registrante en
+`controlador` y `registradoPor` NULL — no rompen nada porque el dato sigue
+ahí; el fallback para mostrarlos vive en getRegistrador (erroresMesa.tsx),
+no hace falta backfill en la base para esto (a diferencia de
+nroControladorReal/nombreControladorReal, que sí necesitan backfill porque
+requieren re-consultar Magnus — ver indicadores-api/backfill_controlador_real.py).
 """
 from datetime import date, timedelta
 
@@ -227,17 +238,27 @@ def fetch_ubicacion_diag(nro_pedido: int | None = None) -> dict:
 
 # ── Insert (Postgres) ─────────────────────────────────────────────────────────
 def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) -> dict:
-    """Re-resuelve fecha/tipo/OT/armador del pedido + nombre del controlador
+    """Re-resuelve fecha/tipo/OT/armador del pedido + nombre de quien carga
     (por nro_operario, WMS.Personal) del lado del server (no confía en lo que
-    mande el cliente) e inserta 1 fila en deposito.errores_mesa."""
+    mande el cliente) e inserta 1 fila en deposito.errores_mesa.
+
+    CAMBIO 2026-07-21 (a pedido de Pablo, 2da vuelta): `controlador` dejó de
+    guardar a quien carga el registro — ese dato ahora va en `registradoPor`,
+    mismo criterio que ya usaba `insert_error_calidad`. `controlador` pasa a
+    ser SIEMPRE el controlador real del pedido (Magnus), igual que
+    `nombreControladorReal` (duplicado a propósito, mismo patrón que Calidad
+    — ver abajo). Los registros viejos (antes de este cambio) quedan con el
+    registrante en `controlador` y `registradoPor` NULL; el fallback para
+    mostrarlos vive en el frontend (getRegistrador en erroresMesa.tsx), no
+    hace falta backfill acá porque el dato ya está en la fila."""
     detalle_error = (detalle_error or "").strip()
     if not nro_operario:
         raise ValueError("Falta 'nroOperario'")
     if not detalle_error:
         raise ValueError("Falta 'detalleError'")
 
-    controlador = fetch_operario_nombre(nro_operario)
-    if not controlador:
+    registrado_por = fetch_operario_nombre(nro_operario)
+    if not registrado_por:
         raise ValueError(f"Operario {nro_operario} no encontrado")
 
     info = fetch_pedido_lookup(nro_pedido) or {
@@ -245,10 +266,8 @@ def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) ->
         "nroArmador": None, "nombreArmador": None, "ubicacion": None,
     }
 
-    # Controlador real del pedido (Magnus, Ven_PedImpresoCP) — a pedido de
-    # Pablo (2026-07-21) se resuelve también acá, no solo en Calidad, para
-    # distinguir en la vista "Registrada" (quién cargó el error, arriba) de
-    # "Controlador" (el controlador real del pedido). None si Magnus no tiene
+    # Controlador real del pedido (Magnus, Ven_PedImpresoCP) — resuelto acá
+    # también (no solo en Calidad) desde 2026-07-21. None si Magnus no tiene
     # control registrado para este pedido — no bloquea el alta.
     ctrl_real = fetch_controlador_pedido(nro_pedido)
     nro_controlador_real = ctrl_real["nroControlador"] if ctrl_real else None
@@ -261,14 +280,14 @@ def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) ->
             """
             INSERT INTO deposito.errores_mesa
                 ("nroPedido", fecha, "tipoPedido", ot, controlador, "nroArmador", "nombreArmador",
-                 ubicacion, "detalleError", "nroControladorReal", "nombreControladorReal")
-            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 ubicacion, "detalleError", "registradoPor", "nroControladorReal", "nombreControladorReal")
+            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id, "createdAt"
             """,
             (
                 nro_pedido, info["tipoPedido"], info["ot"],
-                controlador, info["nroArmador"], info["nombreArmador"], info["ubicacion"], detalle_error,
-                nro_controlador_real, nombre_controlador_real,
+                nombre_controlador_real, info["nroArmador"], info["nombreArmador"], info["ubicacion"], detalle_error,
+                registrado_por, nro_controlador_real, nombre_controlador_real,
             ),
         )
         new_id, created_at = cur.fetchone()
@@ -279,8 +298,9 @@ def insert_error_mesa(nro_pedido: int, nro_operario: int, detalle_error: str) ->
     return {
         **info,
         "id": new_id,
-        "controlador": controlador,
+        "controlador": nombre_controlador_real,
         "detalleError": detalle_error,
+        "registradoPor": registrado_por,
         "nroControladorReal": nro_controlador_real,
         "nombreControladorReal": nombre_controlador_real,
         "createdAt": created_at.isoformat(),
