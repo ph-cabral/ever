@@ -13,9 +13,13 @@ import {
 import {
   computeIndicadores,
   fetchResumen,
+  fetchHorarios,
+  buildTopeResolver,
   mesRange,
   currentYm,
   type ResumenRow,
+  type HorarioTipo,
+  type HorarioAsignacion,
 } from "@/lib/rrhh/asistenciaIndicadores";
 
 const fmt = (n: number) =>
@@ -25,8 +29,22 @@ const fmt = (n: number) =>
 export default function HsExtrasTab() {
   const [ym, setYm] = useState(currentYm());
   const [rows, setRows] = useState<ResumenRow[]>([]);
+  const [tipos, setTipos] = useState<HorarioTipo[]>([]);
+  const [asignaciones, setAsignaciones] = useState<HorarioAsignacion[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetchHorarios().then((h) => {
+      if (!alive) return;
+      setTipos(h.tipos);
+      setAsignaciones(h.asignaciones);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -42,7 +60,14 @@ export default function HsExtrasTab() {
     };
   }, [ym]);
 
-  const ind = useMemo(() => computeIndicadores(rows), [rows]);
+  const resolveTope = useMemo(
+    () => buildTopeResolver(tipos, asignaciones),
+    [tipos, asignaciones],
+  );
+  const ind = useMemo(
+    () => computeIndicadores(rows, resolveTope),
+    [rows, resolveTope],
+  );
 
   return (
     <div className="space-y-6">

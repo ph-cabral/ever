@@ -235,7 +235,7 @@ function Tabla({
             <th className="px-3 py-2 font-medium whitespace-nowrap">Artículo</th>
             <th className="px-3 py-2 font-medium whitespace-nowrap">Línea</th>
             <th className="px-3 py-2 font-medium whitespace-nowrap">Día</th>
-            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Falta/Stock/OC</th>
+            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Falta/Stock/En OC</th>
             <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Falta OC</th>
             <th className="px-3 py-2 font-medium whitespace-nowrap">Despacho</th>
             {!ocultarProveedor && (
@@ -275,14 +275,7 @@ function Tabla({
                   {r.CodArticulo}
                 </td>
                 <td className="px-3 py-2 text-zinc-100 whitespace-nowrap">
-                  <span>
-                    {r.Nombre}
-                    {nuevoArt && r.ocTotal > 0 && (
-                      <span className="ml-2 text-[11px] text-zinc-500">
-                        OC total {fmtNum(r.ocTotal)}
-                      </span>
-                    )}
-                  </span>
+                  <span>{r.Nombre}</span>
                 </td>
                 <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{r.Linea ?? "—"}</td>
                 <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">
@@ -293,7 +286,7 @@ function Tabla({
                 </td>
                 <td
                   className="px-3 py-2 text-right tabular-nums whitespace-nowrap"
-                  title="Faltan / Stock / Cubre OC — existencia real depósito 1 en vivo (mismo dato que /deposito/stock)."
+                  title="Faltan / Stock / En OC (cantidad total pedida en la OC pendiente, no acotada al faltante) — existencia real depósito 1 en vivo (mismo dato que /deposito/stock)."
                 >
                   <span className="text-zinc-100">
                     {fmtNum(r.faltan)}
@@ -308,8 +301,8 @@ function Tabla({
                     {r.stock > 0 ? fmtNum(r.stock) : "—"}
                   </span>
                   <span className="text-zinc-600">/</span>
-                  <span className={r.cubierto > 0 ? cubiertoCls[r.estado] : "text-zinc-600"}>
-                    {r.cubierto > 0 ? fmtNum(r.cubierto) : "—"}
+                  <span className={r.ocTotal > 0 ? cubiertoCls[r.estado] : "text-zinc-600"}>
+                    {r.ocTotal > 0 ? fmtNum(r.ocTotal) : "—"}
                   </span>
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-red-300/90">

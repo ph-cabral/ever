@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { crearCasoSoftech } from "@/lib/softech-jira";
 
 // POST — crear tarjeta en una columna
 export async function POST(req: NextRequest) {
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest) {
     });
     const orden = (max._max.orden ?? -1) + 1;
 
-    const tarjeta = await prisma.$transaction(async (tx) => {
+    let tarjeta = await prisma.$transaction(async (tx) => {
       const nueva = await tx.sistema_tarjeta.create({
         data: {
           columnaId: Number(columnaId),
@@ -37,6 +38,32 @@ export async function POST(req: NextRequest) {
       });
       return nueva;
     });
+
+    // Softech: además de la tarjeta, se abre el caso en el portal de soporte
+    // (Jira Service Management) y se guarda el link para tener vinculación.
+    // "Problema" -> resumen, "Acción / nota" -> descripción; el resto de los
+    // campos del tablero se ignora para esto. Si falla, la tarjeta ya creada
+    // queda sin link (no se rompe la creación).
+    const tablero = await prisma.sistema_tablero.findUnique({
+      where: { id: Number(tableroId) },
+      select: { clave: true },
+    });
+    if (tablero?.clave === "softech") {
+      const camposActuales = (tarjeta.campos ?? {}) as Record<string, unknown>;
+      const caso = await crearCasoSoftech({
+        sistema: camposActuales.sistema as string | null | undefined,
+        resumen: camposActuales.problema as string | null | undefined,
+        descripcion: camposActuales.accion as string | null | undefined,
+      });
+      if (caso) {
+        tarjeta = await prisma.sistema_tarjeta.update({
+          where: { id: tarjeta.id },
+          data: {
+            campos: { ...camposActuales, jiraKey: caso.issueKey, jiraUrl: caso.url },
+          },
+        });
+      }
+    }
 
     return NextResponse.json(tarjeta, { status: 201 });
   } catch (error) {

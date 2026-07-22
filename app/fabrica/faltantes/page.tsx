@@ -178,7 +178,7 @@ function Tabla({
             <th className="px-3 py-2 font-medium whitespace-nowrap">Día</th>
             <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Faltan</th>
             <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Stock</th>
-            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Cubre OC</th>
+            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">En OC</th>
             <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Falta OC</th>
             <th className="px-3 py-2 font-medium whitespace-nowrap">Despacho</th>
             <th className="px-3 py-2 font-medium whitespace-nowrap">Cliente</th>
@@ -205,14 +205,7 @@ function Tabla({
                   {r.CodArticulo}
                 </td>
                 <td className="px-3 py-2 text-zinc-100 whitespace-nowrap">
-                  <span>
-                    {r.Nombre}
-                    {nuevoArt && r.ocTotal > 0 && (
-                      <span className="ml-2 text-[11px] text-zinc-500">
-                        OC total {fmtNum(r.ocTotal)}
-                      </span>
-                    )}
-                  </span>
+                  <span>{r.Nombre}</span>
                 </td>
                 <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{r.Linea ?? "—"}</td>
                 <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">
@@ -246,15 +239,16 @@ function Tabla({
                 </td>
                 <td
                   className={`px-3 py-2 text-right tabular-nums font-medium ${cubiertoCls[r.estado]}`}
+                  title="Cantidad total pedida en la OC pendiente para este artículo (no acotada al faltante)."
                 >
-                  {r.cubierto > 0 ? (
+                  {r.ocTotal > 0 ? (
                     <span className="inline-flex items-center gap-1 justify-end">
                       {r.estado === "entregado" ? (
                         <Check size={13} className="opacity-80" />
                       ) : (
                         <Truck size={13} className="opacity-70" />
                       )}
-                      {fmtNum(r.cubierto)}
+                      {fmtNum(r.ocTotal)}
                     </span>
                   ) : (
                     "—"

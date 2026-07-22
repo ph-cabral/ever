@@ -45,7 +45,16 @@ export async function resolveBucketRenglones(
 ): Promise<BucketRenglon[]> {
   const hoy = new Date().toISOString().slice(0, 10);
   const hasta = hoy > primerDia ? hoy : primerDia;
-  const qs = new URLSearchParams({ desde: primerDia, hasta });
+  // historico=1 es obligatorio acá: sin esto /deposito/faltantes devuelve
+  // solo la foto MÁS NUEVA (SQL_FALTANTES_RANGO, descarta lo ya facturado a
+  // mitad de rango). Un renglón "vive" ~1 día en Ven_PedRenPendientes — para
+  // cuando compras carga el Arribo (días después de PrimerDia), el renglón ya
+  // no está en la foto viva y esta consulta devolvía [] → el POST no
+  // encontraba renglones y la fecha nunca llegaba a faltante_control (bug:
+  // /ventas/faltantes seguía mostrando el fallback automático por OC en vez
+  // del arribo real cargado en /compras/faltantes). Mismo patrón que ya usan
+  // /api/ventas/faltantes y /api/compras/faltantes-consumo.
+  const qs = new URLSearchParams({ desde: primerDia, hasta, historico: "1" });
 
   const res = await fetch(`${API_URL}/deposito/faltantes?${qs}`, {
     cache: "no-store",

@@ -20,12 +20,80 @@ export type ResumenRow = {
 };
 
 // Tope diario en minutos (jornada esperada): viernes 480, fin de semana 0, resto 540.
+// Usado como fallback cuando no hay horario_tipo asignado (ver buildTopeResolver).
 export const topeMin = (fecha: string): number => {
   const dow = new Date(`${fecha}T00:00:00`).getDay(); // 0 Dom .. 6 Sab
   if (dow === 5) return 480;
   if (dow === 0 || dow === 6) return 0;
   return 540;
 };
+
+// ── Horarios por área (asistencia.horario_tipo / asistencia.horario_area) ────
+// Antes el tope era fijo para todos los empleados. Algunos locales trabajan
+// sábado y otros no, así que el tope ahora depende del área/departamento del
+// empleado (mismo texto que "departamento" en ResumenRow). Ver
+// /api/rrhh/asistencia/horarios y sql/asistencia_horario_tipo.sql.
+
+export type HorarioTipo = {
+  id: number;
+  nombre: string;
+  tope_lun: number;
+  tope_mar: number;
+  tope_mie: number;
+  tope_jue: number;
+  tope_vie: number;
+  tope_sab: number;
+  tope_dom: number;
+};
+
+export type HorarioAsignacion = { departamento: string; horario_tipo_id: number };
+
+const DOW_TOPE_FIELDS: (keyof HorarioTipo)[] = [
+  "tope_dom",
+  "tope_lun",
+  "tope_mar",
+  "tope_mie",
+  "tope_jue",
+  "tope_vie",
+  "tope_sab",
+];
+
+export async function fetchHorarios(): Promise<{
+  tipos: HorarioTipo[];
+  asignaciones: HorarioAsignacion[];
+}> {
+  try {
+    const r = await fetch("/api/rrhh/asistencia/horarios");
+    if (!r.ok) return { tipos: [], asignaciones: [] };
+    return r.json();
+  } catch {
+    return { tipos: [], asignaciones: [] };
+  }
+}
+
+// Arma (r: ResumenRow) => minutos esperados ese día, según el horario_tipo
+// asignado al área del empleado. Un área sin asignación usa "Estándar
+// (Lun-Vie)" como fallback. Si todavía no se cargaron tipos (falló el fetch o
+// falta correr el SQL en esta base), cae al topeMin(fecha) fijo de siempre.
+export function buildTopeResolver(
+  tipos: HorarioTipo[],
+  asignaciones: HorarioAsignacion[],
+): (r: ResumenRow) => number {
+  if (!tipos || tipos.length === 0) {
+    return (r) => topeMin(r.fecha);
+  }
+  const porId = new Map(tipos.map((t) => [t.id, t]));
+  const porArea = new Map(asignaciones.map((a) => [a.departamento, a.horario_tipo_id]));
+  const estandar = tipos.find((t) => t.nombre === "Estándar (Lun-Vie)") ?? tipos[0];
+
+  return (r) => {
+    const dep = (r.departamento ?? "").trim();
+    const tipoId = porArea.get(dep);
+    const tipo = (tipoId != null ? porId.get(tipoId) : undefined) ?? estandar;
+    const dow = new Date(`${r.fecha}T00:00:00`).getDay(); // 0 Dom .. 6 Sab
+    return tipo[DOW_TOPE_FIELDS[dow]] as number;
+  };
+}
 
 // Estado auto cuando no hay uno guardado en BD.
 export const calcEstado = (r: ResumenRow): "Normal" | "Ausente" | "Revisar" => {
@@ -42,12 +110,20 @@ export const effEstado = (r: ResumenRow): string => r.estado ?? calcEstado(r);
 export const netMin = (r: ResumenRow): number =>
   Math.max(0, (r.minutos ?? 0) - (r.horas ?? 0) * 60);
 
-// Minutos RRHH = netos con tope diario aplicado.
-export const rrhhMin = (r: ResumenRow): number => Math.min(netMin(r), topeMin(r.fecha));
+// Minutos RRHH = netos con tope diario aplicado. `tope` opcional por si se
+// resolvió por área (buildTopeResolver); si no se pasa, cae al topeMin(fecha) fijo.
+export const rrhhMin = (r: ResumenRow, tope?: number): number =>
+  Math.min(netMin(r), tope ?? topeMin(r.fecha));
 
 // Estados que NO cuentan como ausencia (ajustá esta lista si querés incluir
 // "Ausente" como injustificada en el % de ausentismo).
-export const ESTADOS_NO_AUSENCIA = ["Normal", "Ausente", "Revisar"];
+export const ESTADOS_NO_AUSENCIA = [
+  "Normal",
+  "Ausente",
+  "Revisar",
+  "Gira comercial",
+  "Dia Expo",
+];
 
 export type ParArea = { name: string; value: number };
 
@@ -69,7 +145,10 @@ export type Indicadores = {
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const dep = (r: ResumenRow) => (r.departamento ?? "").trim() || "Sin área";
 
-export function computeIndicadores(rows: ResumenRow[]): Indicadores {
+export function computeIndicadores(
+  rows: ResumenRow[],
+  resolveTope?: (r: ResumenRow) => number,
+): Indicadores {
   let totalMin = 0;
   let extrasMin = 0;
   let inactMin = 0;
@@ -82,7 +161,7 @@ export function computeIndicadores(rows: ResumenRow[]): Indicadores {
   const personas = new Set<string>();
 
   for (const r of rows) {
-    const tope = topeMin(r.fecha);
+    const tope = resolveTope ? resolveTope(r) : topeMin(r.fecha);
     const net = netMin(r);
     const rrhh = Math.min(net, tope);
     const est = effEstado(r);

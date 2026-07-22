@@ -86,7 +86,7 @@ export const SCHEMAS: Record<string, { titleKey: string; fields: CampoDef[] }> =
       // muestran como info de solo lectura arriba del formulario (ModalTarjeta).
       { k: "inicio", l: "Inicio", t: "date", auto: true },
       { k: "problema", l: "Problema", t: "text" },
-      { k: "sistema", l: "Sistema", t: "select", opciones: ["Magnus", "Prolixus", "WMS", "ecommerce"] },
+      { k: "sistema", l: "Sistema", t: "select", opciones: ["Magnus", "Prolixus", "WMS", "ecommerce", "SITD"] },
       { k: "fin", l: "Fin", t: "date", auto: true },
       {
         k: "origen",
@@ -694,6 +694,17 @@ export default function SistemaClient() {
                                   {card.campos[subtitleField.k]}
                                 </p>
                               )}
+                              {tablero.clave === "softech" && card.campos.jiraUrl && (
+                                <a
+                                  href={card.campos.jiraUrl as string}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-xs text-rose-400 hover:text-rose-300 mt-1 inline-block"
+                                >
+                                  {card.campos.jiraKey} ↗
+                                </a>
+                              )}
                             </div>
                           </Fragment>
                         );
@@ -998,6 +1009,17 @@ function ModalTarjeta({
               {campoFin.l}:{" "}
               {campos.fin ? new Date(campos.fin as string).toLocaleString() : "— (en curso)"}
             </p>
+          )}
+          {modal.clave === "softech" && campos.jiraUrl && (
+            <a
+              href={campos.jiraUrl as string}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-rose-400 hover:text-rose-300 -mt-2 mb-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Ver caso en Softech ({campos.jiraKey}) ↗
+            </a>
           )}
           {modal.tarjeta && historial.length > 0 && (
             <div className="text-[11px] text-zinc-500 -mt-1 mb-1 border-l-2 border-zinc-800 pl-2 flex flex-col gap-0.5">

@@ -29,6 +29,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import {
+  fetchHorarios,
+  buildTopeResolver,
+  type HorarioTipo,
+  type HorarioAsignacion,
+} from "@/lib/rrhh/asistenciaIndicadores";
 
 type Row = {
   employee_no: string;
@@ -107,14 +113,6 @@ const fmtHHMM = (min: number | null) => {
   const h = Math.floor(min / 60),
     m = Math.round(min % 60);
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-};
-
-// Tope diario en minutos: viernes 480, fin de semana 0, resto 540.
-const topeMin = (fecha: string) => {
-  const dow = new Date(`${fecha}T00:00:00`).getDay(); // 0 Dom .. 6 Sab
-  if (dow === 5) return 480;
-  if (dow === 0 || dow === 6) return 0;
-  return 540;
 };
 
 // Estado calculado por defecto (uno de: Normal | Ausente | Revisar)
@@ -410,6 +408,7 @@ const AsistenciaRow = memo(function AsistenciaRow({
   edit,
   desde,
   hasta,
+  resolveTope,
   onPatch,
   onCommit,
 }: {
@@ -417,6 +416,7 @@ const AsistenciaRow = memo(function AsistenciaRow({
   edit: Edit | undefined;
   desde: string;
   hasta: string;
+  resolveTope: (r: Row) => number;
   onPatch: (k: string, p: Edit) => void;
   onCommit: (k: string, kind: "estado" | "novedad", bruto?: number) => void;
 }) {
@@ -425,7 +425,8 @@ const AsistenciaRow = memo(function AsistenciaRow({
   const est = e.estado ?? calcEstado(row);
   const horasNov = parseInt(e.horas || "0", 10) || 0;
   const netMin = Math.max(0, (row.minutos ?? 0) - horasNov * 60);
-  const rrhhMin = Math.min(netMin, topeMin(row.fecha));
+  const tope = resolveTope(row);
+  const rrhhMin = Math.min(netMin, tope);
   return (
     <TableRow>
       <TableCell>
@@ -449,9 +450,7 @@ const AsistenciaRow = memo(function AsistenciaRow({
       >
         {fmtHHMM(netMin)}
       </TableCell>
-      <TableCell
-        title={`Neto ${fmtHHMM(netMin)} · tope ${fmtHHMM(topeMin(row.fecha))}`}
-      >
+      <TableCell title={`Neto ${fmtHHMM(netMin)} · tope ${fmtHHMM(tope)}`}>
         {fmtHHMM(rrhhMin)}
       </TableCell>
       <TableCell>
@@ -500,6 +499,26 @@ export default function AsistenciaPage() {
   const [estado, setEstado] = useState<string>("all");
   const [edits, setEdits] = useState<Record<string, Edit>>({});
   const [area, setArea] = useState<string>("all");
+
+  // Horarios por área (tope diario) — ver /api/rrhh/asistencia/horarios.
+  const [tipos, setTipos] = useState<HorarioTipo[]>([]);
+  const [asignaciones, setAsignaciones] = useState<HorarioAsignacion[]>([]);
+  const [horariosOpen, setHorariosOpen] = useState(false);
+
+  const loadHorarios = useCallback(async () => {
+    const h = await fetchHorarios();
+    setTipos(h.tipos);
+    setAsignaciones(h.asignaciones);
+  }, []);
+
+  useEffect(() => {
+    loadHorarios();
+  }, [loadHorarios]);
+
+  const resolveTope = useMemo(
+    () => buildTopeResolver(tipos, asignaciones),
+    [tipos, asignaciones],
+  );
 
   // Ref para leer ediciones actuales dentro de onBlur sin closures stale.
   const editsRef = useRef(edits);
@@ -665,6 +684,13 @@ export default function AsistenciaPage() {
           <p className="text-sm text-muted-foreground mt-1">
             Empleados activos · estado calculado y editable · novedades por día.
           </p>
+          <button
+            type="button"
+            onClick={() => setHorariosOpen((o) => !o)}
+            className="mt-2 text-xs text-primary hover:underline"
+          >
+            {horariosOpen ? "Ocultar horarios" : "Configurar horarios por área"}
+          </button>
         </div>
         {empleadosPorArea.length > 0 && (
           <div className="flex flex-col items-center gap-2 rounded-[2rem] border px-6 py-3">
@@ -688,6 +714,15 @@ export default function AsistenciaPage() {
           </div>
         )}
       </header>
+
+      {horariosOpen && (
+        <HorariosPanel
+          tipos={tipos}
+          asignaciones={asignaciones}
+          areas={areas}
+          onReload={loadHorarios}
+        />
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
         <Input
@@ -769,12 +804,253 @@ export default function AsistenciaPage() {
                 edit={edits[`${r.employee_no}|${r.fecha}`]}
                 desde={desde}
                 hasta={hasta}
+                resolveTope={resolveTope}
                 onPatch={patch}
                 onCommit={commit}
               />
             ))}
           </TableBody>
         </Table>
+      </div>
+    </div>
+  );
+}
+
+// Panel de administración: editar los topes (minutos esperados por día de
+// semana) de cada horario_tipo, y asignar cada área a un tipo. Un área sin
+// asignación usa "Estándar (Lun-Vie)" por defecto (ver buildTopeResolver).
+function HorariosPanel({
+  tipos,
+  asignaciones,
+  areas,
+  onReload,
+}: {
+  tipos: HorarioTipo[];
+  asignaciones: HorarioAsignacion[];
+  areas: string[];
+  onReload: () => Promise<void>;
+}) {
+  const [saving, setSaving] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Record<number, HorarioTipo>>({});
+  const [nuevo, setNuevo] = useState({
+    nombre: "",
+    tope_lun: "540",
+    tope_mar: "540",
+    tope_mie: "540",
+    tope_jue: "540",
+    tope_vie: "480",
+    tope_sab: "0",
+    tope_dom: "0",
+  });
+
+  const DIAS: { key: keyof HorarioTipo; label: string }[] = [
+    { key: "tope_lun", label: "Lun" },
+    { key: "tope_mar", label: "Mar" },
+    { key: "tope_mie", label: "Mié" },
+    { key: "tope_jue", label: "Jue" },
+    { key: "tope_vie", label: "Vie" },
+    { key: "tope_sab", label: "Sáb" },
+    { key: "tope_dom", label: "Dom" },
+  ];
+
+  const valOf = (t: HorarioTipo, key: keyof HorarioTipo) =>
+    draft[t.id]?.[key] ?? t[key];
+
+  const setVal = (t: HorarioTipo, key: keyof HorarioTipo, v: string) => {
+    const n = parseInt(v, 10) || 0;
+    setDraft((prev) => ({
+      ...prev,
+      [t.id]: { ...(prev[t.id] ?? t), [key]: n },
+    }));
+  };
+
+  const guardarTipo = async (t: HorarioTipo) => {
+    setSaving(`tipo-${t.id}`);
+    try {
+      const d = draft[t.id] ?? t;
+      await fetch("/api/rrhh/asistencia/horarios", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "tipo", id: t.id, ...d }),
+      });
+      await onReload();
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const crearTipo = async () => {
+    if (!nuevo.nombre.trim()) return;
+    setSaving("nuevo");
+    try {
+      await fetch("/api/rrhh/asistencia/horarios", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "tipo",
+          nombre: nuevo.nombre,
+          tope_lun: parseInt(nuevo.tope_lun, 10) || 0,
+          tope_mar: parseInt(nuevo.tope_mar, 10) || 0,
+          tope_mie: parseInt(nuevo.tope_mie, 10) || 0,
+          tope_jue: parseInt(nuevo.tope_jue, 10) || 0,
+          tope_vie: parseInt(nuevo.tope_vie, 10) || 0,
+          tope_sab: parseInt(nuevo.tope_sab, 10) || 0,
+          tope_dom: parseInt(nuevo.tope_dom, 10) || 0,
+        }),
+      });
+      setNuevo({
+        nombre: "",
+        tope_lun: "540",
+        tope_mar: "540",
+        tope_mie: "540",
+        tope_jue: "540",
+        tope_vie: "480",
+        tope_sab: "0",
+        tope_dom: "0",
+      });
+      await onReload();
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const asignarArea = async (departamento: string, horario_tipo_id: string) => {
+    setSaving(`area-${departamento}`);
+    try {
+      await fetch("/api/rrhh/asistencia/horarios", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "asignacion",
+          departamento,
+          horario_tipo_id: horario_tipo_id ? Number(horario_tipo_id) : null,
+        }),
+      });
+      await onReload();
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const asignacionDe = (a: string) =>
+    asignaciones.find((x) => x.departamento === a)?.horario_tipo_id ?? "";
+
+  return (
+    <div className="mb-6 rounded-md border p-4 space-y-6">
+      <div>
+        <h2 className="text-sm font-medium mb-2">
+          Tipos de horario (minutos esperados por día)
+        </h2>
+        <div className="space-y-2">
+          {tipos.map((t) => (
+            <div
+              key={t.id}
+              className="flex flex-wrap items-center gap-2 rounded border p-2"
+            >
+              <span className="w-40 text-sm font-medium">{t.nombre}</span>
+              {DIAS.map((d) => (
+                <div key={d.key} className="flex flex-col items-center">
+                  <label className="text-[10px] text-muted-foreground">
+                    {d.label}
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={valOf(t, d.key)}
+                    onChange={(e) => setVal(t, d.key, e.target.value)}
+                    className="h-8 w-16"
+                  />
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => guardarTipo(t)}
+                disabled={saving === `tipo-${t.id}`}
+                className="ml-auto rounded-md border bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                {saving === `tipo-${t.id}` ? "Guardando…" : "Guardar"}
+              </button>
+            </div>
+          ))}
+          {tipos.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              Sin tipos de horario cargados todavía (falta correr el SQL en la
+              base). Mientras tanto se usa el tope fijo de siempre.
+            </p>
+          )}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-end gap-2 rounded border border-dashed p-2">
+          <div className="flex flex-col">
+            <label className="text-[10px] text-muted-foreground">
+              Nuevo tipo
+            </label>
+            <Input
+              placeholder="Nombre"
+              value={nuevo.nombre}
+              onChange={(e) => setNuevo((p) => ({ ...p, nombre: e.target.value }))}
+              className="h-8 w-40"
+            />
+          </div>
+          {DIAS.map((d) => (
+            <div key={d.key} className="flex flex-col items-center">
+              <label className="text-[10px] text-muted-foreground">
+                {d.label}
+              </label>
+              <Input
+                type="number"
+                min={0}
+                value={(nuevo as any)[d.key]}
+                onChange={(e) =>
+                  setNuevo((p) => ({ ...p, [d.key]: e.target.value }))
+                }
+                className="h-8 w-16"
+              />
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={crearTipo}
+            disabled={saving === "nuevo" || !nuevo.nombre.trim()}
+            className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-accent disabled:opacity-50"
+          >
+            {saving === "nuevo" ? "Creando…" : "+ Agregar tipo"}
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-medium mb-2">Área → tipo de horario</h2>
+        {areas.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No hay áreas para mostrar todavía (cargá datos en el rango de
+            fechas de la tabla).
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {areas.map((a) => (
+              <div
+                key={a}
+                className="flex items-center gap-2 rounded border p-2"
+              >
+                <span className="text-sm">{a}</span>
+                <select
+                  className="h-8 rounded-md border bg-background px-2 text-sm"
+                  value={String(asignacionDe(a))}
+                  disabled={saving === `area-${a}`}
+                  onChange={(e) => asignarArea(a, e.target.value)}
+                >
+                  <option value="">Estándar (por defecto)</option>
+                  {tipos.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
