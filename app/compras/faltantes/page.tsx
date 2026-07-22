@@ -495,7 +495,7 @@ export default function ComprasFaltantesPage() {
   const [error, setError] = useState<string | null>(null);
   const [ocWarn, setOcWarn] = useState(false);
   const [ocDesde, setOcDesde] = useState<string | null>(null);
-  const [origen, setOrigen] = useState<Origen>("todos"); // filtro por origen del proveedor (importacion)
+  const [origen, setOrigen] = useState<Origen>("importados"); // filtro por origen del proveedor (importacion) — default Importados, se intercala con el botón
   const [cerrados, setCerrados] = useState<Record<string, boolean>>({}); // acordeones colapsados
   const [flipped, setFlipped] = useState(false); // girar la tarjeta → ver extraordinarios
   const [leaving, setLeaving] = useState<Record<string, "left" | "right">>({}); // filas saliendo (animación)
