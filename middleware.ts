@@ -78,6 +78,8 @@ function esRutaPublica(pathname: string, method: string): boolean {
   // /api/picking/estado arriba (proceso en background, sin cookie de sesion
   // de navegador). Alcance minimo: solo estas rutas exactas.
   if (method === "GET" && /^\/api\/deposito\/pedido\/\d+$/.test(pathname)) return true;
+  // Selector de Artículos del pedido (2026-07-21/22, ambos widgets): mismo caso, solo lectura.
+  if (method === "GET" && /^\/api\/deposito\/pedido\/\d+\/articulos$/.test(pathname)) return true;
   if (method === "GET" && pathname === "/api/deposito/errores-mesa/opciones") return true;
   // Pantalla inicial (N° Operario) del widget rediseñado 2026-07-15.
   if (method === "GET" && pathname === "/api/deposito/errores-mesa/operario") return true;
