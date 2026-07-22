@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck, CalendarRange, Check,
-  ChevronDown, ChevronRight, Flag, RotateCw, ShoppingCart, Undo2, CalendarCheck,
+  ChevronDown, Flag, RotateCw, ShoppingCart, Undo2, CalendarCheck,
   Download, Trash2, X, Globe,
 } from "lucide-react";
 import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
@@ -46,7 +46,7 @@ import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
 type Estado = "completo" | "incompleto" | "sin_orden" | "entregado";
 type Filtro = "todos" | Estado;
 // Origen del proveedor (r.importacion): cicla Todos → Importados → Nacionales.
-type Origen = "todos" | "importados" | "nacionales";
+type Origen = "importados" | "nacionales";
 
 interface Row {
   CodArticulo: string;
@@ -495,8 +495,7 @@ export default function ComprasFaltantesPage() {
   const [error, setError] = useState<string | null>(null);
   const [ocWarn, setOcWarn] = useState(false);
   const [ocDesde, setOcDesde] = useState<string | null>(null);
-  const [origen, setOrigen] = useState<Origen>("importados"); // filtro por origen del proveedor (importacion) — default Importados, se intercala con el botón
-  const [cerrados, setCerrados] = useState<Record<string, boolean>>({}); // acordeones colapsados
+  const [origen, setOrigen] = useState<Origen>("nacionales"); // filtro por origen del proveedor (importacion) — default Nacionales, se intercala con el botón
   const [flipped, setFlipped] = useState(false); // girar la tarjeta → ver extraordinarios
   const [leaving, setLeaving] = useState<Record<string, "left" | "right">>({}); // filas saliendo (animación)
 
@@ -641,17 +640,13 @@ export default function ComprasFaltantesPage() {
     }, EXIT_MS);
   }, []);
 
-  // Cicla el filtro de origen: Todos → Importados → Nacionales → Todos.
+  // Alterna el filtro de origen: Importados ↔ Nacionales.
   const ciclarOrigen = useCallback(() => {
-    setOrigen((o) => (o === "todos" ? "importados" : o === "importados" ? "nacionales" : "todos"));
+    setOrigen((o) => (o === "importados" ? "nacionales" : "importados"));
   }, []);
-  // "todos" no filtra (se ve de todo, incluida Fábrica); "importados"/
-  // "nacionales" excluyen Fábrica (EVER WEAR S.A. INDUSTRIAL no es ni uno ni
-  // otro — ver origenDe).
-  const pasaOrigen = useCallback(
-    (r: Row) => origen === "todos" || origenDe(r) === origen,
-    [origen],
-  );
+  // "importados"/"nacionales" excluyen Fábrica (EVER WEAR S.A. INDUSTRIAL no
+  // es ni uno ni otro — ver origenDe).
+  const pasaOrigen = useCallback((r: Row) => origenDe(r) === origen, [origen]);
 
   // Tabla principal: nunca muestra lo marcado extraordinario.
   const frontRows = useMemo(() => rows.filter((r) => !r.extraordinario), [rows]);
@@ -690,8 +685,8 @@ export default function ComprasFaltantesPage() {
   // los chips Todos/Cubiertos/Parciales/Sin OC reflejan Importados/Nacionales
   // cuando ese filtro está activo.
   const porArticuloOrigen = useMemo(
-    () => (origen === "todos" ? porArticulo : porArticulo.filter(pasaOrigen)),
-    [porArticulo, origen, pasaOrigen],
+    () => porArticulo.filter(pasaOrigen),
+    [porArticulo, pasaOrigen],
   );
 
   const conteo = useMemo(() => {
@@ -800,7 +795,8 @@ export default function ComprasFaltantesPage() {
         <div className="fixed bottom-6 right-6 z-[110] flex flex-col gap-2">
           {loading && (
             <div className="flex items-center gap-3 bg-[#1A1A1A] border border-yellow-400/40 rounded-xl px-5 py-3 text-sm text-zinc-200">
-              <Loader2 size={16} className="animate-spin text-yellow-400" /> Consultando la base…
+              <Loader2 size={16} className="animate-spin text-yellow-400" />{" "}
+              Consultando la base…
             </div>
           )}
           {error && (
@@ -814,7 +810,8 @@ export default function ComprasFaltantesPage() {
       <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 flex items-center justify-between px-4 md:px-8 h-16 gap-4">
         <div className="flex items-center gap-4 min-w-0">
           <span className="font-bold text-yellow-400 text-xl md:text-2xl tracking-wide uppercase whitespace-nowrap">
-            EVER WEAR <span className="text-sm tracking-[3px] font-normal">S.A.</span>
+            EVER WEAR{" "}
+            <span className="text-sm tracking-[3px] font-normal">S.A.</span>
           </span>
           <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
           <span className="hidden md:inline text-zinc-500 text-sm">
@@ -888,17 +885,15 @@ export default function ComprasFaltantesPage() {
 
           <button
             onClick={ciclarOrigen}
-            title="Filtra por origen del proveedor — click para rotar: Todos → Importados → Nacionales"
+            title="Filtra por origen del proveedor — click para alternar: Importados / Nacionales"
             className={`chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium ${
               origen === "importados"
                 ? "bg-amber-500/15 border-amber-400 text-amber-300"
-                : origen === "nacionales"
-                  ? "bg-sky-500/15 border-sky-400 text-sky-300"
-                  : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+                : "bg-sky-500/15 border-sky-400 text-sky-300"
             }`}
           >
             <Globe size={14} />
-            {origen === "todos" ? "Todos los orígenes" : origen === "importados" ? "Importados" : "Nacionales"}
+            {origen === "importados" ? "Importados" : "Nacionales"}
           </button>
 
           <button
@@ -946,7 +941,9 @@ export default function ComprasFaltantesPage() {
               "completo" tampoco puede aparecer: un artículo cubierto de verdad
               (OC+stock reales) ya no tiene faltante y el backend lo excluye de
               la respuesta (ver faltantes-consumo/route.ts, punto 4b). */}
-          {FILTROS.filter((f) => f.key !== "entregado" && f.key !== "completo").map((f) => (
+          {FILTROS.filter(
+            (f) => f.key !== "entregado" && f.key !== "completo",
+          ).map((f) => (
             <button
               key={f.key}
               onClick={() => setFiltro(f.key)}
@@ -968,7 +965,8 @@ export default function ComprasFaltantesPage() {
           ))}
           {ocWarn && (
             <span className="flex items-center gap-1.5 text-xs text-amber-400/80 ml-1">
-              <AlertTriangle size={13} /> OC no disponible — todo figura sin orden
+              <AlertTriangle size={13} /> OC no disponible — todo figura sin
+              orden
             </span>
           )}
         </div>
@@ -989,7 +987,10 @@ export default function ComprasFaltantesPage() {
               {!hay ? (
                 <div className="flex flex-col items-center justify-center py-28 gap-3 text-center">
                   {loading ? (
-                    <Loader2 size={40} className="text-yellow-400 animate-spin" />
+                    <Loader2
+                      size={40}
+                      className="text-yellow-400 animate-spin"
+                    />
                   ) : (
                     <PackageCheck size={44} className="text-zinc-700" />
                   )}
@@ -1001,42 +1002,38 @@ export default function ComprasFaltantesPage() {
                 </div>
               ) : (
                 <div className="flex flex-col gap-3">
-                  {grupos.map(({ prov, rs, importe }) => {
-                    const abierto = !cerrados[prov];
-                    return (
-                      <div key={prov} className="rounded-xl border border-zinc-800 overflow-hidden">
-                        <button
-                          onClick={() => setCerrados((c) => ({ ...c, [prov]: abierto }))}
-                          className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-[#1A1A1A] hover:bg-[#202020] transition-colors text-left"
-                        >
-                          <span className="flex items-center gap-2 min-w-0">
-                            {abierto ? (
-                              <ChevronDown size={15} className="text-zinc-500 shrink-0" />
-                            ) : (
-                              <ChevronRight size={15} className="text-zinc-500 shrink-0" />
-                            )}
-                            <span className="font-medium text-zinc-100 truncate">{prov}</span>
-                            <span className="text-[11px] text-zinc-500 shrink-0">{rs.length} reng.</span>
+                  {grupos.map(({ prov, rs, importe }) => (
+                    <div
+                      key={prov}
+                      className="rounded-xl border border-zinc-800 overflow-hidden"
+                    >
+                      {/* Siempre expandido — sin toggle de colapsar (se mantiene abierto al recargar). */}
+                      <div className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-[#1A1A1A] text-left">
+                        <span className="flex items-center gap-2 min-w-0">
+                          <ChevronDown size={15} className="text-zinc-500 shrink-0" />
+                          <span className="font-medium text-zinc-100 truncate">
+                            {prov}
                           </span>
-                          <span className="text-sm tabular-nums text-zinc-300 shrink-0">
-                            ${fmtNum(importe)}
+                          <span className="text-[11px] text-zinc-500 shrink-0">
+                            {rs.length} reng.
                           </span>
-                        </button>
-                        {abierto && (
-                          <div className="border-t border-zinc-800">
-                            <Tabla
-                              data={rs}
-                              onMark={marcarExtraordinario}
-                              onArribo={guardarArribo}
-                              onDescartar={descartarFaltante}
-                              leaving={leaving}
-                              ocultarProveedor
-                            />
-                          </div>
-                        )}
+                        </span>
+                        <span className="text-sm tabular-nums text-zinc-300 shrink-0">
+                          ${fmtNum(importe)}
+                        </span>
                       </div>
-                    );
-                  })}
+                      <div className="border-t border-zinc-800">
+                        <Tabla
+                          data={rs}
+                          onMark={marcarExtraordinario}
+                          onArribo={guardarArribo}
+                          onDescartar={descartarFaltante}
+                          leaving={leaving}
+                          ocultarProveedor
+                        />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
