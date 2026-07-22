@@ -109,8 +109,14 @@ export async function GET(req: NextRequest) {
         ev.check_out,
         COALESCE(ev.minutos, 0) AS minutos,
         COALESCE(ev.eventos_dia, 0) AS eventos_dia,
-        ed.estado AS estado,
-        ed.dias   AS dias,
+        CASE
+          WHEN ed.dias IS NOT NULL AND ed.dias <= 0 THEN NULL
+          ELSE COALESCE(ed.estado, c.c_estado)
+        END AS estado,
+        CASE
+          WHEN ed.dias IS NOT NULL AND ed.dias <= 0 THEN NULL
+          ELSE COALESCE(ed.dias, c.c_dias)
+        END AS dias,
         nd.novedad   AS novedad,
         nd.horas     AS horas,
         nd.novedades AS novedades
@@ -119,6 +125,21 @@ export async function GET(req: NextRequest) {
       LEFT JOIN ev ON ev.emp_key = a.emp_key AND ev.fecha = d.fecha
       LEFT JOIN asistencia.estado_diario ed
         ON ed.employee_no = a.employee_no AND ed.fecha = d.fecha
+      -- Arrastre de días: si no hay registro explícito para esta fecha, busca el
+      -- origen (estado + días) explícito más reciente cuya ventana [fecha, fecha+dias-1]
+      -- cubra el día actual, y calcula los días restantes (cuenta regresiva).
+      LEFT JOIN LATERAL (
+        SELECT ed2.estado AS c_estado,
+               ed2.dias - (d.fecha - ed2.fecha) AS c_dias
+        FROM asistencia.estado_diario ed2
+        WHERE ed.estado IS NULL
+          AND ed2.employee_no = a.employee_no
+          AND ed2.dias IS NOT NULL
+          AND ed2.fecha < d.fecha
+          AND ed2.fecha + (ed2.dias - 1) >= d.fecha
+        ORDER BY ed2.fecha DESC
+        LIMIT 1
+      ) c ON true
       LEFT JOIN asistencia.novedad_diaria nd
         ON nd.employee_no = a.employee_no AND nd.fecha = d.fecha
       ORDER BY a.employee_name NULLS LAST, d.fecha

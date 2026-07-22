@@ -23,8 +23,10 @@ const OC_DESDE = "2026-06-26";
 //       código de artículo — no se toca esa tabla, solo se consulta)
 //     · indicadores-api /compras/ordenes-pendientes (OC "por llegar" de Magnus:
 //       si el artículo tiene OC pendiente NO importación con FechaEntrega, esa
-//       fecha vale como arribo AUTOMÁTICO; la carga manual en /compras/faltantes
-//       — faltante_control — la PISA cuando compras conoce la fecha real)
+//       fecha vale como arribo AUTOMÁTICO; si NO hay FechaEntrega confiable
+//       (Importacion=true), se estima como FechaOC (fecha de la OC) + 2 días;
+//       la carga manual en /compras/faltantes — faltante_control — la PISA
+//       cuando compras conoce la fecha real)
 //
 //   Tabla 1 — regla de entrada: sin existencia + clienteQuiere aún sin
 //   responder + (ya tiene fecha de arribo [manual u OC] O [compras lo marcó
@@ -209,16 +211,25 @@ export async function GET() {
       });
 
     // Arribo automático por OC: artículo → FechaEntrega de la OC pendiente,
-    // salvo importación (sin fecha confiable). Manual (faltante_control) pisa.
+    // salvo importación (sin fecha confiable) — en ese caso se estima como
+    // FechaOC (fecha en que se hizo la orden, FecMovim) + 2 días. Manual
+    // (faltante_control) pisa cualquiera de los dos casos.
     const ocArribo = new Map<string, string>();
     for (const r of (ocJson?.rows ?? []) as {
       CodArticulo?: string;
       FechaEntrega?: string | null;
+      FechaOC?: string | null;
       Importacion?: boolean;
     }[]) {
       const cod = String(r.CodArticulo ?? "").trim();
-      if (cod && r.FechaEntrega && !r.Importacion)
+      if (!cod) continue;
+      if (r.FechaEntrega && !r.Importacion) {
         ocArribo.set(cod, r.FechaEntrega);
+      } else if (r.FechaOC) {
+        const d = new Date(`${r.FechaOC}T00:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + 2);
+        ocArribo.set(cod, d.toISOString().slice(0, 10));
+      }
     }
 
     // Artículos con remito de ingreso x OC ya concretado (Tabla 2, requisito 3).

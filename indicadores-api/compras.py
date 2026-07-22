@@ -144,15 +144,19 @@ def fetch_ordenes_pendientes(desde=None):
             cod = (str(d.get("CodArticu") or "")).strip()
             if not cod:
                 continue
-            # corte por fecha de la orden (FecMovim)
+            # fecha de la orden (FecMovim) — se usa para el corte y también se
+            # expone como FechaOC (más temprana) para que los consumidores
+            # puedan armar un arribo estimado (FechaOC + N días) cuando no hay
+            # FecEntregaPactada confiable (Importacion=True, FechaEntrega=None).
+            fmov = _to_date(d.get("FecMovim"))
             if corte is not None:
-                fmov = _to_date(d.get("FecMovim"))
                 if fmov is None or fmov < corte:
                     continue
             pend = float(_safe(d.get("CantPedida")) or 0) - float(_safe(d.get("CantRecibida")) or 0)
             if pend <= 0:
                 continue
             fecha = _fecha_entrega(d.get("FechaEntrega"))
+            fmov_iso = fmov.isoformat() if fmov else None
             nro = _nro_oc(d.get("CompCentro"), d.get("NroOC"))
             prov = (str(d.get("Proveedor") or "")).strip() or None
 
@@ -163,6 +167,7 @@ def fetch_ordenes_pendientes(desde=None):
                     "PorLlegar": 0.0,
                     "Proveedor": prov,
                     "FechaEntrega": fecha,    # se queda con la más temprana
+                    "FechaOC": fmov_iso,      # fecha de la OC (FecMovim) más temprana
                     "Importacion": False,
                     "NroOCs": [],
                 }
@@ -174,6 +179,8 @@ def fetch_ordenes_pendientes(desde=None):
                 a["Importacion"] = True       # algún renglón sin fecha ⇒ importación
             elif a["FechaEntrega"] is None or fecha < a["FechaEntrega"]:
                 a["FechaEntrega"] = fecha
+            if fmov_iso and (a["FechaOC"] is None or fmov_iso < a["FechaOC"]):
+                a["FechaOC"] = fmov_iso
             if nro and nro not in a["NroOCs"]:
                 a["NroOCs"].append(nro)
 
