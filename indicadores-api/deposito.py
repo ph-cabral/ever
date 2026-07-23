@@ -259,8 +259,13 @@ def fetch_ingresados(desde, hasta):
 # Si el día pedido es HOY, no se devuelven horas futuras a la hora actual
 # (ver `hora_limite` en fetch_pedidos_hora) — evita graficar como si ya
 # hubiesen transcurrido.
-# Mismos códigos de comprobante que /deposito/pedidos (CODIGOS_COMPROBANTE_WMS)
-# y mismo criterio de "cancelado" que el resto del archivo (PATRONES_CANCELADO).
+# OJO: este backlog es TODO Magnus, no solo lo ligado a WMS. Antes filtraba por
+# CODIGOS_COMPROBANTE_WMS (10,70,100,210,310 = whitelist mayorista, pensada para
+# matchear OT contra pedido en fetch_wms) y eso subcontaba el real "Abiertos"
+# (ej. 2 en vez de ~39): la mayoría de los pedidos abiertos no son mayoristas.
+# Usa el mismo blacklist que main.py::SQL_QUERY para "todos los pedidos reales"
+# (excluye solo comprobantes administrativos/no-pedido) — ver COMP_CODIGOS_EXCLUIDOS_HORA.
+# Mismo criterio de "cancelado" que el resto del archivo (PATRONES_CANCELADO).
 # Fecha/hora nativas de Magnus: FechaXXX = días desde 1800-12-28, HoraXXX = HHMM
 # (mismo esquema que EVERWEAR.dbo.VenFer_PedidoCabecera usado en
 # indicadores-api/main.py::SQL_QUERY / cargar_df, ya probado en producción).
@@ -270,6 +275,9 @@ PEDIDOS_HORA_VENTANA_DIAS = 60
 PEDIDOS_HORA_DESDE = 8
 PEDIDOS_HORA_HASTA = 18  # el último bucket es 17h→18h
 
+# Mismo blacklist que main.py::SQL_QUERY (comprobantes no-pedido reales).
+COMP_CODIGOS_EXCLUIDOS_HORA: tuple[int, ...] = (9, 49, 208, 410)
+
 SQL_PEDIDOS_HORA = """
 SELECT
     p.NroMovVenta,
@@ -278,7 +286,7 @@ SELECT
     e.Ped_EstadoDescripcion AS Estado_Desc
 FROM EVERWEAR.dbo.VenFer_PedidoCabecera p
 LEFT JOIN MAGNUS_SITD.dbo.Pedido_Estados e ON p.EstadoPedido = e.Ped_Estado
-WHERE p.CompCodigo IN ({codigos})
+WHERE p.CompCodigo NOT IN ({codigos})
   AND p.FechaPedido BETWEEN ? AND ?
 """
 
@@ -323,7 +331,7 @@ def fetch_pedidos_hora(fecha: date | None = None):
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd;")
         cur.execute(
-            SQL_PEDIDOS_HORA.format(codigos=",".join(map(str, CODIGOS_COMPROBANTE_WMS))),
+            SQL_PEDIDOS_HORA.format(codigos=",".join(map(str, COMP_CODIGOS_EXCLUIDOS_HORA))),
             (dias_desde, dias_dia),
         )
         filas = cur.fetchall()
