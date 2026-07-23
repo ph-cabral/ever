@@ -59,9 +59,10 @@ interface WmsData {
 // Pedidos por hora (8-18h) — vista en vivo de HOY, fuente Magnus.
 interface HoraRow {
   hora: string;
-  ingresados: number;
-  cerrados: number;
-  abiertos: number | null; // null = todavía no hay foto real ese bucket
+  ingresados: number | null; // null = bucket futuro (todavía no arrancó)
+  cerrados: number | null; // cerrados en Magnus
+  cumplidos: number | null; // OT Picking cumplidas en el WMS (OTEstado=2)
+  abiertos: number | null; // null = bucket futuro / sin foto ni reconstrucción
 }
 interface PedidosHoraData {
   fecha: string;
@@ -370,14 +371,14 @@ export default function DepositoWmsPage() {
       )}
 
       <main className="max-w-[1500px] mx-auto px-4 md:px-8 py-6">
-        {/* Pedidos por hora (8-18h), fuente Magnus — sigue el filtro desde/hasta de arriba */}
+        {/* Gráfico 1: Cumplidos (WMS) vs Abiertos (disponibles) — sigue el filtro desde/hasta de arriba */}
         <div className="mb-6">
           <div className="flex items-center gap-3 mb-3">
             <Clock size={16} className="text-yellow-400" />
             <span className="text-[13px] font-semibold text-zinc-100">
-              Pedidos por hora — {horaEsHoy ? "hoy" : fmtAr(horaData?.fecha ?? null)} (8 a 18h)
+              Cumplidos vs Abiertos por hora — {horaEsHoy ? "hoy" : fmtAr(horaData?.fecha ?? null)} (8 a 18h)
             </span>
-            <span className="text-zinc-600 text-[12px]">Fuente: Magnus</span>
+            <span className="text-zinc-600 text-[12px]">Fuente: WMS + Magnus</span>
             <span className="flex-1 h-px bg-zinc-800" />
           </div>
           <div className="rounded-xl border border-zinc-800 bg-[#171717] p-3">
@@ -393,20 +394,58 @@ export default function DepositoWmsPage() {
                 angle={-60}
                 bars={[{ key: "ingresados", name: "Ingresados", color: C.brand }]}
                 lines={[
-                  { key: "abiertos", name: "Abiertos", color: "#58a6ff" },
-                  { key: "cerrados", name: "Cerrados", color: C.green },
+                  { key: "cumplidos", name: "Cumplidos (WMS)", color: C.green },
+                  { key: "abiertos", name: "Abiertos (disponibles)", color: "#58a6ff" },
                 ]}
               />
             )}
           </div>
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
-            Ingresados/Cerrados = pedidos registrados/cerrados en ese bloque de 15
-            min (reconstruido). Abiertos = foto real tomada cada 15 min cuando ya
-            existe; los tramos sin foto todavía se rellenan con el backlog
-            reconstruido (registrados − cerrados a esa hora), así se ve la
-            fluctuación completa del día.{" "}
+            Cumplidos = OT de picking marcadas Cumplido en el WMS en ese bloque de
+            15 min (cuántos pedidos se cumplieron). Abiertos = pedidos disponibles
+            en Magnus a esa hora (foto real cada 15 min cuando ya existe; el resto
+            reconstruido, registrados − cerrados). Ingresados = pedidos registrados
+            en el bloque.{" "}
             {horaEsHoy
-              ? "Vista en vivo de hoy hasta el momento actual, se actualiza cada 60s."
+              ? "Eje 8-18h completo; las líneas se van trazando hasta la hora actual, se actualiza cada 60s."
+              : "Día completo (ya cerrado)."}
+          </p>
+        </div>
+
+        {/* Gráfico 2: Cumplidos (WMS) vs Cerrados (Magnus) — misma vista, comparación */}
+        <div className="mb-6">
+          <div className="flex items-center gap-3 mb-3">
+            <Clock size={16} className="text-yellow-400" />
+            <span className="text-[13px] font-semibold text-zinc-100">
+              Cumplidos (WMS) vs Cerrados (Magnus) por hora — {horaEsHoy ? "hoy" : fmtAr(horaData?.fecha ?? null)} (8 a 18h)
+            </span>
+            <span className="text-zinc-600 text-[12px]">Fuente: WMS + Magnus</span>
+            <span className="flex-1 h-px bg-zinc-800" />
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-[#171717] p-3">
+            {horaError && !horaData ? (
+              <div className="flex items-center gap-2 py-10 justify-center text-red-300 text-sm">
+                <AlertTriangle size={15} /> {horaError}
+              </div>
+            ) : (
+              <ChartComboBarLine
+                data={horaData?.rows ?? []}
+                xKey="hora"
+                height={220}
+                angle={-60}
+                bars={[{ key: "ingresados", name: "Ingresados", color: C.brand }]}
+                lines={[
+                  { key: "cumplidos", name: "Cumplidos (WMS)", color: C.green },
+                  { key: "cerrados", name: "Cerrados (Magnus)", color: "#f0883e" },
+                ]}
+              />
+            )}
+          </div>
+          <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
+            Compara cuántos pedidos se cumplieron en el WMS (picking terminado)
+            contra cuántos se cerraron en Magnus, en cada bloque de 15 min.{" "}
+            {horaEsHoy
+              ? "Eje 8-18h completo; las líneas se van trazando hasta la hora actual."
               : "Día completo (ya cerrado)."}
           </p>
         </div>

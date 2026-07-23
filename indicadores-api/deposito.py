@@ -389,17 +389,58 @@ def _fotos_abiertos_del_dia(dia: date) -> list[tuple[datetime, int]]:
         conn.close()
 
 
-def fetch_pedidos_hora(fecha: date | None = None):
-    """Vista de un día en buckets de PEDIDOS_HORA_PASO_MIN (8-18h): Ingresados/
-    Cerrados reconstruidos desde EVERWEAR.dbo.VenFer_PedidoCabecera (igual que
-    antes); Abiertos = ÚLTIMA foto real (Postgres) tomada hasta el cierre de
-    cada bucket (carry-forward); para los buckets que todavía no tienen foto
-    real se rellena con el backlog reconstruido (registrados − cerrados a esa
-    hora), así la curva de fluctuación se ve completa desde las 8h.
+# Cumplidos por hora = OT de Picking marcadas Cumplido (OTEstado=2), fechadas por
+# OTFechaHoraEjecucion (mismo campo/criterio que fetch_faltantes_ot y la
+# productividad). 1 OT de Picking = 1 pedido. Se traen los timestamps del día y se
+# bucketean en Python (volumen chico, ~decenas/día).
+SQL_CUMPLIDOS_HORA = """
+SELECT OT.OTFechaHoraEjecucion
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+WHERE Codot.CodotProcesoNegocio = 4          -- Picking (pedidos)
+  AND OT.OTEstado = 2                         -- Cumplido
+  AND OT.OTFechaHoraEjecucion >= ?
+  AND OT.OTFechaHoraEjecucion <  ?
+"""
 
-    Sin `fecha` (o `fecha` = hoy) → vista EN VIVO: no devuelve buckets futuros
-    al momento actual. Con `fecha` de un día anterior → día ya cerrado, se
-    devuelve el 8-18h completo."""
+
+def _cumplidos_wms_del_dia(dia: date) -> list[datetime]:
+    """Timestamps (OTFechaHoraEjecucion) de las OT de Picking Cumplido ejecutadas
+    ese día, para bucketear 'cumplidos cada 15 min'. Lista vacía si el WMS no
+    contesta (no rompe el gráfico: Ingresados/Cerrados/Abiertos siguen)."""
+    ini = datetime(dia.year, dia.month, dia.day)
+    fin = ini + timedelta(days=1)
+    try:
+        conn = get_connection("WMS")
+    except Exception as e:  # noqa: BLE001 — WMS caído no debe tumbar el gráfico
+        print(f"[cumplidos-hora] WMS no disponible: {e}")
+        return []
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_CUMPLIDOS_HORA, (ini, fin))
+        return [r[0] for r in cur.fetchall() if r[0] is not None]
+    finally:
+        conn.close()
+
+
+def fetch_pedidos_hora(fecha: date | None = None):
+    """Vista de un día en buckets de PEDIDOS_HORA_PASO_MIN (8-18h). Campos por
+    bucket:
+      · Ingresados = pedidos registrados en el bucket (Magnus Cabecera).
+      · Cerrados   = pedidos que pasaron a cerrado en el bucket (Magnus Cabecera).
+      · Cumplidos  = OT de Picking marcadas Cumplido (WMS, OTEstado=2) por su
+                     OTFechaHoraEjecucion — cuántos pedidos se cumplieron en el
+                     bucket.
+      · Abiertos   = ÚLTIMA foto real (Postgres) tomada hasta el cierre del
+                     bucket (carry-forward); si todavía no hay foto se rellena
+                     con el backlog reconstruido (registrados − cerrados a esa
+                     hora), así la curva se ve completa desde las 8h.
+
+    El eje 8-18h se devuelve SIEMPRE completo. Para el día de hoy los buckets que
+    todavía no empezaron vienen en None (las líneas se van trazando hacia
+    adelante a medida que pasa el tiempo). Con `fecha` de un día anterior → día
+    ya cerrado, todos los buckets con dato."""
     dia = fecha or date.today()
     es_hoy = dia == date.today()
     dias_dia = (dia - _BASE_PEDIDO).days
@@ -428,35 +469,45 @@ def fetch_pedidos_hora(fecha: date | None = None):
         regs.append((ts_reg, ts_cie))
 
     fotos = _fotos_abiertos_del_dia(dia)
+    cumpl_ts = _cumplidos_wms_del_dia(dia)  # OTFechaHoraEjecucion de OT Picking Cumplido
 
     paso = PEDIDOS_HORA_PASO_MIN
     minuto_desde = PEDIDOS_HORA_DESDE * 60
     minuto_hasta = PEDIDOS_HORA_HASTA * 60
-    if es_hoy:
-        # No proyectar buckets que todavía no pasaron: el último visible es el
-        # que está en curso (parcial, se va completando solo).
-        ahora = _ahora_ar()
-        ahora_min = ahora.hour * 60 + ahora.minute
-        minuto_hasta = min(minuto_hasta, ((ahora_min // paso) + 1) * paso)
+    # Eje 8-18h SIEMPRE completo. Para hoy, los buckets que todavía no arrancaron
+    # van en None → las líneas se trazan hacia adelante a medida que pasa el
+    # tiempo, sin dibujar 0 en el futuro.
+    ahora = _ahora_ar() if es_hoy else None
 
     out = []
     idx_foto = 0
     ultima_foto = None
-    for m in range(minuto_desde, max(minuto_desde, minuto_hasta), paso):
+    for m in range(minuto_desde, minuto_hasta, paso):
         h, mi = divmod(m, 60)
         inicio = datetime(dia.year, dia.month, dia.day, h, mi, 0)
         corte = inicio + timedelta(minutes=paso)
-        ingresados = sum(1 for ts_reg, _ in regs if ts_reg.date() == dia and inicio <= ts_reg < corte)
-        cerrados = sum(1 for _, ts_cie in regs if ts_cie and ts_cie.date() == dia and inicio <= ts_cie < corte)
+        # Carry-forward de la foto real (avanza el índice aunque el bucket sea
+        # futuro; el valor solo se usa en buckets ya pasados).
         while idx_foto < len(fotos) and fotos[idx_foto][0] < corte:
             ultima_foto = fotos[idx_foto][1]
             idx_foto += 1
+        if ahora is not None and inicio > ahora:
+            # Bucket futuro (aún no arrancó): sin datos, la línea corta acá.
+            out.append({
+                "hora": f"{h:02d}:{mi:02d}",
+                "ingresados": None,
+                "cerrados": None,
+                "cumplidos": None,
+                "abiertos": None,
+            })
+            continue
+        ingresados = sum(1 for ts_reg, _ in regs if ts_reg.date() == dia and inicio <= ts_reg < corte)
+        cerrados = sum(1 for _, ts_cie in regs if ts_cie and ts_cie.date() == dia and inicio <= ts_cie < corte)
+        cumplidos = sum(1 for ts in cumpl_ts if inicio <= ts < corte)
         # Backlog reconstruido: pedidos registrados antes del corte y todavía no
-        # cerrados a esa hora. Se usa como relleno para los buckets que aún no
-        # tienen foto real (arranque del día / días viejos sin snapshotter). La
-        # foto real (ultima_foto) SIEMPRE tiene prioridad cuando existe, así el
-        # tramo ya fotografiado muestra el número exacto y el resto la curva
-        # aproximada — así se ve la fluctuación completa desde las 8h.
+        # cerrados a esa hora. Relleno para buckets sin foto real (arranque del
+        # día / días viejos sin snapshotter). La foto real (ultima_foto) SIEMPRE
+        # tiene prioridad cuando existe.
         if ultima_foto is not None:
             abiertos = ultima_foto
         else:
@@ -468,6 +519,7 @@ def fetch_pedidos_hora(fecha: date | None = None):
             "hora": f"{h:02d}:{mi:02d}",
             "ingresados": ingresados,
             "cerrados": cerrados,
+            "cumplidos": cumplidos,
             "abiertos": abiertos,
         })
     return out
