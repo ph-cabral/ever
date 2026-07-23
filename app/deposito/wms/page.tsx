@@ -63,8 +63,8 @@ interface HoraRow {
   cerrados: number | null; // cerrados en Magnus
   cumplidos: number | null; // OT Picking cumplidas en el WMS por bucket (flujo)
   abiertos: number | null; // null = bucket futuro / sin foto ni reconstrucción
-  // Desglose de estados del WMS (gráfico 1). espera/proceso/sin_asignar = foto
-  // cada 15 min (null hasta que hay foto ese día); cumplido = acumulado del día.
+  // Gráfico 1: flujo de OT de picking que pasan a cada etapa por bloque de 15 min
+  // (reconstruido desde las marcas de hora de la OT). null = bucket futuro.
   est_espera: number | null;
   est_proceso: number | null;
   est_cumplido: number | null;
@@ -409,12 +409,13 @@ export default function DepositoWmsPage() {
             )}
           </div>
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
-            Barras = pedidos abiertos (disponibles) a esa hora. Líneas = OT de
-            picking del WMS por estado. En espera / En proceso / Sin asignar = foto
-            real tomada cada 15 min (Sin asignar = OT viva sin operario). Cumplido =
-            acumulado del día (cuántas se cumplieron hasta esa hora).{" "}
+            Barras = pedidos abiertos (disponibles) a esa hora. Líneas = cuántas OT
+            de picking PASAN a cada etapa en ese bloque de 15 min (no acumulado),
+            según la hora de la propia OT: En espera = registrada con operario;
+            Sin asignar = registrada sin operario; En proceso = arrancó el picking;
+            Cumplido = terminada.{" "}
             {horaEsHoy
-              ? "Eje 8-18h completo; espera/proceso/sin-asignar recién arrancan cuando hay foto (se van trazando hacia adelante), cumplido se ve desde las 8h. Se actualiza cada 60s."
+              ? "Eje 8-18h completo, historia del día desde las 8h; se actualiza cada 60s."
               : "Día completo (ya cerrado)."}
           </p>
         </div>
