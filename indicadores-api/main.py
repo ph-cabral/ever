@@ -13,6 +13,7 @@ from deposito import (
     fetch_articulo_ubicaciones, fetch_articulos_multi_ubicacion,
     fetch_stock_deposito1, fetch_stock_por_articulos, fetch_stock_export,
     fetch_contenedor,
+    guardar_snapshot_abiertos, PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN,
 )
 from compras import fetch_ordenes_pendientes, fetch_ordenes_articulos_rango
 from ingresos import fetch_remitos_ingreso
@@ -31,6 +32,8 @@ from errores_mesa import (
 )
 from rrhh import fetch_cvs_por_mes
 from datetime import date, datetime, timedelta
+import threading
+import time
 
 app = FastAPI()
 
@@ -40,6 +43,29 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+# ── Snapshot periódico de "Abiertos" (Magnus) para /deposito/pedidos-hora ────
+# A pedido de Pablo 2026-07-23: reconstruir el backlog abierto desde
+# FechaPedido/FechaCierre quedaba plano (no una serie de tiempo real). En vez
+# de reconstruir el pasado, se saca una FOTO real cada
+# PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN minutos y se guarda en Postgres (ver
+# deposito.py::guardar_snapshot_abiertos, tabla deposito.pedidos_abiertos_snapshot
+# — falta correr sql/deposito_pedidos_abiertos_snapshot.sql antes del deploy).
+# uvicorn corre sin --workers (1 solo proceso, ver Dockerfile), así que este
+# thread corre una única vez; si el día de mañana se agregan workers, mover
+# esto a un proceso/cron aparte para no duplicar filas.
+def _loop_snapshot_abiertos():
+    while True:
+        try:
+            guardar_snapshot_abiertos()
+        except Exception as e:
+            print(f"[snapshot abiertos] error: {e}")
+        time.sleep(PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN * 60)
+
+
+@app.on_event("startup")
+def _iniciar_snapshot_abiertos():
+    threading.Thread(target=_loop_snapshot_abiertos, daemon=True).start()
 
 # ── Constantes de filtro ──────────────────────────────────────────────────────
 ESTADOS_VALIDOS = ['Facturados', 'Cerrados']

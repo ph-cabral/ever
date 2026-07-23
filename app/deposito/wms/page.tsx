@@ -61,7 +61,7 @@ interface HoraRow {
   hora: string;
   ingresados: number;
   cerrados: number;
-  abiertos: number;
+  abiertos: number | null; // null = todavía no hay foto real ese bucket
 }
 interface PedidosHoraData {
   fecha: string;
@@ -390,6 +390,7 @@ export default function DepositoWmsPage() {
                 data={horaData?.rows ?? []}
                 xKey="hora"
                 height={220}
+                angle={-60}
                 bars={[{ key: "ingresados", name: "Ingresados", color: C.brand }]}
                 lines={[
                   { key: "abiertos", name: "Abiertos", color: "#58a6ff" },
@@ -399,11 +400,12 @@ export default function DepositoWmsPage() {
             )}
           </div>
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
-            Ingresados = pedidos registrados esa hora. Abiertos = facturas sin cerrar
-            a esa hora (backlog real, incluye pedidos de días previos). Cerrados = de
-            esos, cuántos pasaron a Cerrado/Facturado esa hora.{" "}
+            Ingresados/Cerrados = pedidos registrados/cerrados en ese bloque de 15
+            min (reconstruido). Abiertos = foto real tomada cada 15 min (no un
+            cálculo retroactivo) — muestra huecos si el snapshot recién empezó a
+            correr hoy.{" "}
             {horaEsHoy
-              ? "Vista en vivo de hoy hasta la hora actual, se actualiza cada 60s."
+              ? "Vista en vivo de hoy hasta el momento actual, se actualiza cada 60s."
               : "Día completo (ya cerrado)."}
           </p>
         </div>

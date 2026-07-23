@@ -17,6 +17,7 @@ OJO compatibilidad con lib/deposito/parseDeposito.ts:
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 from db import get_connection
+from db_pg import get_pg_connection
 
 # ── Faltantes por OT (fuente NUEVA de /deposito/faltantes) ────────────────────
 # Columna de la cabecera OT (base WMS) que guarda el N° de pedido de venta de
@@ -247,36 +248,42 @@ def fetch_ingresados(desde, hasta):
 
 
 # ── Pedidos por hora (8 a 18h) — fuente Magnus, día = hoy (en vivo) o filtro ──
-# Ingresados = pedidos registrados esa hora del día pedido (ts_Registro).
+# Ingresados = pedidos registrados en el bucket (ts_Registro, del día pedido).
 # Cerrados   = de los pedidos con actividad reciente (ventana de
 #              PEDIDOS_HORA_VENTANA_DIAS), cuántos pasaron a Cerrado/Facturado
-#              en esa hora del día pedido (ts_Cierre) — incluye pedidos abiertos
-#              en días previos que recién ese día se cerraron.
-# Abiertos   = backlog real: cuántos de esos pedidos (toda la ventana, no solo
-#              los del día pedido) siguen abiertos al final de esa hora
-#              (registrados antes del corte y sin cierre, o con cierre
-#              posterior al corte).
-# Si el día pedido es HOY, no se devuelven horas futuras a la hora actual
-# (ver `hora_limite` en fetch_pedidos_hora) — evita graficar como si ya
-# hubiesen transcurrido.
-# OJO: este backlog es TODO Magnus, no solo lo ligado a WMS. Antes filtraba por
-# CODIGOS_COMPROBANTE_WMS (10,70,100,210,310 = whitelist mayorista, pensada para
-# matchear OT contra pedido en fetch_wms) y eso subcontaba el real "Abiertos"
-# (ej. 2 en vez de ~39): la mayoría de los pedidos abiertos no son mayoristas.
-# Usa el mismo blacklist que main.py::SQL_QUERY para "todos los pedidos reales"
-# (excluye solo comprobantes administrativos/no-pedido) — ver COMP_CODIGOS_EXCLUIDOS_HORA.
+#              en ese bucket (ts_Cierre) — incluye pedidos abiertos en días
+#              previos que recién ahí se cerraron.
+# Si el día pedido es HOY, no se devuelven buckets futuros al momento actual
+# (ver `tope_min` en fetch_pedidos_hora) — evita graficar como si ya hubiesen
+# transcurrido.
+#
+# OJO 2026-07-23 (2 vueltas de fix): "Abiertos" reconstruido desde
+# FechaPedido/FechaCierre de VenFer_PedidoCabecera (a) subcontaba (whitelist de
+# comprobante muy angosta, después una ventana de 60 días muy corta para
+# backorders con faltante) y (b) aun ensanchando ambas cosas, quedaba PLANO
+# todo el día — un backlog reconstruido así es, en la práctica, casi el mismo
+# número ("total abierto ahora") para cualquier hora salvo que entren/cierren
+# pedidos justo en esa ventana, no una serie de tiempo real. A pedido de Pablo:
+# en vez de reconstruir el pasado, "Abiertos" ahora sale de FOTOS reales
+# tomadas cada PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN min (ver
+# guardar_snapshot_abiertos + el loop en main.py) contra
+# EVERWEAR.dbo.TMP_TiempoDePedidos.Estado = 'Abierto' — el mismo campo/tabla
+# que ya usa la pestaña "Tiempo de Pedidos" (tabla confirmada y llena por
+# SP_TiempoPedidos_Cargar, no hay que reconstruir nada). Las fotos se guardan
+# en Postgres (deposito.pedidos_abiertos_snapshot, ver
+# sql/deposito_pedidos_abiertos_snapshot.sql — falta correrlo). Ingresados/
+# Cerrados siguen reconstruidos desde Cabecera (no reportado como roto), ahora
+# en buckets de PEDIDOS_HORA_PASO_MIN para compartir el mismo eje que Abiertos.
+#
 # Mismo criterio de "cancelado" que el resto del archivo (PATRONES_CANCELADO).
 # Fecha/hora nativas de Magnus: FechaXXX = días desde 1800-12-28, HoraXXX = HHMM
 # (mismo esquema que EVERWEAR.dbo.VenFer_PedidoCabecera usado en
 # indicadores-api/main.py::SQL_QUERY / cargar_df, ya probado en producción).
-# La ventana era de 60 días y se quedaba corta: pedidos con faltante (esperando
-# stock) quedan abiertos en Magnus mucho más que eso, así que el backlog de
-# "Abiertos" salía subcontado (backorders viejos quedaban afuera de la consulta).
-# Subida a 365 días. Si en vivo sigue sin cerrar con el número real, subir más
-# (o sacar el límite directamente, a costa de una consulta más pesada).
 PEDIDOS_HORA_VENTANA_DIAS = 365
 PEDIDOS_HORA_DESDE = 8
-PEDIDOS_HORA_HASTA = 18  # el último bucket es 17h→18h
+PEDIDOS_HORA_HASTA = 18  # el último bucket es 17:45→18:00
+PEDIDOS_HORA_PASO_MIN = 15  # granularidad del gráfico (bucket + eje X)
+PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN = 15  # cada cuánto se saca una foto real
 
 # Mismo blacklist que main.py::SQL_QUERY (comprobantes no-pedido reales).
 COMP_CODIGOS_EXCLUIDOS_HORA: tuple[int, ...] = (9, 49, 208, 410)
@@ -291,6 +298,17 @@ FROM EVERWEAR.dbo.VenFer_PedidoCabecera p
 LEFT JOIN MAGNUS_SITD.dbo.Pedido_Estados e ON p.EstadoPedido = e.Ped_Estado
 WHERE p.CompCodigo NOT IN ({codigos})
   AND p.FechaPedido BETWEEN ? AND ?
+"""
+
+# "Abiertos ahora" — mismo campo/tabla que la pestaña Tiempo de Pedidos
+# (TMP_TiempoDePedidos.Estado), NO se reconstruye desde Cabecera. Sin el
+# filtro de CodComprobante_Factura <> SinCodigo (ese filtro es para "ya
+# facturado", un pedido Abierto todavía no tiene factura asignada).
+SQL_ABIERTOS_AHORA = """
+SELECT COUNT(*) FROM dbo.TMP_TiempoDePedidos
+WHERE TRY_CAST(LEFT(CodComprobante, CHARINDEX(' ', CodComprobante + ' ') - 1) AS INT)
+      NOT IN ({codigos})
+  AND LTRIM(RTRIM(Estado)) = 'Abierto'
 """
 
 
@@ -315,15 +333,71 @@ def _pedido_ts(fecha_dias, hora_hhmm):
         return None
 
 
-def fetch_pedidos_hora(fecha: date | None = None):
-    """Vista por hora (8-18h) de un día: pedidos ingresados por hora + backlog de
-    abiertos + cerrados por hora. Fuente: EVERWEAR.dbo.VenFer_PedidoCabecera
-    (Magnus); ventana de PEDIDOS_HORA_VENTANA_DIAS para calcular el backlog real
-    (no solo lo ingresado ese día).
+def _ahora_ar() -> datetime:
+    """'Ahora' naive en hora de Argentina (UTC-3, sin horario de verano), sin
+    depender de la base de datos IANA de zonas horarias (el contenedor slim de
+    indicadores-api no la tiene instalada). Mismo criterio naive-ART que el
+    resto del archivo (_pedido_ts)."""
+    return datetime.utcnow() - timedelta(hours=3)
 
-    Sin `fecha` (o `fecha` = hoy) → vista EN VIVO: NO devuelve horas futuras a
-    la hora actual (evita proyectar como si ya hubiesen pasado). Con `fecha`
-    de un día anterior → día ya cerrado, se devuelve el 8-18h completo."""
+
+def fetch_abiertos_ahora() -> int:
+    """Cuenta actual de pedidos Abiertos en Magnus (TMP_TiempoDePedidos.Estado).
+    Usado por guardar_snapshot_abiertos (foto periódica, ver main.py)."""
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd;")
+        cur.execute(SQL_ABIERTOS_AHORA.format(codigos=",".join(map(str, COMP_CODIGOS_EXCLUIDOS_HORA))))
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    finally:
+        conn.close()
+
+
+def guardar_snapshot_abiertos() -> int:
+    """Saca una foto de 'Abiertos ahora' y la inserta en Postgres
+    (deposito.pedidos_abiertos_snapshot). Llamado por el loop periódico en
+    main.py cada PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN minutos."""
+    abiertos = fetch_abiertos_ahora()
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO deposito.pedidos_abiertos_snapshot (ts, abiertos) VALUES (%s, %s)",
+            (_ahora_ar(), abiertos),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return abiertos
+
+
+def _fotos_abiertos_del_dia(dia: date) -> list[tuple[datetime, int]]:
+    """Fotos ya guardadas ese día (Postgres), ordenadas. Lista vacía si el
+    snapshotter todavía no corrió ese día (recién deployado)."""
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT ts, abiertos FROM deposito.pedidos_abiertos_snapshot "
+            "WHERE ts::date = %s ORDER BY ts",
+            (dia,),
+        )
+        return [(ts, int(ab)) for ts, ab in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def fetch_pedidos_hora(fecha: date | None = None):
+    """Vista de un día en buckets de PEDIDOS_HORA_PASO_MIN (8-18h): Ingresados/
+    Cerrados reconstruidos desde EVERWEAR.dbo.VenFer_PedidoCabecera (igual que
+    antes); Abiertos = ÚLTIMA foto real (Postgres) tomada hasta el cierre de
+    cada bucket (carry-forward) — None si todavía no hay ninguna foto ese día.
+
+    Sin `fecha` (o `fecha` = hoy) → vista EN VIVO: no devuelve buckets futuros
+    al momento actual. Con `fecha` de un día anterior → día ya cerrado, se
+    devuelve el 8-18h completo."""
     dia = fecha or date.today()
     es_hoy = dia == date.today()
     dias_dia = (dia - _BASE_PEDIDO).days
@@ -351,24 +425,35 @@ def fetch_pedidos_hora(fecha: date | None = None):
         ts_cie = _pedido_ts(f_cie, h_cie)
         regs.append((ts_reg, ts_cie))
 
-    hora_limite = PEDIDOS_HORA_HASTA
+    fotos = _fotos_abiertos_del_dia(dia)
+
+    paso = PEDIDOS_HORA_PASO_MIN
+    minuto_desde = PEDIDOS_HORA_DESDE * 60
+    minuto_hasta = PEDIDOS_HORA_HASTA * 60
     if es_hoy:
-        # No proyectar horas que todavía no pasaron: último bucket visible es
-        # el de la hora en curso (parcial, se va completando solo).
-        hora_limite = min(PEDIDOS_HORA_HASTA, datetime.now().hour + 1)
+        # No proyectar buckets que todavía no pasaron: el último visible es el
+        # que está en curso (parcial, se va completando solo).
+        ahora = _ahora_ar()
+        ahora_min = ahora.hour * 60 + ahora.minute
+        minuto_hasta = min(minuto_hasta, ((ahora_min // paso) + 1) * paso)
 
     out = []
-    for h in range(PEDIDOS_HORA_DESDE, max(PEDIDOS_HORA_DESDE, hora_limite)):
-        inicio = datetime(dia.year, dia.month, dia.day, h, 0, 0)
-        corte = datetime(dia.year, dia.month, dia.day, h + 1, 0, 0)
+    idx_foto = 0
+    ultima_foto = None
+    for m in range(minuto_desde, max(minuto_desde, minuto_hasta), paso):
+        h, mi = divmod(m, 60)
+        inicio = datetime(dia.year, dia.month, dia.day, h, mi, 0)
+        corte = inicio + timedelta(minutes=paso)
         ingresados = sum(1 for ts_reg, _ in regs if ts_reg.date() == dia and inicio <= ts_reg < corte)
         cerrados = sum(1 for _, ts_cie in regs if ts_cie and ts_cie.date() == dia and inicio <= ts_cie < corte)
-        abiertos = sum(1 for ts_reg, ts_cie in regs if ts_reg < corte and (ts_cie is None or ts_cie >= corte))
+        while idx_foto < len(fotos) and fotos[idx_foto][0] < corte:
+            ultima_foto = fotos[idx_foto][1]
+            idx_foto += 1
         out.append({
-            "hora": f"{h:02d}:00",
+            "hora": f"{h:02d}:{mi:02d}",
             "ingresados": ingresados,
             "cerrados": cerrados,
-            "abiertos": abiertos,
+            "abiertos": ultima_foto,
         })
     return out
 
