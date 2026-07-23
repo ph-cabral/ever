@@ -1,8 +1,9 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  Loader2, RefreshCw, AlertTriangle, PackageSearch, Users, Pause, Play,
+  Loader2, RefreshCw, AlertTriangle, PackageSearch, Users, Pause, Play, Clock,
 } from "lucide-react";
+import { ChartComboBarLine, C } from "../components/ui";
 
 const REFRESH_MS = 60_000;
 
@@ -53,6 +54,18 @@ interface WmsData {
   estados: EstadoAgg[];
   por_operario: OperarioAgg[];
   resumen: Resumen;
+}
+
+// Pedidos por hora (8-18h) — vista en vivo de HOY, fuente Magnus.
+interface HoraRow {
+  hora: string;
+  ingresados: number;
+  cerrados: number;
+  abiertos: number;
+}
+interface PedidosHoraData {
+  fecha: string;
+  rows: HoraRow[];
 }
 
 type Tone = "amber" | "yellow" | "green" | "orange" | "sky" | "neutral";
@@ -106,6 +119,33 @@ export default function DepositoWmsPage() {
   const [auto, setAuto] = useState(true);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const [, setTick] = useState(0); // re-render del "hace Xs"
+
+  // Pedidos por hora (8-18h), en vivo, solo HOY — independiente del rango
+  // desde/hasta de arriba (que es para el WMS por estado).
+  const [horaData, setHoraData] = useState<PedidosHoraData | null>(null);
+  const [horaError, setHoraError] = useState<string | null>(null);
+
+  const loadHora = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/deposito/pedidos-hora`, { cache: "no-store" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setHoraData(j as PedidosHoraData);
+      setHoraError(null);
+    } catch (e) {
+      setHoraError(e instanceof Error ? e.message : "Error al cargar pedidos por hora");
+    }
+  }, []);
+
+  useEffect(() => {
+    loadHora();
+  }, [loadHora]);
+
+  useEffect(() => {
+    if (!auto) return;
+    const id = setInterval(loadHora, REFRESH_MS);
+    return () => clearInterval(id);
+  }, [auto, loadHora]);
 
   const load = useCallback(async (d: string, h: string) => {
     setLoading(true);
@@ -321,6 +361,42 @@ export default function DepositoWmsPage() {
       )}
 
       <main className="max-w-[1500px] mx-auto px-4 md:px-8 py-6">
+        {/* Pedidos por hora (8-18h) — hoy en vivo, fuente Magnus */}
+        <div className="mb-6">
+          <div className="flex items-center gap-3 mb-3">
+            <Clock size={16} className="text-yellow-400" />
+            <span className="text-[13px] font-semibold text-zinc-100">
+              Pedidos por hora — hoy (8 a 18h)
+            </span>
+            <span className="text-zinc-600 text-[12px]">Fuente: Magnus</span>
+            <span className="flex-1 h-px bg-zinc-800" />
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-[#171717] p-3">
+            {horaError && !horaData ? (
+              <div className="flex items-center gap-2 py-10 justify-center text-red-300 text-sm">
+                <AlertTriangle size={15} /> {horaError}
+              </div>
+            ) : (
+              <ChartComboBarLine
+                data={horaData?.rows ?? []}
+                xKey="hora"
+                height={220}
+                bars={[{ key: "ingresados", name: "Ingresados", color: C.brand }]}
+                lines={[
+                  { key: "abiertos", name: "Abiertos", color: "#58a6ff" },
+                  { key: "cerrados", name: "Cerrados", color: C.green },
+                ]}
+              />
+            )}
+          </div>
+          <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
+            Ingresados = pedidos registrados esa hora. Abiertos = facturas sin cerrar
+            a esa hora (backlog real, incluye pedidos de días previos). Cerrados = de
+            esos, cuántos pasaron a Cerrado/Facturado esa hora. Vista en vivo de hoy,
+            se actualiza cada 60s.
+          </p>
+        </div>
+
         {primeraCarga ? (
           <div className="flex flex-col items-center justify-center py-28 gap-3 text-center">
             <Loader2 size={40} className="text-yellow-400 animate-spin" />

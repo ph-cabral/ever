@@ -7,6 +7,7 @@ import {
   Bar,
   LineChart,
   Line,
+  ComposedChart,
   PieChart,
   Pie,
   Cell,
@@ -753,6 +754,79 @@ export function ChartLine({
           />
         ))}
       </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+// Barras + líneas combinadas (ej. ingresados por hora + backlog abierto/cerrado).
+export function ChartComboBarLine({
+  data,
+  xKey,
+  bars,
+  lines,
+  height = 240,
+  angle = 0,
+}: {
+  data: unknown[];
+  xKey: string;
+  bars: Serie[];
+  lines: Serie[];
+  height?: number;
+  angle?: number;
+}) {
+  if (!data.length) return <Empty h={height} />;
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart
+        data={data}
+        margin={{ top: 24, right: 12, left: 0, bottom: angle ? 46 : 22 }}
+      >
+        <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+        <XAxis
+          dataKey={xKey}
+          stroke={C.border}
+          tick={{ fontSize: 11, fill: C.muted }}
+          angle={angle}
+          textAnchor={angle ? "end" : "middle"}
+          height={angle ? 46 : 24}
+          interval={0}
+        />
+        <YAxis
+          stroke={C.border}
+          width={36}
+          tick={{ fontSize: 11, fill: C.muted }}
+          allowDecimals={false}
+        />
+        <Tooltip contentStyle={tooltipStyle} formatter={(v: unknown) => fmtNum(Number(v))} />
+        <Legend
+          verticalAlign="top"
+          align="center"
+          height={28}
+          wrapperStyle={{ fontSize: 11, color: C.muted, paddingBottom: 6 }}
+        />
+        {bars.map((s, i) => (
+          <Bar
+            key={s.key}
+            dataKey={s.key}
+            name={s.name}
+            fill={s.color ?? PALETTE[i % PALETTE.length]}
+            radius={[3, 3, 0, 0]}
+            maxBarSize={36}
+          />
+        ))}
+        {lines.map((s, i) => (
+          <Line
+            key={s.key}
+            type="monotone"
+            dataKey={s.key}
+            name={s.name}
+            stroke={s.color ?? PALETTE[(bars.length + i) % PALETTE.length]}
+            strokeWidth={2}
+            dot={{ r: 3 }}
+            activeDot={{ r: 5 }}
+          />
+        ))}
+      </ComposedChart>
     </ResponsiveContainer>
   );
 }

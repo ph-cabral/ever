@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from db import get_connection
 from utils import construir_timestamps, calcular_tiempos, COLUMNAS_TIEMPO
 from deposito import (
-    fetch_wms, fetch_tiempo, fetch_ingresados, fetch_faltantes,
+    fetch_wms, fetch_tiempo, fetch_ingresados, fetch_pedidos_hora, fetch_faltantes,
     fetch_faltantes_fechas, fetch_vivo, fetch_faltantes_ot, fetch_faltantes_ot_diag,
     fetch_ot_diferencias,
     fetch_wms_estados, fetch_wms_estados_diag,
@@ -201,6 +201,16 @@ def deposito_ingresados(
         "total": sum(r["pedidos"] for r in rows),
         "rows": rows,
     }
+
+@app.get("/deposito/pedidos-hora")
+def deposito_pedidos_hora():
+    """Vista EN VIVO de HOY (8-18h): pedidos ingresados, backlog de abiertos y
+    cerrados por hora. Fuente Magnus (VenFer_PedidoCabecera)."""
+    try:
+        rows = fetch_pedidos_hora()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+    return {"fecha": date.today().isoformat(), "rows": rows}
 
 @app.get("/deposito/vivo")
 def deposito_vivo():

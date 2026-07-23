@@ -4,6 +4,9 @@ Consultas en vivo para la pagina /deposito de ever (reemplazan los Excel).
 - WMS  -> Productividad de Operarios (lean: solo columnas que usa el parser TS).
           Base WMS, datetime nativo, filtra por OTFechaHoraEjecucion.
 - TIEMPO -> EVERWEAR.dbo.TMP_TiempoDePedidos (la misma tabla que exportaba el xlsx).
+- PEDIDOS_HORA -> EVERWEAR.dbo.VenFer_PedidoCabecera (Magnus), vista EN VIVO
+          de HOY por hora (8-18h): ingresados / abiertos (backlog real) /
+          cerrados. Ver fetch_pedidos_hora().
 
 OJO compatibilidad con lib/deposito/parseDeposito.ts:
   * PROCESO se devuelve SIN acentos ('Reposicion','Re-Ubicacion','Libre','Picking')
@@ -241,6 +244,107 @@ def fetch_ingresados(desde, hasta):
         return out
     finally:
         conn.close()
+
+
+# ── Pedidos por hora (8 a 18h) — vista EN VIVO de HOY, fuente Magnus ──────────
+# Ingresados = pedidos registrados esa hora de HOY (ts_Registro).
+# Cerrados   = de los pedidos con actividad reciente (ventana de
+#              PEDIDOS_HORA_VENTANA_DIAS), cuántos pasaron a Cerrado/Facturado
+#              en esa hora de HOY (ts_Cierre) — incluye pedidos abiertos en
+#              días previos que recién hoy se cerraron.
+# Abiertos   = backlog real: cuántos de esos pedidos (toda la ventana, no solo
+#              los de hoy) siguen abiertos al final de esa hora (registrados
+#              antes del corte y sin cierre, o con cierre posterior al corte).
+# Mismos códigos de comprobante que /deposito/pedidos (CODIGOS_COMPROBANTE_WMS)
+# y mismo criterio de "cancelado" que el resto del archivo (PATRONES_CANCELADO).
+# Fecha/hora nativas de Magnus: FechaXXX = días desde 1800-12-28, HoraXXX = HHMM
+# (mismo esquema que EVERWEAR.dbo.VenFer_PedidoCabecera usado en
+# indicadores-api/main.py::SQL_QUERY / cargar_df, ya probado en producción).
+# TODO verificar en vivo (GET /deposito/pedidos-hora) que la ventana de 60 días
+# alcanza para capturar todo el backlog de "Abierto" real; ajustar si hace falta.
+PEDIDOS_HORA_VENTANA_DIAS = 60
+PEDIDOS_HORA_DESDE = 8
+PEDIDOS_HORA_HASTA = 18  # el último bucket es 17h→18h
+
+SQL_PEDIDOS_HORA = """
+SELECT
+    p.NroMovVenta,
+    p.FechaPedido,  p.HoraRegistracion,
+    p.FechaCierre,  p.HoraCierre,
+    e.Ped_EstadoDescripcion AS Estado_Desc
+FROM EVERWEAR.dbo.VenFer_PedidoCabecera p
+LEFT JOIN MAGNUS_SITD.dbo.Pedido_Estados e ON p.EstadoPedido = e.Ped_Estado
+WHERE p.CompCodigo IN ({codigos})
+  AND p.FechaPedido BETWEEN ? AND ?
+"""
+
+
+def _pedido_ts(fecha_dias, hora_hhmm):
+    """FechaXXX (días desde 1800-12-28) + HoraXXX (HHMM) -> datetime, o None si
+    la etapa todavía no ocurrió (fecha <= 0) — mismo criterio que utils.py."""
+    try:
+        f = int(fecha_dias) if fecha_dias is not None else 0
+    except (TypeError, ValueError):
+        return None
+    if f <= 0:
+        return None
+    try:
+        h = int(hora_hhmm) if hora_hhmm not in (None, "") else 0
+    except (TypeError, ValueError):
+        h = 0
+    horas, minutos = divmod(h, 100)
+    try:
+        base = _BASE_PEDIDO + timedelta(days=f)
+        return datetime(base.year, base.month, base.day) + timedelta(hours=horas, minutes=minutos)
+    except (ValueError, OverflowError):
+        return None
+
+
+def fetch_pedidos_hora():
+    """Vista EN VIVO de hoy (8-18h): pedidos ingresados por hora + backlog de
+    abiertos + cerrados por hora. Fuente: EVERWEAR.dbo.VenFer_PedidoCabecera
+    (Magnus); ventana de PEDIDOS_HORA_VENTANA_DIAS para calcular el backlog real
+    (no solo lo ingresado hoy)."""
+    hoy = date.today()
+    dias_hoy = (hoy - _BASE_PEDIDO).days
+    dias_desde = dias_hoy - PEDIDOS_HORA_VENTANA_DIAS
+
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd;")
+        cur.execute(
+            SQL_PEDIDOS_HORA.format(codigos=",".join(map(str, CODIGOS_COMPROBANTE_WMS))),
+            (dias_desde, dias_hoy),
+        )
+        filas = cur.fetchall()
+    finally:
+        conn.close()
+
+    regs = []  # (ts_registro, ts_cierre) de pedidos vivos (no cancelados)
+    for _nro, f_ped, h_reg, f_cie, h_cie, estado_desc in filas:
+        if any(p in str(estado_desc or "").upper() for p in PATRONES_CANCELADO):
+            continue
+        ts_reg = _pedido_ts(f_ped, h_reg)
+        if not ts_reg:
+            continue
+        ts_cie = _pedido_ts(f_cie, h_cie)
+        regs.append((ts_reg, ts_cie))
+
+    out = []
+    for h in range(PEDIDOS_HORA_DESDE, PEDIDOS_HORA_HASTA):
+        inicio = datetime(hoy.year, hoy.month, hoy.day, h, 0, 0)
+        corte = datetime(hoy.year, hoy.month, hoy.day, h + 1, 0, 0)
+        ingresados = sum(1 for ts_reg, _ in regs if ts_reg.date() == hoy and inicio <= ts_reg < corte)
+        cerrados = sum(1 for _, ts_cie in regs if ts_cie and ts_cie.date() == hoy and inicio <= ts_cie < corte)
+        abiertos = sum(1 for ts_reg, ts_cie in regs if ts_reg < corte and (ts_cie is None or ts_cie >= corte))
+        out.append({
+            "hora": f"{h:02d}:00",
+            "ingresados": ingresados,
+            "cerrados": cerrados,
+            "abiertos": abiertos,
+        })
+    return out
 
 
 # ── Faltantes (renglones pendientes del último día con registro < hoy) ────────
