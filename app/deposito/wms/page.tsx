@@ -401,9 +401,10 @@ export default function DepositoWmsPage() {
           </div>
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
             Ingresados/Cerrados = pedidos registrados/cerrados en ese bloque de 15
-            min (reconstruido). Abiertos = foto real tomada cada 15 min (no un
-            cálculo retroactivo) — muestra huecos si el snapshot recién empezó a
-            correr hoy.{" "}
+            min (reconstruido). Abiertos = foto real tomada cada 15 min cuando ya
+            existe; los tramos sin foto todavía se rellenan con el backlog
+            reconstruido (registrados − cerrados a esa hora), así se ve la
+            fluctuación completa del día.{" "}
             {horaEsHoy
               ? "Vista en vivo de hoy hasta el momento actual, se actualiza cada 60s."
               : "Día completo (ya cerrado)."}

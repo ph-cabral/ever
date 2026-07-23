@@ -393,7 +393,9 @@ def fetch_pedidos_hora(fecha: date | None = None):
     """Vista de un día en buckets de PEDIDOS_HORA_PASO_MIN (8-18h): Ingresados/
     Cerrados reconstruidos desde EVERWEAR.dbo.VenFer_PedidoCabecera (igual que
     antes); Abiertos = ÚLTIMA foto real (Postgres) tomada hasta el cierre de
-    cada bucket (carry-forward) — None si todavía no hay ninguna foto ese día.
+    cada bucket (carry-forward); para los buckets que todavía no tienen foto
+    real se rellena con el backlog reconstruido (registrados − cerrados a esa
+    hora), así la curva de fluctuación se ve completa desde las 8h.
 
     Sin `fecha` (o `fecha` = hoy) → vista EN VIVO: no devuelve buckets futuros
     al momento actual. Con `fecha` de un día anterior → día ya cerrado, se
@@ -449,11 +451,24 @@ def fetch_pedidos_hora(fecha: date | None = None):
         while idx_foto < len(fotos) and fotos[idx_foto][0] < corte:
             ultima_foto = fotos[idx_foto][1]
             idx_foto += 1
+        # Backlog reconstruido: pedidos registrados antes del corte y todavía no
+        # cerrados a esa hora. Se usa como relleno para los buckets que aún no
+        # tienen foto real (arranque del día / días viejos sin snapshotter). La
+        # foto real (ultima_foto) SIEMPRE tiene prioridad cuando existe, así el
+        # tramo ya fotografiado muestra el número exacto y el resto la curva
+        # aproximada — así se ve la fluctuación completa desde las 8h.
+        if ultima_foto is not None:
+            abiertos = ultima_foto
+        else:
+            abiertos = sum(
+                1 for ts_reg, ts_cie in regs
+                if ts_reg < corte and (ts_cie is None or ts_cie >= corte)
+            )
         out.append({
             "hora": f"{h:02d}:{mi:02d}",
             "ingresados": ingresados,
             "cerrados": cerrados,
-            "abiertos": ultima_foto,
+            "abiertos": abiertos,
         })
     return out
 

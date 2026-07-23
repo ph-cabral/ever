@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck, CalendarRange, Check,
-  ChevronDown, Flag, RotateCw, ShoppingCart, Undo2, CalendarCheck,
+  ChevronDown, ChevronRight, Flag, RotateCw, ShoppingCart, Undo2, CalendarCheck,
   Download, Trash2, X, Globe,
 } from "lucide-react";
 import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
@@ -498,6 +498,7 @@ export default function ComprasFaltantesPage() {
   const [origen, setOrigen] = useState<Origen>("nacionales"); // filtro por origen del proveedor (importacion) — default Nacionales, se intercala con el botón
   const [flipped, setFlipped] = useState(false); // girar la tarjeta → ver extraordinarios
   const [leaving, setLeaving] = useState<Record<string, "left" | "right">>({}); // filas saliendo (animación)
+  const [provAbierto, setProvAbierto] = useState<string | null>(null); // acordeón: solo un proveedor abierto a la vez; todos cerrados al entrar
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1002,15 +1003,25 @@ export default function ComprasFaltantesPage() {
                 </div>
               ) : (
                 <div className="flex flex-col gap-3">
-                  {grupos.map(({ prov, rs, importe }) => (
+                  {grupos.map(({ prov, rs, importe }) => {
+                    const abierto = provAbierto === prov;
+                    return (
                     <div
                       key={prov}
                       className="rounded-xl border border-zinc-800 overflow-hidden"
                     >
-                      {/* Siempre expandido — sin toggle de colapsar (se mantiene abierto al recargar). */}
-                      <div className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-[#1A1A1A] text-left">
+                      {/* Acordeón: click abre este proveedor y cierra el resto; todos cerrados al entrar. */}
+                      <button
+                        type="button"
+                        onClick={() => setProvAbierto((p) => (p === prov ? null : prov))}
+                        className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-[#1A1A1A] text-left hover:bg-[#222] transition-colors"
+                      >
                         <span className="flex items-center gap-2 min-w-0">
-                          <ChevronDown size={15} className="text-zinc-500 shrink-0" />
+                          {abierto ? (
+                            <ChevronDown size={15} className="text-zinc-500 shrink-0" />
+                          ) : (
+                            <ChevronRight size={15} className="text-zinc-500 shrink-0" />
+                          )}
                           <span className="font-medium text-zinc-100 truncate">
                             {prov}
                           </span>
@@ -1021,19 +1032,22 @@ export default function ComprasFaltantesPage() {
                         <span className="text-sm tabular-nums text-zinc-300 shrink-0">
                           ${fmtNum(importe)}
                         </span>
-                      </div>
-                      <div className="border-t border-zinc-800">
-                        <Tabla
-                          data={rs}
-                          onMark={marcarExtraordinario}
-                          onArribo={guardarArribo}
-                          onDescartar={descartarFaltante}
-                          leaving={leaving}
-                          ocultarProveedor
-                        />
-                      </div>
+                      </button>
+                      {abierto && (
+                        <div className="border-t border-zinc-800">
+                          <Tabla
+                            data={rs}
+                            onMark={marcarExtraordinario}
+                            onArribo={guardarArribo}
+                            onDescartar={descartarFaltante}
+                            leaving={leaving}
+                            ocultarProveedor
+                          />
+                        </div>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
