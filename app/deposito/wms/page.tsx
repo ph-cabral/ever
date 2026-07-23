@@ -398,7 +398,7 @@ export default function DepositoWmsPage() {
                 xKey="hora"
                 height={220}
                 angle={-60}
-                bars={[]}
+                bars={[{ key: "abiertos", name: "Abiertos", color: "#3f3f46" }]}
                 lines={[
                   { key: "est_espera", name: "En espera", color: "#facc15" },
                   { key: "est_proceso", name: "En proceso", color: "#58a6ff" },
@@ -409,10 +409,10 @@ export default function DepositoWmsPage() {
             )}
           </div>
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
-            OT de picking del WMS por estado a lo largo del día. En espera / En
-            proceso / Sin asignar = foto real tomada cada 15 min (Sin asignar = OT
-            viva sin operario). Cumplido = acumulado del día (cuántas se cumplieron
-            hasta esa hora).{" "}
+            Barras = pedidos abiertos (disponibles) a esa hora. Líneas = OT de
+            picking del WMS por estado. En espera / En proceso / Sin asignar = foto
+            real tomada cada 15 min (Sin asignar = OT viva sin operario). Cumplido =
+            acumulado del día (cuántas se cumplieron hasta esa hora).{" "}
             {horaEsHoy
               ? "Eje 8-18h completo; espera/proceso/sin-asignar recién arrancan cuando hay foto (se van trazando hacia adelante), cumplido se ve desde las 8h. Se actualiza cada 60s."
               : "Día completo (ya cerrado)."}
