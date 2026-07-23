@@ -269,9 +269,12 @@ def fetch_ingresados(desde, hasta):
 # Fecha/hora nativas de Magnus: FechaXXX = días desde 1800-12-28, HoraXXX = HHMM
 # (mismo esquema que EVERWEAR.dbo.VenFer_PedidoCabecera usado en
 # indicadores-api/main.py::SQL_QUERY / cargar_df, ya probado en producción).
-# TODO verificar en vivo (GET /deposito/pedidos-hora) que la ventana de 60 días
-# alcanza para capturar todo el backlog de "Abierto" real; ajustar si hace falta.
-PEDIDOS_HORA_VENTANA_DIAS = 60
+# La ventana era de 60 días y se quedaba corta: pedidos con faltante (esperando
+# stock) quedan abiertos en Magnus mucho más que eso, así que el backlog de
+# "Abiertos" salía subcontado (backorders viejos quedaban afuera de la consulta).
+# Subida a 365 días. Si en vivo sigue sin cerrar con el número real, subir más
+# (o sacar el límite directamente, a costa de una consulta más pesada).
+PEDIDOS_HORA_VENTANA_DIAS = 365
 PEDIDOS_HORA_DESDE = 8
 PEDIDOS_HORA_HASTA = 18  # el último bucket es 17h→18h
 
@@ -1198,6 +1201,15 @@ WMS_COL_FECHA = "OTFechaHoraRegist"
 # 5=En Proceso pocos y recientes; 1=Pendiente backlog). 3/4 no aparecen en Picking.
 # bucket: solo para el color en la vista. Si algún día aparece un código nuevo, cae en
 # "Estado N" (bucket otro) y se agrega acá.
+#
+# OJO 2026-07-23: el WMS pasa una OT a OTEstado=5 apenas queda ASIGNADA/despachada a
+# un operario, no cuando arranca a picking de verdad — con lo cual "En proceso" venía
+# mezclando OT recién asignadas (sin tocar) con OT realmente en curso, y por eso las
+# cartas de /deposito/wms mostraban en "En proceso" lo que el usuario sabía que era
+# en realidad Pendiente. Se reclasifica estado=5 en SQL usando progreso a nivel ítem
+# (OTItemCantCumplida > 0, mismo criterio que ya usa fetch_wms/SQL_RESUMEN vía
+# "CANT. ITEM RECOLECTADOS"): si ninguna línea tiene progreso, se cuenta como 1
+# (Pendiente); si al menos una tiene progreso, se cuenta como 5 (En proceso, real).
 WMS_ESTADO_LABELS: dict[int, dict] = {
     0: {"label": "Pendiente",   "bucket": "espera"},
     1: {"label": "Pendiente",   "bucket": "espera"},
@@ -1222,7 +1234,8 @@ def _wms_estado_meta(estado) -> dict:
 
 SQL_WMS_ESTADOS = """
 SELECT
-    OT.OTEstado      AS Estado,
+    CASE WHEN OT.OTEstado = 5 AND ISNULL(it.Recolectados, 0) = 0
+         THEN 1 ELSE OT.OTEstado END AS Estado,
     P.PersonalNombre AS Operario,
     COUNT(*)              AS Cantidad,
     ISNULL(SUM(it.Items), 0) AS Items
@@ -1230,13 +1243,16 @@ FROM OT
 INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
 LEFT JOIN Personal P ON OT.OTUsuarioGUID_Repositor = P.PersonalId
 LEFT JOIN (
-    SELECT OTId, SUM(CASE WHEN OTItemTipo = 1 THEN 1 ELSE 0 END) AS Items
+    SELECT OTId,
+        SUM(CASE WHEN OTItemTipo = 1 THEN 1 ELSE 0 END)                          AS Items,
+        SUM(CASE WHEN OTItemTipo = 1 AND OTItemCantCumplida > 0 THEN 1 ELSE 0 END) AS Recolectados
     FROM OTItem GROUP BY OTId
 ) it ON it.OTId = OT.OTId
 WHERE Codot.CodotProcesoNegocio IN ({procesos})
   AND OT.{col_fecha} >= ?
   AND OT.{col_fecha} <= ?
-GROUP BY OT.OTEstado, P.PersonalNombre
+GROUP BY CASE WHEN OT.OTEstado = 5 AND ISNULL(it.Recolectados, 0) = 0
+              THEN 1 ELSE OT.OTEstado END, P.PersonalNombre
 """
 
 # Último día con OT registrada (para el default del tablero). Parametrizado por proceso.
