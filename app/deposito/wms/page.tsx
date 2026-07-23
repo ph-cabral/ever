@@ -61,8 +61,14 @@ interface HoraRow {
   hora: string;
   ingresados: number | null; // null = bucket futuro (todavía no arrancó)
   cerrados: number | null; // cerrados en Magnus
-  cumplidos: number | null; // OT Picking cumplidas en el WMS (OTEstado=2)
+  cumplidos: number | null; // OT Picking cumplidas en el WMS por bucket (flujo)
   abiertos: number | null; // null = bucket futuro / sin foto ni reconstrucción
+  // Desglose de estados del WMS (gráfico 1). espera/proceso/sin_asignar = foto
+  // cada 15 min (null hasta que hay foto ese día); cumplido = acumulado del día.
+  est_espera: number | null;
+  est_proceso: number | null;
+  est_cumplido: number | null;
+  est_sin_asignar: number | null;
 }
 interface PedidosHoraData {
   fecha: string;
@@ -371,14 +377,14 @@ export default function DepositoWmsPage() {
       )}
 
       <main className="max-w-[1500px] mx-auto px-4 md:px-8 py-6">
-        {/* Gráfico 1: Cumplidos (WMS) vs Abiertos (disponibles) — sigue el filtro desde/hasta de arriba */}
+        {/* Gráfico 1: desglose de estados del WMS por hora (en espera / en proceso / cumplido / sin asignar) */}
         <div className="mb-6">
           <div className="flex items-center gap-3 mb-3">
             <Clock size={16} className="text-yellow-400" />
             <span className="text-[13px] font-semibold text-zinc-100">
-              Cumplidos vs Abiertos por hora — {horaEsHoy ? "hoy" : fmtAr(horaData?.fecha ?? null)} (8 a 18h)
+              Estados del WMS por hora — {horaEsHoy ? "hoy" : fmtAr(horaData?.fecha ?? null)} (8 a 18h)
             </span>
-            <span className="text-zinc-600 text-[12px]">Fuente: WMS + Magnus</span>
+            <span className="text-zinc-600 text-[12px]">Fuente: WMS</span>
             <span className="flex-1 h-px bg-zinc-800" />
           </div>
           <div className="rounded-xl border border-zinc-800 bg-[#171717] p-3">
@@ -392,22 +398,23 @@ export default function DepositoWmsPage() {
                 xKey="hora"
                 height={220}
                 angle={-60}
-                bars={[{ key: "ingresados", name: "Ingresados", color: C.brand }]}
+                bars={[]}
                 lines={[
-                  { key: "cumplidos", name: "Cumplidos (WMS)", color: C.green },
-                  { key: "abiertos", name: "Abiertos (disponibles)", color: "#58a6ff" },
+                  { key: "est_espera", name: "En espera", color: "#facc15" },
+                  { key: "est_proceso", name: "En proceso", color: "#58a6ff" },
+                  { key: "est_cumplido", name: "Cumplido", color: C.green },
+                  { key: "est_sin_asignar", name: "Sin asignar", color: "#f0883e" },
                 ]}
               />
             )}
           </div>
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
-            Cumplidos = OT de picking marcadas Cumplido en el WMS en ese bloque de
-            15 min (cuántos pedidos se cumplieron). Abiertos = pedidos disponibles
-            en Magnus a esa hora (foto real cada 15 min cuando ya existe; el resto
-            reconstruido, registrados − cerrados). Ingresados = pedidos registrados
-            en el bloque.{" "}
+            OT de picking del WMS por estado a lo largo del día. En espera / En
+            proceso / Sin asignar = foto real tomada cada 15 min (Sin asignar = OT
+            viva sin operario). Cumplido = acumulado del día (cuántas se cumplieron
+            hasta esa hora).{" "}
             {horaEsHoy
-              ? "Eje 8-18h completo; las líneas se van trazando hasta la hora actual, se actualiza cada 60s."
+              ? "Eje 8-18h completo; espera/proceso/sin-asignar recién arrancan cuando hay foto (se van trazando hacia adelante), cumplido se ve desde las 8h. Se actualiza cada 60s."
               : "Día completo (ya cerrado)."}
           </p>
         </div>

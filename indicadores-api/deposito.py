@@ -355,17 +355,89 @@ def fetch_abiertos_ahora() -> int:
         conn.close()
 
 
+# Foto del desglose de estados del WMS AHORA (para el gráfico 1). Estados vivos
+# (espera/proceso) sin filtro de fecha (una OT viva es viva sin importar cuándo
+# entró); Cumplido (terminal) sólo del día. Se separa asignado / sin asignar por
+# si la OT tiene repositor (OTUsuarioGUID_Repositor → Personal). Estado=5 sin
+# ningún ítem recolectado se reclasifica a Pendiente (1), mismo criterio que
+# SQL_WMS_ESTADOS.
+SQL_WMS_BREAKDOWN_AHORA = """
+SELECT
+    CASE WHEN OT.OTEstado = 5 AND ISNULL(it.Recolectados, 0) = 0
+         THEN 1 ELSE OT.OTEstado END AS Estado,
+    CASE WHEN P.PersonalNombre IS NULL OR LTRIM(RTRIM(P.PersonalNombre)) = ''
+         THEN 0 ELSE 1 END AS Asignado,
+    COUNT(*) AS Cantidad
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+LEFT JOIN Personal P ON OT.OTUsuarioGUID_Repositor = P.PersonalId
+LEFT JOIN (
+    SELECT OTId, SUM(CASE WHEN OTItemTipo = 1 AND OTItemCantCumplida > 0 THEN 1 ELSE 0 END) AS Recolectados
+    FROM OTItem GROUP BY OTId
+) it ON it.OTId = OT.OTId
+WHERE Codot.CodotProcesoNegocio = 4
+  AND ( OT.OTEstado IN ({vivos})
+        OR (OT.OTFechaHoraEjecucion >= ? AND OT.OTFechaHoraEjecucion < ?) )
+GROUP BY CASE WHEN OT.OTEstado = 5 AND ISNULL(it.Recolectados, 0) = 0
+              THEN 1 ELSE OT.OTEstado END,
+         CASE WHEN P.PersonalNombre IS NULL OR LTRIM(RTRIM(P.PersonalNombre)) = ''
+              THEN 0 ELSE 1 END
+"""
+
+
+def fetch_wms_breakdown_ahora() -> dict:
+    """Desglose actual de OT de Picking: {en_espera, en_proceso, cumplido,
+    sin_asignar}. en_espera/en_proceso = vivas CON operario asignado;
+    sin_asignar = vivas SIN operario; cumplido = terminadas hoy (OTEstado=2).
+    No se solapan: total_vivas = en_espera + en_proceso + sin_asignar."""
+    hoy = _ahora_ar().date()
+    ini = datetime(hoy.year, hoy.month, hoy.day)
+    fin = ini + timedelta(days=1)
+    out = {"en_espera": 0, "en_proceso": 0, "cumplido": 0, "sin_asignar": 0}
+    conn = get_connection("WMS")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(
+            SQL_WMS_BREAKDOWN_AHORA.format(vivos=",".join(str(e) for e in WMS_ESTADOS_VIVOS)),
+            (ini, fin),
+        )
+        for estado, asignado, cant in cur.fetchall():
+            cant = int(cant or 0)
+            bucket = _wms_estado_meta(estado)["bucket"]
+            if bucket == "fin":
+                out["cumplido"] += cant
+            elif int(asignado or 0) == 0:  # viva sin operario
+                out["sin_asignar"] += cant
+            elif bucket == "espera":
+                out["en_espera"] += cant
+            elif bucket == "proceso":
+                out["en_proceso"] += cant
+        return out
+    finally:
+        conn.close()
+
+
 def guardar_snapshot_abiertos() -> int:
-    """Saca una foto de 'Abiertos ahora' y la inserta en Postgres
+    """Saca una foto de 'Abiertos ahora' (Magnus) + el desglose de estados del
+    WMS (en_espera/en_proceso/cumplido/sin_asignar) y la inserta en Postgres
     (deposito.pedidos_abiertos_snapshot). Llamado por el loop periódico en
     main.py cada PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN minutos."""
     abiertos = fetch_abiertos_ahora()
+    try:
+        wms = fetch_wms_breakdown_ahora()
+    except Exception as e:  # noqa: BLE001 — WMS caído no debe frenar la foto de abiertos
+        print(f"[snapshot abiertos] WMS breakdown no disponible: {e}")
+        wms = {"en_espera": None, "en_proceso": None, "cumplido": None, "sin_asignar": None}
     conn = get_pg_connection()
     try:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO deposito.pedidos_abiertos_snapshot (ts, abiertos) VALUES (%s, %s)",
-            (_ahora_ar(), abiertos),
+            "INSERT INTO deposito.pedidos_abiertos_snapshot "
+            "(ts, abiertos, en_espera, en_proceso, cumplido, sin_asignar) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (_ahora_ar(), abiertos, wms["en_espera"], wms["en_proceso"],
+             wms["cumplido"], wms["sin_asignar"]),
         )
         conn.commit()
     finally:
@@ -373,18 +445,27 @@ def guardar_snapshot_abiertos() -> int:
     return abiertos
 
 
-def _fotos_abiertos_del_dia(dia: date) -> list[tuple[datetime, int]]:
-    """Fotos ya guardadas ese día (Postgres), ordenadas. Lista vacía si el
-    snapshotter todavía no corrió ese día (recién deployado)."""
+def _fotos_abiertos_del_dia(dia: date) -> list[tuple]:
+    """Fotos ya guardadas ese día (Postgres), ordenadas por ts. Cada tupla =
+    (ts, abiertos, en_espera, en_proceso, cumplido, sin_asignar). Lista vacía si
+    el snapshotter todavía no corrió ese día (recién deployado)."""
     conn = get_pg_connection()
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT ts, abiertos FROM deposito.pedidos_abiertos_snapshot "
+            "SELECT ts, abiertos, en_espera, en_proceso, cumplido, sin_asignar "
+            "FROM deposito.pedidos_abiertos_snapshot "
             "WHERE ts::date = %s ORDER BY ts",
             (dia,),
         )
-        return [(ts, int(ab)) for ts, ab in cur.fetchall()]
+        return [
+            (ts, int(ab) if ab is not None else None,
+             ee if ee is None else int(ee),
+             ep if ep is None else int(ep),
+             cu if cu is None else int(cu),
+             sa if sa is None else int(sa))
+            for ts, ab, ee, ep, cu, sa in cur.fetchall()
+        ]
     finally:
         conn.close()
 
@@ -436,6 +517,12 @@ def fetch_pedidos_hora(fecha: date | None = None):
                      bucket (carry-forward); si todavía no hay foto se rellena
                      con el backlog reconstruido (registrados − cerrados a esa
                      hora), así la curva se ve completa desde las 8h.
+      · est_espera / est_proceso / est_sin_asignar = desglose de estados del WMS
+                     (OT de Picking) tomado de la MISMA foto cada 15 min; None
+                     hasta que hay foto ese día (son estados vivos, sin historial
+                     reconstruible). est_cumplido = acumulado real de cumplidos
+                     del día (reconstruido desde OTFechaHoraEjecucion), completo
+                     desde las 8h. Los cuatro son el gráfico 1.
 
     El eje 8-18h se devuelve SIEMPRE completo. Para el día de hoy los buckets que
     todavía no empezaron vienen en None (las líneas se van trazando hacia
@@ -481,35 +568,37 @@ def fetch_pedidos_hora(fecha: date | None = None):
 
     out = []
     idx_foto = 0
-    ultima_foto = None
+    abiertos_foto = None
+    est_espera = est_proceso = est_sin = None  # carry-forward del desglose WMS
     for m in range(minuto_desde, minuto_hasta, paso):
         h, mi = divmod(m, 60)
         inicio = datetime(dia.year, dia.month, dia.day, h, mi, 0)
         corte = inicio + timedelta(minutes=paso)
-        # Carry-forward de la foto real (avanza el índice aunque el bucket sea
+        # Carry-forward de la última foto (avanza el índice aunque el bucket sea
         # futuro; el valor solo se usa en buckets ya pasados).
         while idx_foto < len(fotos) and fotos[idx_foto][0] < corte:
-            ultima_foto = fotos[idx_foto][1]
+            f = fotos[idx_foto]
+            abiertos_foto = f[1]
+            est_espera, est_proceso, est_sin = f[2], f[3], f[5]
             idx_foto += 1
         if ahora is not None and inicio > ahora:
-            # Bucket futuro (aún no arrancó): sin datos, la línea corta acá.
+            # Bucket futuro (aún no arrancó): sin datos, las líneas cortan acá.
             out.append({
                 "hora": f"{h:02d}:{mi:02d}",
-                "ingresados": None,
-                "cerrados": None,
-                "cumplidos": None,
-                "abiertos": None,
+                "ingresados": None, "cerrados": None, "cumplidos": None,
+                "abiertos": None, "est_espera": None, "est_proceso": None,
+                "est_cumplido": None, "est_sin_asignar": None,
             })
             continue
         ingresados = sum(1 for ts_reg, _ in regs if ts_reg.date() == dia and inicio <= ts_reg < corte)
         cerrados = sum(1 for _, ts_cie in regs if ts_cie and ts_cie.date() == dia and inicio <= ts_cie < corte)
-        cumplidos = sum(1 for ts in cumpl_ts if inicio <= ts < corte)
+        cumplidos = sum(1 for ts in cumpl_ts if inicio <= ts < corte)          # flujo (gráfico 2)
+        est_cumplido = sum(1 for ts in cumpl_ts if ts < corte)                 # acumulado del día (estado, gráfico 1)
         # Backlog reconstruido: pedidos registrados antes del corte y todavía no
-        # cerrados a esa hora. Relleno para buckets sin foto real (arranque del
-        # día / días viejos sin snapshotter). La foto real (ultima_foto) SIEMPRE
-        # tiene prioridad cuando existe.
-        if ultima_foto is not None:
-            abiertos = ultima_foto
+        # cerrados a esa hora. Relleno para buckets sin foto real. La foto real
+        # (abiertos_foto) SIEMPRE tiene prioridad cuando existe.
+        if abiertos_foto is not None:
+            abiertos = abiertos_foto
         else:
             abiertos = sum(
                 1 for ts_reg, ts_cie in regs
@@ -521,6 +610,13 @@ def fetch_pedidos_hora(fecha: date | None = None):
             "cerrados": cerrados,
             "cumplidos": cumplidos,
             "abiertos": abiertos,
+            # Desglose de estados del WMS (gráfico 1): espera/proceso/sin_asignar
+            # vienen de la foto cada 15 min (None hasta que hay foto ese día);
+            # cumplido es el acumulado real reconstruido, completo desde las 8h.
+            "est_espera": est_espera,
+            "est_proceso": est_proceso,
+            "est_cumplido": est_cumplido,
+            "est_sin_asignar": est_sin,
         })
     return out
 

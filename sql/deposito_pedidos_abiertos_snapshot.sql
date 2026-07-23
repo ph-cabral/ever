@@ -19,3 +19,13 @@ CREATE TABLE IF NOT EXISTS deposito.pedidos_abiertos_snapshot (
 
 CREATE INDEX IF NOT EXISTS idx_pedidos_abiertos_snapshot_ts
     ON deposito.pedidos_abiertos_snapshot (ts);
+
+-- 2026-07-23 (ampliación): la misma foto guarda ahora el desglose de estados del
+-- WMS (OT de Picking) para el gráfico 1 de /deposito/wms — en espera / en proceso
+-- / cumplido / sin asignar (ver deposito.py::fetch_wms_breakdown_ahora). Nullable
+-- porque las fotos viejas no los tienen y porque si el WMS está caído la foto de
+-- abiertos igual se guarda. Correr estos ALTER en Postgres antes de deployar.
+ALTER TABLE deposito.pedidos_abiertos_snapshot ADD COLUMN IF NOT EXISTS en_espera   integer;
+ALTER TABLE deposito.pedidos_abiertos_snapshot ADD COLUMN IF NOT EXISTS en_proceso  integer;
+ALTER TABLE deposito.pedidos_abiertos_snapshot ADD COLUMN IF NOT EXISTS cumplido    integer;
+ALTER TABLE deposito.pedidos_abiertos_snapshot ADD COLUMN IF NOT EXISTS sin_asignar integer;
