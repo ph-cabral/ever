@@ -531,7 +531,7 @@ export default function SistemaClient() {
                 const ordenManual = esSistema && esOrdenManual(col.nombre);
                 const soloMesActual = esSistema
                   ? esColumnaCerradaSistema(col.nombre)
-                  : /solucionado/i.test(col.nombre) && !/sin solu/i.test(col.nombre);
+                  : /resuelto|solucionado/i.test(col.nombre) && !/sin solu/i.test(col.nombre);
                 const mesActualG = mesKey(new Date());
                 const mesCerradoG = mesAnteriorKey(new Date());
 
@@ -1546,11 +1546,6 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
   const sCards = cardsDe(idDe("sistema"));
   const sfCards = cardsDe(idDe("softech"));
 
-  const solvedCount = sfCards.filter(
-    (c) => /solucionado/i.test(c.colNombre) && !/sin solu/i.test(c.colNombre)
-  ).length;
-  const pctSolved = sfCards.length ? Math.round((solvedCount / sfCards.length) * 100) : 0;
-
   const diffs: number[] = [];
   for (const c of sfCards) {
     const a = parseDate(c.campos.inicio);
@@ -1737,8 +1732,14 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
         <SeccionTablero title={softechTablero.nombre}>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <Kpi value={sfCards.length} label="Casos registrados" />
-            <Kpi value={`${pctSolved}%`} label="Resuelto" />
             <Kpi value={avgDays} label="Días promedio de resolución" />
+            {sfPorEstado.map((e) => (
+              <Kpi
+                key={e.name}
+                value={`${sfCards.length ? Math.round((e.value / sfCards.length) * 100) : 0}%`}
+                label={e.name}
+              />
+            ))}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
