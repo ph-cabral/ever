@@ -9,6 +9,7 @@ type Row = {
   employee_no: string;
   employee_name: string | null;
   departamento: string | null;
+  sector: string | null;
   fecha: string;
   check_in: string | null;
   check_out: string | null;
@@ -75,7 +76,8 @@ export async function GET(req: NextRequest) {
         SELECT l."employeeNo" AS employee_no,
                ltrim(l."employeeNo", '0') AS emp_key,
                NULLIF(TRIM(l.nombre), '') AS employee_name,
-               COALESCE(ar.nombre, l.sector) AS departamento
+               COALESCE(ar.nombre, l.sector) AS departamento,
+               COALESCE(s.nombre, l.sector) AS sector
         FROM everwear.legajo l
         LEFT JOIN everwear.sector s ON s.id = l."sectorId"
         LEFT JOIN everwear.area   ar ON ar.id = s."areaId"
@@ -103,6 +105,7 @@ export async function GET(req: NextRequest) {
         a.employee_no,
         a.employee_name,
         a.departamento,
+        a.sector,
         to_char(d.fecha, 'YYYY-MM-DD') AS fecha,
         ev.devices,
         ev.check_in,
@@ -155,6 +158,7 @@ export async function GET(req: NextRequest) {
       employee_no: r.employee_no,
       employee_name: r.employee_name ?? null,
       departamento: r.departamento ?? null,
+      sector: r.sector ?? null,
       fecha: r.fecha,
       check_in: fmt(r.check_in),
       check_out: fmt(r.check_out),

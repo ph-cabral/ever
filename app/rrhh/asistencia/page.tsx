@@ -40,6 +40,7 @@ type Row = {
   employee_no: string;
   employee_name: string | null;
   departamento: string | null;
+  sector: string | null;
   fecha: string;
   check_in: string | null;
   check_out: string | null;
@@ -499,6 +500,7 @@ export default function AsistenciaPage() {
   const [estado, setEstado] = useState<string>("all");
   const [edits, setEdits] = useState<Record<string, Edit>>({});
   const [area, setArea] = useState<string>("all");
+  const [sector, setSector] = useState<string>("all");
 
   // Horarios por área (tope diario) — ver /api/rrhh/asistencia/horarios.
   const [tipos, setTipos] = useState<HorarioTipo[]>([]);
@@ -651,6 +653,12 @@ export default function AsistenciaPage() {
     [rows],
   );
 
+  const sectores = useMemo(
+    () =>
+      [...new Set(rows.map((r) => r.sector).filter(Boolean) as string[])].sort(),
+    [rows],
+  );
+
   const empleadosPorArea = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of rows) {
@@ -672,9 +680,10 @@ export default function AsistenciaPage() {
       if (q && !(r.employee_name ?? "").toLowerCase().includes(q)) return false;
       if (estado !== "all" && effEstado(r) !== estado) return false;
       if (area !== "all" && (r.departamento ?? "") !== area) return false;
+      if (sector !== "all" && (r.sector ?? "") !== sector) return false;
       return true;
     });
-  }, [rows, empleadoDef, estado, area, edits]);
+  }, [rows, empleadoDef, estado, area, sector, edits]);
 
   return (
     <div className="container mx-auto px-6 py-8">
@@ -724,7 +733,7 @@ export default function AsistenciaPage() {
         />
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-4">
         <Input
           placeholder="Empleado…"
           value={empleado}
@@ -737,6 +746,20 @@ export default function AsistenciaPage() {
           <SelectContent>
             <SelectItem value="all">Todos los estados</SelectItem>
             {ESTADOS.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={sector} onValueChange={setSector}>
+          <SelectTrigger>
+            <SelectValue placeholder="Sector" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos los sectores</SelectItem>
+            {sectores.map((s) => (
               <SelectItem key={s} value={s}>
                 {s}
               </SelectItem>
