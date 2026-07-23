@@ -2,6 +2,7 @@
 // app/rrhh/legajos/[legajo]/page.tsx -> editor de legajo completo
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useForm, FormProvider, useFormContext, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -145,6 +146,7 @@ function RelationTab({ relation }: { relation: RelationDef }) {
 type Tab = { id: string; label: string; kind: "section" | "relation" };
 
 export default function LegajoEditor({ id, initial }: { id: number; initial: Record<string, unknown> }) {
+  const router = useRouter();
   const methods = useForm({
     resolver: zodResolver(legajoUpdateSchema),
     defaultValues: initial as never,
@@ -187,6 +189,7 @@ export default function LegajoEditor({ id, initial }: { id: number; initial: Rec
       }
       toast.success("Legajo guardado");
       methods.reset(values as never);
+      router.push("/rrhh/legajos");
     } catch {
       toast.error("Error de red");
     } finally {
@@ -250,7 +253,7 @@ export default function LegajoEditor({ id, initial }: { id: number; initial: Rec
           <Link
             href="/rrhh/legajos"
             className="rounded-md px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
-          >
+            >
             Volver
           </Link>
           <button
