@@ -203,14 +203,26 @@ def deposito_ingresados(
     }
 
 @app.get("/deposito/pedidos-hora")
-def deposito_pedidos_hora():
-    """Vista EN VIVO de HOY (8-18h): pedidos ingresados, backlog de abiertos y
-    cerrados por hora. Fuente Magnus (VenFer_PedidoCabecera)."""
+def deposito_pedidos_hora(
+    desde: str | None = Query(default=None),
+    hasta: str | None = Query(default=None),
+):
+    """Pedidos ingresados, backlog de abiertos y cerrados por hora (8-18h) de
+    UN día. Fuente Magnus (VenFer_PedidoCabecera). Sin desde/hasta → HOY en
+    vivo (no proyecta horas futuras). Con desde/hasta (mismos filtros que
+    /deposito/wms-estados) → usa `hasta` (o `desde`) como el día a mostrar;
+    si no es hoy, se devuelve el 8-18h completo de ese día."""
+    dia = date.today()
+    if hasta or desde:
+        try:
+            dia = date.fromisoformat((hasta or desde).strip()[:10])
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Fecha inválida (usar YYYY-MM-DD)")
     try:
-        rows = fetch_pedidos_hora()
+        rows = fetch_pedidos_hora(dia)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
-    return {"fecha": date.today().isoformat(), "rows": rows}
+    return {"fecha": dia.isoformat(), "rows": rows}
 
 @app.get("/deposito/vivo")
 def deposito_vivo():

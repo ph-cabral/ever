@@ -120,14 +120,20 @@ export default function DepositoWmsPage() {
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const [, setTick] = useState(0); // re-render del "hace Xs"
 
-  // Pedidos por hora (8-18h), en vivo, solo HOY — independiente del rango
-  // desde/hasta de arriba (que es para el WMS por estado).
+  // Pedidos por hora (8-18h) — sigue el mismo filtro desde/hasta de arriba;
+  // sin filtro (recién entrando a la vista) muestra HOY en vivo.
   const [horaData, setHoraData] = useState<PedidosHoraData | null>(null);
   const [horaError, setHoraError] = useState<string | null>(null);
 
-  const loadHora = useCallback(async () => {
+  // Mismos filtros desde/hasta que el resto de la vista ("" = hoy en vivo).
+  const loadHora = useCallback(async (d: string, h: string) => {
     try {
-      const res = await fetch(`/api/deposito/pedidos-hora`, { cache: "no-store" });
+      const qs = new URLSearchParams();
+      if (d) qs.set("desde", d);
+      if (h) qs.set("hasta", h || d);
+      const res = await fetch(`/api/deposito/pedidos-hora?${qs.toString()}`, {
+        cache: "no-store",
+      });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       setHoraData(j as PedidosHoraData);
@@ -137,15 +143,17 @@ export default function DepositoWmsPage() {
     }
   }, []);
 
+  // Recarga cuando cambia el filtro desde/hasta (mismo rango que arriba).
   useEffect(() => {
-    loadHora();
-  }, [loadHora]);
+    loadHora(desde, hasta);
+  }, [desde, hasta, loadHora]);
 
+  // Auto-refresh cada minuto (si está activado), con el filtro actual.
   useEffect(() => {
     if (!auto) return;
-    const id = setInterval(loadHora, REFRESH_MS);
+    const id = setInterval(() => loadHora(desde, hasta), REFRESH_MS);
     return () => clearInterval(id);
-  }, [auto, loadHora]);
+  }, [auto, desde, hasta, loadHora]);
 
   const load = useCallback(async (d: string, h: string) => {
     setLoading(true);
@@ -197,6 +205,7 @@ export default function DepositoWmsPage() {
   const hoy = isoLocal(new Date());
   const ayer = isoLocal(new Date(Date.now() - 864e5));
   const hace7 = isoLocal(new Date(Date.now() - 6 * 864e5));
+  const horaEsHoy = !horaData?.fecha || horaData.fecha === hoy;
 
   const setRango = (d: string, h: string) => {
     setDesde(d);
@@ -361,12 +370,12 @@ export default function DepositoWmsPage() {
       )}
 
       <main className="max-w-[1500px] mx-auto px-4 md:px-8 py-6">
-        {/* Pedidos por hora (8-18h) — hoy en vivo, fuente Magnus */}
+        {/* Pedidos por hora (8-18h), fuente Magnus — sigue el filtro desde/hasta de arriba */}
         <div className="mb-6">
           <div className="flex items-center gap-3 mb-3">
             <Clock size={16} className="text-yellow-400" />
             <span className="text-[13px] font-semibold text-zinc-100">
-              Pedidos por hora — hoy (8 a 18h)
+              Pedidos por hora — {horaEsHoy ? "hoy" : fmtAr(horaData?.fecha ?? null)} (8 a 18h)
             </span>
             <span className="text-zinc-600 text-[12px]">Fuente: Magnus</span>
             <span className="flex-1 h-px bg-zinc-800" />
@@ -392,8 +401,10 @@ export default function DepositoWmsPage() {
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
             Ingresados = pedidos registrados esa hora. Abiertos = facturas sin cerrar
             a esa hora (backlog real, incluye pedidos de días previos). Cerrados = de
-            esos, cuántos pasaron a Cerrado/Facturado esa hora. Vista en vivo de hoy,
-            se actualiza cada 60s.
+            esos, cuántos pasaron a Cerrado/Facturado esa hora.{" "}
+            {horaEsHoy
+              ? "Vista en vivo de hoy hasta la hora actual, se actualiza cada 60s."
+              : "Día completo (ya cerrado)."}
           </p>
         </div>
 

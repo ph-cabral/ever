@@ -246,15 +246,19 @@ def fetch_ingresados(desde, hasta):
         conn.close()
 
 
-# ── Pedidos por hora (8 a 18h) — vista EN VIVO de HOY, fuente Magnus ──────────
-# Ingresados = pedidos registrados esa hora de HOY (ts_Registro).
+# ── Pedidos por hora (8 a 18h) — fuente Magnus, día = hoy (en vivo) o filtro ──
+# Ingresados = pedidos registrados esa hora del día pedido (ts_Registro).
 # Cerrados   = de los pedidos con actividad reciente (ventana de
 #              PEDIDOS_HORA_VENTANA_DIAS), cuántos pasaron a Cerrado/Facturado
-#              en esa hora de HOY (ts_Cierre) — incluye pedidos abiertos en
-#              días previos que recién hoy se cerraron.
+#              en esa hora del día pedido (ts_Cierre) — incluye pedidos abiertos
+#              en días previos que recién ese día se cerraron.
 # Abiertos   = backlog real: cuántos de esos pedidos (toda la ventana, no solo
-#              los de hoy) siguen abiertos al final de esa hora (registrados
-#              antes del corte y sin cierre, o con cierre posterior al corte).
+#              los del día pedido) siguen abiertos al final de esa hora
+#              (registrados antes del corte y sin cierre, o con cierre
+#              posterior al corte).
+# Si el día pedido es HOY, no se devuelven horas futuras a la hora actual
+# (ver `hora_limite` en fetch_pedidos_hora) — evita graficar como si ya
+# hubiesen transcurrido.
 # Mismos códigos de comprobante que /deposito/pedidos (CODIGOS_COMPROBANTE_WMS)
 # y mismo criterio de "cancelado" que el resto del archivo (PATRONES_CANCELADO).
 # Fecha/hora nativas de Magnus: FechaXXX = días desde 1800-12-28, HoraXXX = HHMM
@@ -300,14 +304,19 @@ def _pedido_ts(fecha_dias, hora_hhmm):
         return None
 
 
-def fetch_pedidos_hora():
-    """Vista EN VIVO de hoy (8-18h): pedidos ingresados por hora + backlog de
+def fetch_pedidos_hora(fecha: date | None = None):
+    """Vista por hora (8-18h) de un día: pedidos ingresados por hora + backlog de
     abiertos + cerrados por hora. Fuente: EVERWEAR.dbo.VenFer_PedidoCabecera
     (Magnus); ventana de PEDIDOS_HORA_VENTANA_DIAS para calcular el backlog real
-    (no solo lo ingresado hoy)."""
-    hoy = date.today()
-    dias_hoy = (hoy - _BASE_PEDIDO).days
-    dias_desde = dias_hoy - PEDIDOS_HORA_VENTANA_DIAS
+    (no solo lo ingresado ese día).
+
+    Sin `fecha` (o `fecha` = hoy) → vista EN VIVO: NO devuelve horas futuras a
+    la hora actual (evita proyectar como si ya hubiesen pasado). Con `fecha`
+    de un día anterior → día ya cerrado, se devuelve el 8-18h completo."""
+    dia = fecha or date.today()
+    es_hoy = dia == date.today()
+    dias_dia = (dia - _BASE_PEDIDO).days
+    dias_desde = dias_dia - PEDIDOS_HORA_VENTANA_DIAS
 
     conn = get_connection("EVERWEAR")
     try:
@@ -315,7 +324,7 @@ def fetch_pedidos_hora():
         cur.execute("SET DATEFORMAT ymd;")
         cur.execute(
             SQL_PEDIDOS_HORA.format(codigos=",".join(map(str, CODIGOS_COMPROBANTE_WMS))),
-            (dias_desde, dias_hoy),
+            (dias_desde, dias_dia),
         )
         filas = cur.fetchall()
     finally:
@@ -331,12 +340,18 @@ def fetch_pedidos_hora():
         ts_cie = _pedido_ts(f_cie, h_cie)
         regs.append((ts_reg, ts_cie))
 
+    hora_limite = PEDIDOS_HORA_HASTA
+    if es_hoy:
+        # No proyectar horas que todavía no pasaron: último bucket visible es
+        # el de la hora en curso (parcial, se va completando solo).
+        hora_limite = min(PEDIDOS_HORA_HASTA, datetime.now().hour + 1)
+
     out = []
-    for h in range(PEDIDOS_HORA_DESDE, PEDIDOS_HORA_HASTA):
-        inicio = datetime(hoy.year, hoy.month, hoy.day, h, 0, 0)
-        corte = datetime(hoy.year, hoy.month, hoy.day, h + 1, 0, 0)
-        ingresados = sum(1 for ts_reg, _ in regs if ts_reg.date() == hoy and inicio <= ts_reg < corte)
-        cerrados = sum(1 for _, ts_cie in regs if ts_cie and ts_cie.date() == hoy and inicio <= ts_cie < corte)
+    for h in range(PEDIDOS_HORA_DESDE, max(PEDIDOS_HORA_DESDE, hora_limite)):
+        inicio = datetime(dia.year, dia.month, dia.day, h, 0, 0)
+        corte = datetime(dia.year, dia.month, dia.day, h + 1, 0, 0)
+        ingresados = sum(1 for ts_reg, _ in regs if ts_reg.date() == dia and inicio <= ts_reg < corte)
+        cerrados = sum(1 for _, ts_cie in regs if ts_cie and ts_cie.date() == dia and inicio <= ts_cie < corte)
         abiertos = sum(1 for ts_reg, ts_cie in regs if ts_reg < corte and (ts_cie is None or ts_cie >= corte))
         out.append({
             "hora": f"{h:02d}:00",

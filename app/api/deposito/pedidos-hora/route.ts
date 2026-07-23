@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 const API_URL =
   process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
@@ -6,11 +6,13 @@ const API_URL =
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Proxy → FastAPI indicadores-api: pedidos por hora de HOY (8-18h), en vivo,
-// fuente Magnus (ingresados / abiertos / cerrados). Sin parámetros: siempre hoy.
-export async function GET() {
+// Proxy → FastAPI indicadores-api: pedidos por hora (8-18h) de un día, fuente
+// Magnus (ingresados / abiertos / cerrados). Mismos filtros desde/hasta que
+// /deposito/wms-estados; sin parámetros: HOY en vivo.
+export async function GET(req: NextRequest) {
   try {
-    const res = await fetch(`${API_URL}/deposito/pedidos-hora`, {
+    const qs = req.nextUrl.search;
+    const res = await fetch(`${API_URL}/deposito/pedidos-hora${qs}`, {
       cache: "no-store",
       signal: AbortSignal.timeout(45000),
     });
