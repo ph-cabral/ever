@@ -1304,6 +1304,23 @@ WMS_ESTADO_LABELS: dict[int, dict] = {
     5: {"label": "En proceso",  "bucket": "proceso"},
 }
 
+# OJO 2026-07-23 (fix #2, encontrado): el usuario reportó que Pendiente+En
+# proceso por operario seguía por debajo de la realidad (ej. Boscacci Vladimir
+# real ~7 entre las dos, la vista daba 1; Maidana real ~8, daba 4) — DESPUÉS
+# del fix de arriba (reclasificar estado=5). Causa: SQL_WMS_ESTADOS filtraba
+# TODO por rango de fecha (WMS_COL_FECHA = OTFechaHoraRegist del día/rango
+# consultado), así que una OT todavía Pendiente/En proceso pero REGISTRADA
+# unos días antes del rango quedaba afuera — se "perdía" backlog viejo sin
+# terminar, igual que le pasaba a /deposito/pedidos-hora con Magnus. Fix:
+# mismo patrón que /deposito/vivo (SQL_VIVO, ver más arriba, "sin filtrar por
+# fecha: una OT viva es la que todavía no está terminada, sin importar cuándo
+# entró") — los estados "vivos" (bucket espera/proceso) se traen SIEMPRE,
+# el filtro de fecha solo aplica a los terminales (Cumplido/despacho/tránsito),
+# si no el "Cumplido" del día crecería sin límite.
+WMS_ESTADOS_VIVOS: tuple[int, ...] = tuple(
+    e for e, m in WMS_ESTADO_LABELS.items() if m["bucket"] in ("espera", "proceso")
+)
+
 
 def _wms_estado_meta(estado) -> dict:
     """{estado, label, bucket} de un OTEstado para la vista WMS, con fallback."""
@@ -1334,8 +1351,8 @@ LEFT JOIN (
     FROM OTItem GROUP BY OTId
 ) it ON it.OTId = OT.OTId
 WHERE Codot.CodotProcesoNegocio IN ({procesos})
-  AND OT.{col_fecha} >= ?
-  AND OT.{col_fecha} <= ?
+  AND ( OT.OTEstado IN ({vivos})
+        OR (OT.{col_fecha} >= ? AND OT.{col_fecha} <= ?) )
 GROUP BY CASE WHEN OT.OTEstado = 5 AND ISNULL(it.Recolectados, 0) = 0
               THEN 1 ELSE OT.OTEstado END, P.PersonalNombre
 """
@@ -1351,9 +1368,14 @@ WHERE Codot.CodotProcesoNegocio IN ({procesos})
 
 
 def fetch_wms_estados(desde=None, hasta=None, procesos: tuple[int, ...] = PROCESOS_VIVO):
-    """OT por estado y carga por preparador en un rango (OTFechaHoraRegist).
+    """OT por estado y carga por preparador. Universo = "vivas + rango":
+      · vivas (Pendiente/En proceso) → SIEMPRE, sin importar cuándo se
+        registraron (mismo criterio que fetch_vivo/SQL_VIVO).
+      · terminales (Cumplido/despacho/tránsito) → solo dentro del rango
+        (OTFechaHoraRegist), si no "Cumplido" crecería sin límite.
 
-    Sin desde/hasta → último día con OT registrada. Devuelve:
+    Sin desde/hasta → rango = último día con OT registrada (solo afecta a los
+    terminales; las vivas se muestran igual). Devuelve:
       · estados      = [{estado, label, bucket, cantidad, items}] (todos los presentes)
       · por_operario = [{operario, total, total_items, por_estado: {<cod>: n},
                          items_por_estado: {<cod>: items}}] con ≥1 OT
@@ -1378,7 +1400,13 @@ def fetch_wms_estados(desde=None, hasta=None, procesos: tuple[int, ...] = PROCES
             h = datetime(dia.year, dia.month, dia.day, 23, 59, 59)
         else:
             d, h = _rango_ot(desde, hasta)
-        cur.execute(SQL_WMS_ESTADOS.format(procesos=proc_in, col_fecha=WMS_COL_FECHA), (d, h))
+        cur.execute(
+            SQL_WMS_ESTADOS.format(
+                procesos=proc_in, col_fecha=WMS_COL_FECHA,
+                vivos=",".join(str(e) for e in WMS_ESTADOS_VIVOS),
+            ),
+            (d, h),
+        )
         filas = cur.fetchall()
     finally:
         conn.close()
