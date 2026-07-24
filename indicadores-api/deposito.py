@@ -423,9 +423,17 @@ def guardar_snapshot_wms_estados() -> dict:
     """Foto de los KPI de estados (fetch_wms_estados, HOY) → Postgres. Guarda
     también espera_merca = OT vivas del operario 'Mercaderia X Llegar' (los
     pedidos esperando que llegue la mercadería), para poder restarlas de
-    Disponibles y mostrarlas aparte en el gráfico de movimiento."""
-    hoy = date.today().isoformat()
-    res = fetch_wms_estados(hoy, hoy)
+    Disponibles y mostrarlas aparte en el gráfico de movimiento.
+
+    Pablo, 2026-07-24: "terminadas" (Cumplido) sale de un COUNT en vivo contra
+    WMS con READ UNCOMMITTED, tomado cada 15 min — NO es un acumulador. Cumplido
+    es un estado terminal que en el negocio nunca vuelve para atrás, pero una
+    foto que cruza una tanda grande de OT pasando a Cumplido a la vez puede leer
+    sucio y devolver momentáneamente menos de lo real (caso real: 12:15=71 →
+    12:30=39). Se clampea contra el máximo ya guardado hoy para que la serie
+    guardada sea monótona no decreciente, como tiene que ser."""
+    hoy = date.today()
+    res = fetch_wms_estados(hoy.isoformat(), hoy.isoformat())
     r = res.get("resumen", {})
     en_espera = int(r.get("en_espera", 0))
     en_proceso = int(r.get("en_proceso", 0))
@@ -442,6 +450,17 @@ def guardar_snapshot_wms_estados() -> dict:
     conn = get_pg_connection()
     try:
         cur = conn.cursor()
+        # Cumplido no puede bajar dentro del día: si esta foto leyó menos que la
+        # máxima ya guardada hoy (lectura sucia en una tanda de altas), nos
+        # quedamos con la máxima previa en vez de guardar una baja espuria.
+        cur.execute(
+            "SELECT COALESCE(MAX(terminadas), 0) FROM deposito.wms_estados_snapshot "
+            "WHERE ts::date = %s",
+            (hoy,),
+        )
+        terminadas_prev = cur.fetchone()[0]
+        if terminadas < terminadas_prev:
+            terminadas = terminadas_prev
         cur.execute(
             "INSERT INTO deposito.wms_estados_snapshot "
             "(ts, en_espera, en_proceso, terminadas, espera_merca) "
