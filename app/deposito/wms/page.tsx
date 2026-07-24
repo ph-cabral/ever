@@ -398,7 +398,7 @@ export default function DepositoWmsPage() {
                 xKey="hora"
                 height={220}
                 angle={-60}
-                bars={[{ key: "abiertos", name: "Abiertos", color: "#3f3f46" }]}
+                bars={[{ key: "ingresados", name: "Ingresados", color: "#3f3f46" }]}
                 lines={[
                   { key: "est_espera", name: "En espera", color: "#facc15" },
                   { key: "est_proceso", name: "En proceso", color: "#58a6ff" },
@@ -409,7 +409,7 @@ export default function DepositoWmsPage() {
             )}
           </div>
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
-            Barras = pedidos abiertos (disponibles) a esa hora. Líneas = cuántas OT
+            Barras = pedidos ingresados (registrados) en ese bloque de 15 min. Líneas = cuántas OT
             de picking PASAN a cada etapa en ese bloque de 15 min (no acumulado),
             según la hora de la propia OT: En espera = registrada con operario;
             Sin asignar = registrada sin operario; En proceso = arrancó el picking;
