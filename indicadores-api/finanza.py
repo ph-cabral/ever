@@ -22,7 +22,7 @@ BASE_DATE = date(1800, 12, 28)   # Magnus guarda fechas como días desde esta ba
 
 # ── Códigos de comprobante (los pidió contaduría) ────────────────────────────
 COD_SUMA  = (11,)                 # lo que ENTRA
-COD_RESTA = (22, 23, 24, 25)      # lo que SALE (notas de crédito / devoluciones)
+COD_RESTA = (13, 22, 23, 24, 25)  # lo que SALE (13 + notas de crédito / devoluciones)
 IVA_RATE  = 0.21                  # para el "neto sin IVA"
 
 # ── CONFIG — CONFIRMADO POR DESCUBRIMIENTO (Ven_CompCabecera) ────────────────
@@ -34,12 +34,12 @@ IVA_RATE  = 0.21                  # para el "neto sin IVA"
 FACT_DB          = "EVERWEAR"            # base
 FACT_TABLA       = "Ven_CompCabecera"    # cabecera de comprobantes de venta
 COL_CODIGO       = "CompCodigo"          # tipo de comprobante (11 / 22 / 23 / 24 / 25)
-COL_IMPORTE      = "Total"               # total CON IVA del comprobante
+COL_IMPORTE      = "Neto"                # importe del comprobante (columna Neto)
 COL_FECHA        = "FecMovim"            # entero Magnus (días desde 1800-12-28)
 FECHA_ES_ENTERO  = True                  # FecMovim es entero
-COL_IVA          = "IVA"                 # columna del IVA → neto sin IVA = Total − IVA (EXACTO)
+COL_IVA          = ""                    # IVA no se toma
 COL_TASA_IVA     = ""                    # TasaIVA vino 0 en toda la tabla; no se usa
-COL_NETO         = ""                    # alternativa: neto gravado puro (excluye NoGravado). Para usarla, poné "Neto"
+COL_NETO         = "Neto"                # se suma/resta la columna Neto directa (sin cálculo de IVA)
 # ─────────────────────────────────────────────────────────────────────────────
 
 CONFIGURADO = bool(FACT_TABLA and COL_CODIGO and COL_IMPORTE and COL_FECHA)
