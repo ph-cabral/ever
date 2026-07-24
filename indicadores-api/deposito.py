@@ -425,7 +425,10 @@ def _wms_transiciones_del_dia(dia: date) -> dict:
     actual de la OT. Vacío si el WMS no contesta (el gráfico no se rompe)."""
     ini = datetime(dia.year, dia.month, dia.day)
     fin = ini + timedelta(days=1)
-    out = {"en_espera": [], "sin_asignar": [], "en_proceso": [], "cumplido": []}
+    # Listas de timestamps por etapa (FLUJO, gráfico 1) + "ot" con la tupla cruda
+    # por OT (reg, pini, ejec, estado, asignado) para reconstruir el SNAPSHOT
+    # (cuántas hay EN cada estado en un momento dado, gráfico nuevo).
+    out = {"en_espera": [], "sin_asignar": [], "en_proceso": [], "cumplido": [], "ot": []}
     try:
         conn = get_connection("WMS")
     except Exception as e:  # noqa: BLE001 — WMS caído no debe tumbar el gráfico
@@ -436,12 +439,15 @@ def _wms_transiciones_del_dia(dia: date) -> dict:
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cur.execute(SQL_WMS_TRANSICIONES, (ini, fin, ini, fin, ini, fin))
         for reg, pini, ejec, estado, asignado in cur.fetchall():
+            asig = int(asignado or 0)
+            est = int(estado or 0)
             if reg is not None and ini <= reg < fin:
-                (out["en_espera"] if int(asignado or 0) == 1 else out["sin_asignar"]).append(reg)
+                (out["en_espera"] if asig == 1 else out["sin_asignar"]).append(reg)
             if pini is not None and ini <= pini < fin:
                 out["en_proceso"].append(pini)
-            if ejec is not None and ini <= ejec < fin and int(estado or 0) == 2:
+            if ejec is not None and ini <= ejec < fin and est == 2:
                 out["cumplido"].append(ejec)
+            out["ot"].append((reg, pini, ejec, est, asig))
         return out
     finally:
         conn.close()
@@ -511,6 +517,29 @@ def fetch_pedidos_hora(fecha: date | None = None):
     def _en(lst, ini_b, fin_b):
         return sum(1 for ts in lst if ini_b <= ts < fin_b)
 
+    ot_list = trans.get("ot", [])  # (reg, pini, ejec, estado, asignado)
+
+    def _snap(corte):
+        """SNAPSHOT: cuántas OT hay EN cada estado al cierre del bucket.
+          · espera      = registrada CON operario y todavía sin arrancar picking
+          · proceso     = arrancó picking y no cumplió
+          · sin_asignar = registrada SIN operario y sin arrancar
+          · cumplido    = terminada (ACUMULADO del día, solo crece)
+        espera/sin_asignar/proceso suben y bajan según cambian de estado."""
+        espera = proceso = sin_asig = cumpl = 0
+        for reg, pini, ejec, estado, asig in ot_list:
+            if ejec is not None and estado == 2 and ejec < corte:
+                cumpl += 1
+                continue
+            if pini is not None and pini < corte:
+                proceso += 1
+            elif reg is not None and reg < corte:
+                if asig == 1:
+                    espera += 1
+                else:
+                    sin_asig += 1
+        return espera, proceso, sin_asig, cumpl
+
     out = []
     idx_foto = 0
     abiertos_foto = None
@@ -530,6 +559,7 @@ def fetch_pedidos_hora(fecha: date | None = None):
                 "ingresados": None, "cerrados": None, "cumplidos": None,
                 "abiertos": None, "est_espera": None, "est_proceso": None,
                 "est_cumplido": None, "est_sin_asignar": None,
+                "snap_espera": None, "snap_disponibles": None, "snap_cumplido": None,
             })
             continue
         ingresados = sum(1 for ts_reg, _ in regs if ts_reg.date() == dia and inicio <= ts_reg < corte)
@@ -541,6 +571,8 @@ def fetch_pedidos_hora(fecha: date | None = None):
         est_cumplido = _en(trans["cumplido"], inicio, corte)
         est_sin = _en(trans["sin_asignar"], inicio, corte)
         cumplidos = est_cumplido  # gráfico 2 usa el mismo flujo de cumplidos
+        # Snapshot (gráfico nuevo): cuántas hay EN cada estado al cierre del bucket.
+        snap_esp, snap_proc, snap_sin, snap_cumpl = _snap(corte)
         # Backlog reconstruido: pedidos registrados antes del corte y todavía no
         # cerrados a esa hora. Relleno para buckets sin foto real. La foto real
         # (abiertos_foto) SIEMPRE tiene prioridad cuando existe.
@@ -561,6 +593,9 @@ def fetch_pedidos_hora(fecha: date | None = None):
             "est_proceso": est_proceso,
             "est_cumplido": est_cumplido,
             "est_sin_asignar": est_sin,
+            "snap_espera": snap_esp,
+            "snap_disponibles": snap_esp + snap_proc + snap_sin,
+            "snap_cumplido": snap_cumpl,
         })
     return out
 

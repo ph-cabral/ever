@@ -69,6 +69,10 @@ interface HoraRow {
   est_proceso: number | null;
   est_cumplido: number | null;
   est_sin_asignar: number | null;
+  // Gráfico snapshot: cuántas hay EN cada estado en el momento (suben/bajan).
+  snap_espera: number | null; // en espera ahora
+  snap_disponibles: number | null; // sin_asignar + en_proceso + en_espera (no cumplidas)
+  snap_cumplido: number | null; // cumplidas ACUMULADO del día (solo crece)
 }
 interface PedidosHoraData {
   fecha: string;
@@ -400,7 +404,6 @@ export default function DepositoWmsPage() {
                 angle={-60}
                 bars={[{ key: "ingresados", name: "Ingresados", color: "#3f3f46" }]}
                 lines={[
-                  { key: "est_espera", name: "En espera", color: "#facc15" },
                   { key: "est_proceso", name: "En proceso", color: "#58a6ff" },
                   { key: "est_cumplido", name: "Cumplido", color: C.green },
                   { key: "est_sin_asignar", name: "Sin asignar", color: "#f0883e" },
@@ -411,11 +414,55 @@ export default function DepositoWmsPage() {
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
             Barras = pedidos ingresados (registrados) en ese bloque de 15 min. Líneas = cuántas OT
             de picking PASAN a cada etapa en ese bloque de 15 min (no acumulado),
-            según la hora de la propia OT: En espera = registrada con operario;
+            según la hora de la propia OT:
             Sin asignar = registrada sin operario; En proceso = arrancó el picking;
             Cumplido = terminada.{" "}
             {horaEsHoy
               ? "Eje 8-18h completo, historia del día desde las 8h; se actualiza cada 60s."
+              : "Día completo (ya cerrado)."}
+          </p>
+        </div>
+
+        {/* Gráfico 1b: SNAPSHOT — cuántas OT hay EN cada estado en el momento
+            (espera y disponibles suben/bajan; cumplidos es acumulado del día). */}
+        <div className="mb-6">
+          <div className="flex items-center gap-3 mb-3">
+            <Clock size={16} className="text-yellow-400" />
+            <span className="text-[13px] font-semibold text-zinc-100">
+              OT en cada estado por hora — {horaEsHoy ? "hoy" : fmtAr(horaData?.fecha ?? null)} (8 a 18h)
+            </span>
+            <span className="text-zinc-600 text-[12px]">Fuente: WMS</span>
+            <span className="flex-1 h-px bg-zinc-800" />
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-[#171717] p-3">
+            {horaError && !horaData ? (
+              <div className="flex items-center gap-2 py-10 justify-center text-red-300 text-sm">
+                <AlertTriangle size={15} /> {horaError}
+              </div>
+            ) : (
+              <ChartComboBarLine
+                data={horaData?.rows ?? []}
+                xKey="hora"
+                height={220}
+                angle={-60}
+                bars={[{ key: "ingresados", name: "Ingresados", color: "#3f3f46" }]}
+                lines={[
+                  { key: "snap_espera", name: "En espera", color: "#facc15" },
+                  { key: "snap_disponibles", name: "Disponibles", color: "#58a6ff" },
+                  { key: "snap_cumplido", name: "Cumplidos (acum.)", color: C.green },
+                ]}
+              />
+            )}
+          </div>
+          <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
+            A diferencia del gráfico anterior (flujo por bloque), este muestra la
+            FOTO del momento: cuántas OT hay EN cada estado al cierre de cada bloque
+            de 15 min. En espera = registradas con operario y sin arrancar picking
+            (sube al entrar, baja al pasar a proceso o cumplirse). Disponibles = todo
+            lo no cumplido (sin asignar + en espera + en proceso). Cumplidos =
+            acumulado del día, solo crece.{" "}
+            {horaEsHoy
+              ? "Eje 8-18h completo; las líneas se trazan hasta la hora actual."
               : "Día completo (ya cerrado)."}
           </p>
         </div>
