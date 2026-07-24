@@ -455,14 +455,13 @@ export default function DepositoWmsPage() {
             )}
           </div>
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
-            A diferencia del gráfico anterior (flujo por bloque), este muestra la
-            FOTO del momento: cuántas OT hay EN cada estado al cierre de cada bloque
-            de 15 min. En espera = registradas con operario y sin arrancar picking
-            (sube al entrar, baja al pasar a proceso o cumplirse). Disponibles = todo
-            lo no cumplido (sin asignar + en espera + en proceso). Cumplidos =
-            acumulado del día, solo crece.{" "}
+            A diferencia del gráfico anterior (flujo por bloque), este es la FOTO
+            real del momento —los mismos números que las tarjetas KPI de arriba—
+            tomada cada 15 min. En espera = Pendientes (sube al entrar, baja al
+            pasar a proceso o cumplirse). Disponibles = todo lo no cumplido
+            (Pendiente + En proceso). Cumplidos = acumulado del día, solo crece.{" "}
             {horaEsHoy
-              ? "Eje 8-18h completo; las líneas se trazan hasta la hora actual."
+              ? "Se traza a medida que se van sacando fotos durante el día."
               : "Día completo (ya cerrado)."}
           </p>
         </div>

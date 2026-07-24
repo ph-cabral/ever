@@ -13,7 +13,8 @@ from deposito import (
     fetch_articulo_ubicaciones, fetch_articulos_multi_ubicacion,
     fetch_stock_deposito1, fetch_stock_por_articulos, fetch_stock_export,
     fetch_contenedor,
-    guardar_snapshot_abiertos, PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN,
+    guardar_snapshot_abiertos, guardar_snapshot_wms_estados,
+    PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN,
 )
 from compras import fetch_ordenes_pendientes, fetch_ordenes_articulos_rango
 from ingresos import fetch_remitos_ingreso
@@ -60,6 +61,12 @@ def _loop_snapshot_abiertos():
             guardar_snapshot_abiertos()
         except Exception as e:
             print(f"[snapshot abiertos] error: {e}")
+        # Misma cadencia: foto de los estados del WMS (gráfico "OT en cada estado
+        # por hora"), así el gráfico coincide con las tarjetas KPI.
+        try:
+            guardar_snapshot_wms_estados()
+        except Exception as e:
+            print(f"[snapshot wms-estados] error: {e}")
         time.sleep(PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN * 60)
 
 

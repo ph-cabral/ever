@@ -389,6 +389,53 @@ def _fotos_abiertos_del_dia(dia: date) -> list[tuple[datetime, int]]:
         conn.close()
 
 
+# ── Foto periódica de estados del WMS (gráfico "OT en cada estado por hora") ──
+# El gráfico de estados EN el momento (espera / disponibles / cumplido acumulado)
+# NO se puede reconstruir del pasado desde las marcas de la OT: la foto viva
+# (fetch_wms_estados) incluye backlog de días previos y define "En proceso" por
+# progreso a nivel ítem (OTEstado=5 con OTItemCantCumplida>0), no por PickIni.
+# Igual que "Abiertos", se saca una FOTO real cada
+# PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN minutos y se guarda en Postgres
+# (deposito.wms_estados_snapshot, ver sql/deposito_wms_estados_snapshot.sql —
+# falta correrlo antes del deploy). Guardamos los 3 valores del resumen para que
+# el gráfico coincida exactamente con las tarjetas KPI.
+def guardar_snapshot_wms_estados() -> dict:
+    """Foto de los KPI de estados (fetch_wms_estados, HOY) → Postgres."""
+    hoy = date.today().isoformat()
+    r = fetch_wms_estados(hoy, hoy).get("resumen", {})
+    en_espera = int(r.get("en_espera", 0))
+    en_proceso = int(r.get("en_proceso", 0))
+    terminadas = int(r.get("terminadas", 0))
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO deposito.wms_estados_snapshot "
+            "(ts, en_espera, en_proceso, terminadas) VALUES (%s, %s, %s, %s)",
+            (_ahora_ar(), en_espera, en_proceso, terminadas),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"en_espera": en_espera, "en_proceso": en_proceso, "terminadas": terminadas}
+
+
+def _fotos_estados_del_dia(dia: date) -> list[tuple[datetime, int, int, int]]:
+    """Fotos de estados ya guardadas ese día (ts, en_espera, en_proceso,
+    terminadas), ordenadas. Vacío si el snapshotter todavía no corrió."""
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT ts, en_espera, en_proceso, terminadas "
+            "FROM deposito.wms_estados_snapshot WHERE ts::date = %s ORDER BY ts",
+            (dia,),
+        )
+        return [(ts, int(a), int(b), int(c)) for ts, a, b, c in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 # Estados del WMS por hora (gráfico 1). En vez de una foto del backlog, se
 # reconstruye el FLUJO: cuántas OT de Picking PASAN a cada etapa en cada bucket
 # de 15 min, usando la marca de hora de la propia OT (igual criterio que
@@ -425,10 +472,7 @@ def _wms_transiciones_del_dia(dia: date) -> dict:
     actual de la OT. Vacío si el WMS no contesta (el gráfico no se rompe)."""
     ini = datetime(dia.year, dia.month, dia.day)
     fin = ini + timedelta(days=1)
-    # Listas de timestamps por etapa (FLUJO, gráfico 1) + "ot" con la tupla cruda
-    # por OT (reg, pini, ejec, estado, asignado) para reconstruir el SNAPSHOT
-    # (cuántas hay EN cada estado en un momento dado, gráfico nuevo).
-    out = {"en_espera": [], "sin_asignar": [], "en_proceso": [], "cumplido": [], "ot": []}
+    out = {"en_espera": [], "sin_asignar": [], "en_proceso": [], "cumplido": []}
     try:
         conn = get_connection("WMS")
     except Exception as e:  # noqa: BLE001 — WMS caído no debe tumbar el gráfico
@@ -439,15 +483,12 @@ def _wms_transiciones_del_dia(dia: date) -> dict:
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cur.execute(SQL_WMS_TRANSICIONES, (ini, fin, ini, fin, ini, fin))
         for reg, pini, ejec, estado, asignado in cur.fetchall():
-            asig = int(asignado or 0)
-            est = int(estado or 0)
             if reg is not None and ini <= reg < fin:
-                (out["en_espera"] if asig == 1 else out["sin_asignar"]).append(reg)
+                (out["en_espera"] if int(asignado or 0) == 1 else out["sin_asignar"]).append(reg)
             if pini is not None and ini <= pini < fin:
                 out["en_proceso"].append(pini)
-            if ejec is not None and ini <= ejec < fin and est == 2:
+            if ejec is not None and ini <= ejec < fin and int(estado or 0) == 2:
                 out["cumplido"].append(ejec)
-            out["ot"].append((reg, pini, ejec, est, asig))
         return out
     finally:
         conn.close()
@@ -517,32 +558,16 @@ def fetch_pedidos_hora(fecha: date | None = None):
     def _en(lst, ini_b, fin_b):
         return sum(1 for ts in lst if ini_b <= ts < fin_b)
 
-    ot_list = trans.get("ot", [])  # (reg, pini, ejec, estado, asignado)
-
-    def _snap(corte):
-        """SNAPSHOT: cuántas OT hay EN cada estado al cierre del bucket.
-          · espera      = registrada CON operario y todavía sin arrancar picking
-          · proceso     = arrancó picking y no cumplió
-          · sin_asignar = registrada SIN operario y sin arrancar
-          · cumplido    = terminada (ACUMULADO del día, solo crece)
-        espera/sin_asignar/proceso suben y bajan según cambian de estado."""
-        espera = proceso = sin_asig = cumpl = 0
-        for reg, pini, ejec, estado, asig in ot_list:
-            if ejec is not None and estado == 2 and ejec < corte:
-                cumpl += 1
-                continue
-            if pini is not None and pini < corte:
-                proceso += 1
-            elif reg is not None and reg < corte:
-                if asig == 1:
-                    espera += 1
-                else:
-                    sin_asig += 1
-        return espera, proceso, sin_asig, cumpl
+    # Snapshot de estados (gráfico "OT en cada estado por hora"): fotos reales de
+    # los KPI cada 15 min (Postgres). Se hace carry-forward de la última foto ≤
+    # corte, igual que "Abiertos". Así el gráfico coincide con las tarjetas KPI.
+    fotos_est = _fotos_estados_del_dia(dia)
 
     out = []
     idx_foto = 0
     abiertos_foto = None
+    idx_est = 0
+    est_foto = None  # (en_espera, en_proceso, terminadas) de la última foto
     for m in range(minuto_desde, minuto_hasta, paso):
         h, mi = divmod(m, 60)
         inicio = datetime(dia.year, dia.month, dia.day, h, mi, 0)
@@ -552,6 +577,10 @@ def fetch_pedidos_hora(fecha: date | None = None):
         while idx_foto < len(fotos) and fotos[idx_foto][0] < corte:
             abiertos_foto = fotos[idx_foto][1]
             idx_foto += 1
+        # Carry-forward de la última foto de estados (KPI) tomada hasta el corte.
+        while idx_est < len(fotos_est) and fotos_est[idx_est][0] < corte:
+            est_foto = fotos_est[idx_est][1:]  # (en_espera, en_proceso, terminadas)
+            idx_est += 1
         if ahora is not None and inicio > ahora:
             # Bucket futuro (aún no arrancó): sin datos, las líneas cortan acá.
             out.append({
@@ -571,8 +600,14 @@ def fetch_pedidos_hora(fecha: date | None = None):
         est_cumplido = _en(trans["cumplido"], inicio, corte)
         est_sin = _en(trans["sin_asignar"], inicio, corte)
         cumplidos = est_cumplido  # gráfico 2 usa el mismo flujo de cumplidos
-        # Snapshot (gráfico nuevo): cuántas hay EN cada estado al cierre del bucket.
-        snap_esp, snap_proc, snap_sin, snap_cumpl = _snap(corte)
+        # Snapshot (gráfico nuevo): última foto real de los KPI ≤ corte. None si
+        # todavía no hay foto (recién deployado / antes del primer snapshot).
+        if est_foto is not None:
+            snap_espera_v = est_foto[0]
+            snap_disp_v = est_foto[0] + est_foto[1]  # espera + proceso = no cumplido
+            snap_cumpl_v = est_foto[2]               # cumplido (acumulado del día)
+        else:
+            snap_espera_v = snap_disp_v = snap_cumpl_v = None
         # Backlog reconstruido: pedidos registrados antes del corte y todavía no
         # cerrados a esa hora. Relleno para buckets sin foto real. La foto real
         # (abiertos_foto) SIEMPRE tiene prioridad cuando existe.
@@ -593,9 +628,9 @@ def fetch_pedidos_hora(fecha: date | None = None):
             "est_proceso": est_proceso,
             "est_cumplido": est_cumplido,
             "est_sin_asignar": est_sin,
-            "snap_espera": snap_esp,
-            "snap_disponibles": snap_esp + snap_proc + snap_sin,
-            "snap_cumplido": snap_cumpl,
+            "snap_espera": snap_espera_v,
+            "snap_disponibles": snap_disp_v,
+            "snap_cumplido": snap_cumpl_v,
         })
     return out
 
