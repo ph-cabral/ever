@@ -5,6 +5,7 @@ import {
   Check, X, RotateCw, Download, Trash2, Copy,
 } from "lucide-react";
 import { exportarFaltantesVentas } from "@/lib/ventas/exportFaltantes";
+import { InicioButton } from "@/components/ui/InicioButton";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /ventas/faltantes — "Tabla 1" (según diagrama del usuario).
@@ -445,6 +446,7 @@ export default function VentasFaltantesPage() {
 
       <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 flex items-center justify-between px-4 md:px-8 h-16 gap-4">
         <div className="flex items-center gap-4 min-w-0">
+          <InicioButton />
           <span className="font-bold text-yellow-400 text-xl md:text-2xl tracking-wide uppercase whitespace-nowrap">
             EVER WEAR <span className="text-sm tracking-[3px] font-normal">S.A.</span>
           </span>

@@ -4,6 +4,7 @@ import {
   Loader2, RefreshCw, AlertTriangle, PackageSearch, Users, Pause, Play, Clock,
 } from "lucide-react";
 import { ChartComboBarLine, C } from "../components/ui";
+import { InicioButton } from "@/components/ui/InicioButton";
 
 const REFRESH_MS = 60_000;
 
@@ -73,6 +74,10 @@ interface HoraRow {
   snap_espera: number | null; // en espera ahora
   snap_disponibles: number | null; // sin_asignar + en_proceso + en_espera (no cumplidas)
   snap_cumplido: number | null; // cumplidas ACUMULADO del día (solo crece)
+  // Gráfico "Movimiento de pedidos" (solo pedidos con OT de Picking en WMS).
+  mov_abiertos: number | null; // abiertos en Magnus (30d) no cumplidos en WMS
+  mov_disponibles: number | null; // no cumplido EXCLUYENDO Mercaderia X Llegar
+  mov_espera_merca: number | null; // OT del operario "Mercaderia X Llegar"
 }
 interface PedidosHoraData {
   fecha: string;
@@ -270,6 +275,7 @@ export default function DepositoWmsPage() {
       {/* header */}
       <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 flex flex-wrap items-center justify-between px-4 md:px-8 py-3 gap-4">
         <div className="flex items-center gap-4">
+          <InicioButton />
           <span className="font-bold text-yellow-400 text-xl md:text-2xl tracking-wide uppercase">
             EVER WEAR{" "}
             <span className="text-xs md:text-sm tracking-[3px] font-normal">S.A.</span>
@@ -429,9 +435,9 @@ export default function DepositoWmsPage() {
           <div className="flex items-center gap-3 mb-3">
             <Clock size={16} className="text-yellow-400" />
             <span className="text-[13px] font-semibold text-zinc-100">
-              OT en cada estado por hora — {horaEsHoy ? "hoy" : fmtAr(horaData?.fecha ?? null)} (8 a 18h)
+              Movimiento de pedidos por hora — {horaEsHoy ? "hoy" : fmtAr(horaData?.fecha ?? null)} (8 a 18h)
             </span>
-            <span className="text-zinc-600 text-[12px]">Fuente: WMS</span>
+            <span className="text-zinc-600 text-[12px]">Fuente: Magnus + WMS</span>
             <span className="flex-1 h-px bg-zinc-800" />
           </div>
           <div className="rounded-xl border border-zinc-800 bg-[#171717] p-3">
@@ -445,25 +451,27 @@ export default function DepositoWmsPage() {
                 xKey="hora"
                 height={220}
                 angle={-60}
-                bars={[{ key: "ingresados", name: "Ingresados", color: "#3f3f46" }]}
+                bars={[]}
                 lines={[
-                  { key: "snap_espera", name: "En espera", color: "#facc15" },
-                  { key: "snap_disponibles", name: "Disponibles", color: "#58a6ff" },
+                  { key: "mov_abiertos", name: "Abiertos", color: "#facc15" },
+                  { key: "mov_disponibles", name: "Disponibles", color: "#58a6ff" },
                   { key: "snap_cumplido", name: "Cumplidos (acum.)", color: C.green },
+                  { key: "mov_espera_merca", name: "En espera de mercadería", color: "#f0883e" },
                 ]}
               />
             )}
           </div>
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
-            A diferencia del gráfico anterior (flujo por bloque), este es la FOTO
-            real del momento —los mismos números que las tarjetas KPI de arriba—
-            tomada cada 15 min. En espera = Pendientes (sube al entrar, baja al
-            pasar a proceso o cumplirse). Disponibles = todo lo no cumplido
-            (Pendiente + En proceso). Cumplidos = acumulado del día, solo crece.
-            Los tramos ya fotografiados coinciden exacto con los KPI; el resto del
-            día se reconstruye desde las marcas de hora de cada OT.{" "}
+            Solo pedidos que pasan al WMS (con OT de Picking), vinculados por Nº de
+            pedido. <b>Abiertos</b> = pasaron a Abierto en Magnus (últimos 30 días)
+            y todavía no están cumplidos en el WMS; se reconstruye por hora, sube al
+            abrirse y baja al cumplirse. <b>Disponibles</b> = no cumplido (En espera
+            + En proceso + Sin asignar), <i>sin</i> Mercadería X Llegar. <b>Cumplidos</b>{" "}
+            = acumulado del día, solo crece. <b>En espera de mercadería</b> = pedidos
+            del operario “Mercaderia X Llegar” (esperando stock). Disponibles y En
+            espera de mercadería salen de la foto real cada 15 min.{" "}
             {horaEsHoy
-              ? "Se afina a medida que se van sacando fotos."
+              ? "Se van trazando hacia adelante a medida que pasa el día."
               : "Día completo (ya cerrado)."}
           </p>
         </div>

@@ -13,6 +13,7 @@ import {
   Loader2, RefreshCw, AlertTriangle, FileSpreadsheet, ClipboardList,
   AlertOctagon,
 } from "lucide-react";
+import { InicioButton } from "@/components/ui/InicioButton";
 import { useDepositoData } from "@/lib/deposito/store";
 import { filterDepositoByOperario } from "@/lib/deposito/parseDeposito";
 
@@ -91,6 +92,7 @@ export default function DepositoPage() {
       {/* Header */}
       <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 flex items-center justify-between px-8 h-16 gap-4">
         <div className="flex items-center gap-4 shrink-0">
+          <InicioButton />
           <span className="font-bold text-yellow-400 text-2xl tracking-wide uppercase">
             EVER WEAR <span className="text-sm tracking-[3px] font-normal">S.A.</span>
           </span>

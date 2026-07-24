@@ -2,6 +2,7 @@
 import { useState, type ReactNode } from "react";
 import { Search, Loader2, AlertTriangle, Bot, UserCheck, Package } from "lucide-react";
 import { PageTitle, Panel, Table, Tag, fmtNum } from "../components/ui";
+import { InicioButton } from "@/components/ui/InicioButton";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Depósito → Contenedor: buscar por TAG y ver info general + contenido actual +
@@ -109,6 +110,7 @@ export default function DepositoContenedorPage() {
   return (
     <div className="min-h-screen bg-[#111111] text-white">
       <main className="max-w-5xl mx-auto px-4 py-6">
+        <InicioButton label="Inicio" iconSize={14} className="text-xs text-zinc-500 hover:text-yellow-400 transition-colors mb-3" />
         <div className="flex items-start justify-between gap-4 flex-wrap mb-1">
           <PageTitle
             title="Depósito — Contenedor"

@@ -23,8 +23,16 @@ CREATE TABLE IF NOT EXISTS deposito.wms_estados_snapshot (
     ts         timestamp NOT NULL,   -- naive, hora Argentina (ver _ahora_ar en deposito.py)
     en_espera  integer   NOT NULL,
     en_proceso integer   NOT NULL,
-    terminadas integer   NOT NULL
+    terminadas integer   NOT NULL,
+    -- OT vivas del operario "Mercaderia X Llegar" (pedidos esperando que llegue
+    -- la mercadería). Se restan de Disponibles y se muestran aparte en el
+    -- gráfico de movimiento. Nullable para fotos viejas previas a esta columna.
+    espera_merca integer
 );
+
+-- Si la tabla ya existía sin la columna (deploy previo), agregarla:
+ALTER TABLE deposito.wms_estados_snapshot
+    ADD COLUMN IF NOT EXISTS espera_merca integer;
 
 CREATE INDEX IF NOT EXISTS idx_wms_estados_snapshot_ts
     ON deposito.wms_estados_snapshot (ts);

@@ -17,6 +17,7 @@ import {
   MapPin,
 } from "lucide-react";
 import { toast } from "sonner";
+import { InicioButton } from "@/components/ui/InicioButton";
 import { PROVINCIAS } from "@/lib/buscador/provincias";
 import type { BuscarResponse, Fuente, Prospecto } from "@/lib/buscador/types";
 import { exportarExcel } from "@/lib/buscador/export";
@@ -260,6 +261,7 @@ export default function BuscadorPage() {
       {/* Header */}
       <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 flex items-center justify-between px-6 md:px-8 h-16">
         <div className="flex items-center gap-4">
+          <InicioButton />
           <span className="font-bold text-yellow-400 text-2xl tracking-wide uppercase">
             EVER WEAR <span className="text-sm tracking-[3px] font-normal">S.A.</span>
           </span>

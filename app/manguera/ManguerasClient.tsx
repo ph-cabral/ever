@@ -5,6 +5,7 @@ import { MangueraTable } from "./components/MangueraTable";
 import { AddMangueraModal } from "./components/AddMangueraModal";
 import { AddPersonalModal } from "./components/AddPersonalModal";
 import ReportesModal from "./components/ReportesModal";
+import { InicioButton } from "@/components/ui/InicioButton";
 
 type Manguera = {
   id: number;
@@ -34,6 +35,7 @@ export function ManguerasClient({
 
   return (
     <main className="container mx-auto p-4">
+      <InicioButton label="Inicio" iconSize={14} className="text-sm text-gray-500 hover:text-gray-900 transition-colors" />
       <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Control de Mangueras</h1>
 

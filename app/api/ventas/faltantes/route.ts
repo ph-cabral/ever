@@ -96,6 +96,7 @@ export async function GET() {
         {
           nroPedOrigen: number;
           nroRengOrigen: number;
+          codArticulo: string | null;
           fechaArribo: string | null;
           clienteQuiere: boolean | null;
           vendido: boolean | null;
@@ -104,7 +105,7 @@ export async function GET() {
         }[]
       >`
         SELECT DISTINCT ON ("nroPedOrigen", "nroRengOrigen")
-               "nroPedOrigen", "nroRengOrigen",
+               "nroPedOrigen", "nroRengOrigen", "codArticulo",
                to_char("fechaArribo", 'YYYY-MM-DD') AS "fechaArribo",
                "clienteQuiere",
                "vendido",
@@ -191,24 +192,39 @@ export async function GET() {
     const con = new Set<string>();
     for (const [k, ex] of existLatest) if (ex === true) con.add(k);
 
-    const ctrl = new Map<
-      string,
-      {
-        fechaArribo: string | null;
-        clienteQuiere: boolean | null;
-        vendido: boolean | null;
-        irrelevante: boolean | null;
-        duplicado: boolean | null;
-      }
-    >();
-    for (const r of ctrlRows)
-      ctrl.set(`${r.nroPedOrigen}-${r.nroRengOrigen}`, {
+    type Ctrl = {
+      fechaArribo: string | null;
+      clienteQuiere: boolean | null;
+      vendido: boolean | null;
+      irrelevante: boolean | null;
+      duplicado: boolean | null;
+    };
+    const ctrl = new Map<string, Ctrl>();
+    // Fallback por (pedido, artículo) — sin exigir que NroRengOrigen coincida.
+    // `rows` (más abajo) sale de una consulta FRESCA a /deposito/faltantes; la
+    // fila se guardó en faltante_control con el NroRengOrigen vigente AL
+    // MOMENTO de cargar el Arribo en /compras/faltantes (resolveBucketRenglones,
+    // ver lib/faltantesArribo.ts). Si Ven_PedRenPendientes renumera el renglón
+    // pendiente de un pedido multi-línea entre esa carga y esta lectura (p.ej.
+    // porque otra línea del mismo pedido se facturó y el resto se corrió), el
+    // match exacto por renglón falla aunque el dato SÍ esté en Postgres — mismo
+    // patrón de bug ya encontrado y resuelto para "existencia" (ver keyArt en
+    // /api/compras/faltantes-consumo, comentario "Bug real encontrado
+    // 2026-07-10"). Solo se guarda acá lo que trae fechaArribo (lo único que
+    // este fallback necesita cubrir).
+    const ctrlPorArt = new Map<string, Ctrl>();
+    for (const r of ctrlRows) {
+      const val: Ctrl = {
         fechaArribo: r.fechaArribo,
         clienteQuiere: r.clienteQuiere,
         vendido: r.vendido,
         irrelevante: r.irrelevante,
         duplicado: r.duplicado,
-      });
+      };
+      ctrl.set(`${r.nroPedOrigen}-${r.nroRengOrigen}`, val);
+      const cod = (r.codArticulo ?? "").trim();
+      if (cod && val.fechaArribo) ctrlPorArt.set(`${r.nroPedOrigen}-${cod}`, val);
+    }
 
     // Arribo automático por OC: artículo → FechaEntrega de la OC pendiente,
     // salvo importación (sin fecha confiable) — en ese caso se estima como
@@ -301,7 +317,9 @@ export async function GET() {
         (r) => !ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`)?.duplicado,
       )
       .map((r) => {
-        const c = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);
+        const c =
+          ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`) ??
+          ctrlPorArt.get(`${r.NroPedOrigen}-${r.CodArticulo.trim()}`);
         const extra = extraMap.get(r.CodArticulo);
         const extraordinario = !!extra && extra.comprar === null;
         const manual = c?.fechaArribo ?? null;
@@ -325,7 +343,9 @@ export async function GET() {
     const listos = rows
       .filter((r) => sin.has(`${r.NroPedOrigen}-${r.CodArticulo.trim()}`))
       .map((r) => {
-        const c = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);
+        const c =
+          ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`) ??
+          ctrlPorArt.get(`${r.NroPedOrigen}-${r.CodArticulo.trim()}`);
         return {
           ...r,
           // mismo fallback OC que Tabla 1 (por si el POST de control no

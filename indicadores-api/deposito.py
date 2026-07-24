@@ -288,6 +288,18 @@ PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN = 15  # cada cuánto se saca una foto re
 # Mismo blacklist que main.py::SQL_QUERY (comprobantes no-pedido reales).
 COMP_CODIGOS_EXCLUIDOS_HORA: tuple[int, ...] = (9, 49, 208, 410)
 
+# ── "Movimiento de pedidos" (gráfico snapshot) ──────────────────────────────
+# Ventana hacia atrás de la serie "Abiertos": SOLO pedidos con OT de Picking en
+# WMS (los que pasan al depósito), abiertos en Magnus dentro de esta ventana y
+# todavía no cumplidos en WMS. Evita arrastrar los pedidos de hace años que
+# quedaron abiertos sin limpiar en Magnus.
+MOV_ABIERTOS_VENTANA_DIAS = 30
+# Operario ficticio del WMS donde se parkean los pedidos que esperan que llegue
+# la mercadería (stock). Sus OT NO son trabajo "disponible": se muestran aparte
+# como "En espera de mercadería" y se restan de Disponibles. Match por
+# Personal.PersonalNombre (case-insensitive, sin acento; ver OPERARIO helper).
+OPERARIO_ESPERA_MERCA = "Mercaderia X Llegar"
+
 SQL_PEDIDOS_HORA = """
 SELECT
     p.NroMovVenta,
@@ -399,31 +411,55 @@ def _fotos_abiertos_del_dia(dia: date) -> list[tuple[datetime, int]]:
 # (deposito.wms_estados_snapshot, ver sql/deposito_wms_estados_snapshot.sql —
 # falta correrlo antes del deploy). Guardamos los 3 valores del resumen para que
 # el gráfico coincida exactamente con las tarjetas KPI.
+def _es_operario_merca(nombre) -> bool:
+    """True si el nombre de operario es el buzón 'Mercaderia X Llegar'
+    (case-insensitive, tolerante a acentos/espacios)."""
+    s = str(nombre or "").strip().lower()
+    ref = OPERARIO_ESPERA_MERCA.strip().lower()
+    return s == ref or s == ref.replace("mercaderia", "mercadería")
+
+
 def guardar_snapshot_wms_estados() -> dict:
-    """Foto de los KPI de estados (fetch_wms_estados, HOY) → Postgres."""
+    """Foto de los KPI de estados (fetch_wms_estados, HOY) → Postgres. Guarda
+    también espera_merca = OT vivas del operario 'Mercaderia X Llegar' (los
+    pedidos esperando que llegue la mercadería), para poder restarlas de
+    Disponibles y mostrarlas aparte en el gráfico de movimiento."""
     hoy = date.today().isoformat()
-    r = fetch_wms_estados(hoy, hoy).get("resumen", {})
+    res = fetch_wms_estados(hoy, hoy)
+    r = res.get("resumen", {})
     en_espera = int(r.get("en_espera", 0))
     en_proceso = int(r.get("en_proceso", 0))
     terminadas = int(r.get("terminadas", 0))
+    # Vivas (bucket espera/proceso) del operario Mercaderia X Llegar.
+    vivos = {str(int(e)) for e in WMS_ESTADOS_VIVOS}
+    espera_merca = 0
+    for op in res.get("por_operario", []):
+        if _es_operario_merca(op.get("operario")):
+            espera_merca = sum(
+                int(v) for k, v in (op.get("por_estado") or {}).items() if str(k) in vivos
+            )
+            break
     conn = get_pg_connection()
     try:
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO deposito.wms_estados_snapshot "
-            "(ts, en_espera, en_proceso, terminadas) VALUES (%s, %s, %s, %s)",
-            (_ahora_ar(), en_espera, en_proceso, terminadas),
+            "(ts, en_espera, en_proceso, terminadas, espera_merca) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (_ahora_ar(), en_espera, en_proceso, terminadas, espera_merca),
         )
         conn.commit()
     finally:
         conn.close()
-    return {"en_espera": en_espera, "en_proceso": en_proceso, "terminadas": terminadas}
+    return {"en_espera": en_espera, "en_proceso": en_proceso,
+            "terminadas": terminadas, "espera_merca": espera_merca}
 
 
-def _fotos_estados_del_dia(dia: date) -> list[tuple[datetime, int, int, int]]:
+def _fotos_estados_del_dia(dia: date) -> list[tuple[datetime, int, int, int, int]]:
     """Fotos de estados ya guardadas ese día (ts, en_espera, en_proceso,
-    terminadas), ordenadas. Vacío si el snapshotter todavía no corrió O si la
-    tabla todavía no se creó (así el gráfico cae a la reconstrucción sin romper)."""
+    terminadas, espera_merca), ordenadas. Vacío si el snapshotter todavía no
+    corrió O si la tabla/columna todavía no se creó (así el gráfico cae a la
+    reconstrucción sin romper)."""
     try:
         conn = get_pg_connection()
     except Exception as e:  # noqa: BLE001
@@ -432,13 +468,14 @@ def _fotos_estados_del_dia(dia: date) -> list[tuple[datetime, int, int, int]]:
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT ts, en_espera, en_proceso, terminadas "
+            "SELECT ts, en_espera, en_proceso, terminadas, "
+            "       COALESCE(espera_merca, 0) "
             "FROM deposito.wms_estados_snapshot WHERE ts::date = %s ORDER BY ts",
             (dia,),
         )
-        return [(ts, int(a), int(b), int(c)) for ts, a, b, c in cur.fetchall()]
-    except Exception as e:  # noqa: BLE001 — tabla inexistente u otro error → sin fotos
-        print(f"[estados-snap] sin fotos (¿tabla creada?): {e}")
+        return [(ts, int(a), int(b), int(c), int(d)) for ts, a, b, c, d in cur.fetchall()]
+    except Exception as e:  # noqa: BLE001 — tabla/columna inexistente → sin fotos
+        print(f"[estados-snap] sin fotos (¿tabla/columna creada?): {e}")
         return []
     finally:
         conn.close()
@@ -578,6 +615,107 @@ def _snap_recon(corte: datetime, ot_list: list[tuple]) -> tuple[int, int, int]:
     return espera, proceso, cumpl
 
 
+# ── "Movimiento de pedidos" — Abiertos (Magnus) vinculado a Cumplido (WMS) ────
+# Serie "Abiertos" del gráfico snapshot: universo = pedidos con OT de Picking
+# (los que pasan al WMS). Por cada uno se toma la hora en que pasó a Abierto en
+# Magnus (Cabecera, FechaPedido/HoraRegistracion) y la hora en que se dio
+# Cumplido en el WMS (OTFechaHoraEjecucion con OTEstado=2). Vínculo por
+# NroMovVenta. Es reconstruible (no hace falta foto): a cada corte del día,
+# Abiertos = pedidos con abierto_ts < corte, dentro de la ventana de
+# MOV_ABIERTOS_VENTANA_DIAS días, y todavía sin cumplir a esa hora.
+SQL_MOV_WMS_OT = """
+SELECT
+    OT.{col_pedido}       AS NroMovVenta,
+    OT.OTFechaHoraRegist,
+    OT.OTFechaHoraEjecucion,
+    OT.OTEstado
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+WHERE Codot.CodotProcesoNegocio = 4
+  AND ( OT.OTEstado IN ({vivos})
+        OR OT.OTFechaHoraRegist >= ? )
+"""
+
+SQL_MOV_MAGNUS_ABIERTO = """
+SELECT NroMovVenta, FechaPedido, HoraRegistracion
+FROM EVERWEAR.dbo.VenFer_PedidoCabecera
+WHERE NroMovVenta IN ({ph})
+"""
+
+
+def _mov_abiertos_del_dia(dia: date) -> list[tuple[datetime, datetime | None]]:
+    """[(abierto_ts, cumplido_ts)] por pedido con OT de Picking, para la serie
+    'Abiertos' del movimiento. abierto_ts = pase a Abierto en Magnus (Cabecera),
+    con fallback a la registración de la OT si Magnus no tiene el pedido;
+    cumplido_ts = OTFechaHoraEjecucion (OTEstado=2) o None. Universo: OT vivas
+    (cualquier fecha) + registradas en los últimos MOV_ABIERTOS_VENTANA_DIAS
+    días. Vacío si el WMS no contesta (el gráfico no se rompe)."""
+    corte_ventana = datetime(dia.year, dia.month, dia.day) - timedelta(days=MOV_ABIERTOS_VENTANA_DIAS)
+    try:
+        conn = get_connection("WMS")
+    except Exception as e:  # noqa: BLE001 — WMS caído no debe tumbar el gráfico
+        print(f"[mov-abiertos] WMS no disponible: {e}")
+        return []
+    wms: dict[int, tuple[datetime | None, datetime | None]] = {}
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(
+            SQL_MOV_WMS_OT.format(
+                col_pedido=OT_COL_PEDIDO,
+                vivos=",".join(str(e) for e in WMS_ESTADOS_VIVOS),
+            ),
+            (corte_ventana,),
+        )
+        for nro, reg, ejec, estado in cur.fetchall():
+            if nro is None:
+                continue
+            n = int(nro)
+            cumplido = ejec if (ejec is not None and int(estado or 0) == 2) else None
+            prev = wms.get(n)
+            # Si un pedido tuviera >1 OT, quedarse con la que ya está cumplida.
+            if prev is None or (cumplido is not None and prev[1] is None):
+                wms[n] = (reg, cumplido)
+    finally:
+        conn.close()
+    if not wms:
+        return []
+
+    # abierto_ts real desde Magnus (Cabecera), en chunks.
+    abierto_mg: dict[int, datetime] = {}
+    try:
+        conn = get_connection("EVERWEAR")
+    except Exception as e:  # noqa: BLE001
+        print(f"[mov-abiertos] Magnus no disponible: {e}")
+        conn = None
+    if conn is not None:
+        try:
+            cur = conn.cursor()
+            cur.execute("SET DATEFORMAT ymd;")
+            pedidos = sorted(wms.keys())
+            CH = 1000
+            for i in range(0, len(pedidos), CH):
+                chunk = pedidos[i:i + CH]
+                ph = ",".join("?" for _ in chunk)
+                cur.execute(SQL_MOV_MAGNUS_ABIERTO.format(ph=ph), chunk)
+                for nro, f_ped, h_reg in cur.fetchall():
+                    if nro is None:
+                        continue
+                    ts = _pedido_ts(f_ped, h_reg)
+                    if ts:
+                        abierto_mg[int(nro)] = ts
+        finally:
+            conn.close()
+
+    out: list[tuple[datetime, datetime | None]] = []
+    for n, (reg_ts, cumplido_ts) in wms.items():
+        abierto_ts = abierto_mg.get(n) or reg_ts  # fallback: registración de la OT
+        if abierto_ts is None or abierto_ts < corte_ventana:
+            continue
+        out.append((abierto_ts, cumplido_ts))
+    return out
+
+
 def fetch_pedidos_hora(fecha: date | None = None):
     """Vista de un día en buckets de PEDIDOS_HORA_PASO_MIN (8-18h). Campos por
     bucket:
@@ -650,6 +788,10 @@ def fetch_pedidos_hora(fecha: date | None = None):
     # tiene prioridad cuando existe.
     fotos_est = _fotos_estados_del_dia(dia)
     recon_est = _wms_estados_recon_del_dia(dia)
+    # "Movimiento": pedidos con OT de Picking (los que pasan al WMS), con su hora
+    # de pase a Abierto en Magnus + hora de Cumplido en WMS. Reconstruible por
+    # corte (no depende de foto).
+    mov = _mov_abiertos_del_dia(dia)
 
     out = []
     idx_foto = 0
@@ -667,7 +809,7 @@ def fetch_pedidos_hora(fecha: date | None = None):
             idx_foto += 1
         # Carry-forward de la última foto de estados (KPI) tomada hasta el corte.
         while idx_est < len(fotos_est) and fotos_est[idx_est][0] < corte:
-            est_foto = fotos_est[idx_est][1:]  # (en_espera, en_proceso, terminadas)
+            est_foto = fotos_est[idx_est][1:]  # (espera, proceso, terminadas, espera_merca)
             idx_est += 1
         if ahora is not None and inicio > ahora:
             # Bucket futuro (aún no arrancó): sin datos, las líneas cortan acá.
@@ -677,6 +819,7 @@ def fetch_pedidos_hora(fecha: date | None = None):
                 "abiertos": None, "est_espera": None, "est_proceso": None,
                 "est_cumplido": None, "est_sin_asignar": None,
                 "snap_espera": None, "snap_disponibles": None, "snap_cumplido": None,
+                "mov_abiertos": None, "mov_disponibles": None, "mov_espera_merca": None,
             })
             continue
         ingresados = sum(1 for ts_reg, _ in regs if ts_reg.date() == dia and inicio <= ts_reg < corte)
@@ -694,13 +837,27 @@ def fetch_pedidos_hora(fecha: date | None = None):
             snap_espera_v = est_foto[0]
             snap_disp_v = est_foto[0] + est_foto[1]  # espera + proceso = no cumplido
             snap_cumpl_v = est_foto[2]               # cumplido (acumulado del día)
+            merca_v = est_foto[3] if len(est_foto) > 3 and est_foto[3] is not None else 0
+            # Disponibles del movimiento = no cumplido EXCLUYENDO Mercaderia X Llegar.
+            mov_disp_v = max(snap_disp_v - merca_v, 0)
+            mov_merca_v = merca_v
         elif recon_est:
             r_esp, r_proc, r_cumpl = _snap_recon(corte, recon_est)
             snap_espera_v = r_esp
             snap_disp_v = r_esp + r_proc
             snap_cumpl_v = r_cumpl
+            # Sin foto no se conoce el operario → no se puede separar Mercaderia.
+            mov_disp_v = r_esp + r_proc
+            mov_merca_v = None
         else:
             snap_espera_v = snap_disp_v = snap_cumpl_v = None
+            mov_disp_v = mov_merca_v = None
+        # Abiertos del movimiento: pedidos con OT abiertos (Magnus) antes del corte,
+        # dentro de la ventana, y todavía sin cumplir a esa hora.
+        mov_abiertos_v = sum(
+            1 for ab_ts, cu_ts in mov
+            if ab_ts < corte and (cu_ts is None or cu_ts >= corte)
+        )
         # Backlog reconstruido: pedidos registrados antes del corte y todavía no
         # cerrados a esa hora. Relleno para buckets sin foto real. La foto real
         # (abiertos_foto) SIEMPRE tiene prioridad cuando existe.
@@ -724,6 +881,9 @@ def fetch_pedidos_hora(fecha: date | None = None):
             "snap_espera": snap_espera_v,
             "snap_disponibles": snap_disp_v,
             "snap_cumplido": snap_cumpl_v,
+            "mov_abiertos": mov_abiertos_v,
+            "mov_disponibles": mov_disp_v,
+            "mov_espera_merca": mov_merca_v,
         })
     return out
 

@@ -3,6 +3,7 @@
 import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { InicioButton } from "@/components/ui/InicioButton";
 
 type Corte = {
   id: number;
@@ -73,6 +74,7 @@ export function TrabajosClient({ trabajos }: { trabajos: Trabajo[] }) {
 
   return (
     <main className="container mx-auto p-4 space-y-8">
+      <InicioButton label="Inicio" iconSize={14} className="text-sm text-gray-500 hover:text-gray-900 transition-colors" />
       <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
         <h1 className="text-2xl font-bold">Trabajos</h1>
         <div className="flex items-center gap-2 w-full lg:w-auto">

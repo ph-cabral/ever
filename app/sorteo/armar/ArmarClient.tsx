@@ -200,6 +200,9 @@ export default function ArmarClient() {
   return (
     <div className={styles.wrap}>
       <header className={styles.top}>
+        <Link href="/" className={styles.volver}>
+          ← Inicio
+        </Link>
         <Link href="/sorteo" className={styles.volver}>
           ← Sorteo
         </Link>

@@ -208,23 +208,43 @@ export async function GET(req: NextRequest) {
 
   // 2c) fechaArribo por renglón (preparado.faltante_control), para poder
   // ocultar de esta vista lo que ya está cargado (ver conArribo). Igual que
-  // sinExistencia: se toma sobre el rango, sin exigir que la columna "fecha"
-  // de faltante_control coincida con el PrimerDia del bucket — ver nota en
-  // lib/faltantesArribo.ts sobre por qué esa columna es otra fecha.
+  // sinExistencia: NO se filtra por la columna "fecha" de faltante_control —
+  // ver nota en lib/faltantesArribo.ts sobre por qué esa columna es otra
+  // fecha (el snapshot vigente AL MOMENTO de cargar el Arribo, no el
+  // PrimerDia del bucket). Antes acotaba con WHERE fecha BETWEEN
+  // desdeMarks/hastaMarks: un bucket viejo (PrimerDia de hace semanas, caso
+  // típico acá porque "faltan" es acumulado) puede haber guardado su Arribo
+  // con una "fecha" fuera de esa ventana y quedaba afuera — mismo bug que
+  // /api/ventas/faltantes (ver ctrlPorArt ahí).
+  //
+  // Match primario por renglón (nroPedOrigen+nroRengOrigen) y fallback por
+  // (nroPedOrigen+CodArticulo) — arriboPorRenglonArt — para el caso en que
+  // Ven_PedRenPendientes renumeró el renglón pendiente entre la carga en
+  // /compras/faltantes y esta lectura (pedidos con varias líneas). Mismo
+  // patrón que keyArt ya usa acá para sinExistencia.
   const arriboPorRenglon = new Map<string, string | null>();
-  if (faltRows.length && desdeMarks && hastaMarks) {
+  const arriboPorRenglonArt = new Map<string, string | null>();
+  if (faltRows.length) {
     try {
       const ctrlRows = await prisma.$queryRaw<
-        { nroPedOrigen: number; nroRengOrigen: number; fechaArribo: string | null }[]
+        {
+          nroPedOrigen: number;
+          nroRengOrigen: number;
+          codArticulo: string | null;
+          fechaArribo: string | null;
+        }[]
       >`
-        SELECT "nroPedOrigen", "nroRengOrigen",
+        SELECT "nroPedOrigen", "nroRengOrigen", "codArticulo",
                to_char("fechaArribo", 'YYYY-MM-DD') AS "fechaArribo"
         FROM preparado.faltante_control
-        WHERE fecha BETWEEN ${new Date(desdeMarks)} AND ${new Date(hastaMarks)}
         ORDER BY "updatedAt" ASC
       `;
-      for (const r of ctrlRows)
-        if (r.fechaArribo) arriboPorRenglon.set(keyLine(r.nroPedOrigen, r.nroRengOrigen), r.fechaArribo);
+      for (const r of ctrlRows) {
+        if (!r.fechaArribo) continue;
+        arriboPorRenglon.set(keyLine(r.nroPedOrigen, r.nroRengOrigen), r.fechaArribo);
+        const cod = (r.codArticulo ?? "").trim();
+        if (cod) arriboPorRenglonArt.set(keyArt(r.nroPedOrigen, cod), r.fechaArribo);
+      }
     } catch (e) {
       console.error("read faltante_control (arribo)", e);
     }
@@ -351,7 +371,9 @@ export async function GET(req: NextRequest) {
       if (prevCli) prevCli.cant += it.CantPend || 0;
       else b.clientes.set(codCli, { nombre: it.ClienteNombre ?? null, cant: it.CantPend || 0 });
     }
-    const arribo = arriboPorRenglon.get(keyLine(it.NroPedOrigen, it.NroRengOrigen));
+    const arribo =
+      arriboPorRenglon.get(keyLine(it.NroPedOrigen, it.NroRengOrigen)) ??
+      arriboPorRenglonArt.get(keyArt(it.NroPedOrigen, cod));
     if (arribo) {
       b.renglonesConArribo += 1;
       if (!b.fechaArriboMin || arribo < b.fechaArriboMin) b.fechaArriboMin = arribo;

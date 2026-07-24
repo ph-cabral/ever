@@ -12,6 +12,7 @@ import {
   PageTitle, SectionTitle, Panel, KPI, Grid, ChartBar, ChartDonut, Table,
   fmtNum, fmtMes, C,
 } from "../components/ui";
+import { InicioButton } from "@/components/ui/InicioButton";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Pedidos preparados — REAL (WMS Picking) vs Ingresados (pedidos registrados).
@@ -325,6 +326,7 @@ export default function PedidosPreparadosPage() {
       )}
 
       <main className="max-w-7xl mx-auto px-4 py-6">
+        <InicioButton label="Inicio" iconSize={14} className="text-xs text-zinc-500 hover:text-yellow-400 transition-colors mb-3" />
         <div className="flex items-start justify-between gap-4 flex-wrap mb-1">
           <PageTitle title="Pedidos preparados"
             sub="Ingresados vs preparados (Picking) y productividad por preparador · Depósito Central" />

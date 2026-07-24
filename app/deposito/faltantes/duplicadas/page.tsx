@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { Loader2, RefreshCw, MapPin } from "lucide-react";
+import { InicioButton } from "@/components/ui/InicioButton";
 
 // Artículos con MÁS DE UNA ubicación asignada (rack). Para ir depurando el
 // maestro: cada artículo debería tener una sola. Fuente: EVERWEAR.Ubicacion#
@@ -40,6 +41,7 @@ export default function DuplicadasPage() {
 
   return (
     <div className="min-h-screen bg-[#111111] text-white p-5">
+      <InicioButton label="Inicio" iconSize={14} className="text-xs text-zinc-500 hover:text-yellow-400 transition-colors mb-3" />
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-xl font-bold">Artículos con +1 ubicación asignada</h1>

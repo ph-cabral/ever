@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { InicioButton } from "@/components/ui/InicioButton";
 import {
   Table,
   TableBody,
@@ -150,6 +151,7 @@ export default function RelojEmpPage() {
   // ──────────────────────────────────────────────────────
   return (
     <div className="container mx-auto px-6 py-8 max-w-5xl">
+      <InicioButton label="Inicio" iconSize={16} className="text-sm text-muted-foreground hover:text-foreground transition-colors mb-4" />
       <header className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-medium">Relojes · Empleados</h1>

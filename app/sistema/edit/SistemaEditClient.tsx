@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { InicioButton } from "@/components/ui/InicioButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -151,6 +152,7 @@ export default function SistemaEditClient() {
   return (
     <div className="min-h-screen bg-[#0d0d0d] text-white">
       <header className="sticky top-0 z-20 bg-[#151515] border-b border-zinc-800 px-6 h-14 flex items-center gap-4">
+        <InicioButton label="Inicio" iconSize={14} className="text-zinc-400 hover:text-white text-sm" />
         <Link href="/sistema" className="text-zinc-400 hover:text-white text-sm">
           ← Tablero
         </Link>

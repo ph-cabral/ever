@@ -8,10 +8,6 @@ export const GENERATED_CHILDREN: Record<string, NavNode[]> = {
     {
       "label": "Faltantes",
       "href": "/compras/faltantes"
-    },
-    {
-      "label": "Métricas",
-      "href": "/compras/metricas"
     }
   ],
   "deposito": [
@@ -69,10 +65,6 @@ export const GENERATED_CHILDREN: Record<string, NavNode[]> = {
     {
       "label": "Asistencia",
       "href": "/rrhh/asistencia"
-    },
-    {
-      "label": "Dashboard",
-      "href": "/rrhh/dashboard"
     },
     {
       "label": "Legajos",

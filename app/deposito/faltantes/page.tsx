@@ -10,6 +10,7 @@ import {
   PackageCheck,
   MapPin,
 } from "lucide-react";
+import { InicioButton } from "@/components/ui/InicioButton";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Faltantes — renglones pendientes del último día con registro (anterior a hoy).
@@ -476,6 +477,7 @@ export default function FaltantesPage() {
 
         <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 flex items-center justify-between px-8 h-16 gap-4">
           <div className="flex items-center gap-4">
+            <InicioButton />
             <span className="font-bold text-yellow-400 text-2xl tracking-wide uppercase">
               EVER WEAR{" "}
               <span className="text-sm tracking-[3px] font-normal">S.A.</span>
