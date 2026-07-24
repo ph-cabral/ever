@@ -422,8 +422,13 @@ def guardar_snapshot_wms_estados() -> dict:
 
 def _fotos_estados_del_dia(dia: date) -> list[tuple[datetime, int, int, int]]:
     """Fotos de estados ya guardadas ese día (ts, en_espera, en_proceso,
-    terminadas), ordenadas. Vacío si el snapshotter todavía no corrió."""
-    conn = get_pg_connection()
+    terminadas), ordenadas. Vacío si el snapshotter todavía no corrió O si la
+    tabla todavía no se creó (así el gráfico cae a la reconstrucción sin romper)."""
+    try:
+        conn = get_pg_connection()
+    except Exception as e:  # noqa: BLE001
+        print(f"[estados-snap] Postgres no disponible: {e}")
+        return []
     try:
         cur = conn.cursor()
         cur.execute(
@@ -432,6 +437,9 @@ def _fotos_estados_del_dia(dia: date) -> list[tuple[datetime, int, int, int]]:
             (dia,),
         )
         return [(ts, int(a), int(b), int(c)) for ts, a, b, c in cur.fetchall()]
+    except Exception as e:  # noqa: BLE001 — tabla inexistente u otro error → sin fotos
+        print(f"[estados-snap] sin fotos (¿tabla creada?): {e}")
+        return []
     finally:
         conn.close()
 
@@ -492,6 +500,82 @@ def _wms_transiciones_del_dia(dia: date) -> dict:
         return out
     finally:
         conn.close()
+
+
+# Reconstrucción del SNAPSHOT de estados (gráfico "OT en cada estado por hora")
+# para rellenar los buckets del día que todavía no tienen foto real. Usa el MISMO
+# universo que fetch_wms_estados (fuente de las tarjetas KPI): OT de Picking
+# VIVAS (OTEstado 0/1/5) sin importar la fecha (incluye backlog de días previos)
+# + las terminales REGISTRADAS hoy. Con las marcas de hora de cada OT se
+# reconstruye su estado a cada corte:
+#   · cumplido = OTFechaHoraEjecucion <= corte
+#   · proceso  = arrancó picking (PickIni <= corte) y realmente progresó
+#                (OTEstado=2 cumplido, u OTEstado=5 con ítems recolectados) —
+#                mismo criterio de reclasificación que SQL_WMS_ESTADOS
+#   · espera   = registrada (Regist <= corte) y todavía sin lo anterior
+# La foto real SIEMPRE tiene prioridad; esto es solo el relleno (igual patrón que
+# la reconstrucción de "Abiertos"). El split espera/proceso puede diferir un
+# poco de las tarjetas en instantes intermedios, pero Disponibles (espera+proceso)
+# y Cumplidos cierran con el KPI.
+SQL_WMS_ESTADOS_RECON = """
+SELECT
+    OT.OTFechaHoraRegist,
+    OT.OTFechaHoraPickIni,
+    OT.OTFechaHoraEjecucion,
+    OT.OTEstado,
+    ISNULL(it.Recolectados, 0) AS Recolectados
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+LEFT JOIN (
+    SELECT OTId,
+        SUM(CASE WHEN OTItemTipo = 1 AND OTItemCantCumplida > 0 THEN 1 ELSE 0 END) AS Recolectados
+    FROM OTItem GROUP BY OTId
+) it ON it.OTId = OT.OTId
+WHERE Codot.CodotProcesoNegocio = 4
+  AND ( OT.OTEstado IN ({vivos})
+        OR (OT.OTFechaHoraRegist >= ? AND OT.OTFechaHoraRegist <= ?) )
+"""
+
+
+def _wms_estados_recon_del_dia(dia: date) -> list[tuple]:
+    """(reg, pini, ejec, estado, recolectados) del universo KPI para reconstruir
+    el snapshot de estados a cualquier corte del día. Vacío si el WMS no
+    contesta (el gráfico no se rompe, solo no rellena)."""
+    d = datetime(dia.year, dia.month, dia.day, 0, 0, 0)
+    h = datetime(dia.year, dia.month, dia.day, 23, 59, 59)
+    try:
+        conn = get_connection("WMS")
+    except Exception as e:  # noqa: BLE001
+        print(f"[estados-snap-recon] WMS no disponible: {e}")
+        return []
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(
+            SQL_WMS_ESTADOS_RECON.format(vivos=",".join(str(e) for e in WMS_ESTADOS_VIVOS)),
+            (d, h),
+        )
+        return [(reg, pini, ejec, int(estado or 0), int(recol or 0))
+                for reg, pini, ejec, estado, recol in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _snap_recon(corte: datetime, ot_list: list[tuple]) -> tuple[int, int, int]:
+    """(espera, proceso, cumplido) reconstruidos al `corte` desde las marcas."""
+    espera = proceso = cumpl = 0
+    for reg, pini, ejec, estado, recol in ot_list:
+        if reg is None or reg >= corte:  # todavía no existía a esa hora
+            continue
+        if ejec is not None and ejec < corte:
+            cumpl += 1
+            continue
+        entro_proceso = estado == 2 or (estado == 5 and recol > 0)
+        if entro_proceso and pini is not None and pini < corte:
+            proceso += 1
+        else:
+            espera += 1
+    return espera, proceso, cumpl
 
 
 def fetch_pedidos_hora(fecha: date | None = None):
@@ -561,7 +645,11 @@ def fetch_pedidos_hora(fecha: date | None = None):
     # Snapshot de estados (gráfico "OT en cada estado por hora"): fotos reales de
     # los KPI cada 15 min (Postgres). Se hace carry-forward de la última foto ≤
     # corte, igual que "Abiertos". Así el gráfico coincide con las tarjetas KPI.
+    # Para los buckets SIN foto todavía se reconstruye desde las marcas de la OT
+    # (mismo universo KPI) → el día se ve completo desde las 8h; la foto real
+    # tiene prioridad cuando existe.
     fotos_est = _fotos_estados_del_dia(dia)
+    recon_est = _wms_estados_recon_del_dia(dia)
 
     out = []
     idx_foto = 0
@@ -600,12 +688,17 @@ def fetch_pedidos_hora(fecha: date | None = None):
         est_cumplido = _en(trans["cumplido"], inicio, corte)
         est_sin = _en(trans["sin_asignar"], inicio, corte)
         cumplidos = est_cumplido  # gráfico 2 usa el mismo flujo de cumplidos
-        # Snapshot (gráfico nuevo): última foto real de los KPI ≤ corte. None si
-        # todavía no hay foto (recién deployado / antes del primer snapshot).
+        # Snapshot (gráfico nuevo): foto real de los KPI ≤ corte si existe; si no,
+        # reconstrucción desde las marcas de la OT (relleno). La foto real manda.
         if est_foto is not None:
             snap_espera_v = est_foto[0]
             snap_disp_v = est_foto[0] + est_foto[1]  # espera + proceso = no cumplido
             snap_cumpl_v = est_foto[2]               # cumplido (acumulado del día)
+        elif recon_est:
+            r_esp, r_proc, r_cumpl = _snap_recon(corte, recon_est)
+            snap_espera_v = r_esp
+            snap_disp_v = r_esp + r_proc
+            snap_cumpl_v = r_cumpl
         else:
             snap_espera_v = snap_disp_v = snap_cumpl_v = None
         # Backlog reconstruido: pedidos registrados antes del corte y todavía no

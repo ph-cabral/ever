@@ -459,9 +459,11 @@ export default function DepositoWmsPage() {
             real del momento —los mismos números que las tarjetas KPI de arriba—
             tomada cada 15 min. En espera = Pendientes (sube al entrar, baja al
             pasar a proceso o cumplirse). Disponibles = todo lo no cumplido
-            (Pendiente + En proceso). Cumplidos = acumulado del día, solo crece.{" "}
+            (Pendiente + En proceso). Cumplidos = acumulado del día, solo crece.
+            Los tramos ya fotografiados coinciden exacto con los KPI; el resto del
+            día se reconstruye desde las marcas de hora de cada OT.{" "}
             {horaEsHoy
-              ? "Se traza a medida que se van sacando fotos durante el día."
+              ? "Se afina a medida que se van sacando fotos."
               : "Día completo (ya cerrado)."}
           </p>
         </div>
