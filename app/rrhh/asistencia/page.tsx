@@ -665,13 +665,20 @@ export default function AsistenciaPage() {
     for (const r of rows) {
       if (!r.check_in || r.check_out) continue; // presentes = marcados sin egreso
       const a = (r.departamento ?? "").trim() || "Sin área";
+      if (a.toLowerCase() === "locales") continue; // no cuenta en este widget
       m.set(a, (m.get(a) ?? 0) + 1);
     }
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [rows]);
 
   const marcados = useMemo(
-    () => rows.filter((r) => r.check_in && !r.check_out).length,
+    () =>
+      rows.filter(
+        (r) =>
+          r.check_in &&
+          !r.check_out &&
+          (r.departamento ?? "").trim().toLowerCase() !== "locales",
+      ).length,
     [rows],
   );
 

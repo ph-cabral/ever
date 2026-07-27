@@ -317,12 +317,22 @@ export async function GET() {
         (r) => !ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`)?.duplicado,
       )
       .map((r) => {
-        const c =
-          ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`) ??
-          ctrlPorArt.get(`${r.NroPedOrigen}-${r.CodArticulo.trim()}`);
+        const cExact = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);
+        const cArt = ctrlPorArt.get(`${r.NroPedOrigen}-${r.CodArticulo.trim()}`);
+        const c = cExact ?? cArt;
         const extra = extraMap.get(r.CodArticulo);
         const extraordinario = !!extra && extra.comprar === null;
-        const manual = c?.fechaArribo ?? null;
+        // fechaArribo por separado de `c`: el match exacto por renglón puede
+        // EXISTIR (ctrl se llena para TODO renglón, tenga o no arribo — hace
+        // falta para clienteQuiere/irrelevante/duplicado) pero con
+        // fechaArribo=null si ese renglón quedó reciclado por Magnus para OTRO
+        // artículo. Si usáramos `c?.fechaArribo` (objeto completo con ??), ese
+        // null exacto tapaba el fallback por artículo (cArt) aunque cArt SÍ
+        // tuviera el arribo cargado — la fila caía al estimado de OC (badge
+        // "OC", el que se ve como "fecha de despacho") en vez del manual.
+        // Bug real 2026-07-24: /compras/faltantes con arribo cargado, /ventas
+        // /faltantes seguía mostrando el estimado incluso después de deployar.
+        const manual = cExact?.fechaArribo ?? cArt?.fechaArribo ?? null;
         return {
           ...r,
           fechaArribo: manual ?? ocArribo.get(r.CodArticulo.trim()) ?? null,
@@ -343,15 +353,17 @@ export async function GET() {
     const listos = rows
       .filter((r) => sin.has(`${r.NroPedOrigen}-${r.CodArticulo.trim()}`))
       .map((r) => {
-        const c =
-          ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`) ??
-          ctrlPorArt.get(`${r.NroPedOrigen}-${r.CodArticulo.trim()}`);
+        const cExact = ctrl.get(`${r.NroPedOrigen}-${r.NroRengOrigen}`);
+        const cArt = ctrlPorArt.get(`${r.NroPedOrigen}-${r.CodArticulo.trim()}`);
+        const c = cExact ?? cArt;
         return {
           ...r,
           // mismo fallback OC que Tabla 1 (por si el POST de control no
-          // persistió la fecha al responder clienteQuiere)
+          // persistió la fecha al responder clienteQuiere). fechaArribo mira
+          // cExact y cArt por separado — ver comentario en Tabla 1 arriba
+          // (mismo bug: objeto exacto con fechaArribo=null tapaba el fallback).
           fechaArribo:
-            c?.fechaArribo ?? ocArribo.get(r.CodArticulo.trim()) ?? null,
+            cExact?.fechaArribo ?? cArt?.fechaArribo ?? ocArribo.get(r.CodArticulo.trim()) ?? null,
           clienteQuiere: c?.clienteQuiere ?? null,
           vendido: c?.vendido ?? null,
           yaIngreso: ingresados.has(r.CodArticulo.trim()),
