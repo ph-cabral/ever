@@ -8,14 +8,25 @@ export interface MenuNode {
   label: string;
   href: string;
   color?: string; // sólo módulos de primer nivel
+  hasIndex?: boolean; // sólo módulos de primer nivel; default true (ver collapse)
   children: MenuNode[];
 }
 
-/** Colapsa cadenas de un solo hijo (sólo al entrar desde la grilla de módulos). */
+/**
+ * Sólo al entrar desde la grilla de módulos: si el módulo NO tiene página
+ * propia (hasIndex === false, ej. "fabrica") no hay nada que mostrar en su
+ * botón central, así que baja un nivel a su única vista hija. Si el módulo
+ * SÍ tiene dashboard propio (hasIndex true/undefined, el caso normal) nunca
+ * se lo salta — el centro es siempre el dashboard del módulo, con sus vistas
+ * hijas como botones satélite, aunque haya una sola (ej. Compras → Faltantes,
+ * Sistema → Edit). Los nodos más profundos del árbol siempre tienen página
+ * propia (así los arma gen-nav.mjs), por eso el colapso nunca sigue de largo.
+ */
 function collapse(node: MenuNode): MenuNode {
-  let n = node;
-  while (n.children.length === 1) n = n.children[0];
-  return n;
+  if (node.hasIndex === false && node.children.length === 1) {
+    return node.children[0];
+  }
+  return node;
 }
 
 const RADIUS = 168; // radio del primer anillo (hijos directos del centro)
@@ -51,10 +62,11 @@ export function HomeMenu({ modules }: { modules: MenuNode[] }) {
   const [center, setCenter] = useState<MenuNode | null>(null);
 
   function enter(node: MenuNode) {
-    // El colapso de cadenas de 1 hijo sólo aplica al entrar desde la grilla.
+    // El colapso (bajar un nivel si el módulo no tiene dashboard propio) sólo
+    // aplica al entrar desde la grilla.
     const t = collapse(node);
     if (t.children.length === 0) {
-      router.push(t.href); // módulo sin sub-vistas (o cadena de 1 hijo): navega directo
+      router.push(t.href); // sin sub-vistas: navega directo (dashboard o vista única sin hijos)
       return;
     }
     setCenter(t);

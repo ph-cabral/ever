@@ -96,10 +96,17 @@ for (const key of MODULE_KEYS) GEN[key] = walk(join(APP, key), `/${key}`);
 
 // Módulos detectados, listos para que modules.ts arme los botones del home
 // (label/color se pueden overridear a mano en RAW_MODULES; si no, usa default).
+// hasIndex = el módulo tiene su propio app/<key>/page.tsx (su "dashboard").
+// Lo usa HomeMenu para decidir el colapso: si hasIndex es true, el botón
+// central SIEMPRE entra al módulo (dashboard + vistas hijas como satélites),
+// aunque tenga una sola vista hija — nunca se lo salta. Si es false (el
+// módulo no tiene página propia, ej. "fabrica") sí conviene bajar un nivel,
+// porque navegar a esa ruta rompería (404).
 const GENERATED_MODULES = MODULE_KEYS.map((key) => ({
   key,
   label: label(key),
   href: `/${key}`,
+  hasIndex: hasPage(join(APP, key)),
 }));
 
 const banner =
@@ -108,6 +115,6 @@ const banner =
 const body =
   `import type { NavNode } from "./modules";\n\n` +
   `export const GENERATED_CHILDREN: Record<string, NavNode[]> = ${JSON.stringify(GEN, null, 2)};\n\n` +
-  `export const GENERATED_MODULES: { key: string; label: string; href: string }[] = ${JSON.stringify(GENERATED_MODULES, null, 2)};\n`;
+  `export const GENERATED_MODULES: { key: string; label: string; href: string; hasIndex: boolean }[] = ${JSON.stringify(GENERATED_MODULES, null, 2)};\n`;
 writeFileSync(join(ROOT, "lib/auth/nav.generated.ts"), banner + body);
 console.log("nav.generated.ts OK");

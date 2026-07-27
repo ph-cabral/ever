@@ -21,13 +21,14 @@ export interface ModuleDef {
   label: string;
   href: string;
   color: string; // clases tailwind para el botón del home
+  hasIndex: boolean; // ¿tiene su propio app/<key>/page.tsx? (dashboard del módulo)
   children?: NavNode[]; // sub-vistas (árbol) para el menú animado del home
 }
 
 // Color/label manual SOLO para los módulos que querés personalizar.
 // Cualquier carpeta nueva en app/ (detectada por gen-nav.mjs) que no esté acá
 // se agrega sola con un color default — no hace falta tocar este archivo.
-const RAW_MODULES: Omit<ModuleDef, "children">[] = [
+const RAW_MODULES: Omit<ModuleDef, "children" | "hasIndex">[] = [
   {
     key: "manguera",
     label: "Mangueras",
@@ -106,10 +107,17 @@ const DEFAULT_COLORS = [
   "bg-rose-700 hover:bg-rose-600",
 ];
 
+// hasIndex real de cada módulo (¿tiene su propio app/<key>/page.tsx, o sea un
+// dashboard?). Única fuente de verdad: lo calcula gen-nav.mjs escaneando app/
+// en cada dev/build — acá sólo se lee, nunca se hardcodea a mano.
+const HAS_INDEX: Record<string, boolean> = Object.fromEntries(
+  GENERATED_MODULES.map((g) => [g.key, g.hasIndex]),
+);
+
 // RAW_MODULES (manual, con color/label a medida) + lo que gen-nav.mjs detectó en
 // app/ y todavía no está en RAW_MODULES (color default, rotando la paleta).
 const ALL_RAW: Omit<ModuleDef, "children">[] = [
-  ...RAW_MODULES,
+  ...RAW_MODULES.map((m) => ({ ...m, hasIndex: HAS_INDEX[m.key] ?? true })),
   ...GENERATED_MODULES.filter(
     (g) => !RAW_MODULES.some((m) => m.key === g.key),
   ).map((g, i) => ({
@@ -117,6 +125,7 @@ const ALL_RAW: Omit<ModuleDef, "children">[] = [
     label: g.label,
     href: g.href,
     color: DEFAULT_COLORS[i % DEFAULT_COLORS.length],
+    hasIndex: g.hasIndex,
   })),
 ];
 

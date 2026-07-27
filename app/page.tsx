@@ -33,6 +33,7 @@ export default async function Home() {
     label: m.label,
     href: m.href,
     color: m.color,
+    hasIndex: m.hasIndex,
     children: filterNodes(m.children),
   }));
 

@@ -96,65 +96,77 @@ export const GENERATED_CHILDREN: Record<string, NavNode[]> = {
   "vicki": []
 };
 
-export const GENERATED_MODULES: { key: string; label: string; href: string }[] = [
+export const GENERATED_MODULES: { key: string; label: string; href: string; hasIndex: boolean }[] = [
   {
     "key": "buscador",
     "label": "Buscador",
-    "href": "/buscador"
+    "href": "/buscador",
+    "hasIndex": true
   },
   {
     "key": "compras",
     "label": "Compras",
-    "href": "/compras"
+    "href": "/compras",
+    "hasIndex": true
   },
   {
     "key": "deposito",
     "label": "Deposito",
-    "href": "/deposito"
+    "href": "/deposito",
+    "hasIndex": true
   },
   {
     "key": "fabrica",
     "label": "Fabrica",
-    "href": "/fabrica"
+    "href": "/fabrica",
+    "hasIndex": false
   },
   {
     "key": "finanza",
     "label": "Finanza",
-    "href": "/finanza"
+    "href": "/finanza",
+    "hasIndex": true
   },
   {
     "key": "manguera",
     "label": "Manguera",
-    "href": "/manguera"
+    "href": "/manguera",
+    "hasIndex": true
   },
   {
     "key": "picking",
     "label": "Picking",
-    "href": "/picking"
+    "href": "/picking",
+    "hasIndex": true
   },
   {
     "key": "rrhh",
     "label": "RRHH",
-    "href": "/rrhh"
+    "href": "/rrhh",
+    "hasIndex": true
   },
   {
     "key": "sistema",
     "label": "Sistema",
-    "href": "/sistema"
+    "href": "/sistema",
+    "hasIndex": true
   },
   {
     "key": "sorteo",
     "label": "Sorteo",
-    "href": "/sorteo"
+    "href": "/sorteo",
+    "hasIndex": true
   },
   {
     "key": "ventas",
     "label": "Ventas",
-    "href": "/ventas"
+    "href": "/ventas",
+    "hasIndex": false
   },
   {
     "key": "vicki",
     "label": "Vicki",
-    "href": "/vicki"
+    "href": "/vicki",
+    "hasIndex": true
   }
 ];
