@@ -85,7 +85,7 @@ export const SCHEMAS: Record<string, { titleKey: string; fields: CampoDef[] }> =
       // esColumnaAbiertaSoftech en las rutas de la API). Ya no se tipean a mano; se
       // muestran como info de solo lectura arriba del formulario (ModalTarjeta).
       { k: "inicio", l: "Inicio", t: "date", auto: true },
-      { k: "problema", l: "Problema", t: "text" },
+      { k: "problema", l: "Problema", t: "select", opciones: [], extensible: true },
       { k: "sistema", l: "Sistema", t: "select", opciones: ["Magnus", "Prolixus", "WMS", "ecommerce", "SITD"] },
       { k: "fin", l: "Fin", t: "date", auto: true },
       {
@@ -1492,6 +1492,60 @@ function PanelUbicacion({
   );
 }
 
+function PanelProblema({
+  name,
+  cards,
+  offset,
+  onClose,
+}: {
+  name: string;
+  cards: CardM[];
+  offset: number;
+  onClose: () => void;
+}) {
+  const [entrado, setEntrado] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntrado(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  return (
+    <div
+      className="absolute bg-[#1f1f1f] border border-zinc-700 rounded-xl shadow-2xl shadow-black/60 p-3 w-full transition-all duration-300 ease-out overflow-y-auto scrollbar-hide"
+      style={{
+        top: offset * 14,
+        left: offset * 10,
+        right: -offset * 4,
+        zIndex: 20 + offset,
+        maxHeight: 280,
+        transform: entrado ? "translateX(0)" : "translateX(48px)",
+        opacity: entrado ? 1 : 0,
+      }}
+    >
+      <div className="flex items-center justify-between mb-2 sticky top-0 bg-[#1f1f1f]">
+        <h5 className="text-sm font-semibold text-zinc-100 truncate">{name}</h5>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-zinc-500">{cards.length}</span>
+          <button onClick={onClose} className="text-zinc-500 hover:text-rose-400 text-xs" title="Cerrar">
+            ✕
+          </button>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        {cards.map((c) => (
+          <div key={c.id} className="bg-[#161616] border border-zinc-800 rounded-lg p-2">
+            <p className="text-xs text-zinc-200 whitespace-pre-line">{c.campos.accion || "(sin nota)"}</p>
+            <p className="text-[10px] text-zinc-500 mt-1">
+              {c.campos.sistema || "—"} · {c.campos.origen || "—"} · {c.colNombre}
+            </p>
+          </div>
+        ))}
+        {cards.length === 0 && <p className="text-xs text-zinc-600">Sin tarjetas.</p>}
+      </div>
+    </div>
+  );
+}
+
 type CardM = Tarjeta & { colNombre: string };
 
 function Metricas({ tableros }: { tableros: Tablero[] }) {
@@ -1527,6 +1581,10 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
   const toggleUbicacion = (name: string) =>
     setPilaUbicacion((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
 
+  const [pilaProblema, setPilaProblema] = useState<string[]>([]);
+  const toggleProblema = (name: string) =>
+    setPilaProblema((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
+
   const unicas =
     mes === "todos"
       ? unicasAll
@@ -1561,6 +1619,7 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
   const topUbicacion = sisPorUbicacion[0];
   const sfPorEstado = countBy(sfCards, (c) => c.colNombre);
   const sfPorSistema = countBy(sfCards, (c) => c.campos.sistema);
+  const sfPorProblema = countBy(sfCards, (c) => c.campos.problema).sort((a, b) => b.value - a.value);
 
   const sistemaTablero = tableros.find((t) => t.clave === "sistema");
   const softechTablero = tableros.find((t) => t.clave === "softech");
@@ -1776,6 +1835,66 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
                 </Bar>
               </BarChart>
             </ChartBox>
+
+            <div className="bg-[#161616] border border-zinc-800 rounded-xl p-4 md:col-span-3 shadow-sm">
+              <h4 className="text-sm text-zinc-300 mb-2">
+                Por problema{" "}
+                <span className="text-zinc-500 font-normal">(clic en una barra para ver el detalle)</span>
+              </h4>
+              <div className="flex flex-col md:flex-row gap-4">
+                <div style={{ width: "100%", maxWidth: 420, height: Math.max(260, sfPorProblema.length * 26) }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={sfPorProblema} layout="vertical" margin={{ left: 8, right: 12 }}>
+                      <CartesianGrid stroke="#27272a" horizontal={false} />
+                      <XAxis type="number" stroke="#a1a1aa" fontSize={12} allowDecimals={false} />
+                      <YAxis type="category" dataKey="name" stroke="#a1a1aa" fontSize={11} width={140} />
+                      <Tooltip
+                        cursor={{ fill: "#ffffff0d" }}
+                        contentStyle={{ background: "#1f1f1f", border: "1px solid #3f3f46" }}
+                        labelStyle={{ color: "#f4f4f5" }}
+                        itemStyle={{ color: "#f4f4f5" }}
+                      />
+                      <Bar
+                        dataKey="value"
+                        radius={[0, 4, 4, 0]}
+                        cursor="pointer"
+                        onClick={(d: any) => toggleProblema(d.name)}
+                      >
+                        {sfPorProblema.map((entry, i) => (
+                          <Cell
+                            key={i}
+                            fill={PALETTE[i % PALETTE.length]}
+                            stroke={pilaProblema.includes(entry.name) ? "#f4f4f5" : "none"}
+                            strokeWidth={pilaProblema.includes(entry.name) ? 2 : 0}
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div
+                  className="relative flex-1"
+                  style={{ minHeight: Math.max(180, Math.min(260, sfPorProblema.length * 26)) }}
+                >
+                  {pilaProblema.length === 0 ? (
+                    <p className="text-xs text-zinc-600 h-full flex items-center">
+                      Elegí un problema en el gráfico para ver sus tarjetas acá.
+                    </p>
+                  ) : (
+                    pilaProblema.map((name, i) => (
+                      <PanelProblema
+                        key={name}
+                        name={name}
+                        cards={sfCards.filter((c) => (c.campos.problema || "(sin dato)") === name)}
+                        offset={i}
+                        onClose={() => toggleProblema(name)}
+                      />
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </SeccionTablero>
       )}
