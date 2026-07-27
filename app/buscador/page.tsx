@@ -563,7 +563,7 @@ export default function BuscadorPage() {
                               href={p.web}
                               target="_blank"
                               rel="noreferrer"
-                              title="Sitio web"
+                              title="Buscador"
                               className="text-zinc-300 hover:text-yellow-400"
                             >
                               <Globe size={15} />

@@ -27,10 +27,17 @@ export const maxDuration = 60;
 //      crédito (no se arrastra sobrante a favor) y el artículo vuelve a foja
 //      cero para el próximo ciclo. Si no alcanzan, el descubierto real sigue
 //      acumulando tal cual.
-//   4b. Un artículo con el acumulado ya en 0 (cubierto de verdad, por OC+stock
-//      reales) deja de tener faltante: esa fila NO se manda en la respuesta
-//      (desaparece de toda la vista), salvo el histórico "entregado" que no
-//      pasa por esta regla.
+//   4b. Color/visibilidad de cada bucket "vivo" (2026-07-27, 4 casos, en orden):
+//      · stock SOLO (sin la OC) ya cubre el acumulado → NO es problema de
+//        compras: el bucket se EXCLUYE de la respuesta (desaparece de toda
+//        la vista, ver resueltoPorStock).
+//      · si no, pero OC+stock juntos cubren todo (descubierto=0) → estado
+//        "completo", SE MUESTRA en verde (antes también se ocultaba; ahora
+//        solo se oculta el caso de arriba, resuelto por stock puro).
+//      · si no, y hay algo de OC pendiente (cub>0) → "incompleto", rojo.
+//      · si no hay OC en absoluto → "sin_orden", SIN COLOR (antes rojo).
+//      El histórico "entregado" no pasa por ninguna de estas reglas (tiene
+//      su propio verde, fijo).
 //   5. Se persiste el consumo por día en preparado.faltante_oc_consumo
 //      (best-effort: si la tabla no está creada aún, la vista igual funciona).
 // ──────────────────────────────────────────────────────────────────────────────
@@ -85,6 +92,7 @@ interface Bucket {
   ocs: string[];
   estado: Estado;
   stock: number; // existencia real en depósito 1 (WMS, en vivo) — ver /deposito/stock
+  resueltoPorStock: boolean; // el STOCK SOLO (sin la OC) ya cubre todo el acumulado — se excluye de la respuesta (ver punto 4b), no llega al front
 }
 
 const keyLine = (p: number, r: number) => `${p}-${r}`;
@@ -357,6 +365,7 @@ export async function GET(req: NextRequest) {
         ocs: [],
         estado: "sin_orden",
         stock: 0,
+        resueltoPorStock: false,
       };
       buckets.set(k, b);
     }
@@ -400,10 +409,14 @@ export async function GET(req: NextRequest) {
   //      EXACTO de "fechaEntrega"; ahora aplica cualquier día, sea por OC, por
   //      stock, o la suma de ambos). Si no alcanza, el descubierto real NO se
   //      resetea: sigue acumulando hasta que se cubra de verdad.
-  //    · Un artículo que quedó en 0 (cubierto de verdad) ya no tiene faltante:
-  //      esa fila se excluye de la respuesta más abajo (no aparece en ninguna
-  //      tabla de la vista) — la fecha manual de "Arribo" NO interviene acá,
-  //      solo la cobertura real (OC/stock en vivo).
+  //    · Un artículo que quedó en 0 (cubierto de verdad): si necesitó la OC
+  //      para llegar a 0 (el stock solo no alcanzaba), NO se excluye — se
+  //      manda con estado "completo" (fondo verde) para que quede a la vista
+  //      que se resolvió. Si en cambio el STOCK SOLO ya alcanzaba (la OC no
+  //      hizo falta), SÍ se excluye (ver resueltoPorStock/punto 4b): no es un
+  //      problema de compras, desaparece de la vista. La fecha manual de
+  //      "Arribo" NO interviene en ninguno de los dos casos, solo la
+  //      cobertura real (OC/stock en vivo).
   //    · Límite conocido: Magnus agrega todas las OC pendientes del artículo en
   //      un solo total con la fecha de entrega MÁS TEMPRANA (ver
   //      indicadores-api/compras.py:fetch_ordenes_pendientes). Si un artículo
@@ -459,11 +472,20 @@ export async function GET(req: NextRequest) {
         continue;
       }
       acumulado += b.nuevoDelDia;
+      // Acumulado de HOY antes de cualquier reset — se usa para decidir si el
+      // STOCK SOLO (sin la OC) ya alcanza a cubrirlo (ver resueltoPorStock).
+      const acumuladoDelDia = acumulado;
       let cub = Math.min(Math.max(ocTotal, 0), acumulado);
       let desc = Math.max(acumulado - ocTotal, 0);
       // El stock físico del depósito 1 (en vivo, WMS) tapa lo que la OC no
       // cubrió: si ya está en depósito no hace falta esperar una orden de compra.
       let descNetoStock = Math.max(desc - stock, 0);
+
+      // El STOCK SOLO (sin contar ninguna OC) ya cubre todo el acumulado de
+      // hoy: no es un problema de compras (no hace falta encargar nada), así
+      // que este bucket se excluye más abajo en vez de pintarse — desaparece
+      // de la tabla en lugar de quedar verde o neutro.
+      const resueltoPorStock = stock >= acumuladoDelDia;
 
       // Cobertura REAL de hoy (OC pendiente actual + stock físico actual, las
       // dos en vivo — no la fecha manual de "Arribo" ni ninguna estimación):
@@ -484,17 +506,23 @@ export async function GET(req: NextRequest) {
       b.cubierto = cub;
       b.descubierto = r2(descNetoStock);
       b.ocTotal = ocTotal;
+      b.resueltoPorStock = resueltoPorStock;
       if (oc) {
         b.fechaEntrega = fechaEntrega;
         b.importacion = !!oc.Importacion;
         b.ocs = oc.NroOCs ?? [];
         if (!b.Proveedor && oc.Proveedor) b.Proveedor = oc.Proveedor;
       }
-      // faltan=0 → cubierto de verdad (esta fila se excluye de la respuesta
-      // más abajo, ver filtro "resuelto"). Se deja "completo" por prolijidad
-      // del tipo, pero no llega a mostrarse.
-      b.estado =
-        descNetoStock <= 0 ? "completo" : cub > 0 || stock > 0 ? "incompleto" : "sin_orden";
+      // 4 estados (2026-07-27, pedido explícito de Pablo):
+      //   · descNetoStock<=0 (OC+stock cubren TODO)     → "completo" (verde).
+      //     Si además resueltoPorStock (el STOCK SOLO ya alcanzaba, sin
+      //     necesitar la OC), el filtro de más abajo lo saca de la
+      //     respuesta — desaparece en vez de quedar verde.
+      //   · si no, cub>0 (hay algo de OC pero no alcanza ni con el stock)
+      //     → "incompleto" (rojo).
+      //   · si no (no hay OC y el stock tampoco alcanza)  → "sin_orden"
+      //     (sin color — antes rojo, ver rowCls en page.tsx).
+      b.estado = descNetoStock <= 0 ? "completo" : cub > 0 ? "incompleto" : "sin_orden";
     }
     artImporte.set(cod, imp);
   }
@@ -511,10 +539,13 @@ export async function GET(req: NextRequest) {
         descartMap.get(keyArtDia(b.CodArticulo, b.fecha)) ?? descartUltPorArt.get(b.CodArticulo);
       return !descartado;
     })
-    // Ya cubierto de verdad (OC + stock reales, ver punto 4/4b): sin faltante,
-    // no aparece en NINGUNA tabla de la vista. El histórico "entregado" no
-    // pasa por esta regla (b.vivo=false).
-    .filter((b) => !b.vivo || b.faltan > 0)
+    // Resuelto por STOCK SOLO (sin la OC, ver resueltoPorStock más arriba):
+    // no es un problema de compras, no hace falta encargar nada — esta fila
+    // SÍ se excluye (desaparece de toda la vista). Distinto de "completo" a
+    // secas (OC+stock cubren todo pero el stock por sí solo NO alcanzaba):
+    // ese caso NO se excluye más abajo, se manda con estado "completo" y se
+    // pinta verde (cambio 2026-07-27, antes también se ocultaba).
+    .filter((b) => !(b.estado === "completo" && b.resueltoPorStock))
     .sort((a, c) => {
       const ia = artImporte.get(a.CodArticulo) ?? 0;
       const ic = artImporte.get(c.CodArticulo) ?? 0;

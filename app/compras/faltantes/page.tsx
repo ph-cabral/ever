@@ -29,10 +29,21 @@ import { InicioButton } from "@/components/ui/InicioButton";
 //     el reverso. Ahí queda hasta que la OC "por llegar" cubre el faltante del
 //     artículo (descubierto llega a 0) — sale sola, sin acción manual.
 //
-//   Color de fila por estado del DÍA:
-//     · verde  → la OC que llegó a ese día cubre el faltante (descubierto = 0)
-//     · rojo   → la OC alcanzó en parte (0 < cubierto < faltan)
-//     · neutro → a ese día no le llegó OC (cubierto = 0)
+//   Color de fila por estado del DÍA (4 reglas, 2026-07-27 — Pablo):
+//     · (sin fila) → el STOCK SOLO (sin la OC) ya cubre el acumulado: no es
+//       problema de compras, el backend directamente NO manda ese bucket
+//       (resueltoPorStock, ver faltantes-consumo/route.ts punto 4b).
+//     · verde  → OC + stock juntos cubren TODO el acumulado (descubierto = 0,
+//       estado "completo") pero el stock por sí solo NO alcanzaba — hizo
+//       falta la OC. Se muestra para dejar constancia de que quedó resuelta
+//       (hasta 2026-07-27 este caso también se ocultaba, igual que el de
+//       arriba; ahora se distinguen).
+//     · rojo   → sigue descubierto y HAY algo de OC cargada, pero no alcanza
+//       ni sumando el stock (estado "incompleto").
+//     · sin color → sigue descubierto y NO hay ninguna OC pendiente (estado
+//       "sin_orden"). Antes pintaba rojo igual que "incompleto"; ahora es
+//       neutro (ver rowCls) para no mezclar "ya hay algo en camino" con
+//       "no hay nada pedido todavía".
 //
 //   Fecha de arribo (columna "Arribo"): se carga acá a nivel artículo+día y se
 //   aplica (fan-out) a todos los renglones de ese bucket en
@@ -138,9 +149,12 @@ const rowCls: Record<Estado, string> = {
   completo: "bg-green-500/10 hover:bg-green-500/[0.16]",
   entregado: "bg-emerald-500/10 hover:bg-emerald-500/[0.16]",
   incompleto: "bg-red-500/10 hover:bg-red-500/[0.16]",
-  // sin_orden = stock+OC no cubre nada del faltante (peor caso que "incompleto",
-  // no mejor) → misma fila roja. Antes quedaba neutro y parecía "sin alerta".
-  sin_orden: "bg-red-500/10 hover:bg-red-500/[0.16]",
+  // sin_orden = no hay NINGUNA OC pendiente (cub=0) y el stock tampoco cubre
+  // el faltante. Reglas 2026-07-27 (Pablo): sin color — el rojo es solo para
+  // "incompleto" (hay una OC cargada pero no alcanza). Antes (mismo día,
+  // versión intermedia) era rojo igual que "incompleto"; antes de eso había
+  // sido neutro — vuelve a serlo, ahora ya explícito y no por accidente.
+  sin_orden: "hover:bg-zinc-800/40",
 };
 // Color del número "cubre OC" dentro de la celda Falta/Stock/OC: verde SOLO si
 // stock+OC cubre TODO el faltante (completo/entregado). Si es cobertura
@@ -941,12 +955,11 @@ export default function ComprasFaltantesPage() {
           <div className="w-px h-5 bg-zinc-800 hidden sm:block" />
 
           {/* "entregado" ya no existe: todo lo marcado sin existencia es demanda viva.
-              "completo" tampoco puede aparecer: un artículo cubierto de verdad
-              (OC+stock reales) ya no tiene faltante y el backend lo excluye de
-              la respuesta (ver faltantes-consumo/route.ts, punto 4b). */}
-          {FILTROS.filter(
-            (f) => f.key !== "entregado" && f.key !== "completo",
-          ).map((f) => (
+              "completo" SÍ puede aparecer (cambio 2026-07-27): un artículo
+              cubierto de verdad (OC+stock reales) ya no se excluye en el
+              backend, se manda con fondo verde (ver faltantes-consumo/
+              route.ts, punto 4b) — este chip deja filtrar solo esos. */}
+          {FILTROS.filter((f) => f.key !== "entregado").map((f) => (
             <button
               key={f.key}
               onClick={() => setFiltro(f.key)}

@@ -226,10 +226,25 @@ export async function GET() {
       if (cod && val.fechaArribo) ctrlPorArt.set(`${r.nroPedOrigen}-${cod}`, val);
     }
 
-    // Arribo automático por OC: artículo → FechaEntrega de la OC pendiente,
+    // Suma N días a una fecha ISO (yyyy-mm-dd) sin corrimiento de huso horario
+    // — mismo criterio que addDaysISO en app/compras/faltantes/page.tsx, donde
+    // se usa para el "sugerido" Despacho+2 mientras compras no cargue/confirme
+    // el arribo real.
+    const addDaysISO = (iso: string, days: number) => {
+      const d = new Date(`${iso}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + days);
+      return d.toISOString().slice(0, 10);
+    };
+
+    // Arribo automático por OC: artículo → FechaEntrega (Despacho) + 2 días,
     // salvo importación (sin fecha confiable) — en ese caso se estima como
     // FechaOC (fecha en que se hizo la orden, FecMovim) + 2 días. Manual
     // (faltante_control) pisa cualquiera de los dos casos.
+    // Bug real 2026-07-27: acá se guardaba r.FechaEntrega SIN sumar los 2 días
+    // (a diferencia del "sugerido" de /compras/faltantes), así que mientras
+    // compras no cargara/confirmara un arribo real, /ventas/faltantes mostraba
+    // literalmente la fecha de Despacho (ej. 23/07) en vez del mismo estimado
+    // de arribo que ya se ve en /compras/faltantes (Despacho+2, ej. 25/07).
     const ocArribo = new Map<string, string>();
     for (const r of (ocJson?.rows ?? []) as {
       CodArticulo?: string;
@@ -240,11 +255,9 @@ export async function GET() {
       const cod = String(r.CodArticulo ?? "").trim();
       if (!cod) continue;
       if (r.FechaEntrega && !r.Importacion) {
-        ocArribo.set(cod, r.FechaEntrega);
+        ocArribo.set(cod, addDaysISO(r.FechaEntrega, 2));
       } else if (r.FechaOC) {
-        const d = new Date(`${r.FechaOC}T00:00:00Z`);
-        d.setUTCDate(d.getUTCDate() + 2);
-        ocArribo.set(cod, d.toISOString().slice(0, 10));
+        ocArribo.set(cod, addDaysISO(r.FechaOC, 2));
       }
     }
 
