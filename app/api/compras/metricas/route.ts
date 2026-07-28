@@ -43,6 +43,15 @@ export const maxDuration = 60;
 //     · Importación: SOLO sale de /compras/ordenes-pendientes (no hay otra
 //       fuente) — default false (Nacional) si el artículo no tiene OC
 //       asociada, mismo default que ya usa faltantes-consumo.
+//
+//   Totales unidades/$ + % (agregado 2026-07-28, Pablo): además del conteo en
+//   items, se informa faltantesUnidades/faltantesImporte (suma de
+//   CantPend/Importe por renglón del set A completo, mismo dato que ya trae
+//   /deposito/faltantes para la torta — no cuesta una llamada extra) y
+//   pctUnidades/pctImporte = qué % representan sobre TODO lo pedido ese mes
+//   (indicadores-api GET /ventas/pedidos-mes, best-effort → pedidosMesWarn).
+//   pctUnidades/pctImporte quedan en null si el denominador no está disponible
+//   o es 0 (no se puede dividir por cero / no informar un % falso).
 // ──────────────────────────────────────────────────────────────────────────────
 
 const PROVEEDOR_OBJETIVO = "ever wear s.a. industrial";
@@ -142,22 +151,69 @@ export async function GET(req: NextRequest) {
   // 4) Torta: clasifica el set A (Faltantes) en Importados/Nacionales/EVER
   // WEAR INDUSTRIAL. Proveedor: Magnus faltantes viejo (best-effort) con
   // fallback a la OC pendiente; Importación: solo de la OC pendiente.
+  // faltUnidMap/faltImporteMap: mismo fetch de arriba (deposito/faltantes),
+  // reusado también para sumar unidades ($ y cantidad) de los faltantes del
+  // mes — CantPend/Importe ya vienen calculados por renglón desde
+  // fetch_faltantes (indicadores-api/deposito.py). Si esta llamada falla,
+  // clasifWarn ya avisa (afecta torta Y estos 2 totales).
   const faltProveedorMap = new Map<string, string | null>();
+  const faltUnidMap = new Map<string, number>();
+  const faltImporteMap = new Map<string, number>();
   let clasifWarn = false;
   try {
     const faltJson = await getJson(
       `${API_URL}/deposito/faltantes?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}&historico=1`,
     );
-    for (const r of (faltJson.rows ?? []) as { CodArticulo: string; Proveedor: string | null }[]) {
+    for (const r of (faltJson.rows ?? []) as {
+      CodArticulo: string;
+      Proveedor: string | null;
+      CantPend?: number;
+      Importe?: number;
+    }[]) {
       const cod = (r.CodArticulo ?? "").trim();
       if (!cod) continue;
       const prev = faltProveedorMap.get(cod);
       if (!prev && r.Proveedor) faltProveedorMap.set(cod, r.Proveedor);
+      faltUnidMap.set(cod, (faltUnidMap.get(cod) ?? 0) + (Number(r.CantPend) || 0));
+      faltImporteMap.set(cod, (faltImporteMap.get(cod) ?? 0) + (Number(r.Importe) || 0));
     }
   } catch (e) {
     clasifWarn = true;
     console.error("GET /api/compras/metricas — deposito/faltantes (proveedor)", e);
   }
+
+  // Total de unidades y $ de los faltantes del mes (set A completo, no solo
+  // los clasificados) — suma por artículo desde los maps de arriba.
+  let faltantesUnidades = 0;
+  let faltantesImporte = 0;
+  for (const cod of faltantes) {
+    faltantesUnidades += faltUnidMap.get(cod) ?? 0;
+    faltantesImporte += faltImporteMap.get(cod) ?? 0;
+  }
+  faltantesUnidades = Math.round(faltantesUnidades * 100) / 100;
+  faltantesImporte = Math.round(faltantesImporte * 100) / 100;
+
+  // Denominador del %: total de TODO lo pedido (unidades/$) ese mes, sin
+  // filtrar por artículo (indicadores-api /ventas/pedidos-mes, best-effort —
+  // si falla, el % simplemente no se informa, ver pedidosMesWarn).
+  let pedidosMesUnidades = 0;
+  let pedidosMesImporte = 0;
+  let pedidosMesWarn = false;
+  try {
+    const pedJson = await getJson(
+      `${API_URL}/ventas/pedidos-mes?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`,
+    );
+    pedidosMesUnidades = Number(pedJson.totalUnidades) || 0;
+    pedidosMesImporte = Number(pedJson.totalImporte) || 0;
+  } catch (e) {
+    pedidosMesWarn = true;
+    console.error("GET /api/compras/metricas — ventas/pedidos-mes", e);
+  }
+
+  const pctUnidades =
+    pedidosMesUnidades > 0 ? Math.round((faltantesUnidades / pedidosMesUnidades) * 1000) / 10 : null;
+  const pctImporte =
+    pedidosMesImporte > 0 ? Math.round((faltantesImporte / pedidosMesImporte) * 1000) / 10 : null;
 
   const ocInfoMap = new Map<string, { Proveedor: string | null; Importacion: boolean }>();
   try {
@@ -193,6 +249,13 @@ export async function GET(req: NextRequest) {
     ocWarn,
     ingresoWarn,
     clasifWarn,
+    pedidosMesWarn,
+    faltantesUnidades,
+    faltantesImporte,
+    pedidosMesUnidades,
+    pedidosMesImporte,
+    pctUnidades,
+    pctImporte,
     columnas: [
       { key: "faltantes", label: "Faltantes", total: faltantes.length, articulos: faltantes },
       { key: "conOC", label: "Con OC", total: conOC.length, articulos: conOC },

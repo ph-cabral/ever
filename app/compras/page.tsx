@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageX, ShoppingCart, PackageCheck, BarChart3,
+  Package, Wallet, Percent,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 import KpiCard from "@/app/rrhh/components/KpiCard";
@@ -34,9 +35,37 @@ interface Resp {
   ocWarn: boolean;
   ingresoWarn: boolean;
   clasifWarn: boolean;
+  pedidosMesWarn: boolean;
+  faltantesUnidades: number;
+  faltantesImporte: number;
+  pedidosMesUnidades: number;
+  pedidosMesImporte: number;
+  pctUnidades: number | null;
+  pctImporte: number | null;
   columnas: Columna[];
   torta: Grupo[];
 }
+
+// Paleta del funnel (barras) — Faltantes/Con OC/Ingresados: mismos matices que
+// ya usan las KpiCard de arriba (orange/blue/green), para que barra y card
+// queden asociadas visualmente. Antes todas las barras salían del mismo
+// amarillo (t.primary), sin distinguirse entre sí.
+const FUNNEL_COLORS = ["#FB923C", "#60A5FA", "#4ADE80"];
+// Paleta de la torta (origen) — antes t.palette son 8 tonos de amarillo/ámbar
+// casi indistinguibles entre sí para solo 3 categorías. Importados/Nacionales
+// en los mismos tonos que el funnel (blue/green) + violeta para Fábrica
+// (categoría "aparte", no es ni importado ni nacional).
+const ORIGEN_COLORS = ["#60A5FA", "#4ADE80", "#C084FC"];
+
+const fmtNum = (n: number) =>
+  new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(n || 0);
+const fmtMoney = (n: number) =>
+  new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 0,
+  }).format(n || 0);
+const fmtPct = (n: number | null) => (n === null ? "—" : `${fmtNum(n)}%`);
 
 const fmtMesLabel = (mes: string) => {
   const m = /(\d{4})-(\d{2})/.exec(mes);
@@ -175,6 +204,12 @@ export default function ComprasMetricasPage() {
             No se pudo clasificar proveedor/importación para algunos artículos — la torta puede estar incompleta
           </div>
         )}
+        {data?.pedidosMesWarn && (
+          <div className="flex items-center gap-1.5 text-xs text-amber-400/80">
+            <AlertTriangle size={13} />
+            Total pedido del mes no disponible — el % sobre el total no se puede calcular
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <KpiCard
@@ -200,6 +235,34 @@ export default function ComprasMetricasPage() {
           />
         </div>
 
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <KpiCard
+            label="Unidades faltantes"
+            value={fmtNum(data?.faltantesUnidades ?? 0)}
+            hint="Total de unidades de los artículos faltantes del mes"
+            icon={Package}
+            accent="zinc"
+          />
+          <KpiCard
+            label="$ faltantes"
+            value={fmtMoney(data?.faltantesImporte ?? 0)}
+            hint="Total en $ de los artículos faltantes del mes"
+            icon={Wallet}
+            accent="yellow"
+          />
+          <KpiCard
+            label="% del total pedido"
+            value={fmtPct(data?.pctImporte ?? null)}
+            hint={
+              data?.pctUnidades != null
+                ? `En $ · en unidades: ${fmtPct(data.pctUnidades)}`
+                : "Faltantes ($) sobre el total pedido/vendido ese mes"
+            }
+            icon={Percent}
+            accent="orange"
+          />
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4">
             {chartData.length > 0 ? (
@@ -211,6 +274,7 @@ export default function ComprasMetricasPage() {
                 currency={false}
                 height={340}
                 xAngle={0}
+                colors={FUNNEL_COLORS}
               />
             ) : (
               <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
@@ -232,6 +296,7 @@ export default function ComprasMetricasPage() {
                 title={`Faltantes por origen — ${fmtMesLabel(mes)}`}
                 data={pieData}
                 height={340}
+                colors={ORIGEN_COLORS}
               />
             ) : (
               <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">

@@ -16,9 +16,13 @@ type Props = {
   title: string;
   data: Array<{ name: string; value: number }>;
   height?: number;
+  // Paleta opcional para las porciones (fallback = t.palette, sin cambios
+  // para los usos existentes que no la pasan).
+  colors?: string[];
 };
 
-function PieChartCard({ title, data, height = 300 }: Props) {
+function PieChartCard({ title, data, height = 300, colors }: Props) {
+  const palette = colors ?? t.palette;
   return (
     <>
       <CardTitle
@@ -39,7 +43,7 @@ function PieChartCard({ title, data, height = 300 }: Props) {
             label={{ fill: t.text, fontSize: 12 }}
           >
             {data.map((_, i) => (
-              <Cell key={i} fill={t.palette[i % t.palette.length]} />
+              <Cell key={i} fill={palette[i % palette.length]} />
             ))}
           </Pie>
           <Tooltip

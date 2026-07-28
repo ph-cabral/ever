@@ -18,6 +18,7 @@ from deposito import (
 )
 from compras import fetch_ordenes_pendientes, fetch_ordenes_articulos_rango
 from ingresos import fetch_remitos_ingreso
+from ventas import fetch_pedidos_mes
 from finanza import fetch_facturacion_dia, fetch_descubrir
 from clientes import fetch_cliente
 from mesa_control import (
@@ -427,6 +428,21 @@ def compras_ordenes_mes(
     Para /compras/metricas: funnel faltantes del mes → con OC ese mes."""
     try:
         return fetch_ordenes_articulos_rango(desde, hasta)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+# ── Ventas: total pedido del mes (denominador del % en /compras/metricas) ───
+@app.get("/ventas/pedidos-mes")
+def ventas_pedidos_mes(
+    desde: str = Query(...),
+    hasta: str = Query(...),
+):
+    """Total de unidades y $ de TODOS los pedidos válidos (Cerrado/Facturado)
+    del rango [desde, hasta], por FechaPedido de VenFer_PedidoCabecera — no
+    filtra por artículo. Para /compras/metricas: qué % del total pedido ese
+    mes representan los faltantes."""
+    try:
+        return fetch_pedidos_mes(desde, hasta)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList,
+  BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList,
 } from "recharts";
 import { everWearTheme as t } from "@/lib/rrhh/theme";
 import { CardTitle } from "@/components/ui/card";
@@ -21,6 +21,9 @@ type Props = {
   xTickFontSize?: number;
   xAngle?: number;
   currency?: boolean;
+  // Colores por barra (uno por elemento de `data`, cíclico). Opcional — sin
+  // esto se comporta igual que antes (todas las barras en t.primary).
+  colors?: string[];
 };
 
 const fmtARS = (n: number) =>
@@ -36,6 +39,7 @@ const fmtNum = (n: number) =>
 function BarChartCard({
   title, data, xKey, yKey, height = 300,
   ubicacionLabel = "top", labelFontSize = 12, labelFill = t.text, xTickFontSize = 12, xAngle = -45, currency = true,
+  colors,
 }: Props) {
   const fmt = currency ? fmtARS : fmtNum;   
   return (
@@ -72,6 +76,9 @@ function BarChartCard({
             formatter={(value) => fmt(Number(value))}
           />
           <Bar dataKey={yKey} fill={t.primary} radius={[4, 4, 0, 0]}>
+            {colors && data.map((_, i) => (
+              <Cell key={`cell-${i}`} fill={colors[i % colors.length]} />
+            ))}
             <LabelList
               dataKey={yKey}
               position={ubicacionLabel}
