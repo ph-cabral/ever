@@ -84,22 +84,71 @@ export async function GET(req: NextRequest) {
         WHERE l.estado = 'ACTIVO' AND l."employeeNo" IS NOT NULL
         ${employee_no ? `AND ltrim(l."employeeNo", '0') = ltrim($3, '0')` : ""}
       ),
-      ev AS (
+      -- Margen anti-duplicado: 2 marcas del mismo reloj a menos de esto se
+      -- colapsan en 1 sola (el reloj a veces tipea 2 veces el mismo toque).
+      params AS (
+        SELECT interval '5 minutes' AS margen
+      ),
+      raw_ev AS (
         SELECT
           ltrim(e.employee_no, '0') AS emp_key,
           (e.event_time AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS fecha,
-          string_agg(DISTINCT e.device, ',' ORDER BY e.device) AS devices,
-          MIN(e.event_time) AS check_in,
-          CASE WHEN COUNT(*) > 1 THEN MAX(e.event_time) ELSE NULL END AS check_out,
-          CASE
-            WHEN COUNT(*) > 1
-              THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (MAX(e.event_time) - MIN(e.event_time))) / 60)::int)
-            ELSE 0
-          END AS minutos,
-          COUNT(*)::int AS eventos_dia
+          e.device,
+          e.event_time
         FROM asistencia.evento e, bounds b
         WHERE e.event_time >= b.lo AND e.event_time < b.hi
-        GROUP BY ltrim(e.employee_no, '0'), (e.event_time AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+      ),
+      devices_agg AS (
+        SELECT emp_key, fecha, string_agg(DISTINCT device, ',' ORDER BY device) AS devices
+        FROM raw_ev
+        GROUP BY emp_key, fecha
+      ),
+      gapped AS (
+        SELECT r.*,
+               r.event_time - LAG(r.event_time)
+                 OVER (PARTITION BY r.emp_key, r.fecha ORDER BY r.event_time) AS gap
+        FROM raw_ev r
+      ),
+      -- "Islas": corridas de fichajes separadas por >= margen. Cada isla es
+      -- 1 sola marca real (si el reloj duplicó el toque, cae en la misma isla).
+      islas AS (
+        SELECT g.*,
+               SUM(CASE WHEN g.gap IS NULL OR g.gap >= p.margen THEN 1 ELSE 0 END)
+                 OVER (PARTITION BY g.emp_key, g.fecha ORDER BY g.event_time) AS isla
+        FROM gapped g, params p
+      ),
+      marcas AS (
+        SELECT emp_key, fecha, isla, MIN(event_time) AS mark_time
+        FROM islas
+        GROUP BY emp_key, fecha, isla
+      ),
+      -- Impar = INGRESO, par = EGRESO, por posición dentro del día (no por
+      -- major/minor del reloj). Pedido de RRHH 2026-07-28.
+      posn AS (
+        SELECT emp_key, fecha, mark_time,
+               ROW_NUMBER() OVER (PARTITION BY emp_key, fecha ORDER BY mark_time) AS posn,
+               LAG(mark_time) OVER (PARTITION BY emp_key, fecha ORDER BY mark_time) AS prev_mark_time
+        FROM marcas
+      ),
+      ev AS (
+        SELECT
+          p.emp_key,
+          p.fecha,
+          d.devices,
+          MIN(p.mark_time) FILTER (WHERE p.posn % 2 = 1) AS check_in,
+          MAX(p.mark_time) FILTER (WHERE p.posn % 2 = 0) AS check_out,
+          -- Minutos = suma de cada par (ingreso→egreso), no primer-a-último.
+          -- Así un corte para almorzar (egreso→ingreso) no cuenta como trabajado.
+          COALESCE(SUM(
+            CASE WHEN p.posn % 2 = 0
+              THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (p.mark_time - p.prev_mark_time)) / 60))
+              ELSE 0
+            END
+          ), 0)::int AS minutos,
+          COUNT(*)::int AS eventos_dia
+        FROM posn p
+        JOIN devices_agg d ON d.emp_key = p.emp_key AND d.fecha = p.fecha
+        GROUP BY p.emp_key, p.fecha, d.devices
       )
       SELECT
         a.employee_no,
