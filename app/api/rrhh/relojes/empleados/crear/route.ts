@@ -3,11 +3,10 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 
 const RELOJES = [
-  { ip: "10.10.0.30", nombre: "Oficina" },
+  { ip: "10.10.0.12", nombre: "Oficina" },
+  { ip: "10.10.0.30", nombre: "Fabrica" },
+  { ip: "10.10.0.92", nombre: "Lilser" },
 ];
-
-// { ip: "10.10.0.30", nombre: "Fabrica" },
-// { ip: "10.10.0.92", nombre: "Lilser" },
 const USER = process.env.HIKVISION_USER ?? "admin";
 // Sin default hardcodeado: la credencial tiene que venir del entorno.
 const PASS = process.env.HIKVISION_PASS ?? "";
