@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { MapPin, X, Loader2 } from "lucide-react";
+
+const fmtNum = (n: number) =>
+  new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(n || 0);
 
 type Evento = {
   id: number;
@@ -33,7 +37,8 @@ export default function PickingPage() {
   const respuestaRef = useRef<HTMLInputElement>(null);
   const [estadoActivo, setEstadoActivo] = useState<Estado>("pendiente");
   const [busqueda, setBusqueda] = useState("");
-  
+  const [ubicArt, setUbicArt] = useState<string | null>(null); // artículo del modal de ubicaciones
+
   const responderChat = async (id: number) => {
     if (!respuesta.trim()) return;
     await fetch(`/api/chat/${id}/responder`, {
@@ -167,7 +172,14 @@ export default function PickingPage() {
                       className="border-b border-gray-800 hover:bg-gray-900"
                     >
                       <td className="py-3 px-4 font-mono font-bold">
-                        {e.codigo}
+                        <button
+                          onClick={() => setUbicArt(e.codigo)}
+                          title="Ver ubicaciones"
+                          className="inline-flex items-center gap-1 hover:text-yellow-400"
+                        >
+                          <MapPin size={13} className="text-gray-500" />
+                          {e.codigo}
+                        </button>
                       </td>
                       <td className="py-3 px-4">{e.cantidad}</td>
                       <td className="py-3 px-4">{e.picker_nombre}</td>
@@ -271,6 +283,90 @@ export default function PickingPage() {
                 ↵
               </button>
             </div>
+          )}
+        </div>
+      </div>
+
+      {ubicArt && (
+        <UbicacionesModal articulo={ubicArt} onClose={() => setUbicArt(null)} />
+      )}
+    </div>
+  );
+}
+
+// Modal: ubicaciones del artículo con cantidad > 0. Mismo modal que en
+// /deposito/faltantes (reutiliza el endpoint /api/deposito/faltantes/ubicaciones).
+function UbicacionesModal({
+  articulo,
+  onClose,
+}: {
+  articulo: string;
+  onClose: () => void;
+}) {
+  const [rows, setRows] = useState<{ Ubicacion: string; Cantidad: number }[]>(
+    [],
+  );
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let vivo = true;
+    fetch(
+      `/api/deposito/faltantes/ubicaciones?articulo=${encodeURIComponent(articulo)}`,
+      { cache: "no-store" },
+    )
+      .then((r) => r.json())
+      .then((j) => {
+        if (vivo) setRows((j.rows ?? []).filter((r: any) => r.Cantidad > 0));
+      })
+      .catch(() => {
+        if (vivo) setRows([]);
+      })
+      .finally(() => {
+        if (vivo) setLoading(false);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [articulo]);
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm bg-[#1A1A1A] border border-zinc-700 rounded-xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+          <span className="font-mono text-sm text-yellow-400">{articulo}</span>
+          <button
+            onClick={onClose}
+            className="text-zinc-400 hover:text-white"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="max-h-80 overflow-y-auto">
+          {loading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="animate-spin text-zinc-500" />
+            </div>
+          ) : rows.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm text-zinc-500">
+              Sin otras ubicaciones
+            </p>
+          ) : (
+            <table className="w-full text-sm">
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i} className="border-b border-zinc-800/60">
+                    <td className="px-4 py-2 text-zinc-200">{r.Ubicacion}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-zinc-300">
+                      {fmtNum(r.Cantidad)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
       </div>

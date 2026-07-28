@@ -18,15 +18,21 @@ export const maxDuration = 60;
 //      última marca por renglón).
 //   3. Se agrupa por (artículo, PrimerDia) → "lo nuevo de cada día" sin doble
 //      contar (cada renglón cuenta una sola vez, en su día de aparición).
-//   4. Por artículo, "faltan" se ACUMULA día a día (no se resetea): faltan[día] =
-//      faltan[día-1] + nuevoDelDia. Se cubre contra DOS fuentes en VIVO (no
-//      estimaciones, no la fecha manual de "Arribo"): la OC "por llegar"
-//      (Magnus, ya neta de lo recibido) y el stock físico real del depósito 1
-//      (WMS, ver /deposito/stock-por-articulos). Cualquier día que esas dos
-//      fuentes juntas alcancen a cubrir todo el acumulado, se descarta el
-//      crédito (no se arrastra sobrante a favor) y el artículo vuelve a foja
-//      cero para el próximo ciclo. Si no alcanzan, el descubierto real sigue
-//      acumulando tal cual.
+//   4. Por artículo, "faltan" (lo que se MUESTRA) se ACUMULA día a día y NUNCA
+//      se resetea ni se le resta la OC/stock: faltan[día] = faltan[día-1] +
+//      nuevoDelDia, bruto, siempre (pedido 2026-07-28, Pablo — antes se
+//      pisaba a 0 el día que la cobertura alcanzaba, y la vista dejaba de
+//      mostrar el acumulado real). Aparte, y SOLO para decidir el color de
+//      fondo de la fila (estado), se calcula una cobertura interna contra DOS
+//      fuentes en VIVO (no estimaciones, no la fecha manual de "Arribo"): la
+//      OC "por llegar" (Magnus, ya neta de lo recibido) y el stock físico real
+//      del depósito 1 (WMS, ver /deposito/stock-por-articulos). Esa cobertura
+//      interna sí se resetea a 0 cuando esas dos fuentes juntas alcanzan a
+//      cubrir todo lo acumulado (no arrastra sobrante a favor para el próximo
+//      ciclo) — pero ese reset queda en una variable aparte, nunca toca
+//      "faltan" ni "ocTotal" (los dos siguen mostrándose tal cual, sin restar
+//      uno del otro). Si no alcanzan, el descubierto real sigue acumulando
+//      tal cual.
 //   4b. Color/visibilidad de cada bucket "vivo" (2026-07-27, 4 casos, en orden):
 //      · stock SOLO (sin la OC) ya cubre el acumulado → NO es problema de
 //        compras: el bucket se EXCLUYE de la respuesta (desaparece de toda
@@ -76,7 +82,7 @@ interface Bucket {
   clientes: Map<string, { nombre: string | null; cant: number }>;
   fecha: string; // PrimerDia (día del faltante)
   vivo: boolean; // false = histórico ya entregado/cubierto
-  faltan: number; // acumulado (ver punto 4 más abajo), no solo lo nuevo del día
+  faltan: number; // acumulado BRUTO (ver punto 4 más abajo), nunca se resetea ni se le resta OC/stock
   nuevoDelDia: number; // lo que aportó puntualmente este día (sin acumular)
   importe: number;
   renglones: number;
@@ -393,22 +399,25 @@ export async function GET(req: NextRequest) {
       b.Linea = it.Linea;
   }
 
-  // 4) por artículo: acumular el faltante día a día (no se resetea) y cubrirlo
-  //    contra DOS fuentes reales (no estimaciones): la OC "por llegar" (Magnus,
-  //    en vivo, ya neta de lo recibido) y el stock físico actual del depósito 1
-  //    (WMS, en vivo — ver stockMap más abajo).
+  // 4) por artículo: acumular el faltante día a día y NUNCA resetearlo ni
+  //    restarle la OC/stock en lo que se muestra (b.faltan) — eso se compara
+  //    aparte, en una cobertura interna, solo para decidir estado/color.
   //
-  //    · faltan (por día) = acumulado de todo lo que sigue sin existencia hasta
-  //      ESE día (faltanAcum[día] = faltanAcum[día-1] + nuevoDelDia). Antes solo
-  //      mostraba lo nuevo de cada día y por eso "se reseteaba".
-  //    · La OC cubre ese acumulado primero (cubierto = min(acumulado, ocTotal));
-  //      lo que la OC no llega a cubrir, se neta contra el stock físico actual.
-  //    · Cualquier día que esa cobertura real (OC + stock) llegue a cubrir TODO
-  //      el acumulado, se descarta: no se arrastra sobrante a favor del próximo
-  //      ciclo, el artículo vuelve a foja cero (antes esto solo pasaba el día
-  //      EXACTO de "fechaEntrega"; ahora aplica cualquier día, sea por OC, por
-  //      stock, o la suma de ambos). Si no alcanza, el descubierto real NO se
-  //      resetea: sigue acumulando hasta que se cubra de verdad.
+  //    · faltan (por día, MOSTRADO) = acumulado bruto de todo lo que sigue sin
+  //      existencia hasta ESE día (faltanAcum[día] = faltanAcum[día-1] +
+  //      nuevoDelDia), SIEMPRE, sin excepción — nunca se pisa a 0 aunque la OC
+  //      o el stock ya lo cubran (pedido 2026-07-28, Pablo).
+  //    · Para el ESTADO (color de fondo) se calcula, aparte, una cobertura
+  //      interna: la OC cubre el acumulado primero (cubierto = min(acumulado,
+  //      ocTotal)); lo que la OC no llega a cubrir, se neta contra el stock
+  //      físico actual.
+  //    · Cualquier día que esa cobertura interna (OC + stock) llegue a cubrir
+  //      TODO el acumulado, esa cobertura (no "faltan") se descarta: no se
+  //      arrastra sobrante a favor del próximo ciclo, vuelve a foja cero para
+  //      el cálculo de estado (antes esto solo pasaba el día EXACTO de
+  //      "fechaEntrega"; ahora aplica cualquier día, sea por OC, por stock, o
+  //      la suma de ambos). Si no alcanza, el descubierto real NO se resetea:
+  //      sigue acumulando hasta que se cubra de verdad.
   //    · Un artículo que quedó en 0 (cubierto de verdad): si necesitó la OC
   //      para llegar a 0 (el stock solo no alcanzaba), NO se excluye — se
   //      manda con estado "completo" (fondo verde) para que quede a la vista
@@ -458,6 +467,11 @@ export async function GET(req: NextRequest) {
     const ocTotal = oc?.PorLlegar ?? 0;
     const fechaEntrega = oc?.FechaEntrega ?? null;
     const stock = stockMap.get(cod) ?? 0;
+    // acumuladoBruto: lo que se MUESTRA en "faltan" — suma nuevoDelDia día a
+    // día y NUNCA se resetea, ni aunque la OC/stock cubran todo (pedido
+    // 2026-07-28, Pablo). acumulado: cobertura INTERNA (solo para estado/color
+    // de fila), esa sí se resetea cuando OC+stock alcanzan a cubrir todo.
+    let acumuladoBruto = 0;
     let acumulado = 0;
     let imp = 0;
     for (const b of arr) {
@@ -471,6 +485,7 @@ export async function GET(req: NextRequest) {
         b.estado = "entregado";
         continue;
       }
+      acumuladoBruto += b.nuevoDelDia;
       acumulado += b.nuevoDelDia;
       // Acumulado de HOY antes de cualquier reset — se usa para decidir si el
       // STOCK SOLO (sin la OC) ya alcanza a cubrirlo (ver resueltoPorStock).
@@ -487,14 +502,14 @@ export async function GET(req: NextRequest) {
       // de la tabla en lugar de quedar verde o neutro.
       const resueltoPorStock = stock >= acumuladoDelDia;
 
-      // Cobertura REAL de hoy (OC pendiente actual + stock físico actual, las
-      // dos en vivo — no la fecha manual de "Arribo" ni ninguna estimación):
-      // si ya alcanza para cubrir TODO el acumulado, se descarta el crédito
-      // — no se arrastra sobrante a favor del próximo ciclo, el artículo
-      // vuelve a foja cero. Antes esto solo pasaba el día EXACTO de
-      // "fechaEntrega"; ahora aplica cualquier día que la cobertura real
-      // (por OC, por stock o la suma de ambos) llegue a 0. Si no alcanza, el
-      // descubierto real NO se resetea: sigue acumulando tal cual.
+      // Cobertura INTERNA de hoy (OC pendiente actual + stock físico actual,
+      // las dos en vivo — no la fecha manual de "Arribo" ni ninguna
+      // estimación): si ya alcanza para cubrir TODO el acumulado, se descarta
+      // el crédito de ESTA cobertura interna (no se arrastra sobrante a favor
+      // del próximo ciclo, para el cálculo de estado). Antes esto pisaba
+      // también "faltan" (lo mostrado); ahora "faltan" queda aparte, en
+      // acumuladoBruto, que nunca se resetea. Si no alcanza, el descubierto
+      // real NO se resetea: sigue acumulando tal cual.
       if (descNetoStock <= 0) {
         acumulado = 0;
         cub = 0;
@@ -502,7 +517,7 @@ export async function GET(req: NextRequest) {
         descNetoStock = 0;
       }
 
-      b.faltan = r2(acumulado); // acumulado (ya reseteado arriba si correspondía)
+      b.faltan = r2(acumuladoBruto); // bruto: nunca se resetea ni se le resta OC/stock
       b.cubierto = cub;
       b.descubierto = r2(descNetoStock);
       b.ocTotal = ocTotal;
@@ -569,7 +584,7 @@ export async function GET(req: NextRequest) {
         clientes: Array.from(b.clientes, ([cod, v]) => ({ cod, nombre: v.nombre, cant: r2(v.cant) })),
         fecha: b.fecha,
         vivo: b.vivo,
-        faltan: r2(b.faltan), // acumulado hasta este día (ver punto 4)
+        faltan: r2(b.faltan), // acumulado BRUTO hasta este día, sin restar OC/stock (ver punto 4)
         nuevoDelDia: r2(b.nuevoDelDia),
         cubierto: r2(b.cubierto),
         descubierto: r2(b.descubierto),

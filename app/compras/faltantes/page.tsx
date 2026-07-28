@@ -10,17 +10,18 @@ import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
 import { InicioButton } from "@/components/ui/InicioButton";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// /compras/faltantes — faltantes "sin existencia" por (artículo, día) con la OC
-//   restada, ACUMULADO día a día.
+// /compras/faltantes — faltantes "sin existencia" por (artículo, día).
+//   "Faltan" y "En OC" se muestran BRUTOS, sin restarse entre sí (pedido
+//   2026-07-28, Pablo) — la resta contra OC/stock se sigue calculando, pero
+//   solo por dentro, para decidir el color de fondo de cada fila (ver estado).
 //
 //   · Rango "Desde/Hasta": default hoy/hoy. Ampliar "Desde" hacia atrás para ver
 //     faltantes de días anteriores. Cada renglón cuenta una sola vez, en su DÍA
 //     DE APARICIÓN (no se doble-cuenta el mismo renglón dos veces).
-//   · "Faltan" es ACUMULADO por artículo: faltan[día] = faltan[día-1] + lo nuevo
-//     de ese día (no se resetea). Se cubre contra la OC "por llegar" (Magnus, en
-//     vivo). El día que llega la OC (fechaEntrega): si cubrió con sobrante, el
-//     acumulado vuelve a 0 ese día (no se arrastra crédito); si NO alcanzó, el
-//     descubierto real sigue tal cual (no se fuerza a 0).
+//   · "Faltan" es ACUMULADO bruto por artículo: faltan[día] = faltan[día-1] +
+//     lo nuevo de ese día, y NUNCA se resetea ni se le resta la OC/el stock
+//     (ver faltantes-consumo/route.ts punto 4). "En OC" tampoco se le resta
+//     nada: es el total pendiente de esa OC tal cual.
 //   · Extraordinario/Comprar (preparado.faltante_extraordinario, por artículo+día):
 //     el botón 🚩 de cada fila marca extraordinario=true (comprar queda null,
 //     pendiente) → la fila desaparece de esta tabla. La decisión de comprar o
@@ -68,7 +69,7 @@ interface Row {
   clientes: { cod: string; nombre: string | null; cant: number }[];
   fecha: string; // día del faltante (primera aparición)
   vivo: boolean; // false = histórico ya entregado/cubierto
-  faltan: number; // acumulado hasta este día (no se resetea día a día)
+  faltan: number; // acumulado BRUTO hasta este día (nunca se resetea, no se le resta OC/stock)
   nuevoDelDia: number; // lo nuevo que aportó puntualmente este día
   stock: number; // existencia real en depósito 1 (WMS, en vivo — mismo dato que /deposito/stock)
   cubierto: number;
@@ -301,7 +302,7 @@ function Tabla({
                 </td>
                 <td
                   className="px-3 py-2 text-right tabular-nums whitespace-nowrap"
-                  title="Faltan / Stock / En OC (cantidad total pedida en la OC pendiente, no acotada al faltante) — existencia real depósito 1 en vivo (mismo dato que /deposito/stock)."
+                  title="Faltan (acumulado bruto, sin restar OC/stock) / Stock (existencia real depósito 1 en vivo, mismo dato que /deposito/stock) / En OC (cantidad total pedida en la OC pendiente, tal cual, no neteada contra Faltan)."
                 >
                   <span className="text-zinc-100">
                     {fmtNum(r.faltan)}
