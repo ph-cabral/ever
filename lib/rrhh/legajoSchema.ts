@@ -7,9 +7,14 @@ const bool = z.boolean().optional();
 const num  = z.coerce.number().optional().nullable();
 const int  = z.coerce.number().int().optional().nullable();
 const date = z.coerce.date().optional().nullable();
+// para columnas @unique: "" -> null (si no, dos legajos sin cargar chocan con P2002 por string vacío)
+const uniqueStr = (max: number) =>
+  z.string().trim().max(max).optional().nullable()
+    .transform((v) => (v === "" ? null : v));
 
 export const legajoUpdateSchema = z.object({
   estado: z.string().max(20).optional(),
+  employeeNo: uniqueStr(50), anvizId: uniqueStr(20),
   // step1
   nombre: z.string().trim().min(1).max(100).optional(),
   dni: str, cuil: str, fechaNacimiento: date, lugarNacimiento: str,
