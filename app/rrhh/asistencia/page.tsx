@@ -11,6 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { Pencil } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { Input } from "@/components/ui/input";
 import { DateField } from "@/components/ui/date-field";
@@ -48,6 +49,7 @@ type Row = {
   minutos: number | null;
   eventos_dia: number | null;
   devices: string | null;
+  ajustado?: boolean;
   estado: string | null;
   dias: number | null;
   novedad: string | null;
@@ -60,14 +62,6 @@ type Edit = {
   novedad?: string;
   horas?: string;
   novedades?: { novedad: string; horas: number }[];
-};
-
-type NovedadItem = { novedad: string; horas: number };
-
-type Edit = {
-  estado?: string;
-  dias?: string;
-  novedades?: NovedadItem[];
 };
 
 const ESTADOS = [
@@ -115,6 +109,12 @@ const fmtHHMM = (min: number | null) => {
   const h = Math.floor(min / 60),
     m = Math.round(min % 60);
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+};
+
+// HH:MM en hora local del navegador, para precargar el input type="time".
+const toHHMM = (iso: string) => {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
 // Estado calculado por defecto (uno de: Normal | Ausente | Revisar)
@@ -404,6 +404,127 @@ function FichajesCell({
   );
 }
 
+// Editor manual de Ingreso/Egreso — para el caso de un fichaje incompleto
+// (entró y no marcó salida, o hay una sola marca a la tarde y falta la de
+// la mañana). Sólo aparece cuando falta alguno de los dos lados; permite
+// cargar ambos porque la única marca que sí existe puede estar mal
+// clasificada (ver sql/asistencia_ajuste_manual.sql).
+function HorarioEditor({
+  employee_no,
+  fecha,
+  checkIn,
+  checkOut,
+  onSaved,
+}: {
+  employee_no: string;
+  fecha: string;
+  checkIn: string | null;
+  checkOut: string | null;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [ci, setCi] = useState(checkIn ? toHHMM(checkIn) : "");
+  const [co, setCo] = useState(checkOut ? toHHMM(checkOut) : "");
+  const [saving, setSaving] = useState(false);
+
+  const openModal = () => {
+    setCi(checkIn ? toHHMM(checkIn) : "");
+    setCo(checkOut ? toHHMM(checkOut) : "");
+    setOpen(true);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await fetch("/api/rrhh/asistencia/ajuste", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          employee_no,
+          fecha,
+          check_in: ci ? `${fecha}T${ci}:00-03:00` : null,
+          check_out: co ? `${fecha}T${co}:00-03:00` : null,
+        }),
+      });
+      setOpen(false);
+      onSaved();
+    } catch (err) {
+      console.error("[ajuste horario]", err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={openModal}
+        title="Asignar horario manualmente"
+        className="ml-1 inline-flex text-muted-foreground hover:text-foreground"
+      >
+        <Pencil className="h-3.5 w-3.5" />
+      </button>
+      {open &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setOpen(false)}
+          >
+            <div
+              className="w-full max-w-xs rounded-lg border bg-popover p-4 shadow-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="mb-3 text-sm font-medium">
+                Editar horario · {fecha}
+              </h2>
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground">
+                    Ingreso
+                  </label>
+                  <Input
+                    type="time"
+                    value={ci}
+                    onChange={(e) => setCi(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground">
+                    Egreso
+                  </label>
+                  <Input
+                    type="time"
+                    value={co}
+                    onChange={(e) => setCo(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-accent"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={saving}
+                  className="rounded-md border bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                >
+                  {saving ? "Guardando…" : "Guardar"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 // Fila memoizada: editar/tipear una fila no re-renderiza el resto de la tabla.
 const AsistenciaRow = memo(function AsistenciaRow({
   row,
@@ -413,6 +534,8 @@ const AsistenciaRow = memo(function AsistenciaRow({
   resolveTope,
   onPatch,
   onCommit,
+  onHorarioSaved,
+  isAdmin,
 }: {
   row: Row;
   edit: Edit | undefined;
@@ -421,6 +544,8 @@ const AsistenciaRow = memo(function AsistenciaRow({
   resolveTope: (r: Row) => number;
   onPatch: (k: string, p: Edit) => void;
   onCommit: (k: string, kind: "estado" | "novedad", bruto?: number) => void;
+  onHorarioSaved: () => void;
+  isAdmin: boolean;
 }) {
   const k = `${row.employee_no}|${row.fecha}`;
   const e = edit ?? {};
@@ -441,8 +566,27 @@ const AsistenciaRow = memo(function AsistenciaRow({
       </TableCell>
       <TableCell>{row.fecha}</TableCell>
       <TableCell>{row.devices ?? "—"}</TableCell>
-      <TableCell>{fmtTime(row.check_in)}</TableCell>
-      <TableCell>{fmtTime(row.check_out)}</TableCell>
+      <TableCell>
+        <div className="flex items-center">
+          <span className={row.ajustado ? "italic text-amber-700" : undefined}>
+            {fmtTime(row.check_in)}
+          </span>
+          {isAdmin && (!row.check_in || !row.check_out) && (
+            <HorarioEditor
+              employee_no={row.employee_no}
+              fecha={row.fecha}
+              checkIn={row.check_in}
+              checkOut={row.check_out}
+              onSaved={onHorarioSaved}
+            />
+          )}
+        </div>
+      </TableCell>
+      <TableCell>
+        <span className={row.ajustado ? "italic text-amber-700" : undefined}>
+          {fmtTime(row.check_out)}
+        </span>
+      </TableCell>
       <TableCell
         title={
           horasNov
@@ -502,6 +646,17 @@ export default function AsistenciaPage() {
   const [edits, setEdits] = useState<Record<string, Edit>>({});
   const [area, setArea] = useState<string>("all");
   const [sector, setSector] = useState<string>("all");
+
+  // El ajuste manual de Ingreso/Egreso sólo lo puede cargar un ADMIN (el
+  // endpoint también lo exige — esto es sólo para no mostrar el lápiz a
+  // quien de todas formas no puede guardarlo).
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setIsAdmin(d?.usuario?.rol === "ADMIN"))
+      .catch(() => setIsAdmin(false));
+  }, []);
 
   // Horarios por área (tope diario) — ver /api/rrhh/asistencia/horarios.
   const [tipos, setTipos] = useState<HorarioTipo[]>([]);
@@ -839,6 +994,8 @@ export default function AsistenciaPage() {
                 resolveTope={resolveTope}
                 onPatch={patch}
                 onCommit={commit}
+                onHorarioSaved={fetchData}
+                isAdmin={isAdmin}
               />
             ))}
           </TableBody>

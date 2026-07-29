@@ -16,6 +16,7 @@ type Row = {
   minutos: number | null;
   eventos_dia: number | null;
   devices: string | null;
+  ajustado: boolean;
   estado: string | null;
   dias: number | null;
   novedad: string | null; // legacy: nombres unidos por ", "
@@ -157,10 +158,17 @@ export async function GET(req: NextRequest) {
         a.sector,
         to_char(d.fecha, 'YYYY-MM-DD') AS fecha,
         ev.devices,
-        ev.check_in,
-        ev.check_out,
-        COALESCE(ev.minutos, 0) AS minutos,
+        COALESCE(am.check_in, ev.check_in)   AS check_in,
+        COALESCE(am.check_out, ev.check_out) AS check_out,
+        CASE
+          WHEN am.check_in IS NOT NULL OR am.check_out IS NOT NULL THEN
+            GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (
+              COALESCE(am.check_out, ev.check_out) - COALESCE(am.check_in, ev.check_in)
+            )) / 60))::int
+          ELSE COALESCE(ev.minutos, 0)
+        END AS minutos,
         COALESCE(ev.eventos_dia, 0) AS eventos_dia,
+        (am.check_in IS NOT NULL OR am.check_out IS NOT NULL) AS ajustado,
         CASE
           WHEN ed.dias IS NOT NULL AND ed.dias <= 0 THEN NULL
           ELSE COALESCE(ed.estado, c.c_estado)
@@ -175,6 +183,8 @@ export async function GET(req: NextRequest) {
       FROM dias d
       CROSS JOIN act a
       LEFT JOIN ev ON ev.emp_key = a.emp_key AND ev.fecha = d.fecha
+      LEFT JOIN asistencia.ajuste_manual am
+        ON am.employee_no = a.employee_no AND am.fecha = d.fecha
       LEFT JOIN asistencia.estado_diario ed
         ON ed.employee_no = a.employee_no AND ed.fecha = d.fecha
       -- Arrastre de días: si no hay registro explícito para esta fecha, busca el
@@ -214,6 +224,7 @@ export async function GET(req: NextRequest) {
       minutos: r.minutos,
       eventos_dia: r.eventos_dia,
       devices: r.devices ?? null,
+      ajustado: r.ajustado === true,
       estado: r.estado ?? null,
       dias: r.dias ?? null,
       novedad: r.novedad ?? null,
