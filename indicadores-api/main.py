@@ -32,6 +32,7 @@ from errores_mesa import (
     insert_error_calidad, update_observacion, fetch_controlador_diag,
     fetch_articulos_pedido,
 )
+from control_asignacion import asignar_siguiente, fetch_cola_diag
 from rrhh import fetch_cvs_por_mes
 from datetime import date, datetime, timedelta
 import threading
@@ -691,6 +692,9 @@ class ErrorCalidadIn(BaseModel):
 class ObservacionIn(BaseModel):
     observacion: str
 
+class AsignarIn(BaseModel):
+    nroOperario: int
+
 @app.get("/deposito/pedido/{nro}")
 def deposito_pedido(nro: int):
     """Lookup por Nro Pedido (NroMovVenta): Fecha + Tipo Pedido (Magnus) + OT +
@@ -801,6 +805,30 @@ def deposito_errores_mesa_controlador_diag(nro: int = Query(...)):
     controlador registrado" en el widget de Calidad."""
     try:
         return fetch_controlador_diag(nro)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.post("/deposito/errores-mesa/asignar")
+def deposito_errores_mesa_asignar(body: AsignarIn):
+    """Botón "Asignar" del widget de Mesa de Control: reclama el próximo
+    pedido de la cola (Cumplido en WMS + Abierto en Magnus, cruce por Nro de
+    movimiento — ver control_asignacion.py) para `nroOperario`. Atómico
+    (SKIP LOCKED): nunca se asigna el mismo pedido a 2 operarios aunque
+    llamen al mismo tiempo. 404 si el operario no existe o si no hay pedidos
+    disponibles para asignar."""
+    try:
+        return asignar_siguiente(body.nroOperario)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Error: {str(e)}")
+
+@app.get("/deposito/errores-mesa/cola-diag")
+def deposito_errores_mesa_cola_diag(limit: int = Query(default=20, le=200)):
+    """Diagnóstico: cuántos pedidos libres/asignados hay ahora en
+    deposito.control_asignacion + una muestra reciente."""
+    try:
+        return fetch_cola_diag(limit)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

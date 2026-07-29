@@ -86,6 +86,8 @@ function esRutaPublica(pathname: string, method: string): boolean {
   if (method === "POST" && pathname === "/api/deposito/errores-mesa") return true;
   // Widget de escritorio "Errores Calidad" (2026-07-16): mismo caso.
   if (method === "POST" && pathname === "/api/deposito/errores-mesa/calidad") return true;
+  // Botón "Asignar" del widget Mesa de Control (2026-07-29): mismo caso.
+  if (method === "POST" && pathname === "/api/deposito/errores-mesa/asignar") return true;
   return false;
 }
 
