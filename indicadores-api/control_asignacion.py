@@ -4,13 +4,26 @@ Cola de asignación de pedidos — widget de Mesa de Control (a pedido de Pablo,
 botón "Asignar": en vez de tipear el pedido a mano, el operario reclama el
 próximo pedido de una cola armada con el cruce:
 
-    Cumplido en WMS (OT de Picking, OTEstado=2)
-        ∩
     Abierto en Magnus (VenFer_PedidoCabecera.EstadoPedido -> Pedido_Estados
     Ped_EstadoDescripcion = 'Abierto')
+        ∩
+    Cumplido en WMS (OT de Picking, OTEstado=2)
 
 cruzados por NroMovVenta ("número de movimiento", mismo campo que ya usa
 fetch_pedido_lookup en errores_mesa.py vía OT.{OT_COL_PEDIDO}).
+
+FIX 2026-07-29 (mismo día, tras deploy): el cruce arrancaba por WMS — traía
+los últimos `limit` (500) OT Cumplidas por fecha, acotadas además a los
+últimos 60 días (CONTROL_ASIGNACION_VENTANA_DIAS), y recién ahí filtraba
+contra Magnus. Un pedido Abierto en Magnus cuyo picking se cumplió hace más
+de 60 días (o que no entraba en el top-500 más reciente) quedaba afuera sin
+que hubiera ningún error — resultado: "No hay pedidos disponibles para
+asignar" con pedidos que sí correspondían. Se invirtió el orden: ahora se
+arranca por TODOS los Abiertos de Magnus (universo naturalmente acotado —
+son los pedidos activos, no el historial de OTs) y se filtra ese conjunto
+contra WMS por NroMovVenta puntual, sin ventana de fecha ni límite de
+"últimos N". La intersección resultante es la misma; solo cambió qué lado
+maneja el volumen.
 
 Tabla: deposito.control_asignacion (ver ever/sql/deposito_control_asignacion.sql
 — correr ANTES de deployar este módulo).
@@ -30,22 +43,38 @@ asignar_siguiente) — 2 operarios apretando "Asignar" al mismo tiempo, incluso
 en la misma fracción de segundo, siempre terminan con filas distintas. No
 hace falta lockear la tabla entera ni coordinar nada del lado de la app.
 """
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 from db import get_connection
 from db_pg import get_pg_connection
 from deposito import OT_COL_PEDIDO
 from errores_mesa import fetch_operario_nombre, _col_observaciones_ot, BASE_DATE
 
-# Ventana de seguridad: no barrer OTs Cumplidas de hace demasiado tiempo (un
-# pedido Cumplido en WMS pero que sigue "Abierto" en Magnus por mucho tiempo
-# es raro — normalmente se cierra enseguida después del control). Ajustable
-# sin tocar el resto de la lógica.
-CONTROL_ASIGNACION_VENTANA_DIAS = 60
+# Tope de seguridad: cuántos pedidos Abiertos de Magnus se consideran como
+# máximo en un solo refresco de la cola (ordenados NroMovVenta ASC, o sea los
+# más viejos primero — mismo criterio que el ORDER BY de asignar_siguiente,
+# así que un recorte acá nunca deja afuera al que le tocaría el turno).
+# Ajustable sin tocar el resto de la lógica.
+MAGNUS_ABIERTOS_LIMIT = 3000
 
 
-# ── WMS: pedidos con OT de Picking Cumplida (la más reciente por pedido) ─────
-SQL_WMS_CUMPLIDOS_BASE = """
+# ── Magnus: TODOS los pedidos Abiertos (fecha/tipo/cliente) — universo base ──
+SQL_MAGNUS_ABIERTOS_TODOS = """
+SELECT TOP ({limit})
+    cab.NroMovVenta,
+    cab.FechaPedido,
+    cc.DetalleCorto     AS TipoPedido,
+    cli.Cliente_Nombre  AS Cliente
+FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
+INNER JOIN MAGNUS_SITD.dbo.Pedido_Estados    est ON cab.EstadoPedido = est.Ped_Estado
+LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo   = cc.CompCodigo
+LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente   = cli.CodCliente
+WHERE est.Ped_EstadoDescripcion = 'Abierto'
+ORDER BY cab.NroMovVenta ASC
+"""
+
+# ── WMS: de esos pedidos puntuales, cuáles tienen OT de Picking Cumplida ─────
+SQL_WMS_CUMPLIDOS_POR_PEDIDO = """
 SELECT
     OT.{col_pedido}            AS NroPedido,
     OT.OTId                    AS Ot,
@@ -57,37 +86,40 @@ INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
 LEFT JOIN Personal P_Repositor ON OT.OTUsuarioGUID_Repositor = P_Repositor.PersonalId
 WHERE Codot.CodotProcesoNegocio = 4          -- Picking
   AND OT.OTEstado = 2                        -- Cumplido
-  AND OT.OTFechaHoraEjecucion >= ?
-"""
-
-# ── Magnus: de esos pedidos, cuáles siguen Abiertos (+ fecha/tipo/cliente) ───
-SQL_MAGNUS_ABIERTOS = """
-SELECT
-    cab.NroMovVenta,
-    cab.FechaPedido,
-    cc.DetalleCorto     AS TipoPedido,
-    cli.Cliente_Nombre  AS Cliente
-FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
-LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo   = cc.CompCodigo
-LEFT JOIN MAGNUS_SITD.dbo.Pedido_Estados     est ON cab.EstadoPedido = est.Ped_Estado
-LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente   = cli.CodCliente
-WHERE cab.NroMovVenta IN ({ph})
-  AND est.Ped_EstadoDescripcion = 'Abierto'
+  AND OT.{col_pedido} IN ({ph})
 """
 
 
-def fetch_pedidos_cumplidos_abiertos(limit: int = 500) -> list[dict]:
-    """Cruce Cumplido(WMS) ∩ Abierto(Magnus) por NroMovVenta. Cada dict trae
+def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[dict]:
+    """Cruce Abierto(Magnus) ∩ Cumplido(WMS) por NroMovVenta. Cada dict trae
     nroPedido/fecha/tipoPedido/cliente/ubicacion/ot/nroArmador/nombreArmador
-    — mismos campos que usa deposito.control_asignacion. `limit` acota
-    cuántos pedidos Cumplidos de WMS se consideran (los primeros por
-    OTFechaHoraEjecucion DESC, o sea los cumplidos más recientemente) para no
-    barrer un universo enorme en cada refresco de la cola."""
-    hoy = date.today()
-    # datetime (no date) para comparar contra OTFechaHoraEjecucion (WMS,
-    # datetime nativo) — mismo criterio defensivo que _mov_abiertos_del_dia
-    # en deposito.py.
-    corte = datetime(hoy.year, hoy.month, hoy.day) - timedelta(days=CONTROL_ASIGNACION_VENTANA_DIAS)
+    — mismos campos que usa deposito.control_asignacion.
+
+    Arranca por Magnus (TODOS los Abiertos, hasta `limit`, NroMovVenta ASC) y
+    recién ahí consulta WMS puntualmente por esos NroMovVenta — sin ventana
+    de fecha. Antes era al revés (WMS primero, acotado a los últimos 500
+    Cumplidos de los últimos 60 días) y dejaba afuera Abiertos con picking
+    cumplido hace rato; ver nota "FIX 2026-07-29" en el docstring del módulo."""
+    conn = get_connection("EVERWEAR")
+    abiertos: dict[int, dict] = {}
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_MAGNUS_ABIERTOS_TODOS.format(limit=limit))
+        for nro, fecha_int, tipo_pedido, cliente in cur.fetchall():
+            if nro is None:
+                continue
+            fecha = (BASE_DATE + timedelta(days=int(fecha_int))).date() if fecha_int else None
+            abiertos[int(nro)] = {
+                "fecha": fecha,
+                "tipoPedido": (tipo_pedido or "").strip() or None,
+                "cliente": (cliente or "").strip() or None,
+            }
+    finally:
+        conn.close()
+
+    if not abiertos:
+        return []
 
     conn = get_connection("WMS")
     wms: dict[int, dict] = {}
@@ -96,84 +128,58 @@ def fetch_pedidos_cumplidos_abiertos(limit: int = 500) -> list[dict]:
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         observ_col = _col_observaciones_ot(conn)
         observ_select = f", OT.{observ_col} AS Ubicacion" if observ_col else ""
-        cur.execute(
-            SQL_WMS_CUMPLIDOS_BASE.format(col_pedido=OT_COL_PEDIDO, observ_select=observ_select),
-            (corte,),
-        )
-        cols = [c[0] for c in cur.description]
-        for row in cur.fetchall():
-            d = dict(zip(cols, row))
-            nro = d.get("NroPedido")
-            if nro is None:
-                continue
-            n = int(nro)
-            cumplido = d.get("Cumplido")
-            prev = wms.get(n)
-            # Si un pedido tuviera >1 OT Cumplida, quedarse con la más reciente.
-            if prev is None or (cumplido and prev.get("Cumplido") and cumplido > prev["Cumplido"]):
-                ubic = d.get("Ubicacion")
-                wms[n] = {
-                    "nroPedido": n,
-                    "ot": int(d["Ot"]) if d.get("Ot") is not None else None,
-                    "nroArmador": int(d["NroArmador"]) if d.get("NroArmador") is not None else None,
-                    "nombreArmador": (d.get("NombreArmador") or "").strip() or None,
-                    "ubicacion": (str(ubic).strip() or None) if ubic is not None else None,
-                    "Cumplido": cumplido,
-                }
-    finally:
-        conn.close()
-
-    if not wms:
-        return []
-
-    # Solo los más recientemente Cumplidos (evita cruzar un universo enorme
-    # contra Magnus cuando la cola de "Cumplidos" acumula muchos pedidos).
-    # datetime.min (no date.min) en el fallback: "Cumplido" es datetime nativo
-    # de WMS, mezclar date/datetime en el sort de-facto rompería la comparación.
-    pendientes = sorted(wms.values(), key=lambda d: d["Cumplido"] or datetime.min, reverse=True)[:limit]
-
-    conn = get_connection("EVERWEAR")
-    out: list[dict] = []
-    try:
-        cur = conn.cursor()
-        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
-        nros = [d["nroPedido"] for d in pendientes]
+        nros = list(abiertos.keys())
         CH = 1000
-        abiertos: dict[int, dict] = {}
         for i in range(0, len(nros), CH):
             chunk = nros[i:i + CH]
             ph = ",".join("?" for _ in chunk)
-            cur.execute(SQL_MAGNUS_ABIERTOS.format(ph=ph), chunk)
-            for nro, fecha_int, tipo_pedido, cliente in cur.fetchall():
+            cur.execute(
+                SQL_WMS_CUMPLIDOS_POR_PEDIDO.format(
+                    col_pedido=OT_COL_PEDIDO, observ_select=observ_select, ph=ph,
+                ),
+                chunk,
+            )
+            cols = [c[0] for c in cur.description]
+            for row in cur.fetchall():
+                d = dict(zip(cols, row))
+                nro = d.get("NroPedido")
                 if nro is None:
                     continue
-                fecha = (BASE_DATE + timedelta(days=int(fecha_int))).date() if fecha_int else None
-                abiertos[int(nro)] = {
-                    "fecha": fecha,
-                    "tipoPedido": (tipo_pedido or "").strip() or None,
-                    "cliente": (cliente or "").strip() or None,
-                }
-        for d in pendientes:
-            ab = abiertos.get(d["nroPedido"])
-            if ab is None:
-                continue  # Cumplido en WMS pero ya no está Abierto en Magnus
-            out.append({
-                "nroPedido": d["nroPedido"],
-                "fecha": ab["fecha"],
-                "tipoPedido": ab["tipoPedido"],
-                "cliente": ab["cliente"],
-                "ubicacion": d["ubicacion"],
-                "ot": d["ot"],
-                "nroArmador": d["nroArmador"],
-                "nombreArmador": d["nombreArmador"],
-            })
+                n = int(nro)
+                cumplido = d.get("Cumplido")
+                prev = wms.get(n)
+                # Si un pedido tuviera >1 OT Cumplida, quedarse con la más reciente.
+                if prev is None or (cumplido and prev.get("Cumplido") and cumplido > prev["Cumplido"]):
+                    ubic = d.get("Ubicacion")
+                    wms[n] = {
+                        "ot": int(d["Ot"]) if d.get("Ot") is not None else None,
+                        "nroArmador": int(d["NroArmador"]) if d.get("NroArmador") is not None else None,
+                        "nombreArmador": (d.get("NombreArmador") or "").strip() or None,
+                        "ubicacion": (str(ubic).strip() or None) if ubic is not None else None,
+                        "Cumplido": cumplido,
+                    }
     finally:
         conn.close()
 
+    out: list[dict] = []
+    for nro, ab in abiertos.items():
+        w = wms.get(nro)
+        if w is None:
+            continue  # Abierto en Magnus pero todavía no Cumplido en WMS
+        out.append({
+            "nroPedido": nro,
+            "fecha": ab["fecha"],
+            "tipoPedido": ab["tipoPedido"],
+            "cliente": ab["cliente"],
+            "ubicacion": w["ubicacion"],
+            "ot": w["ot"],
+            "nroArmador": w["nroArmador"],
+            "nombreArmador": w["nombreArmador"],
+        })
     return out
 
 
-def refrescar_cola(limit: int = 500) -> int:
+def refrescar_cola(limit: int = MAGNUS_ABIERTOS_LIMIT) -> int:
     """Agrega a deposito.control_asignacion los pedidos Cumplidos+Abiertos que
     todavía no estén en la cola (ON CONFLICT DO NOTHING — no toca los que ya
     están, asignados o no). Devuelve cuántos se agregaron. Se llama al

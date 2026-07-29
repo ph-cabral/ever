@@ -13,6 +13,7 @@ export type ResumenRow = {
   minutos: number | null; // minutos fichados (check_out - check_in)
   eventos_dia: number | null;
   devices: string | null;
+  feriado?: boolean; // ver asistencia.feriado / botón "Feriados" en la página
   estado: string | null; // guardado en estado_diario (editable)
   dias: number | null;
   novedad: string | null;
@@ -95,9 +96,12 @@ export function buildTopeResolver(
   };
 }
 
-// Estado auto cuando no hay uno guardado en BD.
-export const calcEstado = (r: ResumenRow): "Normal" | "Ausente" | "Revisar" => {
-  if (!r.check_in) return "Ausente";
+// Estado auto cuando no hay uno guardado en BD. Si el día es feriado (botón
+// "Feriados" en /rrhh/asistencia) y no hay fichaje, no cuenta como falta.
+export const calcEstado = (
+  r: ResumenRow,
+): "Normal" | "Ausente" | "Revisar" | "Feriado" => {
+  if (!r.check_in) return r.feriado ? "Feriado" : "Ausente";
   if (!r.check_out) return "Revisar";
   if ((r.minutos ?? 0) < 60) return "Revisar";
   return "Normal";
@@ -121,6 +125,7 @@ export const ESTADOS_NO_AUSENCIA = [
   "Normal",
   "Ausente",
   "Revisar",
+  "Feriado",
   "Gira comercial",
   "Dia Expo",
 ];
@@ -174,7 +179,8 @@ export function computeIndicadores(
     if (ex > 0) extrasArea.set(dep(r), (extrasArea.get(dep(r)) ?? 0) + ex);
     extrasMin += ex;
 
-    // Horas inactivas: tope perdido en días Ausente / Revisar.
+    // Horas inactivas: tope perdido en días Ausente / Revisar (Feriado no
+    // cuenta: ese día nadie tenía que trabajar).
     if (est === "Ausente" || est === "Revisar") {
       inactMin += Math.max(0, tope - rrhh);
     }

@@ -50,6 +50,7 @@ type Row = {
   eventos_dia: number | null;
   devices: string | null;
   ajustado?: boolean;
+  feriado?: boolean;
   estado: string | null;
   dias: number | null;
   novedad: string | null;
@@ -78,6 +79,7 @@ const ESTADOS = [
   "Ausente",
   "Normal",
   "Revisar",
+  "Feriado",
 ];
 
 const NOVEDADES = [
@@ -111,15 +113,28 @@ const fmtHHMM = (min: number | null) => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 };
 
+// Columna RRHH: redondea a la hora entera. Sólo sube a la hora siguiente
+// cuando el resto llega a 45 minutos (ej. 9:30 -> "9", 8:45 -> "9"). Pedido
+// de RRHH 2026-07-29 — sólo cambia cómo se muestra esta columna, el resto de
+// los cálculos (topes, indicadores) siguen usando los minutos exactos.
+const fmtHorasRRHH = (min: number | null): string => {
+  if (min == null) return "—";
+  const h = Math.floor(min / 60);
+  const rem = min % 60;
+  return String(rem >= 45 ? h + 1 : h);
+};
+
 // HH:MM en hora local del navegador, para precargar el input type="time".
 const toHHMM = (iso: string) => {
   const d = new Date(iso);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
-// Estado calculado por defecto (uno de: Normal | Ausente | Revisar)
-const calcEstado = (r: Row): "Normal" | "Ausente" | "Revisar" => {
-  if (!r.check_in) return "Ausente";
+// Estado calculado por defecto (uno de: Normal | Ausente | Revisar | Feriado).
+// Si el día está marcado como feriado (botón "Feriados") y no hay fichaje,
+// no cuenta como falta: todos los empleados faltarían igual ese día.
+const calcEstado = (r: Row): "Normal" | "Ausente" | "Revisar" | "Feriado" => {
+  if (!r.check_in) return r.feriado ? "Feriado" : "Ausente";
   if (!r.check_out) return "Revisar";
   if ((r.minutos ?? 0) < 60) return "Revisar";
   return "Normal";
@@ -141,6 +156,7 @@ const estadoTone = (s: string) => {
     return "bg-emerald-100 text-emerald-800 border-emerald-200";
   if (s === "Ausente") return "bg-zinc-100 text-zinc-700 border-zinc-200";
   if (s === "Revisar") return "bg-amber-100 text-amber-800 border-amber-200";
+  if (s === "Feriado") return "bg-indigo-100 text-indigo-800 border-indigo-200";
   return "bg-sky-100 text-sky-800 border-sky-200"; // justificaciones
 };
 
@@ -525,6 +541,159 @@ function HorarioEditor({
   );
 }
 
+const CAL_WEEKDAYS = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"];
+const CAL_MESES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+// Botón "Feriados": abre un calendario del mes en curso (sin navegación —
+// sólo el mes actual) donde se pueden marcar/desmarcar varios días como no
+// laborables. Esos días quedan en asistencia.feriado (sql/asistencia_feriados.sql)
+// y hacen que calcEstado muestre "Feriado" en vez de "Ausente" cuando no hay
+// fichaje, para no ensuciar el control de inasistencias con un día en el que
+// nadie trabajó. Pedido de Pablo, 2026-07-29.
+function FeriadosButton({ onSaved }: { onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [feriados, setFeriados] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState<string | null>(null);
+
+  const hoy = new Date();
+  const year = hoy.getFullYear();
+  const month = hoy.getMonth(); // 0-based
+  const mm = String(month + 1).padStart(2, "0");
+  const ultimoDia = new Date(year, month + 1, 0).getDate();
+  const desdeMes = `${year}-${mm}-01`;
+  const hastaMes = `${year}-${mm}-${String(ultimoDia).padStart(2, "0")}`;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const qs = new URLSearchParams({ desde: desdeMes, hasta: hastaMes });
+      const r = await fetch(`/api/rrhh/asistencia/feriados?${qs}`);
+      const data: string[] = r.ok ? await r.json() : [];
+      setFeriados(new Set(data));
+    } finally {
+      setLoading(false);
+    }
+  }, [desdeMes, hastaMes]);
+
+  const openModal = () => {
+    setOpen(true);
+    load();
+  };
+
+  const toggle = async (fecha: string) => {
+    const activo = !feriados.has(fecha);
+    setSaving(fecha);
+    setFeriados((prev) => {
+      const next = new Set(prev);
+      if (activo) next.add(fecha);
+      else next.delete(fecha);
+      return next;
+    });
+    try {
+      await fetch("/api/rrhh/asistencia/feriados", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fecha, activo }),
+      });
+      onSaved();
+    } catch (err) {
+      console.error("[feriados]", err);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  for (let d = 1; d <= ultimoDia; d++) cells.push(d);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={openModal}
+        className="mt-2 ml-3 text-xs text-primary hover:underline"
+      >
+        Feriados
+      </button>
+      {open &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setOpen(false)}
+          >
+            <div
+              className="w-full max-w-xs rounded-lg border bg-popover p-4 shadow-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-1 flex items-center justify-between">
+                <h2 className="text-sm font-medium">
+                  Feriados · {CAL_MESES[month]} {year}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  ✕
+                </button>
+              </div>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Marcá los días no laborables del mes. Esos días no cuentan
+                como falta.
+              </p>
+              {loading ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  Cargando…
+                </p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-7 gap-0.5 text-center text-[11px] text-muted-foreground mb-1">
+                    {CAL_WEEKDAYS.map((w) => (
+                      <div key={w} className="py-1">
+                        {w}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-0.5">
+                    {cells.map((d, i) => {
+                      if (!d) return <div key={i} />;
+                      const fecha = `${year}-${mm}-${String(d).padStart(2, "0")}`;
+                      const marcado = feriados.has(fecha);
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          disabled={saving === fecha}
+                          onClick={() => toggle(fecha)}
+                          title={fecha}
+                          className={cn(
+                            "h-7 w-7 mx-auto rounded text-xs transition-colors disabled:opacity-50",
+                            marcado
+                              ? "bg-indigo-600 text-white hover:opacity-90"
+                              : "hover:bg-accent",
+                          )}
+                        >
+                          {d}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 // Fila memoizada: editar/tipear una fila no re-renderiza el resto de la tabla.
 const AsistenciaRow = memo(function AsistenciaRow({
   row,
@@ -597,7 +766,7 @@ const AsistenciaRow = memo(function AsistenciaRow({
         {fmtHHMM(netMin)}
       </TableCell>
       <TableCell title={`Neto ${fmtHHMM(netMin)} · tope ${fmtHHMM(tope)}`}>
-        {fmtHHMM(rrhhMin)}
+        {fmtHorasRRHH(rrhhMin)}
       </TableCell>
       <TableCell>
         <FichajesCell
@@ -864,6 +1033,7 @@ export default function AsistenciaPage() {
           >
             {horariosOpen ? "Ocultar horarios" : "Configurar horarios por área"}
           </button>
+          <FeriadosButton onSaved={fetchData} />
         </div>
         {empleadosPorArea.length > 0 && (
           <div className="flex flex-col items-center gap-2 rounded-[2rem] border px-6 py-3">
