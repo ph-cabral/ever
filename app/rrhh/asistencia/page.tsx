@@ -954,6 +954,7 @@ export default function AsistenciaPage() {
             <TableRow>
               <TableHead>Empleado</TableHead>
               <TableHead>Fecha</TableHead>
+              <TableHead>Reloj</TableHead>
               <TableHead>Ingreso</TableHead>
               <TableHead>Egreso</TableHead>
               <TableHead>En empresa</TableHead>
