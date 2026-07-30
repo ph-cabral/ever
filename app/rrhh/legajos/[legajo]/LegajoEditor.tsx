@@ -14,6 +14,7 @@ import {
 } from "@/lib/rrhh/legajoFields";
 import { legajoUpdateSchema } from "@/lib/rrhh/legajoSchema";
 import { SectorSelect } from "./SectorSelect";
+import { LugarSelect } from "./LugarSelect";
 
 const ESTADO_CLASS: Record<string, string> = {
   ACTIVO: "bg-green-100 text-green-700",
@@ -267,6 +268,15 @@ export default function LegajoEditor({ id, initial }: { id: number; initial: Rec
             value={(methods.watch("sectorId") as number | null) ?? null}
             onChange={(sid) =>
               methods.setValue("sectorId", sid, {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+            }
+          />
+          <LugarSelect
+            value={(methods.watch("lugarId") as number | null) ?? null}
+            onChange={(lid) =>
+              methods.setValue("lugarId", lid, {
                 shouldDirty: true,
                 shouldValidate: true,
               })

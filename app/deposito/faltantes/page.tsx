@@ -1,16 +1,19 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Loader2,
   RefreshCw,
   AlertTriangle,
+  AlertOctagon,
   Undo2,
   Check,
   X,
   PackageCheck,
   MapPin,
+  Download,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
+import { exportarFaltantesExistencia } from "@/lib/deposito/exportFaltantesExistencia";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Faltantes — renglones pendientes del último día con registro (anterior a hoy).
@@ -18,7 +21,18 @@ import { InicioButton } from "@/components/ui/InicioButton";
 //   Celular : pantalla completa, 1 artículo a la vez (detalles apilados),
 //             Deshacer arriba · En existencia (verde) / Sin existencia (rojo) abajo.
 //   Cada marca se guarda al instante en Postgres (preparado.faltante_existencia).
+//   Exportar Excel (PC, header) = histórico por mes cerrado, no el día en
+//   pantalla — pega a GET /api/deposito/faltantes/historico?mes=YYYY-MM.
 // ──────────────────────────────────────────────────────────────────────────────
+
+// Mes cerrado anterior al actual ("YYYY-MM") — default del selector de
+// exportación: el mes en curso todavía no cerró.
+function mesCerradoAnterior(): string {
+  const d = new Date();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  return d.toISOString().slice(0, 7);
+}
 
 interface Item {
   NroPedOrigen: number;
@@ -35,12 +49,13 @@ interface Item {
   Proveedor: string | null;
   Vendedor: string | null;
 }
-type Estado = "pendiente" | "si" | "no";
+type Estado = "pendiente" | "si" | "no" | "mal";
 interface Mark {
   nroPedOrigen: number;
   nroRengOrigen: number;
   codArticulo: string;
   existencia: boolean | null;
+  malFacturado: boolean | null;
   cantidad: number | null;
 }
 // Catálogo de novedades (preparado.faltante_novedad_tipo). Llega en la 1ra carga:
@@ -73,8 +88,10 @@ export default function FaltantesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ubicArt, setUbicArt] = useState<string | null>(null); // artículo del modal de ubicaciones
-  const [exitDir, setExitDir] = useState<"left" | "right" | null>(null); // tarjeta móvil saliendo
+  const [exitDir, setExitDir] = useState<"left" | "right" | "up" | null>(null); // tarjeta móvil saliendo
   const [transitioning, setTransitioning] = useState(false);
+  const [mesExport, setMesExport] = useState(mesCerradoAnterior);
+  const [exportLoading, setExportLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -115,7 +132,8 @@ export default function FaltantesPage() {
           const cj = await cRes.json().catch(() => ({ rows: [] }));
           for (const m of (cj.rows ?? []) as Mark[]) {
             const k = `${m.nroPedOrigen}-${m.nroRengOrigen}`;
-            if (typeof m.existencia === "boolean")
+            if (m.malFacturado) est[k] = "mal";
+            else if (typeof m.existencia === "boolean")
               est[k] = m.existencia ? "si" : "no";
             if (m.cantidad !== null && m.cantidad !== undefined)
               cant[k] = m.cantidad;
@@ -149,8 +167,37 @@ export default function FaltantesPage() {
     load();
   }, [load]);
 
-  const persist = useCallback(
-    (it: Item, existencia: boolean) =>
+  // PC y celular leen el mismo `items` (misma consulta a ot-diferencias, que ya
+  // excluye pedidos cancelados en Magnus). El "PC muestra cancelados / celular
+  // no" que se reportó no es un filtro distinto entre vistas — es una pestaña
+  // de PC dejada abierta muchas horas sin recargar: el celular se abre/recarga
+  // seguido durante el día y ve la lista al día, mientras el PC se queda con
+  // el snapshot de cuando cargó, incluyendo pedidos que se cancelaron después.
+  // Fix: reconsultar solo (sin tocar el flujo/posición del celular) cada 3 min
+  // y también al volver a la pestaña, para que ambas vistas converjan solas.
+  const transitioningRef = useRef(transitioning);
+  useEffect(() => {
+    transitioningRef.current = transitioning;
+  }, [transitioning]);
+  useEffect(() => {
+    const REFRESH_MS = 3 * 60 * 1000;
+    const tick = () => {
+      if (document.visibilityState === "visible" && !transitioningRef.current)
+        load();
+    };
+    const id = window.setInterval(tick, REFRESH_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [load]);
+
+  // Los 3 estados (si/no/mal facturado) son excluyentes entre sí: al marcar
+  // uno se manda existencia + malFacturado juntos, así el otro campo se limpia
+  // en el mismo POST (ver comentario en check/route.ts).
+  const persistEstado = useCallback(
+    (it: Item, estado: "si" | "no" | "mal") =>
       fetch("/api/deposito/faltantes/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -159,7 +206,8 @@ export default function FaltantesPage() {
           nroPedOrigen: it.NroPedOrigen,
           nroRengOrigen: it.NroRengOrigen,
           codArticulo: it.CodArticulo,
-          existencia,
+          existencia: estado === "si" ? true : estado === "no" ? false : null,
+          malFacturado: estado === "mal",
         }),
       }).catch(() => setError("No se pudo guardar la marca")),
     [fecha],
@@ -257,17 +305,18 @@ export default function FaltantesPage() {
   );
 
   // Celular: marca y avanza al siguiente. La tarjeta actual sale volando hacia
-  // el costado (verde → derecha, rojo → izquierda) y recién ahí avanza el
-  // puntero — así hay tiempo de ver la animación antes de que cambie el dato.
+  // el costado (verde → derecha, rojo → izquierda) o hacia arriba (mal
+  // facturado, violeta) y recién ahí avanza el puntero — así hay tiempo de
+  // ver la animación antes de que cambie el dato.
   const mark = useCallback(
-    (it: Item, existencia: boolean) => {
+    (it: Item, estado: "si" | "no" | "mal") => {
       if (transitioning) return;
       const k = keyOf(it);
       setTransitioning(true);
-      setExitDir(existencia ? "right" : "left");
+      setExitDir(estado === "si" ? "right" : estado === "no" ? "left" : "up");
       const prev = estados[k] ?? "pendiente";
-      setEstados((s) => ({ ...s, [k]: existencia ? "si" : "no" }));
-      void persist(it, existencia);
+      setEstados((s) => ({ ...s, [k]: estado }));
+      void persistEstado(it, estado);
       window.setTimeout(() => {
         setUndoStack((u) => [...u, { keys: [k], prev: { [k]: prev }, idx }]);
         setIdx((i) => Math.min(i + 1, items.length));
@@ -275,13 +324,13 @@ export default function FaltantesPage() {
         setTransitioning(false);
       }, 260);
     },
-    [estados, idx, items.length, persist, transitioning],
+    [estados, idx, items.length, persistEstado, transitioning],
   );
 
   // PC: marca todos los renglones de un artículo agrupado a la vez (un solo
   // chequeo de stock aplica a todos los pedidos pendientes de ese artículo).
   const markGroup = useCallback(
-    (group: Item[], existencia: boolean) => {
+    (group: Item[], estado: "si" | "no" | "mal") => {
       const prev: Record<string, Estado> = {};
       const keys = group.map((it) => {
         const k = keyOf(it);
@@ -291,12 +340,12 @@ export default function FaltantesPage() {
       setUndoStack((u) => [...u, { keys, prev, idx }]);
       setEstados((s) => {
         const n = { ...s };
-        for (const k of keys) n[k] = existencia ? "si" : "no";
+        for (const k of keys) n[k] = estado;
         return n;
       });
-      for (const it of group) void persist(it, existencia);
+      for (const it of group) void persistEstado(it, estado);
     },
-    [estados, idx, persist],
+    [estados, idx, persistEstado],
   );
 
   const undo = useCallback(() => {
@@ -329,7 +378,8 @@ export default function FaltantesPage() {
                 nroPedOrigen: ped,
                 nroRengOrigen: reng,
                 codArticulo: "",
-                existencia: p === "si",
+                existencia: p === "si" ? true : p === "no" ? false : null,
+                malFacturado: p === "mal",
               },
             };
       fetch("/api/deposito/faltantes/check", {
@@ -340,15 +390,48 @@ export default function FaltantesPage() {
     }
   }, [undoStack, fecha]);
 
+  // Exportar Excel del mes elegido (histórico completo de marcas, no el día
+  // que está en pantalla). Trae nombre/ubicación/cliente vía el join
+  // best-effort con preparado.faltante_wms que hace el endpoint.
+  const exportarMes = useCallback(async () => {
+    setExportLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/deposito/faltantes/historico?mes=${mesExport}`,
+        { cache: "no-store" },
+      );
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      if (!j.rows?.length) {
+        setError(`Sin marcas registradas en ${mesExport}`);
+        return;
+      }
+      exportarFaltantesExistencia(j.rows, mesExport);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al exportar");
+    } finally {
+      setExportLoading(false);
+    }
+  }, [mesExport]);
+
   const counts = useMemo(() => {
     let si = 0,
-      no = 0;
+      no = 0,
+      mal = 0;
     for (const it of items) {
       const e = estados[keyOf(it)];
       if (e === "si") si++;
       else if (e === "no") no++;
+      else if (e === "mal") mal++;
     }
-    return { si, no, pend: items.length - si - no, total: items.length };
+    return {
+      si,
+      no,
+      mal,
+      pend: items.length - si - no - mal,
+      total: items.length,
+    };
   }, [items, estados]);
 
   // PC: agrupa los renglones por artículo — una fila por CodArticulo, sin
@@ -381,8 +464,8 @@ export default function FaltantesPage() {
           </button>
           <div className="text-right leading-tight">
             <div className="text-sm font-semibold text-yellow-400">
-              {Math.min(counts.si + counts.no + 1, counts.total)} /{" "}
-              {counts.total}
+              {Math.min(counts.si + counts.no + counts.mal + 1, counts.total)}{" "}
+              / {counts.total}
             </div>
             <div className="text-[11px] text-zinc-500">{fmtAr(fecha)}</div>
           </div>
@@ -405,7 +488,7 @@ export default function FaltantesPage() {
               <p className="text-lg font-semibold">Revisión completa</p>
               <p className="text-sm text-zinc-400">
                 {counts.si} en existencia · {counts.no} sin existencia ·{" "}
-                {counts.total} total
+                {counts.mal} mal facturado · {counts.total} total
               </p>
               <button
                 onClick={undo}
@@ -423,7 +506,9 @@ export default function FaltantesPage() {
                   ? "card-out-right"
                   : exitDir === "left"
                     ? "card-out-left"
-                    : "animate-in fade-in slide-in-from-bottom-2 duration-300"
+                    : exitDir === "up"
+                      ? "card-out-up"
+                      : "animate-in fade-in slide-in-from-bottom-2 duration-300"
               }
             >
               <CardDetalle
@@ -438,20 +523,33 @@ export default function FaltantesPage() {
         </div>
 
         {hay && current && (
-          <div className="shrink-0 grid grid-cols-2 gap-px bg-zinc-800">
+          <div className="relative shrink-0">
+            <div className="grid grid-cols-2 gap-px bg-zinc-800">
+              <button
+                onClick={() => mark(current, "si")}
+                disabled={transitioning}
+                className="h-24 flex flex-col items-center justify-center gap-1 bg-green-600 active:bg-green-700 active:scale-[0.97] text-white font-bold text-lg transition-transform duration-150 disabled:opacity-60"
+              >
+                <Check size={28} /> En existencia
+              </button>
+              <button
+                onClick={() => mark(current, "no")}
+                disabled={transitioning}
+                className="h-24 flex flex-col items-center justify-center gap-1 bg-red-600 active:bg-red-700 active:scale-[0.97] text-white font-bold text-lg transition-transform duration-150 disabled:opacity-60"
+              >
+                <X size={28} /> Sin existencia
+              </button>
+            </div>
+            {/* Tercera acción (más rara que si/no): círculo morado flotando
+                en el medio, arriba de los dos botones grandes — no les come
+                espacio pero queda igual de alcanzable con el pulgar. */}
             <button
-              onClick={() => mark(current, true)}
+              onClick={() => mark(current, "mal")}
               disabled={transitioning}
-              className="h-24 flex flex-col items-center justify-center gap-1 bg-green-600 active:bg-green-700 active:scale-[0.97] text-white font-bold text-lg transition-transform duration-150 disabled:opacity-60"
+              title="Mal facturado"
+              className="btn-anim absolute left-1/2 -top-7 -translate-x-1/2 z-10 w-14 h-14 rounded-full bg-purple-600 active:bg-purple-700 active:scale-[0.94] text-white flex items-center justify-center border-4 border-[#111111] shadow-lg shadow-black/50 disabled:opacity-60"
             >
-              <Check size={28} /> En existencia
-            </button>
-            <button
-              onClick={() => mark(current, false)}
-              disabled={transitioning}
-              className="h-24 flex flex-col items-center justify-center gap-1 bg-red-600 active:bg-red-700 active:scale-[0.97] text-white font-bold text-lg transition-transform duration-150 disabled:opacity-60"
-            >
-              <X size={28} /> Sin existencia
+              <AlertOctagon size={22} />
             </button>
           </div>
         )}
@@ -491,6 +589,7 @@ export default function FaltantesPage() {
             <span className="text-zinc-400">
               <b className="text-green-400">{counts.si}</b> en exist. ·{" "}
               <b className="text-red-400">{counts.no}</b> sin ·{" "}
+              <b className="text-purple-400">{counts.mal}</b> mal fact. ·{" "}
               <b className="text-yellow-400">{counts.pend}</b> pend. ·{" "}
               <b className="text-zinc-200">{counts.total}</b> total
             </span>
@@ -509,6 +608,27 @@ export default function FaltantesPage() {
               className="btn-anim text-zinc-400 hover:text-yellow-400 p-2 disabled:opacity-40 disabled:hover:scale-100 disabled:hover:translate-y-0"
             >
               <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            </button>
+            <div className="w-px h-7 bg-yellow-400/30" />
+            <input
+              type="month"
+              value={mesExport}
+              onChange={(e) => setMesExport(e.target.value)}
+              title="Mes a exportar"
+              className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-yellow-400 cursor-pointer"
+            />
+            <button
+              onClick={exportarMes}
+              disabled={exportLoading}
+              title="Exportar Excel del mes (con/sin existencia)"
+              className="btn-anim flex items-center gap-1.5 text-zinc-400 hover:text-yellow-400 disabled:opacity-40 disabled:hover:scale-100 disabled:hover:translate-y-0"
+            >
+              {exportLoading ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Download size={16} />
+              )}
+              Exportar
             </button>
           </div>
         </header>
@@ -566,7 +686,16 @@ export default function FaltantesPage() {
                     const allNo = group.every(
                       (it) => (estados[keyOf(it)] ?? "pendiente") === "no",
                     );
-                    const e: Estado = allSi ? "si" : allNo ? "no" : "pendiente";
+                    const allMal = group.every(
+                      (it) => (estados[keyOf(it)] ?? "pendiente") === "mal",
+                    );
+                    const e: Estado = allSi
+                      ? "si"
+                      : allNo
+                        ? "no"
+                        : allMal
+                          ? "mal"
+                          : "pendiente";
                     const cantTotal = group.reduce(
                       (s, it) => s + (it.CantPend || 0),
                       0,
@@ -593,7 +722,9 @@ export default function FaltantesPage() {
                             ? "bg-green-950/30"
                             : e === "no"
                               ? "bg-red-950/30"
-                              : "hover:bg-zinc-900/50"
+                              : e === "mal"
+                                ? "bg-purple-950/30"
+                                : "hover:bg-zinc-900/50"
                         }`}
                       >
                         <td className="px-3 py-2">
@@ -680,7 +811,7 @@ export default function FaltantesPage() {
                         <td className="px-3 py-2">
                           <div className="flex items-center justify-center gap-1.5">
                             <button
-                              onClick={() => markGroup(group, true)}
+                              onClick={() => markGroup(group, "si")}
                               title="En existencia"
                               className={`btn-anim p-1.5 rounded-md border ${
                                 e === "si"
@@ -691,7 +822,7 @@ export default function FaltantesPage() {
                               <Check size={15} />
                             </button>
                             <button
-                              onClick={() => markGroup(group, false)}
+                              onClick={() => markGroup(group, "no")}
                               title="Sin existencia"
                               className={`btn-anim p-1.5 rounded-md border ${
                                 e === "no"
@@ -700,6 +831,17 @@ export default function FaltantesPage() {
                               }`}
                             >
                               <X size={15} />
+                            </button>
+                            <button
+                              onClick={() => markGroup(group, "mal")}
+                              title="Mal facturado"
+                              className={`btn-anim p-1.5 rounded-full border ${
+                                e === "mal"
+                                  ? "bg-purple-600 border-purple-600 text-white"
+                                  : "border-zinc-700 text-purple-400 hover:bg-purple-600/20"
+                              }`}
+                            >
+                              <AlertOctagon size={15} />
                             </button>
                           </div>
                         </td>
@@ -812,6 +954,12 @@ function Pill({ e }: { e: Estado }) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-red-600/20 text-red-400 px-2 py-0.5 text-xs font-medium">
         <X size={12} /> Sin exist.
+      </span>
+    );
+  if (e === "mal")
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-purple-600/20 text-purple-400 px-2 py-0.5 text-xs font-medium">
+        <AlertOctagon size={12} /> Mal facturado
       </span>
     );
   return (

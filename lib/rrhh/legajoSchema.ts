@@ -33,6 +33,7 @@ export const legajoUpdateSchema = z.object({
   tipoServicio: str, actividadEconomica: str, domicilioExplotacion: str,
   claveAltaArca: str, fechaEnvioAlta: date, banco: str, bancoOtro: str,
   diaPago: int, percibeSeguroDesempleo: bool, ddjjArt12: bool, sectorId: int,
+  lugarId: int,
   // step4
   tieneCargasFamilia: bool, medioPagoAaff: str, medioPagoAaffOtro: str,
   // step5

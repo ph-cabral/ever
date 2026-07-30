@@ -10,6 +10,7 @@ type Row = {
   employee_name: string | null;
   departamento: string | null;
   sector: string | null;
+  lugar: string | null;
   fecha: string;
   check_in: string | null;
   check_out: string | null;
@@ -79,10 +80,12 @@ export async function GET(req: NextRequest) {
                ltrim(l."employeeNo", '0') AS emp_key,
                NULLIF(TRIM(l.nombre), '') AS employee_name,
                COALESCE(ar.nombre, l.sector) AS departamento,
-               COALESCE(s.nombre, l.sector) AS sector
+               COALESCE(s.nombre, l.sector) AS sector,
+               lu.nombre AS lugar
         FROM everwear.legajo l
         LEFT JOIN everwear.sector s ON s.id = l."sectorId"
         LEFT JOIN everwear.area   ar ON ar.id = s."areaId"
+        LEFT JOIN everwear.lugar  lu ON lu.id = l."lugarId"
         WHERE l.estado = 'ACTIVO' AND l."employeeNo" IS NOT NULL
         ${employee_no ? `AND ltrim(l."employeeNo", '0') = ltrim($3, '0')` : ""}
       ),
@@ -157,6 +160,7 @@ export async function GET(req: NextRequest) {
         a.employee_name,
         a.departamento,
         a.sector,
+        a.lugar,
         to_char(d.fecha, 'YYYY-MM-DD') AS fecha,
         ev.devices,
         COALESCE(am.check_in, ev.check_in)   AS check_in,
@@ -222,6 +226,7 @@ export async function GET(req: NextRequest) {
       employee_name: r.employee_name ?? null,
       departamento: r.departamento ?? null,
       sector: r.sector ?? null,
+      lugar: r.lugar ?? null,
       fecha: r.fecha,
       check_in: fmt(r.check_in),
       check_out: fmt(r.check_out),

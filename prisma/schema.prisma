@@ -197,6 +197,9 @@ model legajo {
   trabajos               trabajo[]
   usuario                usuario?
   anvizId                String?         @unique @db.VarChar(20)
+  // Lugar físico (Oficina/Depósito/Fábrica/etc.) — ver modelo `lugar`.
+  lugarId                Int?
+  lugarRel               lugar?    @relation(fields: [lugarId], references: [id])
   @@index([estado])
   @@schema("everwear")
 }
@@ -378,6 +381,19 @@ model sector {
   @@schema("everwear")
 }
 
+// Lugar físico de trabajo (Oficina, Depósito, Fábrica, etc.) — lista plana para
+// selección rápida por legajo, distinta de área/sector (jerárquico). Se usa para
+// agrupar el widget de "presentes" en /rrhh/asistencia. Ver sql/rrhh_lugar.sql
+// — correr contra Postgres + `prisma db pull` antes de deployar.
+model lugar {
+  id        Int      @id @default(autoincrement())
+  nombre    String   @unique @db.VarChar(80)
+  createdAt DateTime @default(now())
+  legajos   legajo[]
+
+  @@schema("everwear")
+}
+
 // Tabla legada: los clientes ahora se leen en vivo de Magnus
 // (MAGNUS_SITD.dbo.Clientes) desde /manguera/corte. Queda sin uso/relaciones.
 model cliente {
@@ -454,6 +470,7 @@ model faltante_existencia {
   nroRengOrigen  Int      @map("nro_reng_origen")
   codArticulo    String?  @map("cod_articulo") @db.VarChar(50)
   existencia     Boolean?
+  malFacturado   Boolean? @map("mal_facturado")
   cantidad       Float?
   creado_en      DateTime @default(now())
   actualizado_en DateTime @updatedAt

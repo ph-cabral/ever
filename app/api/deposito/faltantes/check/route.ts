@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
         nroRengOrigen: true,
         codArticulo: true,
         existencia: true,
+        malFacturado: true,
         cantidad: true,
       },
     });
@@ -27,14 +28,24 @@ export async function GET(req: NextRequest) {
 }
 
 // POST → guarda/actualiza una marca y/o la cantidad. Body:
-// { fecha, nroPedOrigen, nroRengOrigen, codArticulo, existencia?:boolean, cantidad?:number|null }
-// existencia y cantidad son independientes: se puede mandar sólo uno de los dos
-// (ej. tipear la cantidad sin haber marcado todavía en existencia/sin existencia).
+// { fecha, nroPedOrigen, nroRengOrigen, codArticulo,
+//   existencia?:boolean|null, malFacturado?:boolean, cantidad?:number|null }
+// existencia, malFacturado y cantidad son independientes: se puede mandar sólo
+// uno (ej. tipear la cantidad sin haber marcado todavía el estado). El front
+// (page.tsx) trata las 3 marcas (si/no/mal facturado) como excluyentes y
+// siempre manda existencia+malFacturado juntos al marcar una de ellas:
+//   "si"  → { existencia: true,  malFacturado: false }
+//   "no"  → { existencia: false, malFacturado: false }
+//   "mal" → { existencia: null,  malFacturado: true  }
+// Por eso alcanza con "si la clave vino en el body, pisar esa columna" — sin
+// lógica de exclusión mutua acá.
 export async function POST(req: NextRequest) {
   try {
     const b = await req.json();
     const fecha = new Date(b.fecha);
-    const tieneExistencia = typeof b.existencia === "boolean";
+    const tieneExistencia =
+      typeof b.existencia === "boolean" || b.existencia === null;
+    const tieneMalFacturado = typeof b.malFacturado === "boolean";
     const tieneCantidad = b.cantidad !== undefined;
     const row = await prisma.faltante_existencia.upsert({
       where: {
@@ -46,6 +57,7 @@ export async function POST(req: NextRequest) {
       },
       update: {
         ...(tieneExistencia ? { existencia: b.existencia } : {}),
+        ...(tieneMalFacturado ? { malFacturado: b.malFacturado } : {}),
         ...(tieneCantidad
           ? { cantidad: b.cantidad === null ? null : Number(b.cantidad) }
           : {}),
@@ -57,6 +69,7 @@ export async function POST(req: NextRequest) {
         nroRengOrigen: b.nroRengOrigen,
         codArticulo: String(b.codArticulo ?? ""),
         existencia: tieneExistencia ? b.existencia : null,
+        malFacturado: tieneMalFacturado ? b.malFacturado : null,
         cantidad: tieneCantidad
           ? b.cantidad === null
             ? null

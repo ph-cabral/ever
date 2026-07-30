@@ -43,6 +43,7 @@ type Row = {
   employee_name: string | null;
   departamento: string | null;
   sector: string | null;
+  lugar: string | null;
   fecha: string;
   check_in: string | null;
   check_out: string | null;
@@ -78,6 +79,7 @@ const ESTADOS = [
   "Vacaciones",
   "Ausente",
   "Normal",
+  "Presente",
   "Revisar",
   "Feriado",
 ];
@@ -130,15 +132,29 @@ const toHHMM = (iso: string) => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
-// Estado calculado por defecto (uno de: Normal | Ausente | Revisar | Feriado).
-// Si el día está marcado como feriado (botón "Feriados") y no hay fichaje,
-// no cuenta como falta: todos los empleados faltarían igual ese día.
-const calcEstado = (r: Row): "Normal" | "Ausente" | "Revisar" | "Feriado" => {
+// Estado calculado por defecto (uno de: Normal | Ausente | Revisar | Presente
+// | Feriado). Si el día está marcado como feriado (botón "Feriados") y no hay
+// fichaje, no cuenta como falta: todos los empleados faltarían igual ese día.
+// Con 1 solo fichaje (sin egreso): si es el día de hoy todavía puede estar
+// trabajando, así que se muestra "Presente"; si es de un día anterior, se
+// mantiene "Revisar" (pedido de Pablo 2026-07-29).
+const calcEstado = (
+  r: Row,
+): "Normal" | "Ausente" | "Revisar" | "Presente" | "Feriado" => {
   if (!r.check_in) return r.feriado ? "Feriado" : "Ausente";
-  if (!r.check_out) return "Revisar";
+  if (!r.check_out) return r.fecha === todayLocal() ? "Presente" : "Revisar";
   if ((r.minutos ?? 0) < 60) return "Revisar";
   return "Normal";
 };
+
+// Abreviatura del día de semana, para identificar sábados/domingos de un
+// vistazo en la columna Fecha (pedido de Pablo 2026-07-29, junto con la
+// columna "Extra").
+const DOW_SHORT = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+const dowShort = (fecha: string) =>
+  DOW_SHORT[new Date(`${fecha}T00:00:00`).getDay()];
+const isSaturday = (fecha: string) =>
+  new Date(`${fecha}T00:00:00`).getDay() === 6;
 
 const AREA_TONES = [
   "bg-sky-100 text-sky-800 border-sky-200",
@@ -156,6 +172,7 @@ const estadoTone = (s: string) => {
     return "bg-emerald-100 text-emerald-800 border-emerald-200";
   if (s === "Ausente") return "bg-zinc-100 text-zinc-700 border-zinc-200";
   if (s === "Revisar") return "bg-amber-100 text-amber-800 border-amber-200";
+  if (s === "Presente") return "bg-blue-100 text-blue-800 border-blue-200";
   if (s === "Feriado") return "bg-indigo-100 text-indigo-800 border-indigo-200";
   return "bg-sky-100 text-sky-800 border-sky-200"; // justificaciones
 };
@@ -723,6 +740,12 @@ const AsistenciaRow = memo(function AsistenciaRow({
   const netMin = Math.max(0, (row.minutos ?? 0) - horasNov * 60);
   const tope = resolveTope(row);
   const rrhhMin = Math.min(netMin, tope);
+  // Extra = trabajado por encima del tope del día. En sábado sin horario
+  // asignado o en feriado, el tope resuelve a 0 (ver buildTopeResolver), así
+  // que todo lo trabajado ese día cae acá entero — es la "marca" de quién
+  // trabajó un día sin tenerlo asignado. Pedido de Pablo, 2026-07-29.
+  const extraMin = Math.max(0, netMin - tope);
+  const diaLibreTrabajado = tope === 0 && netMin > 0;
   return (
     <TableRow>
       <TableCell>
@@ -733,7 +756,19 @@ const AsistenciaRow = memo(function AsistenciaRow({
           {row.employee_name ?? `#${row.employee_no}`}
         </Link>
       </TableCell>
-      <TableCell>{row.fecha}</TableCell>
+      <TableCell>
+        {row.fecha}{" "}
+        <span
+          className={cn(
+            "text-xs",
+            isSaturday(row.fecha)
+              ? "font-medium text-orange-600"
+              : "text-muted-foreground",
+          )}
+        >
+          ({dowShort(row.fecha)})
+        </span>
+      </TableCell>
       <TableCell>{row.devices ?? "—"}</TableCell>
       <TableCell>
         <div className="flex items-center">
@@ -767,6 +802,30 @@ const AsistenciaRow = memo(function AsistenciaRow({
       </TableCell>
       <TableCell title={`Neto ${fmtHHMM(netMin)} · tope ${fmtHHMM(tope)}`}>
         {fmtHorasRRHH(rrhhMin)}
+      </TableCell>
+      <TableCell
+        title={
+          diaLibreTrabajado
+            ? `Trabajó ${fmtHHMM(netMin)} sin tener este día asignado (tope 0)`
+            : extraMin > 0
+              ? `Trabajado ${fmtHHMM(netMin)} · tope ${fmtHHMM(tope)}`
+              : undefined
+        }
+      >
+        {extraMin > 0 ? (
+          <span
+            className={cn(
+              "inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium",
+              diaLibreTrabajado
+                ? "bg-orange-100 text-orange-800 border-orange-200"
+                : "bg-blue-100 text-blue-800 border-blue-200",
+            )}
+          >
+            +{fmtHHMM(extraMin)}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
       </TableCell>
       <TableCell>
         <FichajesCell
@@ -984,12 +1043,15 @@ export default function AsistenciaPage() {
     [rows],
   );
 
+  // Widget "presentes": agrupa por lugar (Oficina/Depósito/Fábrica/etc.), no por
+  // área — pedido de Pablo 2026-07-30. Mientras no se le asigne lugar a un legajo
+  // desde /rrhh/legajos, cae en el balde "Sin lugar".
   const empleadosPorArea = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of rows) {
       if (!r.check_in || r.check_out) continue; // presentes = marcados sin egreso
-      const a = (r.departamento ?? "").trim() || "Sin área";
-      if (a.toLowerCase() === "locales") continue; // no cuenta en este widget
+      if ((r.departamento ?? "").trim().toLowerCase() === "locales") continue; // no cuenta en este widget
+      const a = (r.lugar ?? "").trim() || "Sin lugar";
       m.set(a, (m.get(a) ?? 0) + 1);
     }
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
@@ -1129,6 +1191,9 @@ export default function AsistenciaPage() {
               <TableHead>Egreso</TableHead>
               <TableHead>En empresa</TableHead>
               <TableHead>RRHH</TableHead>
+              <TableHead title="Trabajado por encima del tope del día (sábado/feriado sin asignar = todo extra)">
+                Extra
+              </TableHead>
               <TableHead>Fichajes</TableHead>
               <TableHead>Estado / Días</TableHead>
               <TableHead className="text-right">Novedad / Horas</TableHead>
@@ -1138,7 +1203,7 @@ export default function AsistenciaPage() {
             {loading && (
               <TableRow>
                 <TableCell
-                  colSpan={10}
+                  colSpan={11}
                   className="text-center py-8 text-muted-foreground"
                 >
                   Cargando…
@@ -1148,7 +1213,7 @@ export default function AsistenciaPage() {
             {!loading && filtered.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={10}
+                  colSpan={11}
                   className="text-center py-8 text-muted-foreground"
                 >
                   Sin resultados

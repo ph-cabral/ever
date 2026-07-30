@@ -76,33 +76,57 @@ export async function fetchHorarios(): Promise<{
 // asignado al área del empleado. Un área sin asignación usa "Estándar
 // (Lun-Vie)" como fallback. Si todavía no se cargaron tipos (falló el fetch o
 // falta correr el SQL en esta base), cae al topeMin(fecha) fijo de siempre.
+//
+// Feriado (asistencia.feriado / botón "Feriados") siempre pisa el resultado a
+// 0, sin importar el horario_tipo asignado: nadie está programado para
+// trabajar ese día. Esto hace que cualquier hora trabajada un feriado cuente
+// 100% como extra (rrhhMin = min(neto, 0) = 0, extra = neto - 0 = neto) —
+// mismo mecanismo que ya existía para un sábado sin horario asignado (tope_sab
+// = 0 en "Estándar"). Pedido de Pablo, 2026-07-29: marcar quién trabajó un
+// sábado o feriado sin tener ese día asignado, y contarlo como hora extra.
 export function buildTopeResolver(
   tipos: HorarioTipo[],
   asignaciones: HorarioAsignacion[],
 ): (r: ResumenRow) => number {
-  if (!tipos || tipos.length === 0) {
-    return (r) => topeMin(r.fecha);
-  }
-  const porId = new Map(tipos.map((t) => [t.id, t]));
-  const porArea = new Map(asignaciones.map((a) => [a.departamento, a.horario_tipo_id]));
-  const estandar = tipos.find((t) => t.nombre === "Estándar (Lun-Vie)") ?? tipos[0];
+  const base: (r: ResumenRow) => number =
+    !tipos || tipos.length === 0
+      ? (r) => topeMin(r.fecha)
+      : (() => {
+          const porId = new Map(tipos.map((t) => [t.id, t]));
+          const porArea = new Map(
+            asignaciones.map((a) => [a.departamento, a.horario_tipo_id]),
+          );
+          const estandar =
+            tipos.find((t) => t.nombre === "Estándar (Lun-Vie)") ?? tipos[0];
+          return (r: ResumenRow) => {
+            const dep = (r.departamento ?? "").trim();
+            const tipoId = porArea.get(dep);
+            const tipo = (tipoId != null ? porId.get(tipoId) : undefined) ?? estandar;
+            const dow = new Date(`${r.fecha}T00:00:00`).getDay(); // 0 Dom .. 6 Sab
+            return tipo[DOW_TOPE_FIELDS[dow]] as number;
+          };
+        })();
 
-  return (r) => {
-    const dep = (r.departamento ?? "").trim();
-    const tipoId = porArea.get(dep);
-    const tipo = (tipoId != null ? porId.get(tipoId) : undefined) ?? estandar;
-    const dow = new Date(`${r.fecha}T00:00:00`).getDay(); // 0 Dom .. 6 Sab
-    return tipo[DOW_TOPE_FIELDS[dow]] as number;
-  };
+  return (r) => (r.feriado ? 0 : base(r));
 }
+
+const todayLocal = (): string => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
 
 // Estado auto cuando no hay uno guardado en BD. Si el día es feriado (botón
 // "Feriados" en /rrhh/asistencia) y no hay fichaje, no cuenta como falta.
+// Con 1 solo fichaje (sin egreso): "Presente" si es hoy (puede seguir
+// trabajando), "Revisar" si es un día anterior (pedido de Pablo 2026-07-29).
 export const calcEstado = (
   r: ResumenRow,
-): "Normal" | "Ausente" | "Revisar" | "Feriado" => {
+): "Normal" | "Ausente" | "Revisar" | "Presente" | "Feriado" => {
   if (!r.check_in) return r.feriado ? "Feriado" : "Ausente";
-  if (!r.check_out) return "Revisar";
+  if (!r.check_out) return r.fecha === todayLocal() ? "Presente" : "Revisar";
   if ((r.minutos ?? 0) < 60) return "Revisar";
   return "Normal";
 };
@@ -119,12 +143,21 @@ export const netMin = (r: ResumenRow): number =>
 export const rrhhMin = (r: ResumenRow, tope?: number): number =>
   Math.min(netMin(r), tope ?? topeMin(r.fecha));
 
+// Minutos extra = lo trabajado por encima del tope del día. En un día sin
+// tope asignado (sábado sin horario asignado, o feriado — ver
+// buildTopeResolver) el tope es 0, así que todo lo trabajado ese día cae acá
+// entero. Mismo criterio que `ex` en computeIndicadores, expuesto para poder
+// mostrarlo por fila (ej. columna "Extra" en /rrhh/asistencia).
+export const extraMin = (r: ResumenRow, tope?: number): number =>
+  Math.max(0, netMin(r) - (tope ?? topeMin(r.fecha)));
+
 // Estados que NO cuentan como ausencia (ajustá esta lista si querés incluir
 // "Ausente" como injustificada en el % de ausentismo).
 export const ESTADOS_NO_AUSENCIA = [
   "Normal",
   "Ausente",
   "Revisar",
+  "Presente",
   "Feriado",
   "Gira comercial",
   "Dia Expo",
