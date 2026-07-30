@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
 import { InicioButton } from "@/components/ui/InicioButton";
+import { DateRangeField } from "@/components/ui/date-range-field";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/faltantes — faltantes "sin existencia" por (artículo, día).
@@ -859,20 +860,14 @@ export default function ComprasFaltantesPage() {
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <div className="flex items-center gap-2 mr-2">
             <CalendarRange size={15} className="text-zinc-500" />
-            <input
-              type="date"
-              value={desde}
-              max={hasta}
-              onChange={(e) => setDesde(e.target.value)}
-              className="bg-[#1A1A1A] border border-zinc-700 rounded-md px-2 py-1.5 text-xs text-zinc-200 focus:border-yellow-400 outline-none"
-            />
-            <span className="text-zinc-600 text-xs">a</span>
-            <input
-              type="date"
-              value={hasta}
-              min={desde}
-              onChange={(e) => setHasta(e.target.value)}
-              className="bg-[#1A1A1A] border border-zinc-700 rounded-md px-2 py-1.5 text-xs text-zinc-200 focus:border-yellow-400 outline-none"
+            <DateRangeField
+              desde={desde}
+              hasta={hasta}
+              onChange={(d, h) => {
+                setDesde(d);
+                setHasta(h);
+              }}
+              className="text-xs h-7"
             />
             {(desde !== DESDE_DEFAULT || hasta !== todayISO()) && (
               <button

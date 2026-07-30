@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { ChartComboBarLine, C } from "../components/ui";
 import { InicioButton } from "@/components/ui/InicioButton";
+import { DateRangeField } from "@/components/ui/date-range-field";
 
 const REFRESH_MS = 60_000;
 
@@ -286,27 +287,13 @@ export default function DepositoWmsPage() {
           </span>
         </div>
         <div className="flex items-center gap-2 md:gap-3 text-sm flex-wrap">
-          <label className="flex items-center gap-1.5 text-zinc-500">
-            Desde
-            <input
-              type="date"
-              value={desde}
-              max={hasta || hoy}
-              onChange={(e) => setRango(e.target.value, hasta || e.target.value)}
-              className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none"
-            />
-          </label>
-          <label className="flex items-center gap-1.5 text-zinc-500">
-            Hasta
-            <input
-              type="date"
-              value={hasta}
-              max={hoy}
-              min={desde || undefined}
-              onChange={(e) => setRango(desde || e.target.value, e.target.value)}
-              className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none"
-            />
-          </label>
+          <DateRangeField
+            desde={desde}
+            hasta={hasta}
+            max={hoy}
+            onChange={(d, h) => setRango(d, h)}
+            align="end"
+          />
           <button
             onClick={() => setRango(hoy, hoy)}
             className="px-2.5 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 transition-colors"

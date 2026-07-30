@@ -12,8 +12,11 @@ export interface FilaHistorico {
   ubicacion: string;
   cliente: string;
   vendedor: string;
+  proveedor: string;
   cantidad: number | null;
   cantPedida: number | null;
+  cantCumplida: number | null;
+  diferencia: number | null;
   importe: number;
   existencia: boolean | null;
   malFacturado: boolean | null;
@@ -43,11 +46,14 @@ function fila(r: FilaHistorico) {
     Pedido: r.nroPedOrigen,
     "Código": r.codArticulo,
     "Artículo": r.nombre,
+    Proveedor: r.proveedor,
     Ubicación: r.ubicacion,
     Cliente: r.cliente,
     Vendedor: r.vendedor,
-    "Cant. marcada": r.cantidad ?? "",
+    "Cant. faltante": r.diferencia ?? "", // pedida - cumplida (lo que se marcó sin existencia)
     "Cant. pedida": r.cantPedida ?? "",
+    "Cant. cumplida": r.cantCumplida ?? "",
+    "Cant. marcada a mano": r.cantidad ?? "",
     Importe: r.importe,
   };
 }

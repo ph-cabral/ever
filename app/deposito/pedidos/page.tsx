@@ -13,6 +13,7 @@ import {
   fmtNum, fmtMes, C,
 } from "../components/ui";
 import { InicioButton } from "@/components/ui/InicioButton";
+import { DateRangeField } from "@/components/ui/date-range-field";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Pedidos preparados — REAL (WMS Picking) vs Ingresados (pedidos registrados).
@@ -331,16 +332,15 @@ export default function PedidosPreparadosPage() {
           <PageTitle title="Pedidos preparados"
             sub="Ingresados vs preparados (Picking) y productividad por preparador · Depósito Central" />
           <div className="flex items-center gap-2 flex-wrap mt-1 text-sm">
-            <label className="flex items-center gap-1.5 text-zinc-400">
-              Desde
-              <input type="date" value={desde} max={hasta || undefined} onChange={(e) => setDesde(e.target.value)}
-                className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer" />
-            </label>
-            <label className="flex items-center gap-1.5 text-zinc-400">
-              Hasta
-              <input type="date" value={hasta} min={desde || undefined} onChange={(e) => setHasta(e.target.value)}
-                className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer" />
-            </label>
+            <DateRangeField
+              desde={desde}
+              hasta={hasta}
+              onChange={(d, h) => {
+                setDesde(d);
+                setHasta(h);
+              }}
+              align="end"
+            />
             <button onClick={reload} title="Refrescar" disabled={loading}
               className="text-zinc-400 hover:text-yellow-400 transition-colors p-2 disabled:opacity-40">
               <RefreshCw size={16} className={loading ? "animate-spin" : ""} />

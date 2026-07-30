@@ -14,6 +14,7 @@ import {
   AlertOctagon,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
+import { DateRangeField } from "@/components/ui/date-range-field";
 import { useDepositoData } from "@/lib/deposito/store";
 import { filterDepositoByOperario } from "@/lib/deposito/parseDeposito";
 
@@ -103,29 +104,15 @@ export default function DepositoPage() {
         </div>
 
         <div className={`flex items-center gap-3 text-sm ${tab === "mesa-control" || tab === "errores-mesa" ? "invisible pointer-events-none" : ""}`}>
-          <label className="flex items-center gap-1.5 text-zinc-400">
-            Desde
-            <input
-              type="date"
-              value={desde}
-              max={hasta || undefined}
-              onChange={(e) => {
-                setDesde(e.target.value);
-                setHasta(e.target.value); // al elegir inicio, fin = inicio
-              }}
-              className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer"
-            />
-          </label>
-          <label className="flex items-center gap-1.5 text-zinc-400">
-            Hasta
-            <input
-              type="date"
-              value={hasta}
-              min={desde || undefined}
-              onChange={(e) => setHasta(e.target.value)}
-              className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer"
-            />
-          </label>
+          <DateRangeField
+            desde={desde}
+            hasta={hasta}
+            onChange={(d, h) => {
+              setDesde(d);
+              setHasta(h);
+            }}
+            align="end"
+          />
           <label className="flex items-center gap-1.5 text-zinc-400">
             Operario
             <select

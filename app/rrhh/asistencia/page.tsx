@@ -14,7 +14,7 @@ import Link from "next/link";
 import { Pencil } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { Input } from "@/components/ui/input";
-import { DateField } from "@/components/ui/date-field";
+import { DateRangeField } from "@/components/ui/date-range-field";
 import {
   Select,
   SelectContent,
@@ -914,17 +914,6 @@ export default function AsistenciaPage() {
 
   const [desde, setDesde] = useState(todayLocal());
   const [hasta, setHasta] = useState(todayLocal());
-  const hastaTouched = useRef(false);
-
-  const onDesdeChange = (v: string) => {
-    setDesde(v);
-    if (!hastaTouched.current) setHasta(v);
-    else if (v > hasta) setHasta(v);
-  };
-  const onHastaChange = (v: string) => {
-    hastaTouched.current = true;
-    setHasta(v);
-  };
 
   const keyOf = (r: Row) => `${r.employee_no}|${r.fecha}`;
   const patch = useCallback(
@@ -1176,8 +1165,18 @@ export default function AsistenciaPage() {
             ))}
           </SelectContent>
         </Select>
-        <DateField value={desde} onChange={onDesdeChange} />
-        <DateField value={hasta} min={desde} onChange={onHastaChange} />
+        <div className="md:col-span-2">
+          <DateRangeField
+            desde={desde}
+            hasta={hasta}
+            onChange={(d, h) => {
+              setDesde(d);
+              setHasta(h);
+            }}
+            variant="light"
+            className="w-full"
+          />
+        </div>
       </div>
 
       <div className="rounded-md border">
