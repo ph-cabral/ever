@@ -327,116 +327,6 @@ function Picker({
   );
 }
 
-type Evento = {
-  device: string;
-  employee_no: string;
-  employee_name: string | null;
-  event_time: string;
-  tipo: string | null;
-  major: number | null;
-  minor: number | null;
-};
-
-// Celda con botón que abre modal con todos los fichajes del día.
-function FichajesCell({
-  employee_no,
-  fecha,
-  count,
-}: {
-  employee_no: string;
-  fecha: string;
-  count: number;
-}) {
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [eventos, setEventos] = useState<Evento[]>([]);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const qs = new URLSearchParams({
-        desde: fecha,
-        hasta: fecha,
-        employee_no,
-      });
-      const r = await fetch(`/api/rrhh/asistencia/eventos?${qs}`);
-      setEventos(r.ok ? await r.json() : []);
-    } finally {
-      setLoading(false);
-    }
-  }, [employee_no, fecha]);
-
-  const openModal = () => {
-    setOpen(true);
-    load();
-  };
-
-  return (
-    <>
-      <button
-        type="button"
-        disabled={count === 0}
-        onClick={openModal}
-        className={cn(
-          "inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium",
-          count > 0
-            ? "bg-sky-100 text-sky-800 border-sky-200 hover:opacity-90"
-            : "bg-muted text-muted-foreground border-transparent cursor-default",
-        )}
-      >
-        {count} {count === 1 ? "fichaje" : "fichajes"}
-      </button>
-      {open &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4"
-            onClick={() => setOpen(false)}
-          >
-            <div
-              className="max-h-[80vh] w-full max-w-md overflow-auto rounded-lg border bg-popover p-4 shadow-lg"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-medium">Fichajes · {fecha}</h2>
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  ✕
-                </button>
-              </div>
-              {loading ? (
-                <p className="py-6 text-center text-sm text-muted-foreground">
-                  Cargando…
-                </p>
-              ) : eventos.length === 0 ? (
-                <p className="py-6 text-center text-sm text-muted-foreground">
-                  Sin fichajes
-                </p>
-              ) : (
-                <ul className="divide-y">
-                  {eventos.map((ev, i) => (
-                    <li
-                      key={`${ev.event_time}-${i}`}
-                      className="flex items-center justify-between py-2 text-sm"
-                    >
-                      <span className="font-mono">
-                        {fmtTime(ev.event_time)}
-                      </span>
-                      <span className="text-muted-foreground">{ev.device}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>,
-          document.body,
-        )}
-    </>
-  );
-}
-
 // Editor manual de Ingreso/Egreso — para el caso de un fichaje incompleto
 // (entró y no marcó salida, o hay una sola marca a la tarde y falta la de
 // la mañana). Sólo aparece cuando falta alguno de los dos lados; permite
@@ -769,7 +659,6 @@ const AsistenciaRow = memo(function AsistenciaRow({
           ({dowShort(row.fecha)})
         </span>
       </TableCell>
-      <TableCell>{row.devices ?? "—"}</TableCell>
       <TableCell>
         <div className="flex items-center">
           <span className={row.ajustado ? "italic text-amber-700" : undefined}>
@@ -826,13 +715,6 @@ const AsistenciaRow = memo(function AsistenciaRow({
         ) : (
           <span className="text-muted-foreground">—</span>
         )}
-      </TableCell>
-      <TableCell>
-        <FichajesCell
-          employee_no={row.employee_no}
-          fecha={row.fecha}
-          count={row.eventos_dia ?? 0}
-        />
       </TableCell>
       <TableCell>
         <Picker
@@ -1185,7 +1067,6 @@ export default function AsistenciaPage() {
             <TableRow>
               <TableHead>Empleado</TableHead>
               <TableHead>Fecha</TableHead>
-              {/* <TableHead>Reloj</TableHead> */}
               <TableHead>Ingreso</TableHead>
               <TableHead>Egreso</TableHead>
               <TableHead>En empresa</TableHead>
@@ -1193,7 +1074,6 @@ export default function AsistenciaPage() {
               <TableHead title="Trabajado por encima del tope del día (sábado/feriado sin asignar = todo extra)">
                 Extra
               </TableHead>
-              <TableHead>Fichajes</TableHead>
               <TableHead>Estado / Días</TableHead>
               <TableHead className="text-right">Novedad / Horas</TableHead>
             </TableRow>
@@ -1202,7 +1082,7 @@ export default function AsistenciaPage() {
             {loading && (
               <TableRow>
                 <TableCell
-                  colSpan={11}
+                  colSpan={9}
                   className="text-center py-8 text-muted-foreground"
                 >
                   Cargando…
@@ -1212,7 +1092,7 @@ export default function AsistenciaPage() {
             {!loading && filtered.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={11}
+                  colSpan={9}
                   className="text-center py-8 text-muted-foreground"
                 >
                   Sin resultados

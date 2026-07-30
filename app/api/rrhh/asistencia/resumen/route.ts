@@ -127,13 +127,39 @@ export async function GET(req: NextRequest) {
         FROM islas
         GROUP BY emp_key, fecha, isla
       ),
+      -- Un día con marcas completas (entrada/salida, con o sin cortes para
+      -- almorzar) siempre tiene una cantidad PAR de marcas. Si un día tiene
+      -- exactamente 3, la del medio es un fichaje espurio (duplicado/error de
+      -- reloj) — si se toma como egreso de un "corte", resta como no
+      -- trabajado un tramo que en realidad sí se trabajó. Se descarta esa
+      -- marca del medio y quedan sólo la 1ra y la última. Pedido de Pablo
+      -- 2026-07-30.
+      marcas_cnt AS (
+        SELECT emp_key, fecha, COUNT(*) AS cnt
+        FROM marcas
+        GROUP BY emp_key, fecha
+      ),
+      marcas_filtradas AS (
+        SELECT m.emp_key, m.fecha, m.mark_time
+        FROM marcas m
+        JOIN marcas_cnt mc ON mc.emp_key = m.emp_key AND mc.fecha = m.fecha
+        WHERE NOT (
+          mc.cnt = 3
+          AND m.mark_time = (
+            SELECT m2.mark_time FROM marcas m2
+            WHERE m2.emp_key = m.emp_key AND m2.fecha = m.fecha
+            ORDER BY m2.mark_time
+            OFFSET 1 LIMIT 1
+          )
+        )
+      ),
       -- Impar = INGRESO, par = EGRESO, por posición dentro del día (no por
       -- major/minor del reloj). Pedido de RRHH 2026-07-28.
       posn AS (
         SELECT emp_key, fecha, mark_time,
                ROW_NUMBER() OVER (PARTITION BY emp_key, fecha ORDER BY mark_time) AS posn,
                LAG(mark_time) OVER (PARTITION BY emp_key, fecha ORDER BY mark_time) AS prev_mark_time
-        FROM marcas
+        FROM marcas_filtradas
       ),
       ev AS (
         SELECT
