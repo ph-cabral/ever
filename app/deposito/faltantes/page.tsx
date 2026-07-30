@@ -21,17 +21,14 @@ import { exportarFaltantesExistencia } from "@/lib/deposito/exportFaltantesExist
 //   Celular : pantalla completa, 1 artículo a la vez (detalles apilados),
 //             Deshacer arriba · En existencia (verde) / Sin existencia (rojo) abajo.
 //   Cada marca se guarda al instante en Postgres (preparado.faltante_existencia).
-//   Exportar Excel (PC, header) = histórico por mes cerrado, no el día en
+//   Exportar Excel (PC, header) = histórico del mes elegido, no el día en
 //   pantalla — pega a GET /api/deposito/faltantes/historico?mes=YYYY-MM.
 // ──────────────────────────────────────────────────────────────────────────────
 
-// Mes cerrado anterior al actual ("YYYY-MM") — default del selector de
-// exportación: el mes en curso todavía no cerró.
-function mesCerradoAnterior(): string {
-  const d = new Date();
-  d.setUTCDate(1);
-  d.setUTCMonth(d.getUTCMonth() - 1);
-  return d.toISOString().slice(0, 7);
+// Mes actual ("YYYY-MM") — default del selector de exportación (se puede
+// elegir cualquier otro mes, ej. julio, desde el mismo input).
+function mesActual(): string {
+  return new Date().toISOString().slice(0, 7);
 }
 
 interface Item {
@@ -90,7 +87,7 @@ export default function FaltantesPage() {
   const [ubicArt, setUbicArt] = useState<string | null>(null); // artículo del modal de ubicaciones
   const [exitDir, setExitDir] = useState<"left" | "right" | "up" | null>(null); // tarjeta móvil saliendo
   const [transitioning, setTransitioning] = useState(false);
-  const [mesExport, setMesExport] = useState(mesCerradoAnterior);
+  const [mesExport, setMesExport] = useState(mesActual);
   const [exportLoading, setExportLoading] = useState(false);
 
   const load = useCallback(async () => {
