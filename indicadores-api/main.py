@@ -22,6 +22,9 @@ from ventas import fetch_pedidos_mes
 from finanza import (
     fetch_facturacion_dia,
     fetch_descubrir,
+    fetch_descubrir_presupuestos,
+    fetch_verificar_presupuestos,
+    fetch_pedidos_sin_facturar,
     insert_ajuste_manual,
     fetch_ajuste_manual_list,
 )
@@ -515,6 +518,50 @@ def finanza_ajuste_listar(
         return fetch_ajuste_manual_list(desde, hasta)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Error: {str(e)}")
+
+# ── Finanza: presupuestos "fantasma" (caso Todo Goma, 2026-07-31) ───────────
+@app.get("/finanza/descubrir-presupuestos")
+def finanza_descubrir_presupuestos():
+    """Pre_PresupCab no tuvo el comprobante 41879 (caso Todo Goma) — busca
+    dónde vive realmente la pantalla 'COMPROBANTES (Facturas / Créditos
+    Devolución)' cuando Código Comprobante = 11 (PRESUP.)."""
+    try:
+        return fetch_descubrir_presupuestos()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+
+class VerificarPresupuestoIn(BaseModel):
+    comprobante: str | None = None
+    cod_cliente: int
+    fecha: str          # 'YYYY-MM-DD'
+    total: float
+
+
+@app.post("/finanza/verificar-presupuestos")
+def finanza_verificar_presupuestos(items: list[VerificarPresupuestoIn]):
+    """Chequea una lista de presupuestos (cliente+fecha+total) contra
+    Ven_CompCabecera y VenFer_PedidoCabecera — mismo método que confirmó el
+    caso Todo Goma (41879) como huérfano. No busca por número impreso (no
+    correlaciona con ninguna columna conocida). Los que den
+    huerfano_probable=true son candidatos a cargar en POST /finanza/ajuste."""
+    try:
+        return fetch_verificar_presupuestos([i.dict() for i in items])
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+
+@app.get("/finanza/pedidos-sin-facturar")
+def finanza_pedidos_sin_facturar(fecha: str = Query(...)):
+    """100% automático (no requiere pegar nada a mano): pedidos de `fecha`
+    que WMS ya despachó (Picking ejecutado) pero que no tienen contraparte en
+    Ven_CompCabecera — venta real confirmada por depósito, factura atrasada.
+    Distinto de /finanza/verificar-presupuestos (ahí no hay forma de saber si
+    era plata real o una cotización que no se cerró)."""
+    try:
+        return fetch_pedidos_sin_facturar(fecha)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
 # ── Clientes: lookup por número desde Magnus (para /manguera/corte) ───────────
 @app.get("/clientes/{numero}")
