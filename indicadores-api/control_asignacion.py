@@ -4,8 +4,9 @@ Cola de asignación de pedidos — widget de Mesa de Control (a pedido de Pablo,
 botón "Asignar": en vez de tipear el pedido a mano, el operario reclama el
 próximo pedido de una cola armada con el cruce:
 
-    Abierto en Magnus (VenFer_PedidoCabecera.EstadoPedido -> Pedido_Estados
-    Ped_EstadoDescripcion = 'Abierto')
+    Abierto en Magnus (EVERWEAR.dbo.TMP_TiempoDePedidos.Estado = 'Abierto',
+    cruzado por NroMovVenta contra VenFer_PedidoCabecera solo para traer
+    FechaPedido/TipoPedido/Cliente — ver FIX 2026-07-31 más abajo)
         ∩
     Cumplido en WMS (OT de Picking, OTEstado=2)
 
@@ -59,6 +60,20 @@ MAGNUS_ABIERTOS_LIMIT = 3000
 
 
 # ── Magnus: TODOS los pedidos Abiertos (fecha/tipo/cliente) — universo base ──
+# FIX 2026-07-31 (a pedido de Pablo, tras diagnóstico en vivo): la versión
+# original filtraba "Abierto" vía VenFer_PedidoCabecera.EstadoPedido -> JOIN
+# Pedido_Estados.Ped_EstadoDescripcion. Esa fuente ya se había detectado rota
+# el 2026-07-23 en deposito.py (fetch_pedidos_hora / "Abiertos ahora": ver
+# comentario ahí, "subcontaba"/quedaba plana) y se reemplazó en TODO el resto
+# del proyecto por EVERWEAR.dbo.TMP_TiempoDePedidos.Estado = 'Abierto' (la
+# misma tabla que llena SP_TiempoPedidos_Cargar y que ya usa la pestaña
+# "Tiempo de Pedidos" + fetch_abiertos_ahora). Este módulo, escrito 6 días
+# después, reintrodujo el patrón viejo sin saberlo — en vivo daba
+# TOTAL ABIERTOS: 0 (el join contra Pedido_Estados no matcheaba ninguna fila),
+# así que la cola de asignación nunca tenía candidatos. Se corrige acá al
+# mismo criterio ya probado (TMP_TiempoDePedidos), manteniendo
+# FechaPedido/TipoPedido/Cliente desde Cabecera para no tocar el resto del
+# módulo.
 SQL_MAGNUS_ABIERTOS_TODOS = """
 SELECT TOP ({limit})
     cab.NroMovVenta,
@@ -66,10 +81,10 @@ SELECT TOP ({limit})
     cc.DetalleCorto     AS TipoPedido,
     cli.Cliente_Nombre  AS Cliente
 FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
-INNER JOIN MAGNUS_SITD.dbo.Pedido_Estados    est ON cab.EstadoPedido = est.Ped_Estado
+INNER JOIN EVERWEAR.dbo.TMP_TiempoDePedidos   t   ON t.NroMovVenta   = cab.NroMovVenta
 LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo   = cc.CompCodigo
 LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente   = cli.CodCliente
-WHERE est.Ped_EstadoDescripcion = 'Abierto'
+WHERE LTRIM(RTRIM(t.Estado)) = 'Abierto'
 ORDER BY cab.NroMovVenta ASC
 """
 
