@@ -51,6 +51,15 @@ nroPedido, misma fila). Solo cuando ese pedido está Cerrado (FechaCierre > 0
 en VenFer_PedidoCabecera, ver _fetch_pedido_cerrado) el próximo click sí
 reclama uno nuevo de la cola. Ver _fetch_asignacion_activa +
 _fetch_pedido_cerrado, usados al principio de asignar_siguiente.
+
+CODCLIENTE (a pedido de Pablo, mismo día): el cuadro grande del widget ahora
+también muestra el número de cliente, no solo el nombre — se suma
+`CodCliente` (VenFer_PedidoCabecera, mismo campo del JOIN contra
+MAGNUS_SITD.dbo.Clientes que ya se usaba para el nombre) en todo el camino:
+SQL_MAGNUS_ABIERTOS_TODOS -> fetch_pedidos_cumplidos_abiertos -> refrescar_cola
+-> columna "codCliente" en deposito.control_asignacion (ALTER idempotente en
+ever/sql/deposito_control_asignacion.sql, correr antes de deployar) ->
+_fetch_asignacion_activa / asignar_siguiente. Sin verificar en vivo.
 """
 from datetime import datetime, timedelta
 
@@ -87,7 +96,8 @@ SELECT TOP ({limit})
     cab.NroMovVenta,
     cab.FechaPedido,
     cc.DetalleCorto     AS TipoPedido,
-    cli.Cliente_Nombre  AS Cliente
+    cli.Cliente_Nombre  AS Cliente,
+    cab.CodCliente      AS CodCliente
 FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
 INNER JOIN EVERWEAR.dbo.TMP_TiempoDePedidos   t   ON t.NroMovVenta   = cab.NroMovVenta
 LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo   = cc.CompCodigo
@@ -129,7 +139,7 @@ def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cur.execute(SQL_MAGNUS_ABIERTOS_TODOS.format(limit=limit))
-        for nro, fecha_int, tipo_pedido, cliente in cur.fetchall():
+        for nro, fecha_int, tipo_pedido, cliente, cod_cliente in cur.fetchall():
             if nro is None:
                 continue
             # BASE_DATE ya es un datetime.date (ver errores_mesa.py) — sumarle
@@ -142,6 +152,9 @@ def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list
                 "fecha": fecha,
                 "tipoPedido": (tipo_pedido or "").strip() or None,
                 "cliente": (cliente or "").strip() or None,
+                # Número de cliente (Magnus CodCliente) — a pedido de Pablo
+                # 2026-07-31, el widget lo muestra junto al nombre.
+                "codCliente": int(cod_cliente) if cod_cliente is not None else None,
             }
     finally:
         conn.close()
@@ -199,6 +212,7 @@ def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list
             "fecha": ab["fecha"],
             "tipoPedido": ab["tipoPedido"],
             "cliente": ab["cliente"],
+            "codCliente": ab["codCliente"],
             "ubicacion": w["ubicacion"],
             "ot": w["ot"],
             "nroArmador": w["nroArmador"],
@@ -223,13 +237,13 @@ def refrescar_cola(limit: int = MAGNUS_ABIERTOS_LIMIT) -> int:
             cur.execute(
                 """
                 INSERT INTO deposito.control_asignacion
-                    ("nroPedido", fecha, "tipoPedido", cliente, ubicacion, ot,
+                    ("nroPedido", fecha, "tipoPedido", cliente, "codCliente", ubicacion, ot,
                      "nroArmador", "nombreArmador")
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT ("nroPedido") DO NOTHING
                 """,
                 (
-                    c["nroPedido"], c["fecha"], c["tipoPedido"], c["cliente"],
+                    c["nroPedido"], c["fecha"], c["tipoPedido"], c["cliente"], c["codCliente"],
                     c["ubicacion"], c["ot"], c["nroArmador"], c["nombreArmador"],
                 ),
             )
@@ -280,7 +294,7 @@ def _fetch_asignacion_activa(nro_operario: int) -> dict | None:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT id, "nroPedido", fecha, "tipoPedido", cliente, ubicacion,
+            SELECT id, "nroPedido", fecha, "tipoPedido", cliente, "codCliente", ubicacion,
                    ot, "nroArmador", "nombreArmador", "asignadoA", "asignadoEn"
             FROM deposito.control_asignacion
             WHERE "nroOperarioAsignado" = %s AND "asignadoEn" IS NOT NULL
@@ -295,7 +309,7 @@ def _fetch_asignacion_activa(nro_operario: int) -> dict | None:
     if not row:
         return None
     cols = [
-        "id", "nroPedido", "fecha", "tipoPedido", "cliente", "ubicacion", "ot",
+        "id", "nroPedido", "fecha", "tipoPedido", "cliente", "codCliente", "ubicacion", "ot",
         "nroArmador", "nombreArmador", "asignadoA", "asignadoEn",
     ]
     out = dict(zip(cols, row))
@@ -350,7 +364,7 @@ def asignar_siguiente(nro_operario: int) -> dict:
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
             )
-            RETURNING id, "nroPedido", fecha, "tipoPedido", cliente, ubicacion,
+            RETURNING id, "nroPedido", fecha, "tipoPedido", cliente, "codCliente", ubicacion,
                       ot, "nroArmador", "nombreArmador", "asignadoA", "asignadoEn"
             """,
             (nombre, nro_operario),
@@ -364,7 +378,7 @@ def asignar_siguiente(nro_operario: int) -> dict:
         raise ValueError("No hay pedidos disponibles para asignar")
 
     cols = [
-        "id", "nroPedido", "fecha", "tipoPedido", "cliente", "ubicacion", "ot",
+        "id", "nroPedido", "fecha", "tipoPedido", "cliente", "codCliente", "ubicacion", "ot",
         "nroArmador", "nombreArmador", "asignadoA", "asignadoEn",
     ]
     out = dict(zip(cols, row))
@@ -373,6 +387,103 @@ def asignar_siguiente(nro_operario: int) -> dict:
     if out.get("asignadoEn") is not None:
         out["asignadoEn"] = out["asignadoEn"].isoformat()
     return out
+
+
+# ── Historial: "Pedidos asignados" (vista /deposito/deposito → Mesas) ────────
+# A pedido de Pablo (2026-07-31, mismo día que se armó la cola): el "próximo
+# paso" anotado en deposito_control_asignacion.sql ("listar qué se le asignó
+# a X controlador") — vista de detalle, 1 fila por pedido YA reclamado
+# ("asignadoEn" IS NOT NULL), para ver qué hizo cada operario.
+#
+# "Fecha"/"Hora" salen de "asignadoEn" (el momento real en que ESE operario
+# reclamó el pedido), no de `fecha` (FechaPedido de Magnus, que puede ser
+# muy anterior si el pedido esperó en la cola) — así son comparables contra
+# "horaCierre" (mismo reloj).
+#
+# "horaCierre": no hay un cierre explícito por pedido (el widget no tiene un
+# botón "Terminé"), así que se aproxima con la PRÓXIMA vez que ESE MISMO
+# operario reclamó otro pedido (LEAD("asignadoEn") particionado por
+# "nroOperarioAsignado", ordenado por "asignadoEn"). Es un proxy: si el
+# operario todavía no reclamó uno nuevo (última fila de su partición),
+# "horaCierre" viene NULL — se interpreta como "en curso" en la vista, no
+# como dato faltante. Ver "UN PEDIDO POR OPERARIO A LA VEZ" arriba: mientras
+# el pedido activo no cierra en Magnus, un reclamo repetido devuelve LA MISMA
+# fila (no pisa "asignadoEn"), así que esta cuenta no se contamina con
+# reclamos repetidos del mismo pedido.
+#
+# "cantidadItems": no vive en Postgres — se resuelve en un segundo paso contra
+# Magnus (dbo.venfer_pedidoReng, mismo origen que mesa_control.py), COUNT(*)
+# por NroMovVenta, en lote (IN) para toda la lista de pedidos del resultado.
+def fetch_pedidos_asignados(desde: str | None = None, hasta: str | None = None) -> dict:
+    """Historial de pedidos asignados (deposito.control_asignacion), con
+    cantidad de ítems (Magnus) y "horaCierre" (próxima asignación del mismo
+    operario). `desde`/`hasta` = 'YYYY-MM-DD', filtran por la FECHA de
+    "asignadoEn". Sin ninguno de los dos: HOY. Solo lectura."""
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        params: list = []
+        if desde and hasta:
+            cond = '"asignadoEn"::date BETWEEN %s AND %s'
+            params = [desde, hasta]
+        elif desde:
+            cond = '"asignadoEn"::date >= %s'
+            params = [desde]
+        elif hasta:
+            cond = '"asignadoEn"::date <= %s'
+            params = [hasta]
+        else:
+            cond = '"asignadoEn"::date = CURRENT_DATE'
+        cur.execute(
+            f"""
+            SELECT "nroPedido", "codCliente", cliente,
+                   "nroOperarioAsignado", "asignadoA", "asignadoEn",
+                   LEAD("asignadoEn") OVER (
+                       PARTITION BY "nroOperarioAsignado" ORDER BY "asignadoEn"
+                   ) AS "horaCierre"
+            FROM deposito.control_asignacion
+            WHERE "asignadoEn" IS NOT NULL AND {cond}
+            ORDER BY "asignadoEn" DESC
+            """,
+            params,
+        )
+        cols = [c[0] for c in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    for r in rows:
+        if r.get("asignadoEn") is not None:
+            r["asignadoEn"] = r["asignadoEn"].isoformat()
+        if r.get("horaCierre") is not None:
+            r["horaCierre"] = r["horaCierre"].isoformat()
+
+    # Cantidad de ítems (renglones) por pedido — Magnus, en lote.
+    nros = sorted({r["nroPedido"] for r in rows if r.get("nroPedido") is not None})
+    items_por_pedido: dict[int, int] = {}
+    if nros:
+        conn = get_connection("EVERWEAR")
+        try:
+            cur = conn.cursor()
+            cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+            CH = 1000
+            for i in range(0, len(nros), CH):
+                chunk = nros[i : i + CH]
+                ph = ",".join("?" for _ in chunk)
+                cur.execute(
+                    f"SELECT NroMovVenta, COUNT(*) FROM dbo.venfer_pedidoReng "
+                    f"WHERE NroMovVenta IN ({ph}) GROUP BY NroMovVenta",
+                    chunk,
+                )
+                for nro, cnt in cur.fetchall():
+                    items_por_pedido[int(nro)] = int(cnt)
+        finally:
+            conn.close()
+
+    for r in rows:
+        r["cantidadItems"] = items_por_pedido.get(r["nroPedido"], 0)
+
+    return {"pedidos": rows}
 
 
 def fetch_cola_diag(limit: int = 20) -> dict:
