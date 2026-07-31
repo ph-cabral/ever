@@ -17,6 +17,7 @@ GET /finanza/descubrir y ajustar el bloque CONFIG de abajo.
 from datetime import datetime, date
 from decimal import Decimal
 from db import get_connection
+from db_pg import get_pg_connection
 
 BASE_DATE = date(1800, 12, 28)   # Magnus guarda fechas como días desde esta base
 
@@ -145,7 +146,22 @@ def fetch_facturacion_dia(fecha: str | None = None) -> dict:
     neto_con_iva = entra_con_iva - sale_con_iva
     neto_sin_iva = entra_neto - sale_neto
 
-    return {
+    # Ajuste manual (Postgres finanza.ajuste_manual) — ventas reales que no
+    # generaron comprobante en Magnus (ver ever/sql/finanza_ajuste_manual.sql,
+    # caso Todo Goma 30/07/2026). Si Postgres no responde, no rompe la
+    # facturación de Magnus: el ajuste queda en 0 y se avisa en "mensaje".
+    ajuste_neto, ajuste_total, ajuste_error = 0.0, 0.0, None
+    try:
+        ajuste = fetch_ajuste_manual_total(dia)
+        ajuste_neto = ajuste["neto"]
+        ajuste_total = ajuste["total"]
+    except Exception as e:
+        ajuste_error = str(e)
+
+    neto_sin_iva += ajuste_neto
+    neto_con_iva += ajuste_total if ajuste_total else ajuste_neto
+
+    out = {
         "configurado": True,
         "fecha": dia.isoformat(),
         "entra": round(entra_con_iva),
@@ -156,7 +172,115 @@ def fetch_facturacion_dia(fecha: str | None = None) -> dict:
         "iva_rate": IVA_RATE,
         "metodo_neto": metodo,
         "codigos": {"suma": list(COD_SUMA), "resta": list(COD_RESTA)},
+        "ajuste_manual": round(ajuste_neto),
     }
+    if ajuste_error:
+        out["ajuste_manual_error"] = ajuste_error
+    return out
+
+
+# ── 1b) AJUSTE MANUAL (Postgres) — ventas reales sin comprobante en Magnus ───
+def fetch_ajuste_manual_total(dia: date) -> dict:
+    """SUM(neto)/SUM(total) de finanza.ajuste_manual para `dia`. {0,0} si no
+    hay ninguno cargado ese día."""
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COALESCE(SUM(neto), 0), COALESCE(SUM(total), 0) "
+            "FROM finanza.ajuste_manual WHERE fecha = %s",
+            (dia,),
+        )
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    return {"neto": float(row[0] or 0), "total": float(row[1] or 0)}
+
+
+def insert_ajuste_manual(
+    fecha: str,
+    neto: float,
+    iva: float | None = None,
+    total: float | None = None,
+    cod_cliente: int | None = None,
+    cliente_nombre: str | None = None,
+    comprobante: str | None = None,
+    motivo: str | None = None,
+    usuario: str | None = None,
+) -> dict:
+    """Alta de un ajuste manual (venta real sin comprobante en Magnus).
+    `fecha` = 'YYYY-MM-DD'. `neto` es obligatorio (lo que suma el widget);
+    iva/total son opcionales para trazabilidad."""
+    dia = datetime.strptime(fecha, "%Y-%m-%d").date()
+    if neto is None:
+        raise ValueError("Falta 'neto'")
+
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO finanza.ajuste_manual
+                (fecha, neto, iva, total, cod_cliente, cliente_nombre,
+                 comprobante, motivo, usuario)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, created_at
+            """,
+            (dia, neto, iva, total, cod_cliente, cliente_nombre,
+             comprobante, motivo, usuario),
+        )
+        new_id, created_at = cur.fetchone()
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "id": new_id,
+        "fecha": dia.isoformat(),
+        "neto": float(neto),
+        "iva": float(iva) if iva is not None else None,
+        "total": float(total) if total is not None else None,
+        "codCliente": cod_cliente,
+        "clienteNombre": cliente_nombre,
+        "comprobante": comprobante,
+        "motivo": motivo,
+        "usuario": usuario,
+        "createdAt": created_at.isoformat(),
+    }
+
+
+def fetch_ajuste_manual_list(desde: str | None = None, hasta: str | None = None) -> list[dict]:
+    """Lista de finanza.ajuste_manual, filtro opcional por rango de fecha."""
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        where, params = [], []
+        if desde:
+            where.append("fecha >= %s")
+            params.append(desde)
+        if hasta:
+            where.append("fecha <= %s")
+            params.append(hasta)
+        sql = (
+            "SELECT id, fecha, neto, iva, total, cod_cliente, cliente_nombre, "
+            "comprobante, motivo, usuario, created_at FROM finanza.ajuste_manual"
+        )
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY fecha DESC, created_at DESC"
+        cur.execute(sql, params)
+        cols = [c[0] for c in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    for r in rows:
+        r["fecha"] = r["fecha"].isoformat() if r.get("fecha") else None
+        r["created_at"] = r["created_at"].isoformat() if r.get("created_at") else None
+        for campo in ("neto", "iva", "total"):
+            if r.get(campo) is not None:
+                r[campo] = float(r[campo])
+    return rows
 
 
 # ── 2) DESCUBRIMIENTO (para encontrar la tabla "juntos" sin SSMS) ─────────────

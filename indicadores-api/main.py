@@ -19,7 +19,12 @@ from deposito import (
 from compras import fetch_ordenes_pendientes, fetch_ordenes_articulos_rango
 from ingresos import fetch_remitos_ingreso
 from ventas import fetch_pedidos_mes
-from finanza import fetch_facturacion_dia, fetch_descubrir
+from finanza import (
+    fetch_facturacion_dia,
+    fetch_descubrir,
+    insert_ajuste_manual,
+    fetch_ajuste_manual_list,
+)
 from clientes import fetch_cliente
 from mesa_control import (
     fetch_mesa_control, fetch_mesa_control_diag,
@@ -467,6 +472,49 @@ def finanza_descubrir():
         return fetch_descubrir()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+# ── Finanza: ajuste manual (ventas reales sin comprobante en Magnus) ─────────
+# Ver ever/sql/finanza_ajuste_manual.sql — caso real que lo disparó: Todo Goma
+# (CodCliente 5226), presupuesto Ctrl. A 0002-00041879 del 30/07/2026, que no
+# existe en ningún lado de Magnus. fetch_facturacion_dia ya lo suma solo
+# (Postgres finanza.ajuste_manual); estos endpoints son para cargar/listar.
+class AjusteManualIn(BaseModel):
+    fecha: str                        # 'YYYY-MM-DD'
+    neto: float
+    iva: float | None = None
+    total: float | None = None
+    codCliente: int | None = None
+    clienteNombre: str | None = None
+    comprobante: str | None = None
+    motivo: str | None = None
+    usuario: str | None = None
+
+@app.post("/finanza/ajuste")
+def finanza_ajuste_crear(body: AjusteManualIn):
+    """Alta de un ajuste manual — suma a neto_sin_iva/neto_con_iva del día
+    indicado en /finanza/facturacion-dia."""
+    try:
+        return insert_ajuste_manual(
+            body.fecha, body.neto, body.iva, body.total,
+            body.codCliente, body.clienteNombre, body.comprobante,
+            body.motivo, body.usuario,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Error: {str(e)}")
+
+@app.get("/finanza/ajuste")
+def finanza_ajuste_listar(
+    desde: str | None = Query(default=None),
+    hasta: str | None = Query(default=None),
+):
+    """Lista de ajustes manuales cargados (finanza.ajuste_manual), filtro
+    opcional por rango de fecha."""
+    try:
+        return fetch_ajuste_manual_list(desde, hasta)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Error: {str(e)}")
 
 # ── Clientes: lookup por número desde Magnus (para /manguera/corte) ───────────
 @app.get("/clientes/{numero}")
