@@ -1,12 +1,13 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck, CalendarRange, Check,
   ChevronDown, ChevronRight, Flag, RotateCw, ShoppingCart, Undo2, CalendarCheck,
-  Download, Trash2, X, Globe,
+  Download, Trash2, X, Globe, Search, ArrowRight,
 } from "lucide-react";
 import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
+import { exportarFaltantesExistencia } from "@/lib/deposito/exportFaltantesExistencia";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { DateRangeField } from "@/components/ui/date-range-field";
 
@@ -111,6 +112,11 @@ const todayISO = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
+// Mes actual ("YYYY-MM") — default del selector de exportación histórico
+// (con/sin existencia), mismo reporte y mismo endpoint que /deposito/faltantes.
+function mesActual(): string {
+  return new Date().toISOString().slice(0, 7);
+}
 // Default de "desde": ancla del cruce con OC (OC_DESDE_DEFAULT del backend).
 // Con default hoy–hoy la vista quedaba vacía cada mañana: solo miraba la foto
 // de ayer y perdía los buckets/acumulado de los días anteriores.
@@ -516,6 +522,13 @@ export default function ComprasFaltantesPage() {
   const [flipped, setFlipped] = useState(false); // girar la tarjeta → ver extraordinarios
   const [leaving, setLeaving] = useState<Record<string, "left" | "right">>({}); // filas saliendo (animación)
   const [provAbierto, setProvAbierto] = useState<string | null>(null); // acordeón: solo un proveedor abierto a la vez; todos cerrados al entrar
+  const [mesExport, setMesExport] = useState(mesActual); // mes del export histórico (existencia)
+  const [exportHistLoading, setExportHistLoading] = useState(false);
+  const [buscarCod, setBuscarCod] = useState(""); // filtro "buscar por código" (barra de búsqueda)
+  const [matches, setMatches] = useState<{ prov: string; rs: Row[] }[]>([]); // proveedores donde aparece el código buscado
+  const [matchIdx, setMatchIdx] = useState(0);
+  const [buscado, setBuscado] = useState(false); // true tras ejecutar la búsqueda (para distinguir "sin buscar" de "0 resultados")
+  const provRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -757,6 +770,33 @@ export default function ComprasFaltantesPage() {
     });
   }, [flipped, backRows, visibles, desdeResp, hastaResp]);
 
+  // Excel histórico "con/sin existencia" (mismo reporte de /deposito/faltantes,
+  // mismo endpoint GET /api/deposito/faltantes/historico?mes=YYYY-MM) — acá
+  // solo se agrega el botón + selector de mes, la lógica de armado del Excel
+  // es la misma (lib/deposito/exportFaltantesExistencia). Excluye comprobantes
+  // 70/75 (ver comentario en el endpoint).
+  const exportarHistorico = useCallback(async () => {
+    setExportHistLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/deposito/faltantes/historico?mes=${mesExport}`,
+        { cache: "no-store" },
+      );
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      if (!j.rows?.length) {
+        setError(`Sin marcas registradas en ${mesExport}`);
+        return;
+      }
+      exportarFaltantesExistencia(j.rows, mesExport);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al exportar");
+    } finally {
+      setExportHistLoading(false);
+    }
+  }, [mesExport]);
+
   // Grupos por proveedor, cada grupo ordenado por importe y los grupos por importe total.
   const grupos = useMemo(() => {
     const m = new Map<string, Row[]>();
@@ -770,6 +810,44 @@ export default function ComprasFaltantesPage() {
       .map(([prov, rs]) => ({ prov, rs, importe: rs.reduce((s, x) => s + x.importe, 0) }))
       .sort((a, b) => b.importe - a.importe);
   }, [visibles]);
+
+  // Buscar por código: encuentra en qué proveedor(es) aparece y abre el primero
+  // (cierra cualquier otro — mismo acordeón "1 solo abierto a la vez" de
+  // provAbierto). Si aparece en más de un proveedor, el botón "Siguiente"
+  // cicla: cierra el actual y abre el que sigue.
+  const buscarPorCodigo = useCallback(() => {
+    const q = buscarCod.trim().toLowerCase();
+    if (!q) {
+      setMatches([]);
+      setBuscado(false);
+      return;
+    }
+    const found = grupos.filter((g) => g.rs.some((r) => r.CodArticulo.toLowerCase().includes(q)));
+    setMatches(found);
+    setMatchIdx(0);
+    setBuscado(true);
+    setProvAbierto(found.length > 0 ? found[0].prov : null);
+  }, [buscarCod, grupos]);
+
+  const siguienteMatch = useCallback(() => {
+    if (matches.length === 0) return;
+    const next = (matchIdx + 1) % matches.length;
+    setMatchIdx(next);
+    setProvAbierto(matches[next].prov);
+  }, [matches, matchIdx]);
+
+  const limpiarBusqueda = useCallback(() => {
+    setBuscarCod("");
+    setMatches([]);
+    setMatchIdx(0);
+    setBuscado(false);
+  }, []);
+
+  // Al abrir un proveedor (manual o por búsqueda) lo lleva a la vista.
+  useEffect(() => {
+    if (!provAbierto) return;
+    provRefs.current.get(provAbierto)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [provAbierto]);
 
   // faltan/cubierto/descubierto de las filas "vivo" son ACUMULADOS por artículo
   // (crecen día a día, no se resetean). Sumar todas las filas duplicaría el
@@ -882,6 +960,64 @@ export default function ComprasFaltantesPage() {
             )}
           </div>
 
+          <div className="flex items-center gap-1.5">
+            <div className="relative">
+              <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <input
+                type="text"
+                value={buscarCod}
+                onChange={(e) => {
+                  setBuscarCod(e.target.value);
+                  setBuscado(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") buscarPorCodigo();
+                  if (e.key === "Escape") limpiarBusqueda();
+                }}
+                disabled={flipped}
+                placeholder="Buscar código…"
+                title="Buscar por código de artículo — Enter para buscar; abre el proveedor donde aparece"
+                className="bg-zinc-900 border border-zinc-700 rounded-lg pl-7 pr-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-yellow-400 w-36 disabled:opacity-40"
+              />
+            </div>
+            <button
+              onClick={buscarPorCodigo}
+              disabled={flipped || !buscarCod.trim()}
+              title="Buscar"
+              className="btn-anim px-2 py-1.5 rounded-lg border border-zinc-700 text-zinc-400 hover:border-yellow-400 hover:text-yellow-400 disabled:opacity-40"
+            >
+              <Search size={13} />
+            </button>
+            {matches.length > 0 && (
+              <>
+                <span className="text-[11px] text-zinc-500 whitespace-nowrap tabular-nums">
+                  {matchIdx + 1}/{matches.length}
+                </span>
+                {matches.length > 1 && (
+                  <button
+                    onClick={siguienteMatch}
+                    title="Siguiente coincidencia (cierra esta tabla y abre la próxima)"
+                    className="btn-anim flex items-center gap-1 px-2 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 text-xs"
+                  >
+                    Sig. <ArrowRight size={12} />
+                  </button>
+                )}
+                <button
+                  onClick={limpiarBusqueda}
+                  title="Limpiar búsqueda"
+                  className="text-zinc-600 hover:text-red-400 p-1"
+                >
+                  <X size={13} />
+                </button>
+              </>
+            )}
+            {buscado && matches.length === 0 && (
+              <span className="text-[11px] text-red-400/80 whitespace-nowrap">sin coincidencias</span>
+            )}
+          </div>
+
+          <div className="w-px h-5 bg-zinc-800 hidden sm:block" />
+
           <button
             onClick={() => setConArribo((v) => !v)}
             title="Mostrar también los artículos que ya tienen fecha de arribo cargada (para corroborar los que se pasaron)"
@@ -937,6 +1073,29 @@ export default function ComprasFaltantesPage() {
             className="chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 text-xs font-medium disabled:opacity-40 disabled:hover:scale-100 disabled:hover:translate-y-0"
           >
             <Download size={14} /> Excel
+          </button>
+
+          <div className="w-px h-5 bg-zinc-800 hidden sm:block" />
+
+          <input
+            type="month"
+            value={mesExport}
+            onChange={(e) => setMesExport(e.target.value)}
+            title="Mes del histórico con/sin existencia a exportar"
+            className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-yellow-400 cursor-pointer"
+          />
+          <button
+            onClick={exportarHistorico}
+            disabled={exportHistLoading}
+            title="Exportar Excel histórico con/sin existencia del mes (mismo reporte que /deposito/faltantes)"
+            className="chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 text-xs font-medium disabled:opacity-40 disabled:hover:scale-100 disabled:hover:translate-y-0"
+          >
+            {exportHistLoading ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Download size={14} />
+            )}
+            Excel (existencia)
           </button>
 
           {ocDesde && (
@@ -1019,6 +1178,10 @@ export default function ComprasFaltantesPage() {
                     return (
                     <div
                       key={prov}
+                      ref={(el) => {
+                        if (el) provRefs.current.set(prov, el);
+                        else provRefs.current.delete(prov);
+                      }}
                       className="rounded-xl border border-zinc-800 overflow-hidden"
                     >
                       {/* Acordeón: click abre este proveedor y cierra el resto; todos cerrados al entrar. */}

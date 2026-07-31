@@ -1289,7 +1289,8 @@ WHERE Codot.CodotProcesoNegocio = 4
 SQL_PEDIDOS_INFO = """
 SELECT cab.NroMovVenta, cab.CodCliente,
        est.Ped_EstadoDescripcion AS Estado,
-       uv.Usu_Arma_Nombre        AS Vendedor
+       uv.Usu_Arma_Nombre        AS Vendedor,
+       cab.CompCodigo            AS CompCodigo
 FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
 LEFT JOIN MAGNUS_SITD.dbo.Pedido_Estados est ON cab.EstadoPedido = est.Ped_Estado
 LEFT JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma   uv  ON cab.Vendedor     = uv.Usu_Arma_Codigo
@@ -1338,6 +1339,7 @@ def _info_pedidos(pedidos):
                     "Cliente": _safe(r[1]),
                     "Estado":  _txt(r[2]),
                     "Vendedor": _txt(r[3]),
+                    "CompCodigo": _int(r[4]),
                 }
         return out
     finally:
@@ -1573,6 +1575,11 @@ def fetch_ot_diferencias(desde=None, hasta=None):
             "Diferencia":   round(pedida - cumplida, 3),
             "PrecioVenta":  precio,
             "Importe":      round(precio * pedida, 2),
+            # Comprobante Magnus del pedido (cab.CompCodigo) — campo agregado
+            # 2026-07-31 para que el export de /deposito/faltantes/historico
+            # pueda excluir códigos puntuales (70/75, pedido de Pablo) sin
+            # tocar el filtrado de _es_valido de acá arriba.
+            "CompCodigo":   meta.get("CompCodigo"),
         })
 
     resumen = {"renglones": len(rows), "ot": len({r["OTId"] for r in rows}),

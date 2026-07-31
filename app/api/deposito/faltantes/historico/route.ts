@@ -33,6 +33,13 @@ const API_URL =
 // proveedor de la OC ABIERTA para ese artículo, no necesariamente la que
 // cubrió este faltante puntual; si el artículo no tiene OC pendiente hoy,
 // sale vacío.
+//
+// v3 (2026-07-31): mismo endpoint ahora se consume también desde
+// /compras/faltantes (botón "Excel (existencia)"), no solo desde
+// /deposito/faltantes. A pedido de Pablo se excluyen acá los renglones cuyo
+// pedido es comprobante Magnus 70 o 75 (cab.CompCodigo, expuesto por
+// indicadores-api en /deposito/ot-diferencias desde este mismo cambio) —
+// aplica a AMBOS consumidores por igual, ya que es el mismo reporte.
 
 interface ExistRow {
   fecha: Date;
@@ -56,7 +63,14 @@ interface OtDifRow {
   Cliente: string | number | null;
   Vendedor: string | null;
   Importe: number;
+  CompCodigo: number | null;
 }
+
+// Comprobantes Magnus a excluir de este export (pedido de Pablo, 2026-07-31).
+// Best-effort: solo aplica a renglones resueltos vía ot-diferencias (que ahora
+// trae CompCodigo); el fallback preparado.faltante_wms no lo tiene y no se
+// filtra por este criterio.
+const COMP_CODIGOS_EXCLUIDOS = new Set([70, 75]);
 
 interface WmsRow {
   nroPedOrigen: number | null;
@@ -173,6 +187,7 @@ export async function GET(req: NextRequest) {
         cantCumplida: number;
         diferencia: number;
         importe: number;
+        compCodigo: number | null;
       }
     >();
     for (const r of (otJson?.rows ?? []) as OtDifRow[]) {
@@ -186,6 +201,7 @@ export async function GET(req: NextRequest) {
         cantCumplida: Number(r.CantCumplida ?? 0),
         diferencia: Number(r.Diferencia ?? 0),
         importe: Number(r.Importe ?? 0),
+        compCodigo: r.CompCodigo ?? null,
       });
     }
 
@@ -195,29 +211,34 @@ export async function GET(req: NextRequest) {
       if (cod && r.Proveedor) proveedorPorArticulo.set(cod, r.Proveedor);
     }
 
-    const rows = existRows.map((r: ExistRow) => {
-      const cod = (r.codArticulo ?? "").trim();
-      const ot = otByKey.get(`${r.nroPedOrigen}-${r.nroRengOrigen}`);
-      const w = ot ? undefined : wmsByKey.get(`${r.nroPedOrigen}-${cod}`);
-      return {
-        fecha: r.fecha.toISOString().slice(0, 10),
-        nroPedOrigen: r.nroPedOrigen,
-        nroRengOrigen: r.nroRengOrigen,
-        codArticulo: cod,
-        nombre: ot?.nombre ?? w?.nombre ?? "",
-        ubicacion: ot?.ubicacion ?? w?.ubicacion ?? "",
-        cliente: ot?.cliente ?? w?.cliente ?? "",
-        vendedor: ot?.vendedor ?? w?.vendedor ?? "",
-        proveedor: proveedorPorArticulo.get(cod) ?? "",
-        cantidad: r.cantidad, // cantidad tipeada a mano (opcional, puede venir vacía)
-        cantPedida: ot?.cantPedida ?? w?.cantPedida ?? null,
-        cantCumplida: ot?.cantCumplida ?? null,
-        diferencia: ot?.diferencia ?? null, // = lo que faltó de verdad ese renglón
-        importe: ot?.importe ?? w?.importe ?? 0,
-        existencia: r.existencia,
-        malFacturado: r.malFacturado,
-      };
-    });
+    const rows = existRows
+      .filter((r: ExistRow) => {
+        const ot = otByKey.get(`${r.nroPedOrigen}-${r.nroRengOrigen}`);
+        return !(ot?.compCodigo != null && COMP_CODIGOS_EXCLUIDOS.has(ot.compCodigo));
+      })
+      .map((r: ExistRow) => {
+        const cod = (r.codArticulo ?? "").trim();
+        const ot = otByKey.get(`${r.nroPedOrigen}-${r.nroRengOrigen}`);
+        const w = ot ? undefined : wmsByKey.get(`${r.nroPedOrigen}-${cod}`);
+        return {
+          fecha: r.fecha.toISOString().slice(0, 10),
+          nroPedOrigen: r.nroPedOrigen,
+          nroRengOrigen: r.nroRengOrigen,
+          codArticulo: cod,
+          nombre: ot?.nombre ?? w?.nombre ?? "",
+          ubicacion: ot?.ubicacion ?? w?.ubicacion ?? "",
+          cliente: ot?.cliente ?? w?.cliente ?? "",
+          vendedor: ot?.vendedor ?? w?.vendedor ?? "",
+          proveedor: proveedorPorArticulo.get(cod) ?? "",
+          cantidad: r.cantidad, // cantidad tipeada a mano (opcional, puede venir vacía)
+          cantPedida: ot?.cantPedida ?? w?.cantPedida ?? null,
+          cantCumplida: ot?.cantCumplida ?? null,
+          diferencia: ot?.diferencia ?? null, // = lo que faltó de verdad ese renglón
+          importe: ot?.importe ?? w?.importe ?? 0,
+          existencia: r.existencia,
+          malFacturado: r.malFacturado,
+        };
+      });
 
     return NextResponse.json({
       mes,
