@@ -124,7 +124,12 @@ def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list
         for nro, fecha_int, tipo_pedido, cliente in cur.fetchall():
             if nro is None:
                 continue
-            fecha = (BASE_DATE + timedelta(days=int(fecha_int))).date() if fecha_int else None
+            # BASE_DATE ya es un datetime.date (ver errores_mesa.py) — sumarle
+            # un timedelta da otro date, no hace falta (ni se puede) llamar
+            # .date() de nuevo. FIX 2026-07-31: este bug estaba latente desde
+            # el 2026-07-29 (nunca se disparaba porque el filtro de Abierto
+            # de más arriba siempre devolvía 0 filas antes del fix de hoy).
+            fecha = (BASE_DATE + timedelta(days=int(fecha_int))) if fecha_int else None
             abiertos[int(nro)] = {
                 "fecha": fecha,
                 "tipoPedido": (tipo_pedido or "").strip() or None,
