@@ -43,6 +43,14 @@ operarios, van a ser muchos usando el widget a la vez): el reclamo es un
 asignar_siguiente) — 2 operarios apretando "Asignar" al mismo tiempo, incluso
 en la misma fracción de segundo, siempre terminan con filas distintas. No
 hace falta lockear la tabla entera ni coordinar nada del lado de la app.
+
+UN PEDIDO POR OPERARIO A LA VEZ (a pedido de Pablo, 2026-07-31): si vuelven a
+apretar "Asignar" mientras su pedido anterior TODAVÍA no cerró en Magnus, NO
+se les entrega uno nuevo — se les devuelve el mismo de siempre (mismo
+nroPedido, misma fila). Solo cuando ese pedido está Cerrado (FechaCierre > 0
+en VenFer_PedidoCabecera, ver _fetch_pedido_cerrado) el próximo click sí
+reclama uno nuevo de la cola. Ver _fetch_asignacion_activa +
+_fetch_pedido_cerrado, usados al principio de asignar_siguiente.
 """
 from datetime import datetime, timedelta
 
@@ -232,12 +240,84 @@ def refrescar_cola(limit: int = MAGNUS_ABIERTOS_LIMIT) -> int:
     return nuevos
 
 
+def _fetch_pedido_cerrado(nro_pedido: int) -> bool:
+    """True si `nro_pedido` ya está Cerrado en Magnus. Mismo criterio que
+    fetch_pedidos_hora (deposito.py): VenFer_PedidoCabecera.FechaCierre es la
+    fecha nativa de Magnus (días desde 1800-12-28); <= 0 o NULL = todavía no
+    cerró. Se usa Cabecera (no TMP_TiempoDePedidos) para este chequeo puntual
+    porque es en vivo — TMP_TiempoDePedidos es una foto que llena
+    SP_TiempoPedidos_Cargar y podría tardar en reflejar el cierre.
+
+    Si el pedido no aparece en Cabecera (caso raro / archivado), se considera
+    Cerrado para no dejar al operario trabado esperando un pedido que ya no
+    existe."""
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT FechaCierre FROM EVERWEAR.dbo.VenFer_PedidoCabecera WHERE NroMovVenta = ?",
+            (nro_pedido,),
+        )
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return True
+    fecha_cierre = row[0]
+    try:
+        return fecha_cierre is not None and int(fecha_cierre) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _fetch_asignacion_activa(nro_operario: int) -> dict | None:
+    """Última fila que este operario reclamó (deposito.control_asignacion,
+    la más reciente por "asignadoEn"). None si nunca reclamó nada. Se usa
+    para no entregarle un pedido nuevo mientras el anterior sigue abierto —
+    ver nota "UN PEDIDO POR OPERARIO A LA VEZ" en el docstring del módulo."""
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, "nroPedido", fecha, "tipoPedido", cliente, ubicacion,
+                   ot, "nroArmador", "nombreArmador", "asignadoA", "asignadoEn"
+            FROM deposito.control_asignacion
+            WHERE "nroOperarioAsignado" = %s AND "asignadoEn" IS NOT NULL
+            ORDER BY "asignadoEn" DESC
+            LIMIT 1
+            """,
+            (nro_operario,),
+        )
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    cols = [
+        "id", "nroPedido", "fecha", "tipoPedido", "cliente", "ubicacion", "ot",
+        "nroArmador", "nombreArmador", "asignadoA", "asignadoEn",
+    ]
+    out = dict(zip(cols, row))
+    if out.get("fecha") is not None:
+        out["fecha"] = out["fecha"].isoformat()
+    if out.get("asignadoEn") is not None:
+        out["asignadoEn"] = out["asignadoEn"].isoformat()
+    return out
+
+
 def asignar_siguiente(nro_operario: int) -> dict:
     """Reclama, de forma atómica, el próximo pedido libre de la cola para
     `nro_operario` (resuelto a nombre igual que insert_error_mesa — no confía
     en lo que mande el cliente). Refresca la cola primero (agrega pedidos
     nuevos Cumplidos+Abiertos). Orden: "nroPedido" ascendente, empate por
     fecha descendente (ver ASUNCIÓN de "orden" en el docstring del módulo).
+
+    UN PEDIDO POR OPERARIO A LA VEZ (2026-07-31): antes de tocar la cola, se
+    fija si `nro_operario` ya tiene una asignación activa cuyo pedido sigue
+    Abierto en Magnus — si es así, se le devuelve ESA MISMA fila (no cuenta
+    como un reclamo nuevo). Solo si no tiene ninguna o la que tiene ya Cerró
+    se sigue con el flujo normal de reclamar la próxima libre.
 
     Concurrencia: el UPDATE con "SELECT ... FOR UPDATE SKIP LOCKED" hace que,
     si 2 operarios llaman a esto al mismo tiempo, cada uno se lleve una fila
@@ -249,6 +329,10 @@ def asignar_siguiente(nro_operario: int) -> dict:
     nombre = fetch_operario_nombre(nro_operario)
     if not nombre:
         raise ValueError(f"Operario {nro_operario} no encontrado")
+
+    activa = _fetch_asignacion_activa(nro_operario)
+    if activa is not None and not _fetch_pedido_cerrado(activa["nroPedido"]):
+        return activa
 
     refrescar_cola()
 
