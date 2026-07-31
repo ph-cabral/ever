@@ -13,6 +13,7 @@ import {
 } from "@/app/rrhh/components/IndicadorUI";
 import {
   computeIndicadores,
+  horasPorEmpleado,
   fetchResumen,
   fetchHorarios,
   buildTopeResolver,
@@ -25,6 +26,7 @@ import {
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("es-AR", { maximumFractionDigits: 1 }).format(n);
+const round1 = (n: number) => Math.round(n * 10) / 10;
 
 // Pestaña Ausentismo — alimentada por la BD de fichadas (API resumen).
 // Por estado, excluye Normal / Ausente / Revisar (ver ESTADOS_NO_AUSENCIA).
@@ -35,6 +37,13 @@ export default function AusentismoTab() {
   const [asignaciones, setAsignaciones] = useState<HorarioAsignacion[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Horas objetivo del mes (asistencia.horas_objetivo) — un número único que
+  // representa cuántas horas laborales corresponden en el mes (ej. 300),
+  // contra el que se compara el total trabajado (RRHH, con tope) de cada
+  // empleado. Pedido de Pablo 2026-07-31.
+  const [objetivo, setObjetivo] = useState<string>("");
+  const [savingObjetivo, setSavingObjetivo] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -62,6 +71,32 @@ export default function AusentismoTab() {
     };
   }, [ym]);
 
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/rrhh/asistencia/horas-objetivo?ym=${ym}`)
+      .then((r) => (r.ok ? r.json() : { horas: null }))
+      .then((d) => alive && setObjetivo(d.horas != null ? String(d.horas) : ""))
+      .catch(() => alive && setObjetivo(""));
+    return () => {
+      alive = false;
+    };
+  }, [ym]);
+
+  const guardarObjetivo = async () => {
+    setSavingObjetivo(true);
+    try {
+      await fetch("/api/rrhh/asistencia/horas-objetivo", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ym, horas: objetivo ? Number(objetivo) : null }),
+      });
+    } catch (err) {
+      console.error("[horas objetivo]", err);
+    } finally {
+      setSavingObjetivo(false);
+    }
+  };
+
   const resolveTope = useMemo(
     () => buildTopeResolver(tipos, asignaciones),
     [tipos, asignaciones],
@@ -70,6 +105,16 @@ export default function AusentismoTab() {
     () => computeIndicadores(rows, resolveTope),
     [rows, resolveTope],
   );
+  const porEmpleado = useMemo(
+    () => horasPorEmpleado(rows, resolveTope),
+    [rows, resolveTope],
+  );
+
+  const objetivoNum = objetivo ? Number(objetivo) : null;
+  const cumplieron =
+    objetivoNum != null
+      ? porEmpleado.filter((e) => e.minutos / 60 >= objetivoNum).length
+      : null;
 
   return (
     <div className="space-y-6">
@@ -82,6 +127,35 @@ export default function AusentismoTab() {
       />
 
       {error && <ErrMsg msg={error} />}
+
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4">
+        <label className="flex flex-col gap-1 text-sm text-zinc-400">
+          Horas objetivo del mes
+          <input
+            type="number"
+            min={0}
+            value={objetivo}
+            onChange={(e) => setObjetivo(e.target.value)}
+            onBlur={guardarObjetivo}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+            placeholder="ej. 300"
+            className="w-28 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-zinc-100 outline-none focus:border-yellow-400"
+          />
+        </label>
+        {savingObjetivo && (
+          <span className="text-xs text-zinc-500">Guardando…</span>
+        )}
+        {cumplieron != null && (
+          <span className="text-sm text-zinc-400">
+            Cumplieron el objetivo:{" "}
+            <span className="font-semibold text-zinc-200">
+              {cumplieron} / {porEmpleado.length}
+            </span>
+          </span>
+        )}
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <KpiCard
@@ -134,6 +208,63 @@ export default function AusentismoTab() {
           )}
         </Panel>
       </div>
+
+      {objetivoNum != null && (
+        <Panel>
+          <h3 className="text-sm font-semibold text-zinc-300 mb-3">
+            Horas trabajadas vs. objetivo ({fmt(objetivoNum)} hs)
+          </h3>
+          {porEmpleado.length === 0 ? (
+            <Empty msg={loading ? "Cargando…" : "Sin datos en el período."} />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wide text-zinc-500 border-b border-zinc-800">
+                    <th className="py-2 pr-4">Empleado</th>
+                    <th className="py-2 pr-4">Área</th>
+                    <th className="py-2 pr-4 text-right">Horas</th>
+                    <th className="py-2 pr-4 text-right">Cumplió</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {porEmpleado.map((e) => {
+                    const horas = round1(e.minutos / 60);
+                    const cumplio = horas >= objetivoNum;
+                    return (
+                      <tr
+                        key={e.employee_no}
+                        className="border-b border-zinc-800/60"
+                      >
+                        <td className="py-1.5 pr-4 text-zinc-200">
+                          {e.employee_name ?? `#${e.employee_no}`}
+                        </td>
+                        <td className="py-1.5 pr-4 text-zinc-500">
+                          {e.departamento ?? "—"}
+                        </td>
+                        <td className="py-1.5 pr-4 text-right text-zinc-200">
+                          {fmt(horas)}
+                        </td>
+                        <td className="py-1.5 pr-4 text-right">
+                          <span
+                            className={
+                              cumplio
+                                ? "text-green-400 font-medium"
+                                : "text-orange-400 font-medium"
+                            }
+                          >
+                            {cumplio ? "Sí" : "No"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
+      )}
     </div>
   );
 }

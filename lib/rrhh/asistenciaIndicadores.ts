@@ -257,6 +257,37 @@ export function computeIndicadores(
   };
 }
 
+// Total de horas RRHH (con tope diario aplicado) acumuladas por empleado en
+// el período — para comparar contra el objetivo mensual de horas
+// (asistencia.horas_objetivo, pestaña Ausentismo). Pedido de Pablo 2026-07-31.
+export type HorasEmpleado = {
+  employee_no: string;
+  employee_name: string | null;
+  departamento: string | null;
+  minutos: number;
+};
+
+export function horasPorEmpleado(
+  rows: ResumenRow[],
+  resolveTope?: (r: ResumenRow) => number,
+): HorasEmpleado[] {
+  const m = new Map<string, HorasEmpleado>();
+  for (const r of rows) {
+    const tope = resolveTope ? resolveTope(r) : topeMin(r.fecha);
+    const min = rrhhMin(r, tope);
+    const cur = m.get(r.employee_no);
+    if (cur) cur.minutos += min;
+    else
+      m.set(r.employee_no, {
+        employee_no: r.employee_no,
+        employee_name: r.employee_name,
+        departamento: r.departamento,
+        minutos: min,
+      });
+  }
+  return [...m.values()].sort((a, b) => a.minutos - b.minutos);
+}
+
 // ── Fetch + rango de mes ──────────────────────────────────────────────────────
 
 export async function fetchResumen(desde: string, hasta: string): Promise<ResumenRow[]> {

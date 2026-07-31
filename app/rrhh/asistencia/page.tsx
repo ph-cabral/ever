@@ -100,13 +100,13 @@ const todayLocal = () => {
   return `${y}-${m}-${day}`;
 };
 
-const fmtTime = (iso: string | null) =>
-  iso
-    ? new Date(iso).toLocaleTimeString("es-AR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : "—";
+// Ingreso/Egreso combinado: 24 hs, sin AM/PM, sin cero a la izquierda en la
+// hora (ej. "6:05", "18:02"). Pedido de Pablo 2026-07-31.
+const fmtTime24 = (iso: string | null) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
 
 const fmtHHMM = (min: number | null) => {
   if (min == null) return "—";
@@ -630,12 +630,6 @@ const AsistenciaRow = memo(function AsistenciaRow({
   const netMin = Math.max(0, (row.minutos ?? 0) - horasNov * 60);
   const tope = resolveTope(row);
   const rrhhMin = Math.min(netMin, tope);
-  // Extra = trabajado por encima del tope del día. En sábado sin horario
-  // asignado o en feriado, el tope resuelve a 0 (ver buildTopeResolver), así
-  // que todo lo trabajado ese día cae acá entero — es la "marca" de quién
-  // trabajó un día sin tenerlo asignado. Pedido de Pablo, 2026-07-29.
-  const extraMin = Math.max(0, netMin - tope);
-  const diaLibreTrabajado = tope === 0 && netMin > 0;
   return (
     <TableRow>
       <TableCell>
@@ -662,7 +656,7 @@ const AsistenciaRow = memo(function AsistenciaRow({
       <TableCell>
         <div className="flex items-center">
           <span className={row.ajustado ? "italic text-amber-700" : undefined}>
-            {fmtTime(row.check_in)}
+            {fmtTime24(row.check_in)}/{fmtTime24(row.check_out)}
           </span>
           {isAdmin && (!row.check_in || !row.check_out) && (
             <HorarioEditor
@@ -675,11 +669,6 @@ const AsistenciaRow = memo(function AsistenciaRow({
           )}
         </div>
       </TableCell>
-      <TableCell>
-        <span className={row.ajustado ? "italic text-amber-700" : undefined}>
-          {fmtTime(row.check_out)}
-        </span>
-      </TableCell>
       <TableCell
         title={
           horasNov
@@ -691,30 +680,6 @@ const AsistenciaRow = memo(function AsistenciaRow({
       </TableCell>
       <TableCell title={`Neto ${fmtHHMM(netMin)} · tope ${fmtHHMM(tope)}`}>
         {fmtHorasRRHH(rrhhMin)}
-      </TableCell>
-      <TableCell
-        title={
-          diaLibreTrabajado
-            ? `Trabajó ${fmtHHMM(netMin)} sin tener este día asignado (tope 0)`
-            : extraMin > 0
-              ? `Trabajado ${fmtHHMM(netMin)} · tope ${fmtHHMM(tope)}`
-              : undefined
-        }
-      >
-        {extraMin > 0 ? (
-          <span
-            className={cn(
-              "inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium",
-              diaLibreTrabajado
-                ? "bg-orange-100 text-orange-800 border-orange-200"
-                : "bg-blue-100 text-blue-800 border-blue-200",
-            )}
-          >
-            +{fmtHHMM(extraMin)}
-          </span>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        )}
       </TableCell>
       <TableCell>
         <Picker
@@ -1067,13 +1032,9 @@ export default function AsistenciaPage() {
             <TableRow>
               <TableHead>Empleado</TableHead>
               <TableHead>Fecha</TableHead>
-              <TableHead>Ingreso</TableHead>
-              <TableHead>Egreso</TableHead>
+              <TableHead>Ingreso/Egreso</TableHead>
               <TableHead>En empresa</TableHead>
               <TableHead>RRHH</TableHead>
-              <TableHead title="Trabajado por encima del tope del día (sábado/feriado sin asignar = todo extra)">
-                Extra
-              </TableHead>
               <TableHead>Estado / Días</TableHead>
               <TableHead className="text-right">Novedad / Horas</TableHead>
             </TableRow>
@@ -1082,7 +1043,7 @@ export default function AsistenciaPage() {
             {loading && (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={7}
                   className="text-center py-8 text-muted-foreground"
                 >
                   Cargando…
@@ -1092,7 +1053,7 @@ export default function AsistenciaPage() {
             {!loading && filtered.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={9}
+                  colSpan={7}
                   className="text-center py-8 text-muted-foreground"
                 >
                   Sin resultados
