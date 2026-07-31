@@ -16,6 +16,10 @@ export const GENERATED_CHILDREN: Record<string, NavNode[]> = {
       "href": "/deposito/contenedor"
     },
     {
+      "label": "Depósito",
+      "href": "/deposito/deposito"
+    },
+    {
       "label": "Evaluación",
       "href": "/deposito/evaluacion"
     },
@@ -36,10 +40,6 @@ export const GENERATED_CHILDREN: Record<string, NavNode[]> = {
     {
       "label": "Stock",
       "href": "/deposito/stock"
-    },
-    {
-      "label": "WMS",
-      "href": "/deposito/wms"
     }
   ],
   "fabrica": [
@@ -111,7 +111,7 @@ export const GENERATED_MODULES: { key: string; label: string; href: string; hasI
   },
   {
     "key": "deposito",
-    "label": "Deposito",
+    "label": "Depósito",
     "href": "/deposito",
     "hasIndex": true
   },

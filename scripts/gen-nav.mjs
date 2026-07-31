@@ -8,11 +8,14 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = join(ROOT, "app");
 
 // Rutas accesibles pero que NO se listan en el árbol (home/permisos).
-const IGNORE = new Set(["/deposito/faltantes/control"]);
+// /deposito/wms: migrada a /deposito/deposito (sidebar wms/mesas) 2026-07-31,
+// queda solo como redirect para links viejos — no se lista en el menú.
+const IGNORE = new Set(["/deposito/faltantes/control", "/deposito/wms"]);
 
 // Etiquetas lindas por segmento (acentos, siglas). Lo que no esté acá va Capitalizado.
 const LABELS = {
   wms: "WMS",
+  deposito: "Depósito",
   rrhh: "RRHH",
   evaluacion: "Evaluación",
   duplicadas: "Duplicadas",

@@ -37,7 +37,7 @@ from errores_mesa import (
     insert_error_calidad, update_observacion, fetch_controlador_diag,
     fetch_articulos_pedido,
 )
-from control_asignacion import asignar_siguiente, fetch_cola_diag
+from control_asignacion import asignar_siguiente, fetch_cola_diag, fetch_pedidos_asignados
 from rrhh import fetch_cvs_por_mes
 from datetime import date, datetime, timedelta
 import threading
@@ -877,6 +877,21 @@ def deposito_errores_mesa_cola_diag(limit: int = Query(default=20, le=200)):
     deposito.control_asignacion + una muestra reciente."""
     try:
         return fetch_cola_diag(limit)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+@app.get("/deposito/control-asignacion/pedidos")
+def deposito_control_asignacion_pedidos(
+    desde: str | None = Query(default=None),
+    hasta: str | None = Query(default=None),
+):
+    """Historial de pedidos ASIGNADOS (deposito.control_asignacion) para la
+    vista "Pedidos asignados" (detalle, dentro de /deposito/deposito →
+    Mesas): quién controló cada pedido, cuándo, cuántos ítems tenía, y
+    "horaCierre" (próxima asignación del MISMO operario, proxy de tiempo de
+    control — ver fetch_pedidos_asignados). Sin desde/hasta: HOY."""
+    try:
+        return fetch_pedidos_asignados(desde, hasta)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

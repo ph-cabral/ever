@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS deposito.control_asignacion (
     fecha                 date,               -- FechaPedido (Magnus)
     "tipoPedido"          text,
     cliente               text,               -- Magnus Clientes.Cliente_Nombre
+    "codCliente"          integer,            -- Magnus VenFer_PedidoCabecera.CodCliente
     ubicacion             text,               -- WMS OT Observaciones (fetch_pedido_lookup)
     ot                    integer,
     "nroArmador"          integer,
@@ -50,3 +51,9 @@ CREATE INDEX IF NOT EXISTS idx_control_asignacion_libres
 -- lo que hizo en Magnus (mesa_control.py/fetch_controlador_pedido) — próximo paso.
 CREATE INDEX IF NOT EXISTS idx_control_asignacion_asignado_a
     ON deposito.control_asignacion ("asignadoA");
+
+-- Alta 2026-07-31 (a pedido de Pablo): número de cliente además del nombre —
+-- el widget lo suma al cuadro grande de arriba. ALTER idempotente: si la
+-- tabla ya existía en prod sin esta columna, la agrega; si se crea de cero
+-- con el CREATE TABLE de arriba, no hace nada (ya la incluye).
+ALTER TABLE deposito.control_asignacion ADD COLUMN IF NOT EXISTS "codCliente" integer;
