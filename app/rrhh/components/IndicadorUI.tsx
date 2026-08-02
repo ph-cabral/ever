@@ -3,7 +3,36 @@
 import type { ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 
-// Selector de mes (input nativo type="month") con spinner de carga.
+const MONTHS = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+// Últimos `cant` meses (más reciente primero), asegurando que `incluir`
+// (el mes actualmente seleccionado) siempre esté en la lista aunque caiga
+// fuera del rango.
+function ultimosMeses(cant: number, incluir?: string): string[] {
+  const set = new Set<string>();
+  const d = new Date();
+  d.setDate(1);
+  for (let i = 0; i < cant; i++) {
+    set.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    d.setMonth(d.getMonth() - 1);
+  }
+  if (incluir) set.add(incluir);
+  return Array.from(set).sort().reverse();
+}
+
+const nombreMes = (ym: string): string => {
+  const [y, m] = ym.split("-").map(Number);
+  return `${MONTHS[m - 1]} de ${y}`;
+};
+
+// Selector de mes con spinner de carga. Antes era un <input type="month">
+// nativo: al clickear en el medio del control (en vez del pequeño ícono de
+// calendario del borde) no desplegaba nada, lo que parecía roto (reportado
+// por Pablo 2026-08-01). Un <select> real siempre abre el desplegable del
+// navegador con cualquier click.
 export function MesSelect({
   ym,
   setYm,
@@ -13,15 +42,21 @@ export function MesSelect({
   setYm: (v: string) => void;
   loading: boolean;
 }) {
+  const opciones = ultimosMeses(24, ym);
   return (
     <label className="flex items-center gap-2 text-sm text-zinc-400 shrink-0">
       Mes:
-      <input
-        type="month"
+      <select
         value={ym}
         onChange={(e) => setYm(e.target.value)}
         className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-zinc-100 outline-none focus:border-yellow-400 cursor-pointer"
-      />
+      >
+        {opciones.map((m) => (
+          <option key={m} value={m}>
+            {nombreMes(m)}
+          </option>
+        ))}
+      </select>
       {loading && (
         <Loader2 size={15} className="animate-spin text-yellow-400" />
       )}
