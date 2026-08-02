@@ -88,6 +88,11 @@ export function RegistroButton({
   const [calYear, setCalYear] = useState(hoy.getFullYear());
   const [rangeStart, setRangeStart] = useState<string | null>(null);
   const [rangeEnd, setRangeEnd] = useState<string | null>(null);
+  // Sólo para tipo "novedad": a diferencia de estado (que es el día entero,
+  // sólo importa cuántos días), una novedad son horas puntuales dentro de
+  // cada día del rango (ej. "Est. Med." 2 hs/día durante 5 días) — pedido de
+  // Pablo (2026-08-02).
+  const [horasDia, setHorasDia] = useState("");
 
   // Calendarios de Google (paso final del flujo con calendario).
   const [calendarios, setCalendarios] = useState<Calendario[] | null>(null);
@@ -102,6 +107,7 @@ export function RegistroButton({
     setNuevoNombre("");
     setRangeStart(null);
     setRangeEnd(null);
+    setHorasDia("");
     setCalendarios(null);
     setCalendariosError(null);
     setCalendarioId("");
@@ -181,8 +187,11 @@ export function RegistroButton({
       .catch((e) => setCalendariosError(e?.message ?? "error"));
   }, [step, calendarios]);
 
+  const horasDiaNum = parseInt(horasDia, 10);
+  const horasDiaValida = tipo !== "novedad" || (Number.isFinite(horasDiaNum) && horasDiaNum > 0);
+
   const confirmarRango = async () => {
-    if (!selected || !rangeStart || !rangeEnd || !calendarioId) return;
+    if (!selected || !rangeStart || !rangeEnd || !calendarioId || !horasDiaValida) return;
     setSaving(true);
     setError(null);
     try {
@@ -196,6 +205,7 @@ export function RegistroButton({
           desde: rangeStart,
           hasta: rangeEnd,
           calendar_id: calendarioId,
+          ...(tipo === "novedad" ? { horas: horasDiaNum } : {}),
         }),
       });
       const d = await r.json().catch(() => ({}));
@@ -496,6 +506,22 @@ export function RegistroButton({
                       `${rangeStart} al ${rangeEnd}`}
                     {!rangeStart && "Elegí el primer día."}
                   </p>
+                  {tipo === "novedad" && (
+                    <div className="mt-3">
+                      <label className="mb-1 block text-xs text-muted-foreground">
+                        ¿Cuántas horas por día?
+                      </label>
+                      <Input
+                        type="number"
+                        min={1}
+                        inputMode="numeric"
+                        value={horasDia}
+                        onChange={(e) => setHorasDia(e.target.value)}
+                        placeholder="horas"
+                        className="h-9 w-24"
+                      />
+                    </div>
+                  )}
                   <div className="mt-4 flex justify-end gap-2">
                     <button
                       type="button"
@@ -506,7 +532,7 @@ export function RegistroButton({
                     </button>
                     <button
                       type="button"
-                      disabled={!rangeStart || !rangeEnd}
+                      disabled={!rangeStart || !rangeEnd || !horasDiaValida}
                       onClick={() => setStep("calendario")}
                       className="rounded-md border bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
                     >
@@ -522,6 +548,9 @@ export function RegistroButton({
                     <span className="font-medium">{selected.nombre}</span> del{" "}
                     <span className="font-medium">{rangeStart}</span> al{" "}
                     <span className="font-medium">{rangeEnd}</span>
+                    {tipo === "novedad" && horasDiaValida && (
+                      <> — {horasDiaNum} hs/día</>
+                    )}
                   </p>
                   <p className="mb-2 text-xs text-muted-foreground">
                     Elegí en qué calendario de Google avisar (el que ya tiene agregada a la

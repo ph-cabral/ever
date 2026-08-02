@@ -28,6 +28,7 @@ type Body = {
   desde?: string; // YYYY-MM-DD
   hasta?: string; // YYYY-MM-DD
   calendar_id?: string;
+  horas?: number; // sólo tipo "novedad": horas por día del rango (no es un total)
 };
 
 const FECHA_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -69,6 +70,15 @@ export async function POST(req: NextRequest) {
     }
     if (tipo !== "estado" && tipo !== "novedad") {
       return NextResponse.json({ error: "tipo debe ser estado|novedad" }, { status: 400 });
+    }
+    // Novedad son horas puntuales dentro del día (a diferencia de estado, que
+    // es el día entero) — hace falta cuántas horas por día del rango.
+    const horasDia = tipo === "novedad" ? Math.trunc(Number(body.horas)) : 0;
+    if (tipo === "novedad" && (!Number.isFinite(horasDia) || horasDia <= 0)) {
+      return NextResponse.json(
+        { error: "horas (por día) es obligatorio y mayor a 0 para novedad" },
+        { status: 400 },
+      );
     }
     if (!FECHA_RE.test(desde) || !FECHA_RE.test(hasta)) {
       return NextResponse.json(
@@ -121,6 +131,7 @@ export async function POST(req: NextRequest) {
       `${tipo === "estado" ? "Estado" : "Novedad"}: ${nombre}`,
       `Período: ${rangoTxt}`,
     ];
+    if (tipo === "novedad") descripcionPartes.push(`Horas por día: ${horasDia}`);
     if (creadoPor) descripcionPartes.push(`Registrado por: ${creadoPor}`);
 
     // 1) Google Calendar primero — si falla, no se toca la base.
@@ -154,12 +165,12 @@ export async function POST(req: NextRequest) {
         DO UPDATE SET estado = EXCLUDED.estado, dias = EXCLUDED.dias, updated_at = now()
       `;
     } else {
-      const novedadesJson = JSON.stringify([{ novedad: nombre, horas: 0 }]);
+      const novedadesJson = JSON.stringify([{ novedad: nombre, horas: horasDia }]);
       for (const fecha of rangoFechas(desde, hasta)) {
         await prisma.$executeRaw`
           INSERT INTO asistencia.novedad_diaria
             (employee_no, fecha, novedad, horas, novedades, updated_at)
-          VALUES (${employee_no}, ${fecha}::date, ${nombre}, 0, ${novedadesJson}::jsonb, now())
+          VALUES (${employee_no}, ${fecha}::date, ${nombre}, ${horasDia}, ${novedadesJson}::jsonb, now())
           ON CONFLICT (employee_no, fecha)
           DO UPDATE SET
             novedad    = EXCLUDED.novedad,
