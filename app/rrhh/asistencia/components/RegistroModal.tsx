@@ -1,0 +1,582 @@
+"use client";
+
+// Botón + modal que reemplaza al viejo Picker de Estado/Novedad en
+// /rrhh/asistencia — pedido de Pablo (2026-08-01).
+//
+// El botón muestra el nombre arriba y el número (días/horas) abajo, si hay.
+// Al hacer click se abre un modal con las opciones en grilla ("ladrillos").
+// Si la opción elegida tiene genera_calendario = true (ver
+// /api/rrhh/asistencia/opciones), en vez de pedir un número pide un RANGO de
+// fechas en un calendario (un solo mes, con navegación) y qué Google
+// Calendar usar; al confirmar crea el evento de todo el día y marca esos
+// días en la base (/api/rrhh/asistencia/rango). Si no, se comporta como
+// antes: pide el número simple y guarda con /api/rrhh/asistencia/novedad.
+//
+// Un ADMIN puede, desde la propia grilla, togglear qué opciones generan
+// evento de Calendar y agregar opciones nuevas.
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { CalendarDays, Plus, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+
+export type Opcion = {
+  id: number;
+  tipo: "estado" | "novedad";
+  nombre: string;
+  genera_calendario: boolean;
+  orden: number;
+  activo: boolean;
+};
+
+type Calendario = { id: string; nombre: string; primary: boolean };
+
+const CAL_WEEKDAYS = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"];
+const CAL_MESES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const toISO = (y: number, m: number, d: number) => `${y}-${pad2(m + 1)}-${pad2(d)}`;
+
+type Step = "bricks" | "numero" | "rango" | "calendario";
+
+export function RegistroButton({
+  tipo,
+  opciones,
+  value,
+  numValue,
+  numLabel,
+  placeholder,
+  toneOf,
+  employee_no,
+  employee_name,
+  fecha,
+  bruto,
+  isAdmin,
+  onSaved,
+  onOpcionesChanged,
+}: {
+  tipo: "estado" | "novedad";
+  opciones: Opcion[];
+  value?: string | null;
+  numValue?: number | null;
+  numLabel: "días" | "horas";
+  placeholder: string;
+  toneOf: (nombre: string) => string;
+  employee_no: string;
+  employee_name: string | null;
+  fecha: string;
+  bruto?: number | null;
+  isAdmin: boolean;
+  onSaved: () => void;
+  onOpcionesChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<Step>("bricks");
+  const [selected, setSelected] = useState<Opcion | null>(null);
+  const [numVal, setNumVal] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [nuevoNombre, setNuevoNombre] = useState("");
+
+  // Rango de fechas.
+  const hoy = new Date();
+  const [calMonth, setCalMonth] = useState(hoy.getMonth());
+  const [calYear, setCalYear] = useState(hoy.getFullYear());
+  const [rangeStart, setRangeStart] = useState<string | null>(null);
+  const [rangeEnd, setRangeEnd] = useState<string | null>(null);
+
+  // Calendarios de Google (paso final del flujo con calendario).
+  const [calendarios, setCalendarios] = useState<Calendario[] | null>(null);
+  const [calendariosError, setCalendariosError] = useState<string | null>(null);
+  const [calendarioId, setCalendarioId] = useState("");
+
+  const resetTransient = () => {
+    setStep("bricks");
+    setSelected(null);
+    setNumVal("");
+    setError(null);
+    setNuevoNombre("");
+    setRangeStart(null);
+    setRangeEnd(null);
+    setCalendarios(null);
+    setCalendariosError(null);
+    setCalendarioId("");
+  };
+
+  const close = () => {
+    if (saving) return;
+    setOpen(false);
+    resetTransient();
+  };
+
+  const openModal = () => {
+    resetTransient();
+    setCalMonth(hoy.getMonth());
+    setCalYear(hoy.getFullYear());
+    setOpen(true);
+  };
+
+  const pickOpcion = (op: Opcion) => {
+    setSelected(op);
+    setError(null);
+    if (op.genera_calendario) {
+      setStep("rango");
+    } else {
+      setNumVal(op.nombre === value && numValue != null ? String(numValue) : "");
+      setStep("numero");
+    }
+  };
+
+  // ── Guardado simple (sin calendario) ────────────────────────────────────
+  const guardarSimple = async (quitar = false) => {
+    if (!selected && !quitar) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const body: any = {
+        employee_no,
+        fecha,
+        kind: tipo,
+        value: quitar ? null : selected!.nombre,
+        num: quitar ? null : numVal || null,
+      };
+      if (tipo === "novedad") body.bruto = bruto ?? 0;
+      const r = await fetch("/api/rrhh/asistencia/novedad", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d?.error ?? "error al guardar");
+      }
+      onSaved();
+      close();
+    } catch (e: any) {
+      setError(e?.message ?? "error al guardar");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Paso calendario: carga la lista al entrar ───────────────────────────
+  useEffect(() => {
+    if (step !== "calendario" || calendarios !== null) return;
+    setCalendariosError(null);
+    fetch("/api/rrhh/asistencia/calendarios")
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error ?? "no se pudo listar los calendarios");
+        return d.calendarios as Calendario[];
+      })
+      .then((cs) => {
+        setCalendarios(cs);
+        const def = cs.find((c) => c.primary) ?? cs[0];
+        if (def) setCalendarioId(def.id);
+      })
+      .catch((e) => setCalendariosError(e?.message ?? "error"));
+  }, [step, calendarios]);
+
+  const confirmarRango = async () => {
+    if (!selected || !rangeStart || !rangeEnd || !calendarioId) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/rrhh/asistencia/rango", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          employee_no,
+          tipo,
+          nombre: selected.nombre,
+          desde: rangeStart,
+          hasta: rangeEnd,
+          calendar_id: calendarioId,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error ?? "error al registrar");
+      onSaved();
+      close();
+    } catch (e: any) {
+      setError(e?.message ?? "error al registrar");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Admin: togglear genera_calendario / agregar opción ──────────────────
+  const toggleGenera = async (op: Opcion, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await fetch("/api/rrhh/asistencia/opciones", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: op.id, genera_calendario: !op.genera_calendario }),
+      });
+      onOpcionesChanged();
+    } catch (err) {
+      console.error("[opciones toggle]", err);
+    }
+  };
+
+  const agregarOpcion = async () => {
+    const nombre = nuevoNombre.trim();
+    if (!nombre) return;
+    setSaving(true);
+    try {
+      await fetch("/api/rrhh/asistencia/opciones", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tipo, nombre }),
+      });
+      setNuevoNombre("");
+      onOpcionesChanged();
+    } catch (err) {
+      console.error("[opciones add]", err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Grilla del mes para el paso "rango" ─────────────────────────────────
+  const cells = useMemo(() => {
+    const firstWeekday = (new Date(calYear, calMonth, 1).getDay() + 6) % 7;
+    const ultimoDia = new Date(calYear, calMonth + 1, 0).getDate();
+    const out: (number | null)[] = [];
+    for (let i = 0; i < firstWeekday; i++) out.push(null);
+    for (let d = 1; d <= ultimoDia; d++) out.push(d);
+    return out;
+  }, [calYear, calMonth]);
+
+  const clickDia = (d: number) => {
+    const iso = toISO(calYear, calMonth, d);
+    if (!rangeStart || (rangeStart && rangeEnd)) {
+      setRangeStart(iso);
+      setRangeEnd(null);
+      return;
+    }
+    if (iso < rangeStart) {
+      setRangeEnd(rangeStart);
+      setRangeStart(iso);
+    } else {
+      setRangeEnd(iso);
+    }
+  };
+
+  const cambiarMes = (delta: number) => {
+    let m = calMonth + delta;
+    let y = calYear;
+    if (m < 0) { m = 11; y -= 1; }
+    if (m > 11) { m = 0; y += 1; }
+    setCalMonth(m);
+    setCalYear(y);
+  };
+
+  const num = numValue != null ? numValue : null;
+  const btnClass = cn(
+    "flex min-w-[64px] flex-col items-center justify-center gap-0 rounded-md border px-2.5 py-1 leading-tight hover:opacity-90",
+    value ? toneOf(value) : "bg-muted text-muted-foreground border-transparent",
+  );
+
+  return (
+    <>
+      <button type="button" onClick={openModal} className={btnClass}>
+        <span className="text-xs font-medium">{value ?? placeholder}</span>
+        {num != null && (
+          <span className="text-[10px] opacity-75">
+            {num}
+            {numLabel === "días" ? "d" : "h"}
+          </span>
+        )}
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4"
+            onClick={close}
+          >
+            <div
+              className="w-full max-w-sm rounded-lg border bg-popover p-4 shadow-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-medium">
+                  {tipo === "estado" ? "Estado" : "Novedad"} · {employee_name ?? employee_no} ·{" "}
+                  {fecha}
+                </h2>
+                <button
+                  type="button"
+                  onClick={close}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {error && (
+                <p className="mb-3 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                  {error}
+                </p>
+              )}
+
+              {step === "bricks" && (
+                <>
+                  {value && (
+                    <button
+                      type="button"
+                      onClick={() => guardarSimple(true)}
+                      disabled={saving}
+                      className="mb-2 text-xs text-muted-foreground hover:text-red-600 hover:underline disabled:opacity-50"
+                    >
+                      Quitar {tipo === "estado" ? "estado" : "novedad"} actual
+                    </button>
+                  )}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {opciones.map((op) => (
+                      <button
+                        key={op.id}
+                        type="button"
+                        onClick={() => pickOpcion(op)}
+                        className={cn(
+                          "relative rounded-md border px-2 py-2 text-xs font-medium hover:opacity-90",
+                          op.nombre === value
+                            ? toneOf(op.nombre)
+                            : "bg-muted/60 text-foreground border-transparent hover:bg-accent",
+                        )}
+                      >
+                        {op.nombre}
+                        {isAdmin && (
+                          <span
+                            role="button"
+                            onClick={(e) => toggleGenera(op, e)}
+                            title={
+                              op.genera_calendario
+                                ? "Genera evento en Calendar (click para desactivar)"
+                                : "No genera evento en Calendar (click para activar)"
+                            }
+                            className={cn(
+                              "absolute -right-1 -top-1 rounded-full border bg-background p-0.5",
+                              op.genera_calendario
+                                ? "text-indigo-600 border-indigo-300"
+                                : "text-muted-foreground/50 border-transparent",
+                            )}
+                          >
+                            <CalendarDays className="h-3 w-3" />
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  {isAdmin && (
+                    <div className="mt-3 flex items-center gap-1.5 border-t pt-2">
+                      <Input
+                        placeholder="Nueva opción…"
+                        value={nuevoNombre}
+                        onChange={(e) => setNuevoNombre(e.target.value)}
+                        className="h-7 text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={agregarOpcion}
+                        disabled={saving || !nuevoNombre.trim()}
+                        title="Agregar opción"
+                        className="rounded-md border p-1.5 hover:bg-accent disabled:opacity-50"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {step === "numero" && selected && (
+                <div>
+                  <p className="mb-2 text-sm">
+                    <span className="font-medium">{selected.nombre}</span> — ¿cuántos {numLabel}?
+                  </p>
+                  <Input
+                    type="number"
+                    min={0}
+                    inputMode="numeric"
+                    autoFocus
+                    value={numVal}
+                    onChange={(e) => setNumVal(e.target.value)}
+                    placeholder={numLabel}
+                    className="h-9"
+                  />
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStep("bricks")}
+                      className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-accent"
+                    >
+                      Atrás
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => guardarSimple(false)}
+                      disabled={saving}
+                      className="rounded-md border bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                    >
+                      {saving ? "Guardando…" : "Guardar"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {step === "rango" && selected && (
+                <div>
+                  <p className="mb-2 text-sm">
+                    <span className="font-medium">{selected.nombre}</span> — elegí el rango de
+                    fechas
+                  </p>
+                  <div className="mb-1 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => cambiarMes(-1)}
+                      className="rounded px-2 py-1 text-sm hover:bg-accent"
+                    >
+                      ‹
+                    </button>
+                    <span className="text-xs font-medium">
+                      {CAL_MESES[calMonth]} {calYear}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => cambiarMes(1)}
+                      className="rounded px-2 py-1 text-sm hover:bg-accent"
+                    >
+                      ›
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-7 gap-0.5 text-center text-[11px] text-muted-foreground mb-1">
+                    {CAL_WEEKDAYS.map((w) => (
+                      <div key={w} className="py-1">
+                        {w}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-0.5">
+                    {cells.map((d, i) => {
+                      if (!d) return <div key={i} />;
+                      const iso = toISO(calYear, calMonth, d);
+                      const isEdge = iso === rangeStart || iso === rangeEnd;
+                      const inRange =
+                        rangeStart && rangeEnd && iso >= rangeStart && iso <= rangeEnd;
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => clickDia(d)}
+                          title={iso}
+                          className={cn(
+                            "h-7 w-7 mx-auto rounded text-xs transition-colors",
+                            isEdge
+                              ? "bg-indigo-600 text-white hover:opacity-90"
+                              : inRange
+                                ? "bg-indigo-100 text-indigo-800"
+                                : "hover:bg-accent",
+                          )}
+                        >
+                          {d}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {rangeStart && !rangeEnd && "Ahora elegí el último día."}
+                    {rangeStart &&
+                      rangeEnd &&
+                      `${rangeStart} al ${rangeEnd}`}
+                    {!rangeStart && "Elegí el primer día."}
+                  </p>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStep("bricks")}
+                      className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-accent"
+                    >
+                      Atrás
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!rangeStart || !rangeEnd}
+                      onClick={() => setStep("calendario")}
+                      className="rounded-md border bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                    >
+                      Aceptar
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {step === "calendario" && selected && rangeStart && rangeEnd && (
+                <div>
+                  <p className="mb-2 text-sm">
+                    <span className="font-medium">{selected.nombre}</span> del{" "}
+                    <span className="font-medium">{rangeStart}</span> al{" "}
+                    <span className="font-medium">{rangeEnd}</span>
+                  </p>
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    Elegí en qué calendario de Google avisar (el que ya tiene agregada a la
+                    gente que tiene que verlo).
+                  </p>
+                  {calendariosError && (
+                    <p className="mb-2 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                      {calendariosError}
+                    </p>
+                  )}
+                  {!calendariosError && calendarios === null && (
+                    <p className="py-4 text-center text-sm text-muted-foreground">Cargando…</p>
+                  )}
+                  {calendarios && calendarios.length === 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      No hay calendarios disponibles con permiso de escritura.
+                    </p>
+                  )}
+                  {calendarios && calendarios.length > 0 && (
+                    <select
+                      className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                      value={calendarioId}
+                      onChange={(e) => setCalendarioId(e.target.value)}
+                    >
+                      {calendarios.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nombre}
+                          {c.primary ? " (principal)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStep("rango")}
+                      className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-accent"
+                    >
+                      Atrás
+                    </button>
+                    <button
+                      type="button"
+                      onClick={confirmarRango}
+                      disabled={saving || !calendarioId}
+                      className="rounded-md border bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                    >
+                      {saving ? "Registrando…" : "Registrar"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}

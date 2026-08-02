@@ -62,7 +62,14 @@ export async function PATCH(req: NextRequest) {
       const val = value && value.trim() !== "" ? value.trim() : null;
       const numInt = toInt(num);
       if (val == null && numInt == null) {
-        return NextResponse.json({ ok: true, skipped: true });
+        // Explícitamente vacío (botón "Quitar" del modal) -> borra la fila en
+        // vez de no hacer nada, para que se pueda deshacer un estado ya
+        // guardado (antes esto era un no-op silencioso).
+        await prisma.$executeRaw`
+          DELETE FROM asistencia.estado_diario
+          WHERE employee_no = ${employee_no} AND fecha = ${fecha}::date
+        `;
+        return NextResponse.json({ ok: true, deleted: true });
       }
       await prisma.$executeRaw`
         INSERT INTO asistencia.estado_diario (employee_no, fecha, estado, dias, updated_at)

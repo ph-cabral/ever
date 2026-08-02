@@ -5,7 +5,6 @@ import {
   useState,
   useCallback,
   useMemo,
-  useRef,
   memo,
   useDeferredValue,
 } from "react";
@@ -37,6 +36,7 @@ import {
   type HorarioTipo,
   type HorarioAsignacion,
 } from "@/lib/rrhh/asistenciaIndicadores";
+import { RegistroButton, type Opcion } from "./components/RegistroModal";
 
 type Row = {
   employee_no: string;
@@ -57,40 +57,6 @@ type Row = {
   novedad: string | null;
   horas: number | null;
 };
-
-type Edit = {
-  estado?: string;
-  dias?: string;
-  novedad?: string;
-  horas?: string;
-  novedades?: { novedad: string; horas: number }[];
-};
-
-const ESTADOS = [
-  "Art",
-  "Acompañamiento familiar",
-  "Capacitación",
-  "Dia Expo",
-  "Enfermedad",
-  "Fallecimientos",
-  "Gira comercial",
-  "Nac. de hijo",
-  "Suspención",
-  "Vacaciones",
-  "Ausente",
-  "Normal",
-  "Presente",
-  "Revisar",
-  "Feriado",
-];
-
-const NOVEDADES = [
-  "Tram. Ban.",
-  "Tram. Per.",
-  "Tram. Jud.",
-  "Est. Med.",
-  "Prob. Mov.",
-];
 
 const todayLocal = () => {
   const d = new Date();
@@ -176,156 +142,6 @@ const estadoTone = (s: string) => {
   if (s === "Feriado") return "bg-indigo-100 text-indigo-800 border-indigo-200";
   return "bg-sky-100 text-sky-800 border-sky-200"; // justificaciones
 };
-
-// Picker genérico: botón que despliega opciones; al elegir, foco al input num.
-// El guardado se dispara en onBlur / Enter del input numérico (onCommit).
-function Picker({
-  value,
-  options,
-  toneClass,
-  numValue,
-  numLabel,
-  placeholder,
-  onPick,
-  onNum,
-  onCommit,
-}: {
-  value?: string;
-  options: string[];
-  toneClass?: string;
-  numValue?: string;
-  numLabel: string;
-  placeholder: string;
-  onPick: (v: string) => void;
-  onNum: (v: string) => void;
-  onCommit: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [coords, setCoords] = useState<{
-    top?: number;
-    bottom?: number;
-    left: number;
-    width: number;
-  }>({ top: 0, left: 0, width: 192 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const numRef = useRef<HTMLInputElement>(null);
-
-  const place = () => {
-    const r = btnRef.current?.getBoundingClientRect();
-    if (!r) return;
-    const margin = 8;
-    const panelH = panelRef.current?.offsetHeight ?? options.length * 32 + 8;
-    const spaceBelow = window.innerHeight - r.bottom - margin;
-    const flipUp = spaceBelow < panelH && r.top - margin > spaceBelow;
-    setCoords({
-      ...(flipUp
-        ? { bottom: window.innerHeight - r.top + 4 }
-        : { top: r.bottom + 4 }),
-      left: r.left,
-      width: Math.max(r.width, 176),
-    });
-  };
-
-  const toggle = () => {
-    if (!open) place();
-    setOpen((o) => !o);
-  };
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (
-        btnRef.current &&
-        !btnRef.current.contains(t) &&
-        panelRef.current &&
-        !panelRef.current.contains(t)
-      )
-        setOpen(false);
-    };
-    const onScroll = () => setOpen(false);
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", onScroll);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", onScroll);
-    };
-  }, [open]);
-
-  return (
-    <div className="flex items-center gap-2">
-      <div className="relative">
-        <button
-          ref={btnRef}
-          type="button"
-          onClick={toggle}
-          className={cn(
-            "inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium whitespace-nowrap hover:opacity-90",
-            value
-              ? toneClass
-              : "bg-muted text-muted-foreground border-transparent",
-          )}
-        >
-          {value ?? placeholder}
-        </button>
-        {open &&
-          createPortal(
-            <div
-              ref={panelRef}
-              style={{
-                position: "fixed",
-                top: coords.top,
-                bottom: coords.bottom,
-                left: coords.left,
-                width: coords.width,
-              }}
-              className="z-[100] rounded-md border bg-popover p-1 shadow-md"
-            >
-              {options.map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => {
-                    onPick(opt);
-                    setOpen(false);
-                    setTimeout(() => numRef.current?.focus(), 0);
-                  }}
-                  className={cn(
-                    "block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent",
-                    value === opt && "bg-accent",
-                  )}
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>,
-            document.body,
-          )}
-      </div>
-      <Input
-        ref={numRef}
-        type="number"
-        min={0}
-        inputMode="numeric"
-        value={numValue ?? ""}
-        onChange={(e) => onNum(e.target.value)}
-        onBlur={() => onCommit()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            e.currentTarget.blur(); // dispara onBlur -> onCommit
-          }
-        }}
-        placeholder={numLabel}
-        title={numLabel}
-        className="h-8 w-16"
-      />
-    </div>
-  );
-}
 
 // Editor manual de Ingreso/Egreso — para el caso de un fichaje incompleto
 // (entró y no marcó salida, o hay una sola marca a la tarde y falta la de
@@ -604,29 +420,29 @@ function FeriadosButton({ onSaved }: { onSaved: () => void }) {
 // Fila memoizada: editar/tipear una fila no re-renderiza el resto de la tabla.
 const AsistenciaRow = memo(function AsistenciaRow({
   row,
-  edit,
   desde,
   hasta,
   resolveTope,
-  onPatch,
-  onCommit,
+  estadosOp,
+  novedadesOp,
+  onSaved,
+  onOpcionesChanged,
   onHorarioSaved,
   isAdmin,
 }: {
   row: Row;
-  edit: Edit | undefined;
   desde: string;
   hasta: string;
   resolveTope: (r: Row) => number;
-  onPatch: (k: string, p: Edit) => void;
-  onCommit: (k: string, kind: "estado" | "novedad", bruto?: number) => void;
+  estadosOp: Opcion[];
+  novedadesOp: Opcion[];
+  onSaved: () => void;
+  onOpcionesChanged: () => void;
   onHorarioSaved: () => void;
   isAdmin: boolean;
 }) {
-  const k = `${row.employee_no}|${row.fecha}`;
-  const e = edit ?? {};
-  const est = e.estado ?? calcEstado(row);
-  const horasNov = parseInt(e.horas || "0", 10) || 0;
+  const est = row.estado ?? calcEstado(row);
+  const horasNov = row.horas ?? 0;
   const netMin = Math.max(0, (row.minutos ?? 0) - horasNov * 60);
   const tope = resolveTope(row);
   const rrhhMin = Math.min(netMin, tope);
@@ -682,30 +498,39 @@ const AsistenciaRow = memo(function AsistenciaRow({
         {fmtHorasRRHH(rrhhMin)}
       </TableCell>
       <TableCell>
-        <Picker
+        <RegistroButton
+          tipo="estado"
+          opciones={estadosOp}
           value={est}
-          options={ESTADOS}
-          toneClass={estadoTone(est)}
-          numValue={e.dias}
+          numValue={row.dias}
           numLabel="días"
           placeholder="Estado"
-          onPick={(v) => onPatch(k, { estado: v })}
-          onNum={(v) => onPatch(k, { dias: v })}
-          onCommit={() => onCommit(k, "estado")}
+          toneOf={estadoTone}
+          employee_no={row.employee_no}
+          employee_name={row.employee_name}
+          fecha={row.fecha}
+          isAdmin={isAdmin}
+          onSaved={onSaved}
+          onOpcionesChanged={onOpcionesChanged}
         />
       </TableCell>
       <TableCell>
         <div className="flex justify-end">
-          <Picker
-            value={e.novedad}
-            options={NOVEDADES}
-            toneClass="bg-violet-100 text-violet-800 border-violet-200"
-            numValue={e.horas}
-            numLabel="hs"
+          <RegistroButton
+            tipo="novedad"
+            opciones={novedadesOp}
+            value={row.novedad}
+            numValue={row.horas}
+            numLabel="horas"
             placeholder="Novedad"
-            onPick={(v) => onPatch(k, { novedad: v })}
-            onNum={(v) => onPatch(k, { horas: v })}
-            onCommit={() => onCommit(k, "novedad", row.minutos ?? 0)}
+            toneOf={() => "bg-violet-100 text-violet-800 border-violet-200"}
+            employee_no={row.employee_no}
+            employee_name={row.employee_name}
+            fecha={row.fecha}
+            bruto={row.minutos}
+            isAdmin={isAdmin}
+            onSaved={onSaved}
+            onOpcionesChanged={onOpcionesChanged}
           />
         </div>
       </TableCell>
@@ -718,9 +543,33 @@ export default function AsistenciaPage() {
   const [loading, setLoading] = useState(false);
   const [empleado, setEmpleado] = useState("");
   const [estado, setEstado] = useState<string>("all");
-  const [edits, setEdits] = useState<Record<string, Edit>>({});
   const [area, setArea] = useState<string>("all");
   const [sector, setSector] = useState<string>("all");
+
+  // Opciones de Estado/Novedad (antes hardcodeadas en ESTADOS/NOVEDADES) —
+  // ver /api/rrhh/asistencia/opciones. genera_calendario define si el botón
+  // pide un rango de fechas + Google Calendar en vez del número simple.
+  const [opciones, setOpciones] = useState<Opcion[]>([]);
+  const loadOpciones = useCallback(async () => {
+    try {
+      const r = await fetch("/api/rrhh/asistencia/opciones");
+      const d = await r.json().catch(() => ({}));
+      setOpciones(r.ok ? (d.opciones ?? []) : []);
+    } catch (err) {
+      console.error("[opciones]", err);
+    }
+  }, []);
+  useEffect(() => {
+    loadOpciones();
+  }, [loadOpciones]);
+  const estadosOp = useMemo(
+    () => opciones.filter((o) => o.tipo === "estado"),
+    [opciones],
+  );
+  const novedadesOp = useMemo(
+    () => opciones.filter((o) => o.tipo === "novedad"),
+    [opciones],
+  );
 
   // El ajuste manual de Ingreso/Egreso sólo lo puede cargar un ADMIN (el
   // endpoint también lo exige — esto es sólo para no mostrar el lápiz a
@@ -753,72 +602,8 @@ export default function AsistenciaPage() {
     [tipos, asignaciones],
   );
 
-  // Ref para leer ediciones actuales dentro de onBlur sin closures stale.
-  const editsRef = useRef(edits);
-  useEffect(() => {
-    editsRef.current = edits;
-  }, [edits]);
-
   const [desde, setDesde] = useState(todayLocal());
   const [hasta, setHasta] = useState(todayLocal());
-
-  const keyOf = (r: Row) => `${r.employee_no}|${r.fecha}`;
-  const patch = useCallback(
-    (k: string, p: Edit) =>
-      setEdits((prev) => ({ ...prev, [k]: { ...prev[k], ...p } })),
-    [],
-  );
-
-  // Guardado en DB (blur/Enter). kind = qué picker disparó.
-  const commit = useCallback(
-    async (k: string, kind: "estado" | "novedad", bruto?: number) => {
-      const sep = k.lastIndexOf("|");
-      const employee_no = k.slice(0, sep);
-      const fecha = k.slice(sep + 1);
-      const e = editsRef.current[k] ?? {};
-
-      let body: any;
-      if (kind === "estado") {
-        body = {
-          employee_no,
-          fecha,
-          kind,
-          value: e.estado ?? null,
-          num: e.dias ?? null,
-        };
-      } else {
-        const horas = parseInt(e.horas || "0", 10) || 0;
-        const brutoMin = bruto ?? 0;
-        const netoMin = Math.max(0, brutoMin - horas * 60);
-        body = {
-          employee_no,
-          fecha,
-          kind,
-          value: e.novedad ?? null,
-          num: e.horas ?? null,
-          bruto: brutoMin,
-          neto: netoMin,
-        };
-      }
-
-      if (
-        (body.value == null || body.value === "") &&
-        (body.num == null || body.num === "")
-      )
-        return;
-
-      try {
-        await fetch("/api/rrhh/asistencia/novedad", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-      } catch (err) {
-        console.error("[novedad commit]", err);
-      }
-    },
-    [],
-  );
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -828,30 +613,10 @@ export default function AsistenciaPage() {
       if (!r.ok) {
         console.error(await r.json().catch(() => ({ error: r.statusText })));
         setRows([]);
-        setEdits({});
         return;
       }
       const data: Row[] = await r.json();
       setRows(data);
-
-      // Precargar ediciones guardadas (reemplaza al cambiar de rango).
-      const initial: Record<string, Edit> = {};
-      for (const row of data) {
-        if (
-          row.estado != null ||
-          row.dias != null ||
-          row.novedad != null ||
-          row.horas != null
-        ) {
-          initial[`${row.employee_no}|${row.fecha}`] = {
-            estado: row.estado ?? undefined,
-            dias: row.dias != null ? String(row.dias) : undefined,
-            novedad: row.novedad ?? undefined,
-            horas: row.horas != null ? String(row.horas) : undefined,
-          };
-        }
-      }
-      setEdits(initial);
     } finally {
       setLoading(false);
     }
@@ -861,7 +626,10 @@ export default function AsistenciaPage() {
     fetchData();
   }, [fetchData]);
 
-  const effEstado = (r: Row) => edits[keyOf(r)]?.estado ?? calcEstado(r);
+  // Estado/novedad ahora vienen siempre del server (RegistroButton refresca
+  // con fetchData después de cada guardado) — ya no hace falta una capa de
+  // "edits" local encima de `rows`.
+  const effEstado = (r: Row) => r.estado ?? calcEstado(r);
 
   const empleadoDef = useDeferredValue(empleado);
 
@@ -913,7 +681,7 @@ export default function AsistenciaPage() {
       if (sector !== "all" && (r.sector ?? "") !== sector) return false;
       return true;
     });
-  }, [rows, empleadoDef, estado, area, sector, edits]);
+  }, [rows, empleadoDef, estado, area, sector]);
 
   return (
     <div className="container mx-auto px-6 py-8">
@@ -977,9 +745,9 @@ export default function AsistenciaPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos los estados</SelectItem>
-            {ESTADOS.map((s) => (
-              <SelectItem key={s} value={s}>
-                {s}
+            {estadosOp.map((s) => (
+              <SelectItem key={s.id} value={s.nombre}>
+                {s.nombre}
               </SelectItem>
             ))}
           </SelectContent>
@@ -1035,8 +803,8 @@ export default function AsistenciaPage() {
               <TableHead>Ingreso/Egreso</TableHead>
               <TableHead>En empresa</TableHead>
               <TableHead>RRHH</TableHead>
-              <TableHead>Estado / Días</TableHead>
-              <TableHead className="text-right">Novedad / Horas</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead className="text-right">Novedad</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1064,12 +832,13 @@ export default function AsistenciaPage() {
               <AsistenciaRow
                 key={`${r.employee_no}|${r.fecha}-${r.devices}`}
                 row={r}
-                edit={edits[`${r.employee_no}|${r.fecha}`]}
                 desde={desde}
                 hasta={hasta}
                 resolveTope={resolveTope}
-                onPatch={patch}
-                onCommit={commit}
+                estadosOp={estadosOp}
+                novedadesOp={novedadesOp}
+                onSaved={fetchData}
+                onOpcionesChanged={loadOpciones}
                 onHorarioSaved={fetchData}
                 isAdmin={isAdmin}
               />
