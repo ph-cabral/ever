@@ -104,13 +104,25 @@ export function RegistroButton({
   const [calendarioId, setCalendarioId] = useState("");
   // Invitados puntuales del evento — pedido de Pablo (2026-08-03): además del
   // calendario base (que ya tiene agregada a la gente que siempre lo ve), a
-  // veces hace falta sumar a alguien puntual a ese registro. Se arman como
-  // chips; el input sugiere contra la libreta de asistencia.email_registrado
-  // (ver /api/rrhh/asistencia/emails) mientras se tipea, y el botón "+" suma
-  // lo tipeado aunque no esté en la libreta.
+  // veces hace falta sumar a alguien puntual a ese registro. Se eligen como
+  // pills fijas contra la libreta de asistencia.email_registrado (ver
+  // /api/rrhh/asistencia/emails), desmarcadas por default — click las
+  // marca/desmarca para ESTE registro. El "+" del input de abajo no suma
+  // directo acá: abre un modal chico que guarda el email en la libreta para
+  // que quede disponible como pill de ahora en más.
   const [invitados, setInvitados] = useState<string[]>([]);
   const [invitadoInput, setInvitadoInput] = useState("");
   const [emailsRegistrados, setEmailsRegistrados] = useState<EmailRegistrado[] | null>(null);
+  // Modal chico para sumar un email nuevo a la libreta (asistencia.email_
+  // registrado) sin salir del registro — pedido de Pablo (2026-08-03): el
+  // "+" de abajo antes sumaba directo como invitado puntual de ESTE evento;
+  // ahora guarda en la libreta y aparece como pill fijo (desmarcado) para
+  // marcar acá o en cualquier registro futuro.
+  const [nuevoEmailOpen, setNuevoEmailOpen] = useState(false);
+  const [nuevoEmailValor, setNuevoEmailValor] = useState("");
+  const [nuevoEmailNombre, setNuevoEmailNombre] = useState("");
+  const [nuevoEmailSaving, setNuevoEmailSaving] = useState(false);
+  const [nuevoEmailError, setNuevoEmailError] = useState<string | null>(null);
 
   const resetTransient = () => {
     setStep("bricks");
@@ -127,6 +139,10 @@ export function RegistroButton({
     setInvitados([]);
     setInvitadoInput("");
     setEmailsRegistrados(null);
+    setNuevoEmailOpen(false);
+    setNuevoEmailValor("");
+    setNuevoEmailNombre("");
+    setNuevoEmailError(null);
   };
 
   const close = () => {
@@ -215,29 +231,53 @@ export function RegistroButton({
       .catch(() => setEmailsRegistrados([]));
   }, [step, emailsRegistrados]);
 
-  // Sugerencias contra la libreta mientras se tipea — matchea email o
-  // nombre, y no repite a alguien que ya está agregado como chip.
-  const sugerenciasInvitados = useMemo(() => {
-    const q = invitadoInput.trim().toLowerCase();
-    if (!q || !emailsRegistrados) return [];
-    return emailsRegistrados
-      .filter((e) => !invitados.includes(e.email))
-      .filter(
-        (e) =>
-          e.email.toLowerCase().includes(q) || (e.nombre ?? "").toLowerCase().includes(q),
-      )
-      .slice(0, 6);
-  }, [invitadoInput, emailsRegistrados, invitados]);
-
-  const agregarInvitado = (email: string) => {
-    const limpio = email.trim();
-    if (!EMAIL_RE.test(limpio) || invitados.includes(limpio)) return;
-    setInvitados((prev) => [...prev, limpio]);
-    setInvitadoInput("");
+  // Pills fijas: togglear un email de la libreta como invitado de ESTE
+  // registro — no persiste nada, sólo entra en el POST a /rango.
+  const toggleInvitado = (email: string) => {
+    setInvitados((prev) =>
+      prev.includes(email) ? prev.filter((e) => e !== email) : [...prev, email],
+    );
   };
 
-  const quitarInvitado = (email: string) => {
-    setInvitados((prev) => prev.filter((e) => e !== email));
+  // "+" del input de abajo: ya no suma directo como invitado puntual de este
+  // evento — abre el modal chico para guardar el email en la libreta
+  // (asistencia.email_registrado). Una vez guardado aparece como pill nueva,
+  // desmarcada, acá y en cualquier registro futuro.
+  const abrirNuevoEmail = () => {
+    const limpio = invitadoInput.trim();
+    if (!EMAIL_RE.test(limpio)) return;
+    setNuevoEmailValor(limpio);
+    setNuevoEmailNombre("");
+    setNuevoEmailError(null);
+    setNuevoEmailOpen(true);
+  };
+
+  const guardarNuevoEmail = async () => {
+    const email = nuevoEmailValor.trim();
+    if (!EMAIL_RE.test(email)) {
+      setNuevoEmailError("Email inválido");
+      return;
+    }
+    setNuevoEmailSaving(true);
+    setNuevoEmailError(null);
+    try {
+      const r = await fetch("/api/rrhh/asistencia/emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, nombre: nuevoEmailNombre.trim() || undefined }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error ?? "error al agregar");
+      const rl = await fetch("/api/rrhh/asistencia/emails");
+      const dl = await rl.json().catch(() => ({}));
+      setEmailsRegistrados(rl.ok ? (dl.emails ?? []) : []);
+      setInvitadoInput("");
+      setNuevoEmailOpen(false);
+    } catch (e: any) {
+      setNuevoEmailError(e?.message ?? "error al agregar");
+    } finally {
+      setNuevoEmailSaving(false);
+    }
   };
 
   const horasDiaNum = parseInt(horasDia, 10);
@@ -644,39 +684,49 @@ export function RegistroButton({
                       ))}
                     </select>
                   )}
-                  <div className="relative mt-3">
+                  <div className="mt-3">
                     <label className="mb-1 block text-xs text-muted-foreground">
-                      Sumar invitados puntuales (opcional) — además de la gente que ya está en
-                      ese calendario
+                      Invitados puntuales (opcional) — marcá los que correspondan
                     </label>
-                    {invitados.length > 0 && (
-                      <div className="mb-1.5 flex flex-wrap gap-1">
-                        {invitados.map((email) => (
-                          <span
-                            key={email}
-                            className="inline-flex items-center gap-1 rounded-full border bg-muted/60 py-0.5 pl-2 pr-1 text-[11px]"
-                          >
-                            {email}
+                    {emailsRegistrados === null && (
+                      <p className="text-xs text-muted-foreground">Cargando…</p>
+                    )}
+                    {emailsRegistrados && emailsRegistrados.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        Todavía no hay emails guardados — sumá el primero abajo.
+                      </p>
+                    )}
+                    {emailsRegistrados && emailsRegistrados.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {emailsRegistrados.map((e) => {
+                          const marcado = invitados.includes(e.email);
+                          return (
                             <button
+                              key={e.id}
                               type="button"
-                              onClick={() => quitarInvitado(email)}
-                              title="Quitar"
-                              className="rounded-full p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                              onClick={() => toggleInvitado(e.email)}
+                              title={e.email}
+                              className={cn(
+                                "rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                                marcado
+                                  ? "bg-indigo-600 text-white border-indigo-600"
+                                  : "bg-muted/50 text-muted-foreground border-transparent hover:bg-accent",
+                              )}
                             >
-                              <X className="h-3 w-3" />
+                              {e.nombre || e.email}
                             </button>
-                          </span>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
-                    <div className="flex items-center gap-1.5">
+                    <div className="mt-2 flex items-center gap-1.5">
                       <Input
                         value={invitadoInput}
                         onChange={(e) => setInvitadoInput(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault();
-                            agregarInvitado(invitadoInput);
+                            abrirNuevoEmail();
                           }
                         }}
                         placeholder="correo@empresa.com"
@@ -684,35 +734,14 @@ export function RegistroButton({
                       />
                       <button
                         type="button"
-                        onClick={() => agregarInvitado(invitadoInput)}
+                        onClick={abrirNuevoEmail}
                         disabled={!EMAIL_RE.test(invitadoInput.trim())}
-                        title="Agregar invitado"
+                        title="Sumar email nuevo a la lista"
                         className="shrink-0 rounded-md border p-1.5 hover:bg-accent disabled:opacity-50"
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </button>
                     </div>
-                    {sugerenciasInvitados.length > 0 && (
-                      <div className="absolute z-10 mt-1 w-full rounded-md border bg-popover shadow-md">
-                        {sugerenciasInvitados.map((e) => (
-                          <button
-                            key={e.id}
-                            type="button"
-                            onClick={() => agregarInvitado(e.email)}
-                            className="block w-full truncate px-2.5 py-1.5 text-left text-xs hover:bg-accent"
-                          >
-                            {e.nombre ? (
-                              <>
-                                <span className="font-medium">{e.nombre}</span>{" "}
-                                <span className="text-muted-foreground">{e.email}</span>
-                              </>
-                            ) : (
-                              e.email
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
                   </div>
                   <div className="mt-4 flex justify-end gap-2">
                     <button
@@ -733,6 +762,73 @@ export function RegistroButton({
                   </div>
                 </div>
               )}
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {nuevoEmailOpen &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 p-4"
+            onClick={() => !nuevoEmailSaving && setNuevoEmailOpen(false)}
+          >
+            <div
+              className="w-full max-w-xs rounded-lg border bg-popover p-4 shadow-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-sm font-medium">Sumar email a la lista</h2>
+                <button
+                  type="button"
+                  onClick={() => !nuevoEmailSaving && setNuevoEmailOpen(false)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Queda guardado para siempre — va a aparecer como pill para marcar en este y en
+                futuros registros.
+              </p>
+              {nuevoEmailError && (
+                <p className="mb-2 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                  {nuevoEmailError}
+                </p>
+              )}
+              <div className="space-y-2">
+                <Input
+                  value={nuevoEmailValor}
+                  onChange={(e) => setNuevoEmailValor(e.target.value)}
+                  placeholder="correo@empresa.com"
+                  className="h-9 text-xs"
+                  autoFocus
+                />
+                <Input
+                  value={nuevoEmailNombre}
+                  onChange={(e) => setNuevoEmailNombre(e.target.value)}
+                  placeholder="Nombre (opcional)"
+                  className="h-9 text-xs"
+                />
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNuevoEmailOpen(false)}
+                  disabled={nuevoEmailSaving}
+                  className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-accent disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={guardarNuevoEmail}
+                  disabled={nuevoEmailSaving || !EMAIL_RE.test(nuevoEmailValor.trim())}
+                  className="rounded-md border bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                >
+                  {nuevoEmailSaving ? "Guardando…" : "Guardar"}
+                </button>
+              </div>
             </div>
           </div>,
           document.body,
