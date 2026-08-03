@@ -8,7 +8,9 @@ próximo pedido de una cola armada con el cruce:
     cruzado por NroMovVenta contra VenFer_PedidoCabecera solo para traer
     FechaPedido/TipoPedido/Cliente — ver FIX 2026-07-31 más abajo)
         ∩
-    Cumplido en WMS (OT de Picking, OTEstado=2)
+    Cumplido en WMS: la OT de Picking MÁS RECIENTE del pedido (mayor OTId)
+    está en OTEstado=2 — ver FIX 2026-08-03 más abajo (no alcanza con que
+    EXISTA alguna OT vieja Cumplida)
 
 cruzados por NroMovVenta ("número de movimiento", mismo campo que ya usa
 fetch_pedido_lookup en errores_mesa.py vía OT.{OT_COL_PEDIDO}).
@@ -65,6 +67,16 @@ SQL_MAGNUS_ABIERTOS_TODOS -> fetch_pedidos_cumplidos_abiertos -> refrescar_cola
 -> columna "codCliente" en deposito.control_asignacion (ALTER idempotente en
 ever/sql/deposito_control_asignacion.sql, correr antes de deployar) ->
 _fetch_asignacion_activa / asignar_siguiente. Sin verificar en vivo.
+
+FIX 2026-08-03 (a pedido de Pablo, reportado en vivo): la cola traía pedidos
+que WMS todavía no marca Cumplido. Causa: `SQL_WMS_CUMPLIDOS_POR_PEDIDO`
+filtraba `OTEstado = 2` directo en el SQL — si un pedido tenía una OT vieja
+ya Cumplida y una MÁS NUEVA sin terminar (repick/corrección tras un error),
+la vieja igual matcheaba y el pedido se daba por listo. Fix: se trae TODA OT
+de Picking del pedido (`SQL_WMS_OT_POR_PEDIDO`, sin filtrar OTEstado) y en
+Python se elige la de mayor OTId (más reciente, mismo criterio que usa
+`deposito.py`); el pedido solo cuenta como Cumplido si ESA está en
+OTEstado=2. Sin verificar en vivo — falta rebuild indicadores-api.
 """
 from datetime import datetime, timedelta
 
@@ -119,11 +131,22 @@ ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
 -- NroMovVenta ASC. Sin Prioridad cargada -> 999, al final de la cola.
 """
 
-# ── WMS: de esos pedidos puntuales, cuáles tienen OT de Picking Cumplida ─────
-SQL_WMS_CUMPLIDOS_POR_PEDIDO = """
+# ── WMS: de esos pedidos puntuales, TODAS sus OT de Picking (no solo las ────
+# Cumplidas) — para poder quedarnos con la MÁS RECIENTE y recién ahí decidir
+# si el pedido está Cumplido. FIX 2026-08-03 (a pedido de Pablo, reportado en
+# vivo: la cola traía pedidos que WMS no marca Cumplido): antes esta query
+# filtraba OTEstado=2 directo en SQL, así que si un pedido tenía una OT vieja
+# Cumplida y una MÁS NUEVA todavía sin terminar (repick/corrección), la vieja
+# igual matcheaba y el pedido entraba a la cola como si estuviera listo. Ver
+# fetch_pedidos_cumplidos_abiertos: ahí se agrupa por pedido y se elige la OT
+# de mayor OTId (mismo criterio "más reciente" que ya usa deposito.py,
+# ORDER BY OT.OTId DESC) — el pedido solo cuenta como Cumplido si ESA es
+# OTEstado=2.
+SQL_WMS_OT_POR_PEDIDO = """
 SELECT
     OT.{col_pedido}            AS NroPedido,
     OT.OTId                    AS Ot,
+    OT.OTEstado                AS OTEstado,
     OT.OTFechaHoraEjecucion    AS Cumplido,
     P_Repositor.PersonalId     AS NroArmador,
     P_Repositor.PersonalNombre AS NombreArmador{observ_select}
@@ -131,7 +154,6 @@ FROM OT
 INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
 LEFT JOIN Personal P_Repositor ON OT.OTUsuarioGUID_Repositor = P_Repositor.PersonalId
 WHERE Codot.CodotProcesoNegocio = 4          -- Picking
-  AND OT.OTEstado = 2                        -- Cumplido
   AND OT.{col_pedido} IN ({ph})
 """
 
@@ -191,7 +213,7 @@ def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list
             chunk = nros[i:i + CH]
             ph = ",".join("?" for _ in chunk)
             cur.execute(
-                SQL_WMS_CUMPLIDOS_POR_PEDIDO.format(
+                SQL_WMS_OT_POR_PEDIDO.format(
                     col_pedido=OT_COL_PEDIDO, observ_select=observ_select, ph=ph,
                 ),
                 chunk,
@@ -200,20 +222,23 @@ def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list
             for row in cur.fetchall():
                 d = dict(zip(cols, row))
                 nro = d.get("NroPedido")
-                if nro is None:
+                ot_id = d.get("Ot")
+                if nro is None or ot_id is None:
                     continue
                 n = int(nro)
-                cumplido = d.get("Cumplido")
                 prev = wms.get(n)
-                # Si un pedido tuviera >1 OT Cumplida, quedarse con la más reciente.
-                if prev is None or (cumplido and prev.get("Cumplido") and cumplido > prev["Cumplido"]):
+                # Nos quedamos con la OT de Picking de MAYOR OTId (la más
+                # reciente), sea Cumplida o no — así, si el pedido tiene una
+                # OT nueva todavía sin terminar, esa manda y no una vieja ya
+                # Cumplida (ver nota FIX 2026-08-03 junto a la query).
+                if prev is None or int(ot_id) > prev["ot"]:
                     ubic = d.get("Ubicacion")
                     wms[n] = {
-                        "ot": int(d["Ot"]) if d.get("Ot") is not None else None,
+                        "ot": int(ot_id),
+                        "otEstado": int(d["OTEstado"]) if d.get("OTEstado") is not None else None,
                         "nroArmador": int(d["NroArmador"]) if d.get("NroArmador") is not None else None,
                         "nombreArmador": (d.get("NombreArmador") or "").strip() or None,
                         "ubicacion": (str(ubic).strip() or None) if ubic is not None else None,
-                        "Cumplido": cumplido,
                     }
     finally:
         conn.close()
@@ -221,8 +246,10 @@ def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list
     out: list[dict] = []
     for nro, ab in abiertos.items():
         w = wms.get(nro)
-        if w is None:
-            continue  # Abierto en Magnus pero todavía no Cumplido en WMS
+        if w is None or w.get("otEstado") != 2:
+            # Sin OT de Picking, o la más reciente todavía no está Cumplida
+            # (OTEstado=2) — no está lista para controlar.
+            continue
         out.append({
             "nroPedido": nro,
             "fecha": ab["fecha"],
