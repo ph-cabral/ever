@@ -121,9 +121,11 @@ INNER JOIN EVERWEAR.dbo.TMP_TiempoDePedidos   t   ON t.NroMovVenta   = cab.NroMo
 LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo   = cc.CompCodigo
 LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente   = cli.CodCliente
 WHERE LTRIM(RTRIM(t.Estado)) = 'Abierto'
-  AND cab.CompCodigo <> 70  -- excluye acopios (a pedido de Pablo, 2026-08-03;
-  -- ajustado el mismo día: el 75 SÍ debe quedar, solo se excluye el 70,
-  -- hasta encontrar una forma mejor de distinguir acopios)
+  AND cab.CompCodigo NOT IN (70, 75)  -- excluye acopios (a pedido de Pablo,
+  -- 2026-08-03; se había sacado el 75 de la exclusión el mismo día, pero
+  -- volvió a entrar porque trajo un pedido no finalizado — vuelve a
+  -- excluirse junto con el 70, hasta encontrar una forma mejor de
+  -- distinguir acopios)
 ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
 -- 2026-08-03 (a pedido de Pablo): prioridad ASC (1 = más urgente) y, dentro
 -- de cada prioridad, fecha ASC (más viejo primero) — vaciar los atrasados de
@@ -464,9 +466,9 @@ def fetch_pedidos_asignados(desde: str | None = None, hasta: str | None = None) 
     """Historial de pedidos asignados (deposito.control_asignacion), con
     cantidad de ítems (Magnus) y "horaCierre" (próxima asignación del mismo
     operario). `desde`/`hasta` = 'YYYY-MM-DD', filtran por la FECHA de
-    "asignadoEn". Sin ninguno de los dos: HOY. Excluye acopios (CompCodigo 70
-    en vivo contra Magnus; el 75 queda incluido) — ver comentario junto al
-    filtro más abajo. Solo lectura."""
+    "asignadoEn". Sin ninguno de los dos: HOY. Excluye acopios (CompCodigo
+    70/75 en vivo contra Magnus) — ver comentario junto al filtro más abajo.
+    Solo lectura."""
     conn = get_pg_connection()
     try:
         cur = conn.cursor()
@@ -506,9 +508,8 @@ def fetch_pedidos_asignados(desde: str | None = None, hasta: str | None = None) 
         if r.get("horaCierre") is not None:
             r["horaCierre"] = r["horaCierre"].isoformat()
 
-    # Excluye acopios (a pedido de Pablo, 2026-08-03: CompCodigo 70 — el 75
-    # NO se excluye, queda incluido a pedido explícito — mismo criterio que
-    # SQL_MAGNUS_ABIERTOS_TODOS). Esa exclusión en la cola solo
+    # Excluye acopios (a pedido de Pablo, 2026-08-03: CompCodigo 70 y 75 —
+    # mismo criterio que SQL_MAGNUS_ABIERTOS_TODOS). Esa exclusión en la cola solo
     # frena pedidos NUEVOS al refrescar — pedidos que ya habían quedado
     # guardados en deposito.control_asignacion (de antes del fix, o insertados
     # por otra vía) seguían apareciendo acá porque este historial no
@@ -536,7 +537,7 @@ def fetch_pedidos_asignados(desde: str | None = None, hasta: str | None = None) 
                 for nro, comp in cur.fetchall():
                     comp_codigo[int(nro)] = int(comp) if comp is not None else None
 
-            rows = [r for r in rows if comp_codigo.get(r["nroPedido"]) != 70]
+            rows = [r for r in rows if comp_codigo.get(r["nroPedido"]) not in (70, 75)]
             nros = sorted({r["nroPedido"] for r in rows if r.get("nroPedido") is not None})
 
             for i in range(0, len(nros), CH):

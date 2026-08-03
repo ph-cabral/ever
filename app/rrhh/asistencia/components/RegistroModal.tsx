@@ -42,17 +42,10 @@ const pad2 = (n: number) => String(n).padStart(2, "0");
 const toISO = (y: number, m: number, d: number) => `${y}-${pad2(m + 1)}-${pad2(d)}`;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const parseInvitados = (txt: string): string[] =>
-  Array.from(
-    new Set(
-      txt
-        .split(/[,;\s]+/)
-        .map((s) => s.trim())
-        .filter((s) => EMAIL_RE.test(s)),
-    ),
-  );
 
 type Step = "bricks" | "numero" | "rango" | "calendario";
+
+type EmailRegistrado = { id: number; email: string; nombre: string | null };
 
 export function RegistroButton({
   tipo,
@@ -111,8 +104,13 @@ export function RegistroButton({
   const [calendarioId, setCalendarioId] = useState("");
   // Invitados puntuales del evento — pedido de Pablo (2026-08-03): además del
   // calendario base (que ya tiene agregada a la gente que siempre lo ve), a
-  // veces hace falta sumar a alguien puntual a ese registro.
-  const [invitadosTxt, setInvitadosTxt] = useState("");
+  // veces hace falta sumar a alguien puntual a ese registro. Se arman como
+  // chips; el input sugiere contra la libreta de asistencia.email_registrado
+  // (ver /api/rrhh/asistencia/emails) mientras se tipea, y el botón "+" suma
+  // lo tipeado aunque no esté en la libreta.
+  const [invitados, setInvitados] = useState<string[]>([]);
+  const [invitadoInput, setInvitadoInput] = useState("");
+  const [emailsRegistrados, setEmailsRegistrados] = useState<EmailRegistrado[] | null>(null);
 
   const resetTransient = () => {
     setStep("bricks");
@@ -126,7 +124,9 @@ export function RegistroButton({
     setCalendarios(null);
     setCalendariosError(null);
     setCalendarioId("");
-    setInvitadosTxt("");
+    setInvitados([]);
+    setInvitadoInput("");
+    setEmailsRegistrados(null);
   };
 
   const close = () => {
@@ -203,6 +203,43 @@ export function RegistroButton({
       .catch((e) => setCalendariosError(e?.message ?? "error"));
   }, [step, calendarios]);
 
+  // ── Paso calendario: carga la libreta de emails para sugerir invitados ──
+  useEffect(() => {
+    if (step !== "calendario" || emailsRegistrados !== null) return;
+    fetch("/api/rrhh/asistencia/emails")
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        return (r.ok ? d.emails : []) as EmailRegistrado[];
+      })
+      .then(setEmailsRegistrados)
+      .catch(() => setEmailsRegistrados([]));
+  }, [step, emailsRegistrados]);
+
+  // Sugerencias contra la libreta mientras se tipea — matchea email o
+  // nombre, y no repite a alguien que ya está agregado como chip.
+  const sugerenciasInvitados = useMemo(() => {
+    const q = invitadoInput.trim().toLowerCase();
+    if (!q || !emailsRegistrados) return [];
+    return emailsRegistrados
+      .filter((e) => !invitados.includes(e.email))
+      .filter(
+        (e) =>
+          e.email.toLowerCase().includes(q) || (e.nombre ?? "").toLowerCase().includes(q),
+      )
+      .slice(0, 6);
+  }, [invitadoInput, emailsRegistrados, invitados]);
+
+  const agregarInvitado = (email: string) => {
+    const limpio = email.trim();
+    if (!EMAIL_RE.test(limpio) || invitados.includes(limpio)) return;
+    setInvitados((prev) => [...prev, limpio]);
+    setInvitadoInput("");
+  };
+
+  const quitarInvitado = (email: string) => {
+    setInvitados((prev) => prev.filter((e) => e !== email));
+  };
+
   const horasDiaNum = parseInt(horasDia, 10);
   const horasDiaValida = tipo !== "novedad" || (Number.isFinite(horasDiaNum) && horasDiaNum > 0);
 
@@ -211,7 +248,6 @@ export function RegistroButton({
     setSaving(true);
     setError(null);
     try {
-      const invitados = parseInvitados(invitadosTxt);
       const r = await fetch("/api/rrhh/asistencia/rango", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -608,17 +644,75 @@ export function RegistroButton({
                       ))}
                     </select>
                   )}
-                  <div className="mt-3">
+                  <div className="relative mt-3">
                     <label className="mb-1 block text-xs text-muted-foreground">
                       Sumar invitados puntuales (opcional) — además de la gente que ya está en
                       ese calendario
                     </label>
-                    <Input
-                      value={invitadosTxt}
-                      onChange={(e) => setInvitadosTxt(e.target.value)}
-                      placeholder="correo1@empresa.com, correo2@empresa.com"
-                      className="h-9 text-xs"
-                    />
+                    {invitados.length > 0 && (
+                      <div className="mb-1.5 flex flex-wrap gap-1">
+                        {invitados.map((email) => (
+                          <span
+                            key={email}
+                            className="inline-flex items-center gap-1 rounded-full border bg-muted/60 py-0.5 pl-2 pr-1 text-[11px]"
+                          >
+                            {email}
+                            <button
+                              type="button"
+                              onClick={() => quitarInvitado(email)}
+                              title="Quitar"
+                              className="rounded-full p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        value={invitadoInput}
+                        onChange={(e) => setInvitadoInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            agregarInvitado(invitadoInput);
+                          }
+                        }}
+                        placeholder="correo@empresa.com"
+                        className="h-9 text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => agregarInvitado(invitadoInput)}
+                        disabled={!EMAIL_RE.test(invitadoInput.trim())}
+                        title="Agregar invitado"
+                        className="shrink-0 rounded-md border p-1.5 hover:bg-accent disabled:opacity-50"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    {sugerenciasInvitados.length > 0 && (
+                      <div className="absolute z-10 mt-1 w-full rounded-md border bg-popover shadow-md">
+                        {sugerenciasInvitados.map((e) => (
+                          <button
+                            key={e.id}
+                            type="button"
+                            onClick={() => agregarInvitado(e.email)}
+                            className="block w-full truncate px-2.5 py-1.5 text-left text-xs hover:bg-accent"
+                          >
+                            {e.nombre ? (
+                              <>
+                                <span className="font-medium">{e.nombre}</span>{" "}
+                                <span className="text-muted-foreground">{e.email}</span>
+                              </>
+                            ) : (
+                              e.email
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="mt-4 flex justify-end gap-2">
                     <button

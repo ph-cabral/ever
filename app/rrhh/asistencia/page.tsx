@@ -10,7 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { Pencil } from "lucide-react";
+import { Pencil, Plus, X } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { Input } from "@/components/ui/input";
 import { DateRangeField } from "@/components/ui/date-range-field";
@@ -417,6 +417,188 @@ function FeriadosButton({ onSaved }: { onSaved: () => void }) {
   );
 }
 
+type EmailRegistrado = { id: number; email: string; nombre: string | null };
+
+// Botón "Emails": libreta de correos (asistencia.email_registrado, ver
+// sql/asistencia_emails_registrados.sql) — pedido de Pablo (2026-08-03).
+// Alimenta el autocompletado de "invitados" del modal de Estado/Novedad
+// (RegistroModal.tsx, step "calendario"); acá se administra: agregar,
+// ponerle un nombre para reconocerla más fácil, y borrar. Sin gating de
+// ADMIN, mismo criterio que el botón "Feriados".
+function EmailsButton() {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [emails, setEmails] = useState<EmailRegistrado[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [nuevoEmail, setNuevoEmail] = useState("");
+  const [nuevoNombre, setNuevoNombre] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch("/api/rrhh/asistencia/emails");
+      const d = await r.json().catch(() => ({}));
+      setEmails(r.ok ? (d.emails ?? []) : []);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const openModal = () => {
+    setOpen(true);
+    setError(null);
+    load();
+  };
+
+  const agregar = async () => {
+    const email = nuevoEmail.trim();
+    if (!email) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/rrhh/asistencia/emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, nombre: nuevoNombre.trim() || undefined }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error ?? "error al agregar");
+      setNuevoEmail("");
+      setNuevoNombre("");
+      await load();
+    } catch (e: any) {
+      setError(e?.message ?? "error al agregar");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const eliminar = async (id: number) => {
+    setSaving(true);
+    try {
+      await fetch("/api/rrhh/asistencia/emails", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      await load();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={openModal}
+        className="mt-2 ml-3 text-xs text-primary hover:underline"
+      >
+        Emails
+      </button>
+      {open &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setOpen(false)}
+          >
+            <div
+              className="w-full max-w-sm rounded-lg border bg-popover p-4 shadow-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-1 flex items-center justify-between">
+                <h2 className="text-sm font-medium">Libreta de emails</h2>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  ✕
+                </button>
+              </div>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Se usan para sugerir invitados al registrar un Estado/Novedad con calendario.
+              </p>
+              {error && (
+                <p className="mb-2 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                  {error}
+                </p>
+              )}
+              {loading ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">Cargando…</p>
+              ) : (
+                <div className="max-h-64 overflow-y-auto rounded border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead className="w-8" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {emails.map((em) => (
+                        <TableRow key={em.id}>
+                          <TableCell className="text-xs">{em.email}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {em.nombre ?? "—"}
+                          </TableCell>
+                          <TableCell>
+                            <button
+                              type="button"
+                              onClick={() => eliminar(em.id)}
+                              disabled={saving}
+                              title="Eliminar"
+                              className="text-muted-foreground hover:text-red-600 disabled:opacity-50"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {emails.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={3} className="py-4 text-center text-xs text-muted-foreground">
+                            Sin emails cargados todavía.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+              <div className="mt-3 flex items-center gap-1.5 border-t pt-2">
+                <Input
+                  placeholder="correo@empresa.com"
+                  value={nuevoEmail}
+                  onChange={(e) => setNuevoEmail(e.target.value)}
+                  className="h-8 text-xs"
+                />
+                <Input
+                  placeholder="Nombre (opcional)"
+                  value={nuevoNombre}
+                  onChange={(e) => setNuevoNombre(e.target.value)}
+                  className="h-8 w-32 text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={agregar}
+                  disabled={saving || !nuevoEmail.trim()}
+                  title="Agregar email"
+                  className="rounded-md border p-1.5 hover:bg-accent disabled:opacity-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 // Fila memoizada: editar/tipear una fila no re-renderiza el resto de la tabla.
 const AsistenciaRow = memo(function AsistenciaRow({
   row,
@@ -700,6 +882,7 @@ export default function AsistenciaPage() {
             {horariosOpen ? "Ocultar horarios" : "Configurar horarios por área"}
           </button>
           <FeriadosButton onSaved={fetchData} />
+          <EmailsButton />
         </div>
         {empleadosPorArea.length > 0 && (
           <div className="flex flex-col items-center gap-2 rounded-[2rem] border px-6 py-3">
