@@ -41,6 +41,17 @@ const CAL_MESES = [
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const toISO = (y: number, m: number, d: number) => `${y}-${pad2(m + 1)}-${pad2(d)}`;
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const parseInvitados = (txt: string): string[] =>
+  Array.from(
+    new Set(
+      txt
+        .split(/[,;\s]+/)
+        .map((s) => s.trim())
+        .filter((s) => EMAIL_RE.test(s)),
+    ),
+  );
+
 type Step = "bricks" | "numero" | "rango" | "calendario";
 
 export function RegistroButton({
@@ -98,6 +109,10 @@ export function RegistroButton({
   const [calendarios, setCalendarios] = useState<Calendario[] | null>(null);
   const [calendariosError, setCalendariosError] = useState<string | null>(null);
   const [calendarioId, setCalendarioId] = useState("");
+  // Invitados puntuales del evento — pedido de Pablo (2026-08-03): además del
+  // calendario base (que ya tiene agregada a la gente que siempre lo ve), a
+  // veces hace falta sumar a alguien puntual a ese registro.
+  const [invitadosTxt, setInvitadosTxt] = useState("");
 
   const resetTransient = () => {
     setStep("bricks");
@@ -111,6 +126,7 @@ export function RegistroButton({
     setCalendarios(null);
     setCalendariosError(null);
     setCalendarioId("");
+    setInvitadosTxt("");
   };
 
   const close = () => {
@@ -195,6 +211,7 @@ export function RegistroButton({
     setSaving(true);
     setError(null);
     try {
+      const invitados = parseInvitados(invitadosTxt);
       const r = await fetch("/api/rrhh/asistencia/rango", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -206,6 +223,7 @@ export function RegistroButton({
           hasta: rangeEnd,
           calendar_id: calendarioId,
           ...(tipo === "novedad" ? { horas: horasDiaNum } : {}),
+          ...(invitados.length > 0 ? { invitados } : {}),
         }),
       });
       const d = await r.json().catch(() => ({}));
@@ -312,7 +330,10 @@ export function RegistroButton({
             onClick={close}
           >
             <div
-              className="w-full max-w-sm rounded-lg border bg-popover p-4 shadow-lg"
+              className={cn(
+                "w-full rounded-lg border bg-popover p-4 shadow-lg",
+                step === "rango" && tipo === "novedad" ? "max-w-md" : "max-w-sm",
+              )}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="mb-3 flex items-center justify-between">
@@ -446,82 +467,86 @@ export function RegistroButton({
                     <span className="font-medium">{selected.nombre}</span> — elegí el rango de
                     fechas
                   </p>
-                  <div className="mb-1 flex items-center justify-between">
-                    <button
-                      type="button"
-                      onClick={() => cambiarMes(-1)}
-                      className="rounded px-2 py-1 text-sm hover:bg-accent"
-                    >
-                      ‹
-                    </button>
-                    <span className="text-xs font-medium">
-                      {CAL_MESES[calMonth]} {calYear}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => cambiarMes(1)}
-                      className="rounded px-2 py-1 text-sm hover:bg-accent"
-                    >
-                      ›
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-7 gap-0.5 text-center text-[11px] text-muted-foreground mb-1">
-                    {CAL_WEEKDAYS.map((w) => (
-                      <div key={w} className="py-1">
-                        {w}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-7 gap-0.5">
-                    {cells.map((d, i) => {
-                      if (!d) return <div key={i} />;
-                      const iso = toISO(calYear, calMonth, d);
-                      const isEdge = iso === rangeStart || iso === rangeEnd;
-                      const inRange =
-                        rangeStart && rangeEnd && iso >= rangeStart && iso <= rangeEnd;
-                      return (
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                    <div className="shrink-0">
+                      <div className="mb-1 flex items-center justify-between">
                         <button
-                          key={i}
                           type="button"
-                          onClick={() => clickDia(d)}
-                          title={iso}
-                          className={cn(
-                            "h-7 w-7 mx-auto rounded text-xs transition-colors",
-                            isEdge
-                              ? "bg-indigo-600 text-white hover:opacity-90"
-                              : inRange
-                                ? "bg-indigo-100 text-indigo-800"
-                                : "hover:bg-accent",
-                          )}
+                          onClick={() => cambiarMes(-1)}
+                          className="rounded px-2 py-1 text-sm hover:bg-accent"
                         >
-                          {d}
+                          ‹
                         </button>
-                      );
-                    })}
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {rangeStart && !rangeEnd && "Ahora elegí el último día."}
-                    {rangeStart &&
-                      rangeEnd &&
-                      `${rangeStart} al ${rangeEnd}`}
-                    {!rangeStart && "Elegí el primer día."}
-                  </p>
-                  {tipo === "novedad" && (
-                    <div className="mt-3">
-                      <label className="mb-1 block text-xs text-muted-foreground">
-                        ¿Cuántas horas por día?
-                      </label>
-                      <Input
-                        type="number"
-                        min={1}
-                        inputMode="numeric"
-                        value={horasDia}
-                        onChange={(e) => setHorasDia(e.target.value)}
-                        placeholder="horas"
-                        className="h-9 w-24"
-                      />
+                        <span className="text-xs font-medium">
+                          {CAL_MESES[calMonth]} {calYear}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => cambiarMes(1)}
+                          className="rounded px-2 py-1 text-sm hover:bg-accent"
+                        >
+                          ›
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-7 gap-0.5 text-center text-[11px] text-muted-foreground mb-1">
+                        {CAL_WEEKDAYS.map((w) => (
+                          <div key={w} className="py-1">
+                            {w}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-7 gap-0.5">
+                        {cells.map((d, i) => {
+                          if (!d) return <div key={i} />;
+                          const iso = toISO(calYear, calMonth, d);
+                          const isEdge = iso === rangeStart || iso === rangeEnd;
+                          const inRange =
+                            rangeStart && rangeEnd && iso >= rangeStart && iso <= rangeEnd;
+                          return (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => clickDia(d)}
+                              title={iso}
+                              className={cn(
+                                "h-7 w-7 mx-auto rounded text-xs transition-colors",
+                                isEdge
+                                  ? "bg-indigo-600 text-white hover:opacity-90"
+                                  : inRange
+                                    ? "bg-indigo-100 text-indigo-800"
+                                    : "hover:bg-accent",
+                              )}
+                            >
+                              {d}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {rangeStart && !rangeEnd && "Ahora elegí el último día."}
+                        {rangeStart &&
+                          rangeEnd &&
+                          `${rangeStart} al ${rangeEnd}`}
+                        {!rangeStart && "Elegí el primer día."}
+                      </p>
                     </div>
-                  )}
+                    {tipo === "novedad" && (
+                      <div className="sm:w-28 sm:pt-6">
+                        <label className="mb-1 block text-xs text-muted-foreground">
+                          ¿Cuántas horas por día?
+                        </label>
+                        <Input
+                          type="number"
+                          min={1}
+                          inputMode="numeric"
+                          value={horasDia}
+                          onChange={(e) => setHorasDia(e.target.value)}
+                          placeholder="horas"
+                          className="h-9 w-24"
+                        />
+                      </div>
+                    )}
+                  </div>
                   <div className="mt-4 flex justify-end gap-2">
                     <button
                       type="button"
@@ -583,6 +608,18 @@ export function RegistroButton({
                       ))}
                     </select>
                   )}
+                  <div className="mt-3">
+                    <label className="mb-1 block text-xs text-muted-foreground">
+                      Sumar invitados puntuales (opcional) — además de la gente que ya está en
+                      ese calendario
+                    </label>
+                    <Input
+                      value={invitadosTxt}
+                      onChange={(e) => setInvitadosTxt(e.target.value)}
+                      placeholder="correo1@empresa.com, correo2@empresa.com"
+                      className="h-9 text-xs"
+                    />
+                  </div>
                   <div className="mt-4 flex justify-end gap-2">
                     <button
                       type="button"

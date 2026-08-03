@@ -2,15 +2,13 @@
 -- de Pablo, 2026-07-29). Reemplaza el input manual de "Nro Pedido" por un
 -- botón "Asignar": el widget reclama el próximo pedido Cumplido en WMS +
 -- Abierto en Magnus (cruce por NroMovVenta = "número de movimiento", ver
--- indicadores-api/control_asignacion.py::fetch_pedidos_cumplidos_abiertos),
--- ordenado por "nroPedido" ascendente y, en empate, fecha descendente.
+-- indicadores-api/control_asignacion.py::fetch_pedidos_cumplidos_abiertos).
 --
--- ASUNCIÓN (confirmar con Pablo si el criterio real de "orden" es otro): acá
--- "orden" = número de pedido/movimiento en sí, no un campo separado — no se
--- encontró en Magnus/WMS un campo "Orden" distinto de NroMovVenta/NroPedOrigen
--- (son el mismo valor, ver memoria magnus-ven-pedido-armador). Si Pablo quería
--- otro criterio de orden, avisar para ajustar el ORDER BY en asignar_siguiente
--- sin tocar el esquema.
+-- ORDEN (cambiado 2026-08-03, a pedido de Pablo): "prioridad" ascendente
+-- (Magnus VenFer_PedidoCabecera.Prioridad, 1 = más urgente; NULL al final) y,
+-- dentro de cada prioridad, fecha ascendente (más viejo primero) — vaciar
+-- todos los atrasados de prioridad 1 hasta ponerse al día antes de pasar a
+-- prioridad 2. Antes era "nroPedido" ascendente, empate fecha descendente.
 --
 -- Concurrencia (pedido explícito: nunca asignar el mismo pedido a 2
 -- operarios): el reclamo es 1 solo UPDATE atómico con
@@ -57,3 +55,19 @@ CREATE INDEX IF NOT EXISTS idx_control_asignacion_asignado_a
 -- tabla ya existía en prod sin esta columna, la agrega; si se crea de cero
 -- con el CREATE TABLE de arriba, no hace nada (ya la incluye).
 ALTER TABLE deposito.control_asignacion ADD COLUMN IF NOT EXISTS "codCliente" integer;
+
+-- Alta 2026-08-03 (a pedido de Pablo): orden de la cola pasa a ser por
+-- prioridad (VenFer_PedidoCabecera.Prioridad de Magnus, 1 = más urgente) y,
+-- dentro de cada prioridad, fecha ascendente — vaciar los atrasados de
+-- prioridad 1 hasta ponerse al día antes de pasar a prioridad 2. NULL =
+-- sin prioridad cargada, se trata como la más baja (ver COALESCE en
+-- control_asignacion.py). ALTER idempotente, mismo criterio que "codCliente".
+ALTER TABLE deposito.control_asignacion ADD COLUMN IF NOT EXISTS "prioridad" integer;
+
+-- El índice de libres ahora ordena por prioridad+fecha, no por nroPedido.
+-- DROP+CREATE porque "CREATE INDEX IF NOT EXISTS" no actualiza un índice ya
+-- existente con otra definición.
+DROP INDEX IF EXISTS deposito.idx_control_asignacion_libres;
+CREATE INDEX idx_control_asignacion_libres
+    ON deposito.control_asignacion ("prioridad", fecha)
+    WHERE "asignadoEn" IS NULL;

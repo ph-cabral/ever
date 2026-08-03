@@ -29,13 +29,18 @@ maneja el volumen.
 Tabla: deposito.control_asignacion (ver ever/sql/deposito_control_asignacion.sql
 — correr ANTES de deployar este módulo).
 
-ORDEN de la cola: "nroPedido" ascendente, empate por fecha descendente.
-ASUNCIÓN (avisar a Pablo si el criterio real es otro): no se encontró en
-Magnus/WMS un campo "Orden" separado de NroMovVenta/NroPedOrigen (son el
-mismo valor, ver memoria magnus-ven-pedido-armador.md), así que acá "orden" =
-el número de pedido/movimiento en sí. Si el criterio real es otro (prioridad,
-tipo de pedido, etc.), el ORDER BY de asignar_siguiente es el único lugar que
-hay que tocar — el esquema no cambia.
+ORDEN de la cola (cambiado 2026-08-03, a pedido de Pablo): "prioridad"
+ascendente y, dentro de cada prioridad, fecha ascendente (más viejo primero)
+— la idea es vaciar todos los atrasados de prioridad 1 hasta ponerse al día
+y recién ahí pasar a prioridad 2, también de más viejo a más nuevo.
+"prioridad" = `VenFer_PedidoCabecera.Prioridad` (Magnus; mismo campo que ya
+usa `main.py` para el reporte "Por prioridad"), 1 = más urgente. Pedidos sin
+prioridad cargada (NULL) se tratan como la prioridad más baja (van al final)
+para no colarse adelante de los que sí tienen prioridad asignada — ver
+COALESCE en SQL_MAGNUS_ABIERTOS_TODOS.
+ANTES (hasta 2026-08-03) ordenaba por "nroPedido" ascendente, empate por
+fecha descendente — se dejó de usar por pedido explícito de contaduría/mesa
+de control.
 
 CONCURRENCIA (pedido explícito de Pablo: nunca asignar el mismo pedido a 2
 operarios, van a ser muchos usando el widget a la vez): el reclamo es un
@@ -69,9 +74,9 @@ from deposito import OT_COL_PEDIDO
 from errores_mesa import fetch_operario_nombre, _col_observaciones_ot, BASE_DATE
 
 # Tope de seguridad: cuántos pedidos Abiertos de Magnus se consideran como
-# máximo en un solo refresco de la cola (ordenados NroMovVenta ASC, o sea los
-# más viejos primero — mismo criterio que el ORDER BY de asignar_siguiente,
-# así que un recorte acá nunca deja afuera al que le tocaría el turno).
+# máximo en un solo refresco de la cola (ordenados Prioridad ASC, fecha ASC —
+# mismo criterio que el ORDER BY de asignar_siguiente, así que un recorte
+# acá nunca deja afuera al que le tocaría el turno).
 # Ajustable sin tocar el resto de la lógica.
 MAGNUS_ABIERTOS_LIMIT = 3000
 
@@ -97,13 +102,21 @@ SELECT TOP ({limit})
     cab.FechaPedido,
     cc.DetalleCorto     AS TipoPedido,
     cli.Cliente_Nombre  AS Cliente,
-    cab.CodCliente      AS CodCliente
+    cab.CodCliente      AS CodCliente,
+    cab.Prioridad       AS Prioridad
 FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
 INNER JOIN EVERWEAR.dbo.TMP_TiempoDePedidos   t   ON t.NroMovVenta   = cab.NroMovVenta
 LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo   = cc.CompCodigo
 LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente   = cli.CodCliente
 WHERE LTRIM(RTRIM(t.Estado)) = 'Abierto'
-ORDER BY cab.NroMovVenta ASC
+  AND cab.CompCodigo NOT IN (70, 75)  -- excluye acopios (a pedido de Pablo,
+  -- 2026-08-03: hasta encontrar una forma de distinguirlos, no deben entrar
+  -- a la cola de asignación de la Mesa de Control)
+ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
+-- 2026-08-03 (a pedido de Pablo): prioridad ASC (1 = más urgente) y, dentro
+-- de cada prioridad, fecha ASC (más viejo primero) — vaciar los atrasados de
+-- prioridad 1 hasta ponerse al día antes de pasar a prioridad 2. Antes era
+-- NroMovVenta ASC. Sin Prioridad cargada -> 999, al final de la cola.
 """
 
 # ── WMS: de esos pedidos puntuales, cuáles tienen OT de Picking Cumplida ─────
@@ -128,8 +141,8 @@ def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list
     nroPedido/fecha/tipoPedido/cliente/ubicacion/ot/nroArmador/nombreArmador
     — mismos campos que usa deposito.control_asignacion.
 
-    Arranca por Magnus (TODOS los Abiertos, hasta `limit`, NroMovVenta ASC) y
-    recién ahí consulta WMS puntualmente por esos NroMovVenta — sin ventana
+    Arranca por Magnus (TODOS los Abiertos, hasta `limit`, prioridad ASC/
+    fecha ASC) y recién ahí consulta WMS puntualmente por esos NroMovVenta — sin ventana
     de fecha. Antes era al revés (WMS primero, acotado a los últimos 500
     Cumplidos de los últimos 60 días) y dejaba afuera Abiertos con picking
     cumplido hace rato; ver nota "FIX 2026-07-29" en el docstring del módulo."""
@@ -139,7 +152,7 @@ def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cur.execute(SQL_MAGNUS_ABIERTOS_TODOS.format(limit=limit))
-        for nro, fecha_int, tipo_pedido, cliente, cod_cliente in cur.fetchall():
+        for nro, fecha_int, tipo_pedido, cliente, cod_cliente, prioridad in cur.fetchall():
             if nro is None:
                 continue
             # BASE_DATE ya es un datetime.date (ver errores_mesa.py) — sumarle
@@ -155,6 +168,9 @@ def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list
                 # Número de cliente (Magnus CodCliente) — a pedido de Pablo
                 # 2026-07-31, el widget lo muestra junto al nombre.
                 "codCliente": int(cod_cliente) if cod_cliente is not None else None,
+                # Orden de la cola (a pedido de Pablo, 2026-08-03) — ver
+                # SQL_MAGNUS_ABIERTOS_TODOS. None = sin prioridad cargada.
+                "prioridad": int(prioridad) if prioridad is not None else None,
             }
     finally:
         conn.close()
@@ -213,6 +229,7 @@ def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list
             "tipoPedido": ab["tipoPedido"],
             "cliente": ab["cliente"],
             "codCliente": ab["codCliente"],
+            "prioridad": ab["prioridad"],
             "ubicacion": w["ubicacion"],
             "ot": w["ot"],
             "nroArmador": w["nroArmador"],
@@ -237,14 +254,14 @@ def refrescar_cola(limit: int = MAGNUS_ABIERTOS_LIMIT) -> int:
             cur.execute(
                 """
                 INSERT INTO deposito.control_asignacion
-                    ("nroPedido", fecha, "tipoPedido", cliente, "codCliente", ubicacion, ot,
-                     "nroArmador", "nombreArmador")
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ("nroPedido", fecha, "tipoPedido", cliente, "codCliente", "prioridad",
+                     ubicacion, ot, "nroArmador", "nombreArmador")
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT ("nroPedido") DO NOTHING
                 """,
                 (
                     c["nroPedido"], c["fecha"], c["tipoPedido"], c["cliente"], c["codCliente"],
-                    c["ubicacion"], c["ot"], c["nroArmador"], c["nombreArmador"],
+                    c["prioridad"], c["ubicacion"], c["ot"], c["nroArmador"], c["nombreArmador"],
                 ),
             )
             nuevos += cur.rowcount
@@ -294,8 +311,8 @@ def _fetch_asignacion_activa(nro_operario: int) -> dict | None:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT id, "nroPedido", fecha, "tipoPedido", cliente, "codCliente", ubicacion,
-                   ot, "nroArmador", "nombreArmador", "asignadoA", "asignadoEn"
+            SELECT id, "nroPedido", fecha, "tipoPedido", cliente, "codCliente", "prioridad",
+                   ubicacion, ot, "nroArmador", "nombreArmador", "asignadoA", "asignadoEn"
             FROM deposito.control_asignacion
             WHERE "nroOperarioAsignado" = %s AND "asignadoEn" IS NOT NULL
             ORDER BY "asignadoEn" DESC
@@ -309,8 +326,8 @@ def _fetch_asignacion_activa(nro_operario: int) -> dict | None:
     if not row:
         return None
     cols = [
-        "id", "nroPedido", "fecha", "tipoPedido", "cliente", "codCliente", "ubicacion", "ot",
-        "nroArmador", "nombreArmador", "asignadoA", "asignadoEn",
+        "id", "nroPedido", "fecha", "tipoPedido", "cliente", "codCliente", "prioridad",
+        "ubicacion", "ot", "nroArmador", "nombreArmador", "asignadoA", "asignadoEn",
     ]
     out = dict(zip(cols, row))
     if out.get("fecha") is not None:
@@ -324,8 +341,10 @@ def asignar_siguiente(nro_operario: int) -> dict:
     """Reclama, de forma atómica, el próximo pedido libre de la cola para
     `nro_operario` (resuelto a nombre igual que insert_error_mesa — no confía
     en lo que mande el cliente). Refresca la cola primero (agrega pedidos
-    nuevos Cumplidos+Abiertos). Orden: "nroPedido" ascendente, empate por
-    fecha descendente (ver ASUNCIÓN de "orden" en el docstring del módulo).
+    nuevos Cumplidos+Abiertos). Orden (2026-08-03): "prioridad" ascendente
+    (1 = más urgente, NULL al final) y, dentro de cada prioridad, fecha
+    ascendente — vacía los atrasados de cada prioridad antes de pasar a la
+    siguiente (ver nota de ORDEN en el docstring del módulo).
 
     UN PEDIDO POR OPERARIO A LA VEZ (2026-07-31): antes de tocar la cola, se
     fija si `nro_operario` ya tiene una asignación activa cuyo pedido sigue
@@ -360,12 +379,12 @@ def asignar_siguiente(nro_operario: int) -> dict:
             WHERE id = (
                 SELECT id FROM deposito.control_asignacion
                 WHERE "asignadoEn" IS NULL
-                ORDER BY "nroPedido" ASC, fecha DESC
+                ORDER BY COALESCE("prioridad", 999) ASC, fecha ASC
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
             )
-            RETURNING id, "nroPedido", fecha, "tipoPedido", cliente, "codCliente", ubicacion,
-                      ot, "nroArmador", "nombreArmador", "asignadoA", "asignadoEn"
+            RETURNING id, "nroPedido", fecha, "tipoPedido", cliente, "codCliente", "prioridad",
+                      ubicacion, ot, "nroArmador", "nombreArmador", "asignadoA", "asignadoEn"
             """,
             (nombre, nro_operario),
         )
@@ -378,8 +397,8 @@ def asignar_siguiente(nro_operario: int) -> dict:
         raise ValueError("No hay pedidos disponibles para asignar")
 
     cols = [
-        "id", "nroPedido", "fecha", "tipoPedido", "cliente", "codCliente", "ubicacion", "ot",
-        "nroArmador", "nombreArmador", "asignadoA", "asignadoEn",
+        "id", "nroPedido", "fecha", "tipoPedido", "cliente", "codCliente", "prioridad",
+        "ubicacion", "ot", "nroArmador", "nombreArmador", "asignadoA", "asignadoEn",
     ]
     out = dict(zip(cols, row))
     if out.get("fecha") is not None:
@@ -500,7 +519,7 @@ def fetch_cola_diag(limit: int = 20) -> dict:
         )
         libres, asignados = cur.fetchone()
         cur.execute(
-            'SELECT "nroPedido", fecha, cliente, ubicacion, "asignadoA", "asignadoEn" '
+            'SELECT "nroPedido", fecha, "prioridad", cliente, ubicacion, "asignadoA", "asignadoEn" '
             'FROM deposito.control_asignacion '
             'ORDER BY "createdAt" DESC LIMIT %s',
             (limit,),

@@ -13,7 +13,10 @@ export const dynamic = "force-dynamic";
 // Efecto:
 //  1) Crea el evento de todo el día en el Google Calendar elegido (si esto
 //     falla, no se toca la base — mejor un error claro que dejar el estado
-//     marcado sin que nadie se entere por Calendar).
+//     marcado sin que nadie se entere por Calendar). Si vienen `invitados`
+//     (correos sueltos, pedido de Pablo 2026-08-03: "hay calendarios base
+//     pero a veces se agregan participantes"), se suman como attendees del
+//     evento además de la gente que ya tiene el calendario base.
 //  2) Marca los días del rango:
 //     - estado: usa el mecanismo de "arrastre" que ya tenía estado_diario
 //       (ver resumen/route.ts) — sólo escribe UNA fila en `desde` con
@@ -29,9 +32,11 @@ type Body = {
   hasta?: string; // YYYY-MM-DD
   calendar_id?: string;
   horas?: number; // sólo tipo "novedad": horas por día del rango (no es un total)
+  invitados?: string[]; // correos puntuales a sumar como attendees del evento
 };
 
 const FECHA_RE = /^\d{4}-\d{2}-\d{2}$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_DIAS = 366;
 
 const diasEntre = (desde: string, hasta: string): number =>
@@ -58,6 +63,13 @@ export async function POST(req: NextRequest) {
   try {
     const body: Body = await req.json();
     const { employee_no, tipo, nombre, desde, hasta, calendar_id } = body;
+
+    // Invitados puntuales: se descarta cualquier valor que no tenga forma de
+    // correo en vez de rechazar todo el registro — es un extra opcional, no
+    // vale la pena bloquear el registro del estado/novedad por un typo ahí.
+    const invitados = Array.from(
+      new Set((body.invitados ?? []).map((e) => e.trim()).filter((e) => EMAIL_RE.test(e))),
+    );
 
     if (!employee_no || !tipo || !nombre || !desde || !hasta || !calendar_id) {
       return NextResponse.json(
@@ -133,6 +145,7 @@ export async function POST(req: NextRequest) {
     ];
     if (tipo === "novedad") descripcionPartes.push(`Horas por día: ${horasDia}`);
     if (creadoPor) descripcionPartes.push(`Registrado por: ${creadoPor}`);
+    if (invitados.length > 0) descripcionPartes.push(`Invitados: ${invitados.join(", ")}`);
 
     // 1) Google Calendar primero — si falla, no se toca la base.
     let evento;
@@ -143,6 +156,7 @@ export async function POST(req: NextRequest) {
         description: descripcionPartes.join("\n"),
         desde,
         hasta,
+        attendees: invitados,
       });
     } catch (e: any) {
       console.error("[rango] error creando evento en Calendar", e);
@@ -184,10 +198,11 @@ export async function POST(req: NextRequest) {
     // 3) Log.
     await prisma.$executeRaw`
       INSERT INTO asistencia.calendar_evento
-        (employee_no, tipo, opcion, desde, hasta, calendar_id, event_id, event_link, created_by)
+        (employee_no, tipo, opcion, desde, hasta, calendar_id, event_id, event_link, created_by, invitados)
       VALUES (
         ${employee_no}, ${tipo}, ${nombre}, ${desde}::date, ${hasta}::date,
-        ${calendar_id}, ${evento.id}, ${evento.htmlLink}, ${creadoPor}
+        ${calendar_id}, ${evento.id}, ${evento.htmlLink}, ${creadoPor},
+        ${invitados.length > 0 ? invitados.join(", ") : null}
       )
     `;
 

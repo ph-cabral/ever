@@ -115,16 +115,23 @@ export type CreatedEvent = { id: string; htmlLink: string | null };
 
 // Evento de todo el día de `desde` a `hasta` (ambos inclusive). La API de
 // Calendar espera `end.date` EXCLUSIVE, así que se manda hasta+1 día.
+//
+// `attendees` es opcional — invitados puntuales que se suman a este evento
+// además de la gente que ya tiene agregada el calendario base elegido
+// (pedido de Pablo, 2026-08-03). Se manda con `sendUpdates=all` para que
+// Google les mande la invitación por mail (si no se manda ese query param,
+// Google crea el evento pero no notifica a nadie).
 export async function createAllDayEvent(opts: {
   calendarId: string;
   summary: string;
   description?: string;
   desde: string; // YYYY-MM-DD
   hasta: string; // YYYY-MM-DD
+  attendees?: string[];
 }): Promise<CreatedEvent> {
-  const { calendarId, summary, description, desde, hasta } = opts;
+  const { calendarId, summary, description, desde, hasta, attendees } = opts;
   const data = await callApi<{ id: string; htmlLink?: string }>(
-    `/calendars/${encodeURIComponent(calendarId)}/events`,
+    `/calendars/${encodeURIComponent(calendarId)}/events?sendUpdates=all`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -132,6 +139,9 @@ export async function createAllDayEvent(opts: {
         description,
         start: { date: desde },
         end: { date: addDays(hasta, 1) },
+        ...(attendees && attendees.length > 0
+          ? { attendees: attendees.map((email) => ({ email })) }
+          : {}),
       }),
     },
   );
