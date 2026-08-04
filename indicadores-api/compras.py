@@ -251,3 +251,115 @@ def fetch_ordenes_articulos_rango(desde: str, hasta: str):
         }
     finally:
         conn.close()
+
+
+def fetch_compras_valorizado(desde: str, hasta: str):
+    """Unidades y $ de las Órdenes de Compra HECHAS en [desde, hasta] (por
+    FecMovim de la cabecera) — mismo criterio que fetch_ordenes_articulos_rango
+    (no importa si el renglón ya se recibió o sigue pendiente), pero acá SÍ se
+    suman cantidades y se valoriza en $.
+
+    El $ NO sale de la OC: Com_OrdCompRenglones no expone acá un costo de
+    compra confiable, y aunque lo tuviera, el pedido explícito de Pablo
+    (2026-08-04) es valorizar a precio de VENTA. Se usa el mismo criterio
+    "no hay tabla de lista de precios en el proyecto" que ya usa deposito.py
+    (fetch_faltantes_ot, /deposito/faltantes): el ÚLTIMO PrecioVenta visto
+    para ese CodArticulo en CUALQUIER pedido de Ven_PedRenPendientes.
+    Aproximado a propósito: puede no reflejar el precio vigente si cambió
+    después del último pedido con ese artículo; los artículos sin ningún
+    PrecioVenta encontrado quedan valorizados en 0 y se cuentan en
+    'articulosSinPrecio' (para poder avisar en la vista sin romperla).
+
+    Para el selector de rango libre de /compras, independiente del mes del
+    funnel de /compras/metricas.
+
+    NOTA rendimiento/riesgo: igual que fetch_ordenes_articulos_rango, NO hay
+    filtro de fecha en el WHERE de SQL (FecMovim puede venir como int
+    días-Magnus o datetime nativo) — se filtra en Python con _to_date. Trae
+    toda la OC histórica antes de filtrar; si se vuelve lento, agregar un
+    corte adicional (p. ej. NroOrdCompra >= umbral)."""
+    d1 = datetime.strptime(str(desde)[:10], "%Y-%m-%d").date()
+    d2 = datetime.strptime(str(hasta)[:10], "%Y-%m-%d").date()
+
+    sql = """
+    SELECT
+        cab.FecMovim                  AS FecMovim,
+        LTRIM(RTRIM(r.CodArticulo))   AS CodArticu,
+        r.Cantidad                    AS Cantidad
+    FROM EVERWEAR.dbo.Com_OrdCompRenglones r
+    INNER JOIN EVERWEAR.dbo.Com_OrdCompCabecera cab ON cab.NroOrdCompra = r.NroOrdCompra
+    """
+
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(sql)
+        cols = [c[0] for c in cur.description]
+
+        unidades: dict[str, float] = {}
+        for row in cur.fetchall():
+            d = dict(zip(cols, row))
+            cod = (str(d.get("CodArticu") or "")).strip()
+            if not cod:
+                continue
+            fmov = _to_date(d.get("FecMovim"))
+            if fmov is None or fmov < d1 or fmov > d2:
+                continue
+            cant = float(_safe(d.get("Cantidad")) or 0)
+            unidades[cod] = unidades.get(cod, 0.0) + cant
+
+        # Precio de venta por artículo: último PrecioVenta visto en cualquier
+        # pedido (Ven_PedRenPendientes), mismo patrón que deposito.py.
+        precios: dict[str, float] = {}
+        codigos = sorted(unidades.keys())
+        if codigos:
+            ph = ",".join("?" for _ in codigos)
+            sql_precios = f"""
+                SELECT CodArticu, PrecioVenta
+                FROM (
+                    SELECT LTRIM(RTRIM(CodArticu)) AS CodArticu, PrecioVenta,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY LTRIM(RTRIM(CodArticu))
+                               ORDER BY FecRegistracion DESC
+                           ) AS rn
+                    FROM EVERWEAR.dbo.[Ven_PedRenPendientes]
+                    WHERE LTRIM(RTRIM(CodArticu)) IN ({ph})
+                ) t
+                WHERE rn = 1
+            """
+            cur.execute(sql_precios, codigos)
+            for cod, precio in cur.fetchall():
+                precios[(str(cod or "")).strip()] = float(_safe(precio) or 0)
+
+        rows = []
+        total_unidades = 0.0
+        total_importe = 0.0
+        sin_precio = 0
+        for cod, cant in unidades.items():
+            precio = precios.get(cod)
+            if precio is None:
+                sin_precio += 1
+                precio = 0.0
+            importe = round(cant * precio, 2)
+            total_unidades += cant
+            total_importe += importe
+            rows.append({
+                "CodArticulo": cod,
+                "Cantidad": round(cant, 2),
+                "PrecioVenta": precio,
+                "Importe": importe,
+            })
+        rows.sort(key=lambda r: -r["Importe"])
+
+        return {
+            "desde": d1.isoformat(),
+            "hasta": d2.isoformat(),
+            "itemsDistintos": len(unidades),
+            "unidadesCompradas": round(total_unidades, 2),
+            "montoVenta": round(total_importe, 2),
+            "articulosSinPrecio": sin_precio,
+            "rows": rows,
+        }
+    finally:
+        conn.close()

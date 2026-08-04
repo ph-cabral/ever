@@ -16,7 +16,9 @@ from deposito import (
     guardar_snapshot_abiertos, guardar_snapshot_wms_estados,
     PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN,
 )
-from compras import fetch_ordenes_pendientes, fetch_ordenes_articulos_rango
+from compras import (
+    fetch_ordenes_pendientes, fetch_ordenes_articulos_rango, fetch_compras_valorizado,
+)
 from ingresos import fetch_remitos_ingreso
 from ventas import fetch_pedidos_mes
 from finanza import (
@@ -437,6 +439,22 @@ def compras_ordenes_mes(
     Para /compras/metricas: funnel faltantes del mes → con OC ese mes."""
     try:
         return fetch_ordenes_articulos_rango(desde, hasta)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+# ── Compras: unidades y $ (a precio de VENTA, no de OC) de las OC hechas ─────
+# en un rango de fechas libre — selector independiente del mes de
+# /compras/metricas. Pedido de Pablo 2026-08-04.
+@app.get("/compras/compras-valorizado")
+def compras_compras_valorizado(
+    desde: str = Query(...),
+    hasta: str = Query(...),
+):
+    """Artículos con OC hecha en [desde, hasta]: unidades totales (Cantidad de
+    Com_OrdCompRenglones) y $ valorizado al último PrecioVenta visto en
+    cualquier pedido (Ven_PedRenPendientes) — NO al costo de la OC."""
+    try:
+        return fetch_compras_valorizado(desde, hasta)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
