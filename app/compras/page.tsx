@@ -2,13 +2,12 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageX, ShoppingCart, PackageCheck, BarChart3,
-  Package, Wallet, Percent, CalendarRange,
+  Package, Wallet, Percent,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 import KpiCard from "@/app/rrhh/components/KpiCard";
 import BarChartCard from "@/app/rrhh/components/charts/BarChartCard";
 import PieChartCard from "@/app/rrhh/components/charts/PieChartCard";
-import { DateRangeField } from "@/components/ui/date-range-field";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/metricas — funnel mensual en ITEMS (artículos distintos, no
@@ -47,9 +46,9 @@ interface Resp {
   torta: Grupo[];
 }
 
-// /compras/compras-valorizado — rango de fechas LIBRE (independiente del mes
-// del funnel de arriba): unidades e $ de las OC hechas en el rango, valorizado
-// a precio de VENTA (no al costo de la OC). Pedido de Pablo 2026-08-04.
+// /compras/compras-valorizado — mismo mes que el selector de arriba:
+// unidades e $ de las OC hechas ese mes, valorizado a precio de VENTA (no al
+// costo de la OC). Pedido de Pablo 2026-08-04.
 interface RangoResp {
   desde: string;
   hasta: string;
@@ -98,17 +97,6 @@ const mesActual = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
 
-// Default del rango libre: 1er día del mes actual → hoy (mismo criterio de
-// hora LOCAL que mesActual/todayISO en el resto del proyecto).
-const hoyISO = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
-const primerDiaMesActual = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
-};
-
 export default function ComprasMetricasPage() {
   const [mes, setMes] = useState(mesActual);
   const [data, setData] = useState<Resp | null>(null);
@@ -137,20 +125,20 @@ export default function ComprasMetricasPage() {
     load();
   }, [load]);
 
-  // Rango libre (independiente del mes de arriba): unidades/$ de OC hechas en
-  // el rango, valorizado a precio de venta.
-  const [rangoDesde, setRangoDesde] = useState(primerDiaMesActual);
-  const [rangoHasta, setRangoHasta] = useState(hoyISO);
+  // Vinculado al mismo mes del selector de arriba (data.desde/data.hasta ya
+  // son el 1er/último día de ese mes, calculados por /api/compras/metricas):
+  // unidades/$ de OC hechas ese mes, valorizado a precio de venta. Se
+  // actualiza solo cuando cambia el mes — sin selector ni botón propios.
   const [rangoData, setRangoData] = useState<RangoResp | null>(null);
   const [rangoLoading, setRangoLoading] = useState(false);
   const [rangoError, setRangoError] = useState<string | null>(null);
 
-  const loadRango = useCallback(async () => {
+  const loadRango = useCallback(async (desde: string, hasta: string) => {
     setRangoLoading(true);
     setRangoError(null);
     try {
       const res = await fetch(
-        `/api/compras/compras-valorizado?desde=${encodeURIComponent(rangoDesde)}&hasta=${encodeURIComponent(rangoHasta)}`,
+        `/api/compras/compras-valorizado?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`,
         { cache: "no-store" },
       );
       const j = await res.json().catch(() => ({}));
@@ -162,11 +150,13 @@ export default function ComprasMetricasPage() {
     } finally {
       setRangoLoading(false);
     }
-  }, [rangoDesde, rangoHasta]);
+  }, []);
 
   useEffect(() => {
-    loadRango();
-  }, [loadRango]);
+    if (data?.desde && data?.hasta) {
+      loadRango(data.desde, data.hasta);
+    }
+  }, [data?.desde, data?.hasta, loadRango]);
 
   const chartData = useMemo(
     () => (data?.columnas ?? []).map((c) => ({ name: c.label, value: c.total })),
@@ -369,38 +359,16 @@ export default function ComprasMetricasPage() {
         </div>
 
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
-                <ShoppingCart size={18} /> Compras por rango de fechas
-              </h2>
-              <p className="text-zinc-500 text-sm mt-1">
-                Unidades de Órdenes de Compra generadas en el rango elegido (haya llegado o no
-                todavía) y su valor estimado a precio de VENTA — no al costo de la OC. Rango libre,
-                independiente del mes de arriba.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <CalendarRange size={15} className="text-zinc-500" />
-              <DateRangeField
-                desde={rangoDesde}
-                hasta={rangoHasta}
-                max={hoyISO()}
-                onChange={(d, h) => {
-                  setRangoDesde(d);
-                  setRangoHasta(h);
-                }}
-                className="text-xs h-8"
-              />
-              <button
-                onClick={loadRango}
-                title="Refrescar"
-                disabled={rangoLoading}
-                className="btn-anim text-zinc-400 hover:text-yellow-400 p-2 disabled:opacity-40"
-              >
-                <RefreshCw size={16} className={rangoLoading ? "animate-spin" : ""} />
-              </button>
-            </div>
+          <div>
+            <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
+              <ShoppingCart size={18} /> Compras del mes (a precio de venta)
+              {rangoLoading && <Loader2 size={15} className="animate-spin text-yellow-400" />}
+            </h2>
+            <p className="text-zinc-500 text-sm mt-1">
+              Unidades de Órdenes de Compra generadas en {fmtMesLabel(mes)} (haya llegado o no
+              todavía) y su valor estimado a precio de VENTA — no al costo de la OC. Mismo mes elegido
+              arriba.
+            </p>
           </div>
 
           {rangoError && (
@@ -419,14 +387,14 @@ export default function ComprasMetricasPage() {
             <KpiCard
               label="Items distintos comprados"
               value={fmtNum(rangoData?.itemsDistintos ?? 0)}
-              hint="Artículos distintos con OC en el rango"
+              hint="Artículos distintos con OC ese mes"
               icon={ShoppingCart}
               accent="blue"
             />
             <KpiCard
               label="Unidades compradas"
               value={fmtNum(rangoData?.unidadesCompradas ?? 0)}
-              hint="Total de unidades pedidas por OC en el rango"
+              hint="Total de unidades pedidas por OC ese mes"
               icon={Package}
               accent="zinc"
             />
