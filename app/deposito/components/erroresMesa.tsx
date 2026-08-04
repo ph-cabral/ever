@@ -4,6 +4,12 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Loader2, AlertTriangle, RefreshCw, FileSpreadsheet } from "lucide-react";
 import { PageTitle, Panel, KPI, Grid, Table, ChartBar, ChartLine, C, fmtNum, fmtDate } from "./ui";
 import { exportarErroresMesa } from "@/lib/deposito/exportErroresMesa";
+import { DateRangeField } from "@/components/ui/date-range-field";
+
+// Fecha local ISO (yyyy-mm-dd) — mismo patrón que wmsTab.tsx (isoLocal), evita
+// el shift de toISOString() (que es UTC) para "hoy" como tope del rango.
+const isoLocal = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Registro de Errores — Mesa de Control + Calidad (deposito.errores_mesa,
@@ -136,7 +142,7 @@ export function ErroresMesaTab() {
   const [hasta, setHasta] = useState("");
   const [controlador, setControlador] = useState(ALL);
   const [preparador, setPreparador] = useState(ALL);
-  const [agruparPor, setAgruparPor] = useState<"operario" | "registrada">("operario");
+  const [agruparPor, setAgruparPor] = useState<"operario" | "controlador">("operario");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -160,12 +166,12 @@ export function ErroresMesaTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desde, hasta]);
 
+  // Recarga sola al cambiar el rango — el DateRangeField solo dispara
+  // onChange 1 vez por selección completa (no hay tipeo a mano que golpee la
+  // base en cada tecla), mismo patrón que compras/faltantes y wmsTab.
   useEffect(() => {
     load();
-    // Solo en el montaje: cambios posteriores de fecha se disparan con
-    // "Aplicar fechas" para no golpear la base en cada tecla.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [load]);
 
   const controladores = useMemo(
     () => [...new Set(rows.map(getRegistrador).filter(Boolean) as string[])].sort(),
@@ -216,10 +222,17 @@ export function ErroresMesaTab() {
     return [...m.entries()].sort((a, b) => b[1] - a[1])[0];
   }, [filtered]);
 
-  // ── Errores por persona (Operario que cometió el error / Registrada que lo
-  // cargó, a elección) — top 20, respeta desde/hasta + los filtros activos.
+  // ── Errores por persona — top 20, respeta desde/hasta + los filtros
+  // activos. "Operario" = getOperario (nombreArmador, preparador sobre el
+  // que es el error, siempre poblado). "Controlador" = nombreControladorReal
+  // (Magnus, ver fetch_controlador_pedido en errores_mesa.py) — SOLO se
+  // resuelve para origen='calidad' (insert_error_mesa lo deja NULL a
+  // propósito, ver docstring "3ra vuelta, REVERTIDA"), así que acá se
+  // descartan las filas sin controlador (Mesa de Control) en vez de
+  // contarlas como "sin dato".
   const porPersona = useMemo(() => {
-    const getter = agruparPor === "operario" ? getOperario : getRegistrador;
+    const getter =
+      agruparPor === "operario" ? getOperario : (r: ErrorMesaRow) => r.nombreControladorReal;
     const m = new Map<string, number>();
     filtered.forEach((r) => {
       const p = getter(r);
@@ -274,32 +287,19 @@ export function ErroresMesaTab() {
       <Panel title="Filtros" className="mb-5">
         <div className="flex flex-wrap gap-3 items-end">
           <label className="flex flex-col gap-1 text-[11px] text-zinc-500">
-            Desde
-            <input
-              type="date"
-              value={desde}
-              max={hasta || undefined}
-              onChange={(e) => setDesde(e.target.value)}
-              className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer"
+            Rango de fechas
+            <DateRangeField
+              desde={desde}
+              hasta={hasta}
+              max={isoLocal(new Date())}
+              onChange={(d, h) => {
+                setDesde(d);
+                setHasta(h);
+              }}
+              variant="dark"
+              placeholder="Todas las fechas"
             />
           </label>
-          <label className="flex flex-col gap-1 text-[11px] text-zinc-500">
-            Hasta
-            <input
-              type="date"
-              value={hasta}
-              min={desde || undefined}
-              onChange={(e) => setHasta(e.target.value)}
-              className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer"
-            />
-          </label>
-          <button
-            onClick={load}
-            disabled={loading}
-            className="text-[12px] px-3 py-[7px] rounded-lg border border-zinc-700 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 transition-colors disabled:opacity-40"
-          >
-            Aplicar fechas
-          </button>
           <label className="flex flex-col gap-1 text-[11px] text-zinc-500">
             Registrada
             <select
@@ -352,11 +352,11 @@ export function ErroresMesaTab() {
               accent={
                 <button
                   onClick={() =>
-                    setAgruparPor((v) => (v === "operario" ? "registrada" : "operario"))
+                    setAgruparPor((v) => (v === "operario" ? "controlador" : "operario"))
                   }
                   className="text-[11px] font-semibold px-2 py-1 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 transition-colors normal-case"
                 >
-                  Ver por: {agruparPor === "operario" ? "Operario" : "Registrada"}
+                  Ver por: {agruparPor === "operario" ? "Operario" : "Controlador"}
                 </button>
               }
             >
@@ -372,6 +372,12 @@ export function ErroresMesaTab() {
               {porPersona.length === 20 && (
                 <p className="text-[11px] text-zinc-600 mt-2">
                   Mostrando las 20 personas con más errores.
+                </p>
+              )}
+              {agruparPor === "controlador" && (
+                <p className="text-[11px] text-zinc-600 mt-2">
+                  Solo pedidos con Controlador real registrado en Magnus (origen Calidad) —
+                  descarta los que no tienen controlador.
                 </p>
               )}
             </Panel>
