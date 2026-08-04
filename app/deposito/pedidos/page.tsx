@@ -88,7 +88,8 @@ function ComboChart({ data, hasCtrl, maxEf, angle }: { data: ComboRow[]; hasCtrl
         <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
         <XAxis dataKey="lbl" stroke={C.border} tick={{ fontSize: 11, fill: C.muted }}
           angle={angle} textAnchor={angle ? "end" : "middle"} height={angle ? 60 : 24} interval={0} />
-        <YAxis yAxisId="left" stroke={C.border} width={46} tick={{ fontSize: 11, fill: C.muted }} />
+        <YAxis yAxisId="left" stroke={C.border} width={46} tick={{ fontSize: 11, fill: C.muted }}
+          domain={[0, (dataMax: number) => Math.ceil(dataMax * 2 / 50) * 50]} />
         <YAxis yAxisId="right" orientation="right" domain={[0, maxEf]} stroke={C.border} width={44}
           tick={{ fontSize: 11, fill: C.muted }} tickFormatter={(v) => `${v}%`} />
         <Tooltip contentStyle={tooltipStyle}
