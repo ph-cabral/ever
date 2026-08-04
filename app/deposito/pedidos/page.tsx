@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList,
 } from "recharts";
 import {
   PageTitle, SectionTitle, Panel, KPI, Grid, ChartBar, ChartDonut, Table,
@@ -95,10 +95,20 @@ function ComboChart({ data, hasCtrl, maxEf, angle }: { data: ComboRow[]; hasCtrl
           formatter={(value: number | string, name: string) =>
             name === "% Eficiencia" ? `${value}%` : fmtNum(Number(value))} />
         <Legend wrapperStyle={{ fontSize: 11, color: C.muted, paddingBottom: 6 }} />
-        <Bar yAxisId="left" dataKey="ing" name="Pedidos Ingresados" fill="#d4d4d8" radius={[3, 3, 0, 0]} maxBarSize={46} />
-        <Bar yAxisId="left" dataKey="prep" name="Preparado (OT)" fill={C.green} radius={[3, 3, 0, 0]} maxBarSize={46} />
-        {hasCtrl && <Bar yAxisId="left" dataKey="ctrl" name="Controlado" fill={C.brand} radius={[3, 3, 0, 0]} maxBarSize={46} />}
-        <Line yAxisId="right" type="monotone" dataKey="ef" name="% Eficiencia" stroke={C.red} strokeWidth={2} dot={{ r: 3 }} />
+        <Bar yAxisId="left" dataKey="ing" name="Pedidos Ingresados" fill="#d4d4d8" radius={[3, 3, 0, 0]} maxBarSize={46}>
+          <LabelList dataKey="ing" position="top" fontSize={10} fill={C.muted} formatter={(v: number) => fmtNum(v)} />
+        </Bar>
+        <Bar yAxisId="left" dataKey="prep" name="Preparado (OT)" fill={C.green} radius={[3, 3, 0, 0]} maxBarSize={46}>
+          <LabelList dataKey="prep" position="top" fontSize={10} fill={C.green} formatter={(v: number) => fmtNum(v)} />
+        </Bar>
+        {hasCtrl && (
+          <Bar yAxisId="left" dataKey="ctrl" name="Controlado" fill={C.brand} radius={[3, 3, 0, 0]} maxBarSize={46}>
+            <LabelList dataKey="ctrl" position="top" fontSize={10} fill={C.brand} formatter={(v: number) => fmtNum(v)} />
+          </Bar>
+        )}
+        <Line yAxisId="right" type="monotone" dataKey="ef" name="% Eficiencia" stroke={C.red} strokeWidth={2} dot={{ r: 3 }}>
+          <LabelList dataKey="ef" position="top" fontSize={10} fill={C.red} formatter={(v: number) => `${v}%`} />
+        </Line>
       </ComposedChart>
     </ResponsiveContainer>
   );

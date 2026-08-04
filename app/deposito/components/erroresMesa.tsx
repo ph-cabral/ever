@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Loader2, AlertTriangle, RefreshCw, FileSpreadsheet } from "lucide-react";
-import { PageTitle, Panel, KPI, Grid, Table, fmtNum, fmtDate } from "./ui";
+import { PageTitle, Panel, KPI, Grid, Table, ChartBar, ChartLine, C, fmtNum, fmtDate } from "./ui";
 import { exportarErroresMesa } from "@/lib/deposito/exportErroresMesa";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -136,6 +136,7 @@ export function ErroresMesaTab() {
   const [hasta, setHasta] = useState("");
   const [controlador, setControlador] = useState(ALL);
   const [preparador, setPreparador] = useState(ALL);
+  const [agruparPor, setAgruparPor] = useState<"operario" | "registrada">("operario");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -213,6 +214,34 @@ export function ErroresMesaTab() {
       m.set(r.detalleError, (m.get(r.detalleError) ?? 0) + 1),
     );
     return [...m.entries()].sort((a, b) => b[1] - a[1])[0];
+  }, [filtered]);
+
+  // ── Errores por persona (Operario que cometió el error / Registrada que lo
+  // cargó, a elección) — top 20, respeta desde/hasta + los filtros activos.
+  const porPersona = useMemo(() => {
+    const getter = agruparPor === "operario" ? getOperario : getRegistrador;
+    const m = new Map<string, number>();
+    filtered.forEach((r) => {
+      const p = getter(r);
+      if (p) m.set(p, (m.get(p) ?? 0) + 1);
+    });
+    return [...m.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([persona, cantidad]) => ({ persona, cantidad }));
+  }, [filtered, agruparPor]);
+
+  // ── Tendencia de errores en el tiempo (por día, fecha del pedido) — mismo
+  // rango/filtros que el resto de la vista.
+  const tendencia = useMemo(() => {
+    const m = new Map<string, number>();
+    filtered.forEach((r) => {
+      if (!r.fecha) return;
+      m.set(r.fecha, (m.get(r.fecha) ?? 0) + 1);
+    });
+    return [...m.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([fecha, cantidad]) => ({ fecha: fmtDate(fecha), cantidad }));
   }, [filtered]);
 
   return (
@@ -317,6 +346,47 @@ export function ErroresMesaTab() {
         </div>
       ) : (
         <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
+            <Panel
+              title="Errores por persona"
+              accent={
+                <button
+                  onClick={() =>
+                    setAgruparPor((v) => (v === "operario" ? "registrada" : "operario"))
+                  }
+                  className="text-[11px] font-semibold px-2 py-1 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 transition-colors normal-case"
+                >
+                  Ver por: {agruparPor === "operario" ? "Operario" : "Registrada"}
+                </button>
+              }
+            >
+              <ChartBar
+                data={porPersona}
+                xKey="persona"
+                height={260}
+                series={[{ key: "cantidad", name: "Errores", color: C.brand }]}
+                fmt={(n) => fmtNum(n)}
+                angle={-35}
+                showValues
+              />
+              {porPersona.length === 20 && (
+                <p className="text-[11px] text-zinc-600 mt-2">
+                  Mostrando las 20 personas con más errores.
+                </p>
+              )}
+            </Panel>
+
+            <Panel title="Tendencia de errores" accent={`(${fmtNum(filtered.length)} en el rango)`}>
+              <ChartLine
+                data={tendencia}
+                xKey="fecha"
+                height={260}
+                series={[{ key: "cantidad", name: "Errores", color: C.red }]}
+                fmt={(n) => fmtNum(n)}
+              />
+            </Panel>
+          </div>
+
           <Grid cols={4}>
             <KPI
               label="Registros"
