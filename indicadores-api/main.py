@@ -40,7 +40,7 @@ from errores_mesa import (
     fetch_pedido_lookup, insert_error_mesa, opciones as errores_mesa_opciones,
     fetch_ubicacion_diag, fetch_errores_mesa_list, fetch_operario_nombre,
     insert_error_calidad, update_observacion, fetch_controlador_diag,
-    fetch_articulos_pedido,
+    fetch_articulos_pedido, insert_error_mesa_items,
 )
 from control_asignacion import asignar_siguiente, fetch_cola_diag, fetch_pedidos_asignados
 from rrhh import fetch_cvs_por_mes
@@ -795,6 +795,17 @@ class ErrorMesaIn(BaseModel):
     detalleError: str
     articulos: list[str] | None = None
 
+# Alta en lote (REDISEÑO 2026-08-04): 1 error por artículo, ver
+# insert_error_mesa_items en errores_mesa.py.
+class ErrorMesaItem(BaseModel):
+    codArticulo: str
+    detalleError: str
+
+class ErrorMesaItemsIn(BaseModel):
+    nroPedido: int
+    nroOperario: int
+    items: list[ErrorMesaItem]
+
 class ErrorCalidadIn(BaseModel):
     nroPedido: int
     nroOperario: int
@@ -870,6 +881,22 @@ def deposito_errores_mesa_crear(body: ErrorMesaIn):
     try:
         return insert_error_mesa(
             body.nroPedido, body.nroOperario, body.detalleError, body.articulos
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Error: {str(e)}")
+
+@app.post("/deposito/errores-mesa/items")
+def deposito_errores_mesa_crear_items(body: ErrorMesaItemsIn):
+    """Botón "Finalizar" del widget de Mesa de Control (REDISEÑO 2026-08-04):
+    alta en lote, 1 fila en deposito.errores_mesa por artículo (cada uno con
+    su propio detalleError, elegido artículo por artículo en el widget) — ver
+    insert_error_mesa_items."""
+    try:
+        return insert_error_mesa_items(
+            body.nroPedido, body.nroOperario,
+            [i.model_dump() for i in body.items],
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

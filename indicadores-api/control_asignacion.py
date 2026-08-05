@@ -77,6 +77,23 @@ de Picking del pedido (`SQL_WMS_OT_POR_PEDIDO`, sin filtrar OTEstado) y en
 Python se elige la de mayor OTId (más reciente, mismo criterio que usa
 `deposito.py`); el pedido solo cuenta como Cumplido si ESA está en
 OTEstado=2. Sin verificar en vivo — falta rebuild indicadores-api.
+
+FIX 2026-08-05 (a pedido de Pablo, cambio de criterio): el lado WMS del
+cruce deja de ser "Cumplido" (OTEstado=2) — pasa a ser "el pedido tiene al
+menos 1 renglón de su OT de Picking parado en la ubicación PLAYA_PEDIDOS"
+(OTItem.OTItemUbicacionCodigo, confirmado por diagnóstico en vivo contra
+WMS). El lado Magnus (Abierto, SQL_MAGNUS_ABIERTOS_TODOS) no cambió — sigue
+siendo el universo base y la fuente de fecha/tipo/cliente/prioridad. Ver
+SQL_WMS_PLAYA_PEDIDOS / fetch_pedidos_en_playa_pedidos (nuevas) y
+refrescar_cola (ahora llama a la nueva función). La query/función vieja
+("Cumplido") se deja intacta, sin usar, en
+SQL_WMS_OT_POR_PEDIDO_LEGACY_CUMPLIDO / fetch_pedidos_cumplidos_abiertos_legacy
+— pedido explícito de Pablo de no perderla. Ojo: la columna correcta para ir
+de OT a Magnus sigue siendo OT.OTNroMovVenta (constante OT_COL_PEDIDO en
+deposito.py) — en el diagnóstico se probó por error OT.OTPedidoId primero,
+que también existe pero es un ID compuesto interno de WMS (ej.
+"MAGEW-738058-0-0-334695"), no el NroMovVenta de Magnus. Sin verificar en
+vivo — falta rebuild indicadores-api.
 """
 from datetime import datetime, timedelta
 
@@ -121,11 +138,14 @@ INNER JOIN EVERWEAR.dbo.TMP_TiempoDePedidos   t   ON t.NroMovVenta   = cab.NroMo
 LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo   = cc.CompCodigo
 LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente   = cli.CodCliente
 WHERE LTRIM(RTRIM(t.Estado)) = 'Abierto'
-  AND cab.CompCodigo NOT IN (70, 75)  -- excluye acopios (a pedido de Pablo,
-  -- 2026-08-03; se había sacado el 75 de la exclusión el mismo día, pero
-  -- volvió a entrar porque trajo un pedido no finalizado — vuelve a
-  -- excluirse junto con el 70, hasta encontrar una forma mejor de
-  -- distinguir acopios)
+  AND cab.CompCodigo IN (10, 75, 100, 210, 310)  -- FIX 2026-08-04 (a pedido de
+  -- Pablo): antes era NOT IN (70) — dejaba pasar Factura Directa
+  -- (107/1107/1207/170/207/47/7) a la cola del widget de errores-mesa.
+  -- Whitelist explícita, solo para esta cola: Pedido Mayorista (10),
+  -- Pedido Mayorista Mostradores (100), Pedido Móvil (210), Pedido Web
+  -- (310). Acota mucho más que antes (ya no solo excluye acopios) — este
+  -- criterio es EXCLUSIVO de esta cola, no tocar las demás queries de
+  -- "Abiertos" del proyecto (deposito.py, etc.) con esta whitelist.
 ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
 -- 2026-08-03 (a pedido de Pablo): prioridad ASC (1 = más urgente) y, dentro
 -- de cada prioridad, fecha ASC (más viejo primero) — vaciar los atrasados de
@@ -144,7 +164,13 @@ ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
 # de mayor OTId (mismo criterio "más reciente" que ya usa deposito.py,
 # ORDER BY OT.OTId DESC) — el pedido solo cuenta como Cumplido si ESA es
 # OTEstado=2.
-SQL_WMS_OT_POR_PEDIDO = """
+#
+# LEGACY (a partir de 2026-08-05, ver SQL_WMS_PLAYA_PEDIDOS más abajo): a
+# pedido de Pablo, el criterio "Cumplido" se reemplazó por "está físicamente
+# parado en la ubicación PLAYA_PEDIDOS" — refrescar_cola ya NO llama a
+# fetch_pedidos_cumplidos_abiertos. Se deja el código acá sin tocar (no se
+# borra) por si hace falta volver atrás o comparar.
+SQL_WMS_OT_POR_PEDIDO_LEGACY_CUMPLIDO = """
 SELECT
     OT.{col_pedido}            AS NroPedido,
     OT.OTId                    AS Ot,
@@ -160,7 +186,36 @@ WHERE Codot.CodotProcesoNegocio = 4          -- Picking
 """
 
 
-def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[dict]:
+# ── WMS: pedidos con al menos 1 renglón de la OT de Picking parado en la ────
+# ubicación PLAYA_PEDIDOS (a pedido de Pablo, 2026-08-05). Reemplaza el
+# criterio "Cumplido" de arriba: la señal de "listo para Mesa de Control" ya
+# no es el estado de la OT, es la ubicación física del pedido en WMS.
+# Columna confirmada por diagnóstico en vivo: OTItem.OTItemUbicacionCodigo
+# (NO OT.OTPedidoId/OT.OTObservaciones). El cruce con Magnus sigue siendo por
+# {col_pedido} = OT_COL_PEDIDO = "OTNroMovVenta" (mismo campo ya confirmado y
+# usado en TODO el resto del proyecto — errores_mesa.py, deposito.py — para
+# ir de OT a VenFer_PedidoCabecera.NroMovVenta; OT.OTPedidoId es OTRA columna,
+# con un ID compuesto tipo "MAGEW-738058-0-0-334695", no sirve para este
+# cruce).
+SQL_WMS_PLAYA_PEDIDOS = """
+SELECT DISTINCT
+    OT.{col_pedido}            AS NroPedido,
+    OT.OTId                    AS Ot,
+    OT.OTEstado                AS OTEstado,
+    OT.OTFechaHoraEjecucion    AS Cumplido,
+    P_Repositor.PersonalId     AS NroArmador,
+    P_Repositor.PersonalNombre AS NombreArmador
+FROM OT
+INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
+INNER JOIN OTItem i ON i.OTId = OT.OTId
+LEFT JOIN Personal P_Repositor ON OT.OTUsuarioGUID_Repositor = P_Repositor.PersonalId
+WHERE Codot.CodotProcesoNegocio = 4          -- Picking
+  AND LTRIM(RTRIM(i.OTItemUbicacionCodigo)) = 'PLAYA_PEDIDOS'
+  AND OT.{col_pedido} IN ({ph})
+"""
+
+
+def fetch_pedidos_cumplidos_abiertos_legacy(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[dict]:
     """Cruce Abierto(Magnus) ∩ Cumplido(WMS) por NroMovVenta. Cada dict trae
     nroPedido/fecha/tipoPedido/cliente/ubicacion/ot/nroArmador/nombreArmador
     — mismos campos que usa deposito.control_asignacion.
@@ -215,7 +270,7 @@ def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list
             chunk = nros[i:i + CH]
             ph = ",".join("?" for _ in chunk)
             cur.execute(
-                SQL_WMS_OT_POR_PEDIDO.format(
+                SQL_WMS_OT_POR_PEDIDO_LEGACY_CUMPLIDO.format(
                     col_pedido=OT_COL_PEDIDO, observ_select=observ_select, ph=ph,
                 ),
                 chunk,
@@ -267,12 +322,110 @@ def fetch_pedidos_cumplidos_abiertos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list
     return out
 
 
+def fetch_pedidos_en_playa_pedidos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[dict]:
+    """Cruce Abierto(Magnus) ∩ "está en la ubicación PLAYA_PEDIDOS" (WMS,
+    OTItem.OTItemUbicacionCodigo) por NroMovVenta. Reemplaza el criterio
+    "Cumplido" (ver fetch_pedidos_cumplidos_abiertos_legacy) — a pedido de
+    Pablo, 2026-08-05: la señal de "listo para Mesa de Control" pasa a ser
+    la ubicación física del pedido en WMS, no el estado de la OT. Mismo
+    armado que la función legacy (arranca por TODOS los Abiertos de Magnus y
+    filtra puntual contra WMS por esos NroMovVenta, en lotes de 1000) —
+    misma forma de salida (nroPedido/fecha/tipoPedido/cliente/codCliente/
+    prioridad/ubicacion/ot/nroArmador/nombreArmador)."""
+    conn = get_connection("EVERWEAR")
+    abiertos: dict[int, dict] = {}
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_MAGNUS_ABIERTOS_TODOS.format(limit=limit))
+        for nro, fecha_int, tipo_pedido, cliente, cod_cliente, prioridad in cur.fetchall():
+            if nro is None:
+                continue
+            fecha = (BASE_DATE + timedelta(days=int(fecha_int))) if fecha_int else None
+            abiertos[int(nro)] = {
+                "fecha": fecha,
+                "tipoPedido": (tipo_pedido or "").strip() or None,
+                "cliente": (cliente or "").strip() or None,
+                "codCliente": int(cod_cliente) if cod_cliente is not None else None,
+                "prioridad": int(prioridad) if prioridad is not None else None,
+            }
+    finally:
+        conn.close()
+
+    if not abiertos:
+        return []
+
+    conn = get_connection("WMS")
+    wms: dict[int, dict] = {}
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        nros = list(abiertos.keys())
+        CH = 1000
+        for i in range(0, len(nros), CH):
+            chunk = nros[i:i + CH]
+            ph = ",".join("?" for _ in chunk)
+            cur.execute(
+                SQL_WMS_PLAYA_PEDIDOS.format(col_pedido=OT_COL_PEDIDO, ph=ph),
+                chunk,
+            )
+            cols = [c[0] for c in cur.description]
+            for row in cur.fetchall():
+                d = dict(zip(cols, row))
+                nro = d.get("NroPedido")
+                ot_id = d.get("Ot")
+                if nro is None or ot_id is None:
+                    continue
+                n = int(nro)
+                prev = wms.get(n)
+                # Nos quedamos con la OT de mayor OTId (más reciente) entre
+                # las que tienen algún renglón en PLAYA_PEDIDOS — mismo
+                # criterio "más reciente manda" que la función legacy.
+                if prev is None or int(ot_id) > prev["ot"]:
+                    wms[n] = {
+                        "ot": int(ot_id),
+                        "otEstado": int(d["OTEstado"]) if d.get("OTEstado") is not None else None,
+                        "nroArmador": int(d["NroArmador"]) if d.get("NroArmador") is not None else None,
+                        "nombreArmador": (d.get("NombreArmador") or "").strip() or None,
+                        "ubicacion": "PLAYA_PEDIDOS",
+                    }
+    finally:
+        conn.close()
+
+    out: list[dict] = []
+    for nro, ab in abiertos.items():
+        w = wms.get(nro)
+        if w is None:
+            # Ningún renglón de su OT de Picking está en PLAYA_PEDIDOS —
+            # todavía no está listo para Mesa de Control.
+            continue
+        out.append({
+            "nroPedido": nro,
+            "fecha": ab["fecha"],
+            "tipoPedido": ab["tipoPedido"],
+            "cliente": ab["cliente"],
+            "codCliente": ab["codCliente"],
+            "prioridad": ab["prioridad"],
+            "ubicacion": w["ubicacion"],
+            "ot": w["ot"],
+            "nroArmador": w["nroArmador"],
+            "nombreArmador": w["nombreArmador"],
+        })
+    return out
+
+
 def refrescar_cola(limit: int = MAGNUS_ABIERTOS_LIMIT) -> int:
-    """Agrega a deposito.control_asignacion los pedidos Cumplidos+Abiertos que
-    todavía no estén en la cola (ON CONFLICT DO NOTHING — no toca los que ya
-    están, asignados o no). Devuelve cuántos se agregaron. Se llama al
-    reclamar (asignar_siguiente), no hace falta un loop/cron aparte."""
-    candidatos = fetch_pedidos_cumplidos_abiertos(limit)
+    """Agrega a deposito.control_asignacion los pedidos Abiertos(Magnus) ∩ en
+    PLAYA_PEDIDOS(WMS) que todavía no estén en la cola (ON CONFLICT DO
+    NOTHING — no toca los que ya están, asignados o no). Devuelve cuántos se
+    agregaron. Se llama al reclamar (asignar_siguiente), no hace falta un
+    loop/cron aparte.
+
+    FIX 2026-08-05 (a pedido de Pablo): pasó a usar
+    fetch_pedidos_en_playa_pedidos en vez de fetch_pedidos_cumplidos_abiertos
+    (criterio "Cumplido" en WMS) — ver esa función y
+    fetch_pedidos_cumplidos_abiertos_legacy (se deja sin usar, sin borrar)."""
+    candidatos = fetch_pedidos_en_playa_pedidos(limit)
     if not candidatos:
         return 0
     conn = get_pg_connection()

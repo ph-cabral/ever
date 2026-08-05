@@ -73,7 +73,6 @@ DETALLE_ERROR_OPCIONES = [
     "Producto sin identificación",
     "Pedido no encontrado",
     "Error de mesa",
-    "Otro",
 ]
 
 # ── Lookup (solo lectura) ─────────────────────────────────────────────────────
@@ -444,6 +443,93 @@ def insert_error_mesa(
         "nroControladorReal": None,
         "nombreControladorReal": None,
         "createdAt": created_at.isoformat(),
+    }
+
+
+# ── Alta en lote, 1 fila por artículo (REDISEÑO 2026-08-04, a pedido de Pablo) ─
+# Antes el widget de Mesa de Control cargaba 1 solo detalleError para TODO el
+# pedido (con `articulos` como simple etiqueta/lista adjunta, ver
+# insert_error_mesa arriba). Ahora cada artículo puede tener SU PROPIO error:
+# el widget arma la lista {codArticulo, detalleError} eligiendo el error
+# artículo por artículo y la manda entera al presionar "Finalizar". Se guarda
+# 1 fila de deposito.errores_mesa POR ARTÍCULO (mismo esquema de tabla que ya
+# existía — `articulos` ya era text[], acá cada fila lleva un array de 1 solo
+# elemento — no hace falta migración). A diferencia de llamar a
+# insert_error_mesa en loop desde el widget (que repetiría fetch_operario_nombre
+# + fetch_pedido_lookup + fetch_articulos_pedido en CADA request), acá se
+# resuelven una sola vez y se insertan todas las filas en una sola conexión/
+# transacción.
+def insert_error_mesa_items(
+    nro_pedido: int, nro_operario: int, items: list[dict]
+) -> dict:
+    """`items`: [{"codArticulo": "...", "detalleError": "..."}, ...] — ya
+    validado por Pydantic (ErrorMesaItemsIn) en main.py, acá se re-limpia y
+    se descartan silenciosamente los que vengan sin código o sin error (mismo
+    criterio "no confiar en el cliente" del resto del archivo). Devuelve un
+    resumen (cantidad + detalle de cada fila insertada) para que el widget
+    pueda loguear/mostrar el resultado."""
+    if not nro_operario:
+        raise ValueError("Falta 'nroOperario'")
+    if not items:
+        raise ValueError("Falta 'items' (al menos 1 artículo con error)")
+
+    registrado_por = fetch_operario_nombre(nro_operario)
+    if not registrado_por:
+        raise ValueError(f"Operario {nro_operario} no encontrado")
+
+    info = fetch_pedido_lookup(nro_pedido) or {
+        "fecha": None, "tipoPedido": None, "ot": None,
+        "nroArmador": None, "nombreArmador": None, "ubicacion": None,
+    }
+    disponibles = {a["codArticulo"]: a["descripcion"] for a in fetch_articulos_pedido(nro_pedido)}
+
+    filas: list[tuple[str, list[str]]] = []
+    for it in items:
+        cod = (it.get("codArticulo") or "").strip()
+        detalle_error = (it.get("detalleError") or "").strip()
+        if not cod or not detalle_error:
+            continue
+        desc = disponibles.get(cod)
+        articulo_str = f"{cod} - {desc}" if desc else cod
+        filas.append((detalle_error, [articulo_str]))
+
+    if not filas:
+        raise ValueError("Ningún artículo válido con error para guardar")
+
+    conn = get_pg_connection()
+    resultados = []
+    try:
+        cur = conn.cursor()
+        for detalle_error, articulos_resueltos in filas:
+            cur.execute(
+                """
+                INSERT INTO deposito.errores_mesa
+                    ("nroPedido", fecha, "tipoPedido", ot, "nroArmador", "nombreArmador",
+                     ubicacion, "detalleError", "registradoPor", articulos)
+                VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, "createdAt"
+                """,
+                (
+                    nro_pedido, info["tipoPedido"], info["ot"],
+                    info["nroArmador"], info["nombreArmador"], info["ubicacion"], detalle_error,
+                    registrado_por, articulos_resueltos,
+                ),
+            )
+            new_id, created_at = cur.fetchone()
+            resultados.append({
+                "id": new_id, "detalleError": detalle_error,
+                "articulos": articulos_resueltos, "createdAt": created_at.isoformat(),
+            })
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        **info,
+        "nroPedido": nro_pedido,
+        "registradoPor": registrado_por,
+        "cantidad": len(resultados),
+        "items": resultados,
     }
 
 
