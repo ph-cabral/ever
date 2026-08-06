@@ -300,22 +300,50 @@ export default function VickiPage() {
     await pickLocation(location, true);
   }
 
+  // Reduce la imagen en el navegador (max 800px, JPEG) para no mandar
+  // megas de base64: el reloj igual la recibe achicada a 640px.
+  async function fileToJpegDataUrl(file: File, maxSide = 800): Promise<string> {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("canvas no disponible");
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    return canvas.toDataURL("image/jpeg", 0.85);
+  }
+
   async function uploadImage(file: File) {
     if (loading) return;
     setLoading(true);
     try {
-      const dataUrl: string = await new Promise((resolve, reject) => {
-        const fr = new FileReader();
-        fr.onload = () => resolve(String(fr.result));
-        fr.onerror = () => reject(fr.error);
-        fr.readAsDataURL(file);
-      });
+      let dataUrl: string;
+      try {
+        dataUrl = await fileToJpegDataUrl(file);
+      } catch {
+        // formato que el navegador no decodifica (ej. HEIC): mandar crudo
+        dataUrl = await new Promise((resolve, reject) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve(String(fr.result));
+          fr.onerror = () => reject(fr.error);
+          fr.readAsDataURL(file);
+        });
+      }
       const r = await fetch("/api/vicki/asignar_foto", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: SESSION_ID, photo_b64: dataUrl }),
       });
-      const data = await r.json();
+      const txt = await r.text();
+      let data: any;
+      try {
+        data = JSON.parse(txt);
+      } catch {
+        data = { error: `HTTP ${r.status} (respuesta no-JSON)` };
+      }
       const answer =
         data.response ?? `Error: ${data.detail ?? data.error ?? "desconocido"}`;
       setMessages((prev) => [
