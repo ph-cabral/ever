@@ -47,7 +47,10 @@ function parseInlineBold(line: string, keyBase: string) {
 }
 
 function renderTextBlock(text: string, keyBase: string) {
-  const cleaned = text.replace(/\[(LOC_PICK|UPLOAD_PICK|CONFIRM_PICK)\]/g, "");
+  const cleaned = text.replace(
+    /\[(LOC_PICK|UPLOAD_PICK|CONFIRM_PICK|NAME_PICK:[^\]]*)\]/g,
+    "",
+  );
   const paragraphs = cleaned.split(/\n{2,}/);
 
   return paragraphs.map((para, pi) => {
@@ -144,6 +147,7 @@ export default function VickiPage() {
   const [pickingLocation, setPickingLocation] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [namePick, setNamePick] = useState<string[]>([]);
   const endRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -189,6 +193,8 @@ export default function VickiPage() {
     setPickingLocation(!!last && /\[LOC_PICK\]/.test(last.content));
     setShowUpload(!!last && /\[UPLOAD_PICK\]/.test(last.content));
     setShowConfirm(!!last && /\[CONFIRM_PICK\]/.test(last.content));
+    const np = last?.content.match(/\[NAME_PICK:([^\]]*)\]/);
+    setNamePick(np ? np[1].split("|").filter(Boolean) : []);
     if (last && /Foto tomada/i.test(last.content)) setAwaitingEmp(true);
     fetch(`/api/vicki/draft_status/${SESSION_ID}`)
       .then((r) => r.json())
@@ -401,6 +407,21 @@ export default function VickiPage() {
           onSubmit={onSubmit}
           className="mx-auto max-w-2xl flex flex-col gap-2"
         >
+          {namePick.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {namePick.map((n) => (
+                <Button
+                  key={n}
+                  type="button"
+                  onClick={() => send(n)}
+                  disabled={loading}
+                  className="flex-1 min-w-[45%]"
+                >
+                  {n}
+                </Button>
+              ))}
+            </div>
+          )}
           {(pickingLocation || showUpload) && (
             <div className="flex gap-2">
               {pickingLocation &&
