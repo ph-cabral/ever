@@ -160,7 +160,12 @@ export const config = {
   // generando el loop /login <-> / (el login "entraba" pero volvía a /login).
   runtime: "nodejs",
   // Protege todo salvo /login, /api/auth/*, internos de Next y archivos estáticos.
+  // api/vicki/asignar_foto se excluye del matcher (no solo de esRutaPublica):
+  // con runtime nodejs, el middleware rompe los POST con body grande (foto en
+  // base64) — "TypeError: Response body object should not be disturbed or
+  // locked" en el route handler. Al excluirla, el middleware ni corre y el
+  // body llega intacto. El endpoint igual exige un draft activo en vicki_chat.
   matcher: [
-    "/((?!login|api/auth|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|css|js|map|txt|json|woff|woff2|ttf)$).*)",
+    "/((?!login|api/auth|api/vicki/asignar_foto|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|css|js|map|txt|json|woff|woff2|ttf)$).*)",
   ],
 };
