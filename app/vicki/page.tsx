@@ -47,7 +47,7 @@ function parseInlineBold(line: string, keyBase: string) {
 }
 
 function renderTextBlock(text: string, keyBase: string) {
-  const cleaned = text.replace("[LOC_PICK]", "");
+  const cleaned = text.replace(/\[(LOC_PICK|UPLOAD_PICK|CONFIRM_PICK)\]/g, "");
   const paragraphs = cleaned.split(/\n{2,}/);
 
   return paragraphs.map((para, pi) => {
@@ -142,7 +142,10 @@ export default function VickiPage() {
   const [location, setLocation] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [pickingLocation, setPickingLocation] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   // Cargar historial
   useEffect(() => {
@@ -184,6 +187,8 @@ export default function VickiPage() {
   useEffect(() => {
     const last = [...messages].reverse().find((m) => m.role === "assistant");
     setPickingLocation(!!last && /\[LOC_PICK\]/.test(last.content));
+    setShowUpload(!!last && /\[UPLOAD_PICK\]/.test(last.content));
+    setShowConfirm(!!last && /\[CONFIRM_PICK\]/.test(last.content));
     if (last && /Foto tomada/i.test(last.content)) setAwaitingEmp(true);
     fetch(`/api/vicki/draft_status/${SESSION_ID}`)
       .then((r) => r.json())
@@ -289,6 +294,40 @@ export default function VickiPage() {
     await pickLocation(location, true);
   }
 
+  async function uploadImage(file: File) {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const dataUrl: string = await new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result));
+        fr.onerror = () => reject(fr.error);
+        fr.readAsDataURL(file);
+      });
+      const r = await fetch("/api/vicki/asignar_foto", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: SESSION_ID, photo_b64: dataUrl }),
+      });
+      const data = await r.json();
+      const answer =
+        data.response ?? `Error: ${data.detail ?? data.error ?? "desconocido"}`;
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", content: `📎 ${file.name}` },
+        { role: "assistant", content: answer },
+      ]);
+    } catch (e: any) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Error subiendo imagen: ${e?.message ?? e}` },
+      ]);
+    } finally {
+      setLoading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     send(input);
@@ -362,21 +401,62 @@ export default function VickiPage() {
           onSubmit={onSubmit}
           className="mx-auto max-w-2xl flex flex-col gap-2"
         >
-          {pickingLocation && (
+          {(pickingLocation || showUpload) && (
             <div className="flex gap-2">
-              {UBICACIONES.map((u) => (
+              {pickingLocation &&
+                UBICACIONES.map((u) => (
+                  <Button
+                    key={u.value}
+                    type="button"
+                    onClick={() => pickLocation(u.value)}
+                    disabled={loading}
+                    className="flex-1"
+                  >
+                    {u.label}
+                  </Button>
+                ))}
+              {showUpload && (
                 <Button
-                  key={u.value}
                   type="button"
-                  onClick={() => pickLocation(u.value)}
+                  onClick={() => fileRef.current?.click()}
                   disabled={loading}
-                  className="flex-1"
+                  className="flex-1 bg-zinc-700 hover:bg-zinc-600"
                 >
-                  {u.label}
+                  📎 Subir imagen
                 </Button>
-              ))}
+              )}
             </div>
           )}
+          {showConfirm && (
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                onClick={() => send("si")}
+                disabled={loading}
+                className="flex-1 bg-green-600 hover:bg-green-700"
+              >
+                ✅ Guardar en los 3 relojes
+              </Button>
+              <Button
+                type="button"
+                onClick={() => send("no")}
+                disabled={loading}
+                className="flex-1 bg-red-600 hover:bg-red-700"
+              >
+                ❌ Cancelar
+              </Button>
+            </div>
+          )}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) uploadImage(f);
+            }}
+          />
           {awaitingEmp && (
             <div className="flex gap-2">
               <select
