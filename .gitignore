@@ -63,3 +63,4 @@ __pycache__/
 *.pyc
 .env
 .env.example
+documentos/

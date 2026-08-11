@@ -375,6 +375,7 @@ model sector {
   area      area      @relation(fields: [areaId], references: [id])
   legajos   legajo[]
   trabajos  trabajo[]
+  puestos   puesto[]
 
   @@unique([nombre, areaId])
   @@index([areaId])
@@ -609,4 +610,53 @@ model sistema_opcion {
 
   @@unique([clave, campo, valor])
   @@schema("sistema")
+}
+
+// ── Puestos + procedimientos/instructivos (RRHH) ──────────────────────────────
+// ABM en /rrhh/puestos. Cada documento (procedimiento o instructivo) se asigna
+// a uno o más puestos y se indexa en Qdrant (colección "procedimientos") vía
+// vicki_chat POST /rag/documento para que Vicki los recupere por RAG.
+// Ver sql/rrhh_puestos_documentos.sql — correr contra Postgres + `prisma generate`
+// antes de deployar.
+model puesto {
+  id          Int                @id @default(autoincrement())
+  nombre      String             @unique @db.VarChar(120)
+  descripcion String?
+  sectorId    Int?
+  activo      Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  sector      sector?            @relation(fields: [sectorId], references: [id])
+  documentos  puesto_documento[]
+
+  @@index([sectorId])
+  @@schema("everwear")
+}
+
+// tipo: "procedimiento" | "instructivo". `contenido` es el texto que se indexa;
+// `archivoNombre` guarda el adjunto original opcional (en DOCS_DIR, fuera de git).
+model documento {
+  id            Int                @id @default(autoincrement())
+  tipo          String             @db.VarChar(20)
+  titulo        String             @db.VarChar(200)
+  contenido     String
+  archivoNombre String?            @db.VarChar(200)
+  version       Int                @default(1)
+  vigente       Boolean            @default(true)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  puestos       puesto_documento[]
+
+  @@index([tipo])
+  @@schema("everwear")
+}
+
+model puesto_documento {
+  puestoId    Int
+  documentoId Int
+  puesto      puesto    @relation(fields: [puestoId], references: [id], onDelete: Cascade)
+  documento   documento @relation(fields: [documentoId], references: [id], onDelete: Cascade)
+
+  @@id([puestoId, documentoId])
+  @@schema("everwear")
 }

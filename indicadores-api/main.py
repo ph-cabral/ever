@@ -18,6 +18,7 @@ from deposito import (
 )
 from compras import (
     fetch_ordenes_pendientes, fetch_ordenes_articulos_rango, fetch_compras_valorizado,
+    fetch_consumo_articulo,
 )
 from ingresos import fetch_remitos_ingreso
 from ventas import fetch_pedidos_mes
@@ -455,6 +456,25 @@ def compras_compras_valorizado(
     cualquier pedido (Ven_PedRenPendientes) — NO al costo de la OC."""
     try:
         return fetch_compras_valorizado(desde, hasta)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+# ── Compras: consumo mensual de un artículo + stock por depósito ─────────────
+# Para /compras/consumo (pedido de Pablo 2026-08-11): vendido por mes en un
+# rango de MESES (YYYY-MM), total/promedio/máximo/mínimo>0 y stock 1/2/3.
+@app.get("/compras/consumo-articulo")
+def compras_consumo_articulo(
+    codigo: str = Query(...),
+    desde: str = Query(...),
+    hasta: str = Query(...),
+):
+    """Vendido (CantidadPedida de pedidos válidos, mismo criterio que
+    /ventas/pedidos-mes) por mes calendario para UN CodArticu, con un bucket
+    por cada mes del rango aunque la venta sea 0, + stock por depósito."""
+    try:
+        return fetch_consumo_articulo(codigo, desde, hasta)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

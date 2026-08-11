@@ -144,6 +144,27 @@ function esColumnaCerradaSistema(nombre: string) {
   const n = normalizar(nombre);
   return n.includes("resuelto") || n.includes("arreglado") || n.includes("sin solucionar");
 }
+// Columnas "abiertas" de Softech (mismo criterio que usa la API para completar
+// campos.fin automáticamente: ver app/api/sistema/tarjetas/[id]/route.ts y
+// tarjetas/reorder/route.ts). Cualquier otra columna de Softech se toma como cerrada.
+const SOFTECH_COLUMNAS_ABIERTAS = ["pendiente", "en espera"];
+// Detector genérico de "columna cerrada", válido para cualquier tablero — usado en
+// Metricas() para saber, tarjeta por tarjeta, si su mes debe contarse por
+// columnaDesde (cuándo entró a esa columna) en vez de por la fecha de negocio.
+function esColumnaCerrada(clave: string | undefined, nombre: string) {
+  if (clave === "sistema") return esColumnaCerradaSistema(nombre);
+  if (clave === "softech") return !SOFTECH_COLUMNAS_ABIERTAS.includes(normalizar(nombre));
+  // Resto de tableros (Buren y los que se agreguen después): mismo patrón genérico
+  // que ya usa el tablero Kanban para columnas "cerradas" fuera de sistema/softech.
+  return /resuelto|solucionado/i.test(nombre) && !/sin solu/i.test(nombre);
+}
+// Recorta etiquetas largas del eje Y de los gráficos de barras horizontales (Por
+// ubicación / Por problema) para que no se corten entre sí; el nombre completo
+// sigue disponible en el tooltip y en el panel de detalle al hacer clic.
+function truncarEtiqueta(s: string) {
+  const max = 30;
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
 function mesLabel(m: string) {
   const [y, mo] = m.split("-").map(Number);
   return new Date(y, mo - 1, 1).toLocaleDateString("es-AR", { month: "long", year: "numeric" });
@@ -679,10 +700,21 @@ export default function SistemaClient() {
 
                 const tarjetasVisibles = soloMesActual
                   ? ordenadas.filter((card) => {
+                      // Sistema: las columnas "cerradas" (Resuelto / Arreglado-Sin
+                      // solucionar / No solucionado) filtran por columnaDesde, o sea
+                      // cuándo ENTRÓ la tarjeta a esa columna este mes — no por
+                      // campos.fecha (que puede ser un mes anterior si la tarjeta
+                      // viene de otra columna). Así se ve todo lo que se cargó ahí
+                      // en el mes en curso, sin importar el mes de las demás columnas.
+                      if (esSistema) {
+                        const d = parseDate(card.columnaDesde);
+                        if (!d) return true;
+                        return mesKey(d) === mesActualG;
+                      }
                       const d = subtitleField ? parseDate(card.campos[subtitleField.k]) : null;
                       if (!d) return true;
                       const mk = mesKey(d);
-                      return esSistema ? mk === mesActualG : mk === mesActualG || mk === mesCerradoG;
+                      return mk === mesActualG || mk === mesCerradoG;
                     })
                   : ordenadas;
                 // Durante el drag el original se desmonta: los índices de hover se
@@ -1750,7 +1782,20 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
   const unicasAll = Array.from(new Map(all.map((tj) => [tj.id, tj])).values());
 
   const claveDe = (tableroId: number) => tableros.find((t) => t.id === tableroId)?.clave;
-  const fechaDe = (tj: CardM) => parseDate(tj.campos[fechaFieldFor(claveDe(tj.tableroId))]);
+  // Fecha que define a qué mes pertenece la tarjeta para todo Metricas (KPIs y
+  // gráficos): si está en una columna "cerrada" (Resuelto / Arreglado-Sin
+  // solucionar / No solucionado en sistema, cerradas de Softech, o el patrón
+  // genérico en el resto de tableros), se usa columnaDesde — cuándo ENTRÓ a esa
+  // columna — para que cuente en el mes en que se resolvió, no en el mes en que
+  // se creó. Si está en una columna abierta, se sigue usando la fecha de negocio
+  // (fecha/inicio) como fecha de "registrado".
+  const fechaDe = (tj: CardM) => {
+    const clave = claveDe(tj.tableroId);
+    if (esColumnaCerrada(clave, tj.colNombre)) {
+      return parseDate(tj.columnaDesde) ?? parseDate(tj.campos[fechaFieldFor(clave)]);
+    }
+    return parseDate(tj.campos[fechaFieldFor(clave)]);
+  };
 
   const mesActual = mesKey(new Date());
   const mesesCerrados = Array.from(
@@ -1924,12 +1969,19 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
                 <span className="text-zinc-500 font-normal">(clic en una barra para ver el detalle)</span>
               </h4>
               <div className="flex flex-col md:flex-row gap-4">
-                <div style={{ width: "100%", maxWidth: 420, height: Math.max(260, sisPorUbicacion.length * 26) }}>
+                <div style={{ width: "100%", maxWidth: 460, height: Math.max(260, sisPorUbicacion.length * 32) }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={sisPorUbicacion} layout="vertical" margin={{ left: 8, right: 12 }}>
                       <CartesianGrid stroke="#27272a" horizontal={false} />
                       <XAxis type="number" stroke="#a1a1aa" fontSize={12} allowDecimals={false} />
-                      <YAxis type="category" dataKey="name" stroke="#a1a1aa" fontSize={11} width={110} />
+                      <YAxis
+                        type="category"
+                        dataKey="name"
+                        stroke="#a1a1aa"
+                        fontSize={11}
+                        width={160}
+                        tickFormatter={truncarEtiqueta}
+                      />
                       <Tooltip
                         cursor={{ fill: "#ffffff0d" }}
                         contentStyle={{ background: "#1f1f1f", border: "1px solid #3f3f46" }}
@@ -1957,7 +2009,7 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
 
                 <div
                   className="relative flex-1"
-                  style={{ minHeight: Math.max(180, Math.min(260, sisPorUbicacion.length * 26)) }}
+                  style={{ minHeight: Math.max(180, Math.min(260, sisPorUbicacion.length * 32)) }}
                 >
                   {pilaUbicacion.length === 0 ? (
                     <p className="text-xs text-zinc-600 h-full flex items-center">
@@ -2036,12 +2088,19 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
                 <span className="text-zinc-500 font-normal">(clic en una barra para ver el detalle)</span>
               </h4>
               <div className="flex flex-col md:flex-row gap-4">
-                <div style={{ width: "100%", maxWidth: 420, height: Math.max(260, sfPorProblema.length * 26) }}>
+                <div style={{ width: "100%", maxWidth: 460, height: Math.max(260, sfPorProblema.length * 32) }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={sfPorProblema} layout="vertical" margin={{ left: 8, right: 12 }}>
                       <CartesianGrid stroke="#27272a" horizontal={false} />
                       <XAxis type="number" stroke="#a1a1aa" fontSize={12} allowDecimals={false} />
-                      <YAxis type="category" dataKey="name" stroke="#a1a1aa" fontSize={11} width={140} />
+                      <YAxis
+                        type="category"
+                        dataKey="name"
+                        stroke="#a1a1aa"
+                        fontSize={11}
+                        width={190}
+                        tickFormatter={truncarEtiqueta}
+                      />
                       <Tooltip
                         cursor={{ fill: "#ffffff0d" }}
                         contentStyle={{ background: "#1f1f1f", border: "1px solid #3f3f46" }}
@@ -2069,7 +2128,7 @@ function Metricas({ tableros }: { tableros: Tablero[] }) {
 
                 <div
                   className="relative flex-1"
-                  style={{ minHeight: Math.max(180, Math.min(260, sfPorProblema.length * 26)) }}
+                  style={{ minHeight: Math.max(180, Math.min(260, sfPorProblema.length * 32)) }}
                 >
                   {pilaProblema.length === 0 ? (
                     <p className="text-xs text-zinc-600 h-full flex items-center">

@@ -22,6 +22,10 @@ ANULADAS con saldo pendiente, sumar su Estado a ESTADOS_CAB_EXCLUIR (abajo).
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 from db import get_connection
+# Criterio de "pedido válido" (Cerrado/Facturado, blacklist de CompCodigo) —
+# el MISMO que usa /ventas/pedidos-mes, para que "vendido" signifique lo mismo
+# en toda la app (ver ventas.py, confirmado 2026-07-10).
+from ventas import COMP_CODIGOS_EXCLUIDOS, _es_valido
 
 BASE_DATE = date(1800, 12, 28)  # Magnus guarda fechas como días desde esta base
 
@@ -363,3 +367,164 @@ def fetch_compras_valorizado(desde: str, hasta: str):
         }
     finally:
         conn.close()
+
+
+# ── Consumo mensual de UN artículo + stock por depósito (/compras/consumo) ────
+# Vista pedida por Pablo 2026-08-11: cod. artículo + rango de MESES →
+# vendido por mes, total, promedio (total / meses del rango, incluidos los de
+# venta 0), máximo, mínimo > 0, total/máximo, total/mínimo, y stock por
+# depósito (1/2/3, EVERWEAR.Stk_ArticSucursalDeposito — mismo criterio que
+# /deposito/stock, ver deposito.py ARSU_*).
+#
+# "Vendido" = CantidadPedida de VenFer_PedidoReng de pedidos VÁLIDOS
+# (Cerrado/Facturado, sin la blacklist de CompCodigo) por FechaPedido de la
+# cabecera — exactamente el mismo criterio que /ventas/pedidos-mes, pero
+# filtrado a un solo CodArticu y agrupado por mes.
+
+SQL_CONSUMO_ARTICULO = """
+SELECT
+    cab.FechaPedido                       AS FechaPedido,
+    cab.CompCodigo                        AS CompCodigo,
+    est.Ped_EstadoDescripcion             AS Estado,
+    r.CantidadPedida                      AS Cantidad
+FROM EVERWEAR.dbo.VenFer_PedidoReng r
+INNER JOIN EVERWEAR.dbo.VenFer_PedidoCabecera cab ON cab.NroMovVenta = r.NroMovVenta
+LEFT  JOIN MAGNUS_SITD.dbo.Pedido_Estados     est ON cab.EstadoPedido = est.Ped_Estado
+WHERE LTRIM(RTRIM(r.CodArticu)) = ?
+  AND cab.FechaPedido BETWEEN ? AND ?
+"""
+
+# Depósitos fijos 1/2/3 — mismos IDs confirmados que usa /deposito/stock
+# (deposito.py DEPOSITOS). Se repiten acá para no importar media tabla de
+# constantes; si algún día se agrega un depósito, actualizar en ambos lados.
+CONSUMO_DEPOSITOS = (1, 2, 3)
+
+SQL_STOCK_ARTICULO = """
+SELECT a.Deposito, SUM(a.StkReal) AS Stock
+FROM EVERWEAR.dbo.Stk_ArticSucursalDeposito a
+WHERE LTRIM(RTRIM(a.CodArticulo)) = ?
+GROUP BY a.Deposito
+"""
+
+SQL_NOMBRE_ARTICULO = """
+SELECT TOP 1 ap.Detalle, s.DetalleMedida, s.UnidadMedida
+FROM EVERWEAR.dbo.[StkFer_Articulos] s
+LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloPatron
+WHERE LTRIM(RTRIM(s.CodArticulo)) = ?
+"""
+
+
+def _meses_rango(desde: str, hasta: str) -> list[str]:
+    """['2026-03', '2026-04', ...] entre desde y hasta (YYYY-MM, inclusive)."""
+    y1, m1 = int(desde[:4]), int(desde[5:7])
+    y2, m2 = int(hasta[:4]), int(hasta[5:7])
+    if (y1, m1) > (y2, m2):
+        (y1, m1), (y2, m2) = (y2, m2), (y1, m1)
+    out = []
+    y, m = y1, m1
+    while (y, m) <= (y2, m2):
+        out.append(f"{y:04d}-{m:02d}")
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+    return out
+
+
+def fetch_consumo_articulo(codigo: str, desde: str, hasta: str):
+    """Consumo mensual de `codigo` en el rango de meses [desde, hasta]
+    (formato YYYY-MM) + stock actual por depósito.
+
+    Devuelve SIEMPRE un bucket por cada mes del rango (cantidad 0 si no se
+    vendió) — el promedio divide por la cantidad de meses del rango, no por
+    los meses con venta. FechaPedido es int días-Magnus (BASE_DATE), así que
+    el rango se filtra directo en SQL como enteros (mismo patrón que
+    fetch_pedidos_mes)."""
+    cod = (codigo or "").strip()
+    if not cod:
+        raise ValueError("codigo vacío")
+
+    meses = _meses_rango(str(desde)[:7], str(hasta)[:7])
+    y1, m1 = int(meses[0][:4]), int(meses[0][5:7])
+    y2, m2 = int(meses[-1][:4]), int(meses[-1][5:7])
+    d1 = date(y1, m1, 1)
+    d2 = (date(y2 + 1, 1, 1) if m2 == 12 else date(y2, m2 + 1, 1)) - timedelta(days=1)
+    d1n = (d1 - BASE_DATE).days
+    d2n = (d2 - BASE_DATE).days
+
+    por_mes: dict[str, float] = {m: 0.0 for m in meses}
+    nombre = None
+    stock_por_dep: dict[int, float] = {d: 0.0 for d in CONSUMO_DEPOSITOS}
+
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+
+        cur.execute(SQL_CONSUMO_ARTICULO, (cod, d1n, d2n))
+        cols = [c[0] for c in cur.description]
+        for row in cur.fetchall():
+            d = dict(zip(cols, row))
+            try:
+                comp = int(d.get("CompCodigo")) if d.get("CompCodigo") is not None else None
+            except (TypeError, ValueError):
+                comp = None
+            if comp in COMP_CODIGOS_EXCLUIDOS:
+                continue
+            if not _es_valido(d.get("Estado")):
+                continue
+            fec = _to_date(d.get("FechaPedido"))
+            if fec is None:
+                continue
+            key = f"{fec.year:04d}-{fec.month:02d}"
+            if key not in por_mes:
+                continue
+            por_mes[key] += float(_safe(d.get("Cantidad")) or 0)
+
+        # Nombre del artículo (para confirmar en la vista que el código existe)
+        cur.execute(SQL_NOMBRE_ARTICULO, (cod,))
+        row = cur.fetchone()
+        if row:
+            nombre = " ".join(
+                " ".join(str(_safe(x) or "").strip() for x in row).split()
+            ) or None
+
+        # Stock actual por depósito (1/2/3)
+        cur.execute(SQL_STOCK_ARTICULO, (cod,))
+        for dep, stk in cur.fetchall():
+            try:
+                dep_i = int(dep)
+            except (TypeError, ValueError):
+                continue
+            if dep_i in stock_por_dep:
+                stock_por_dep[dep_i] = float(_safe(stk) or 0)
+    finally:
+        conn.close()
+
+    cantidades = [round(por_mes[m], 2) for m in meses]
+    total = round(sum(cantidades), 2)
+    n_meses = len(meses)
+    promedio = round(total / n_meses, 2) if n_meses else 0.0
+    maximo = max(cantidades) if cantidades else 0.0
+    positivos = [c for c in cantidades if c > 0]
+    minimo = min(positivos) if positivos else None
+    return {
+        "codigo": cod,
+        "nombre": nombre,
+        "desde": meses[0],
+        "hasta": meses[-1],
+        "mesesEnRango": n_meses,
+        "meses": [{"mes": m, "cantidad": round(por_mes[m], 2)} for m in meses],
+        "totalVendido": total,
+        "promedio": promedio,
+        "maximo": maximo,
+        "totalSobreMaximo": round(total / maximo, 2) if maximo > 0 else None,
+        "minimo": minimo,
+        "totalSobreMinimo": round(total / minimo, 2) if minimo else None,
+        "stock": {
+            "porDeposito": [
+                {"deposito": d, "stock": round(stock_por_dep[d], 2)}
+                for d in CONSUMO_DEPOSITOS
+            ],
+            "total": round(sum(stock_por_dep.values()), 2),
+        },
+    }
