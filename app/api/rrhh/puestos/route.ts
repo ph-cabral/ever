@@ -19,12 +19,14 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const nombre = String(body?.nombre ?? "").trim();
   if (!nombre) return NextResponse.json({ error: "Falta el nombre" }, { status: 400 });
+  const sectorId = body?.sectorId ? Number(body.sectorId) : null;
+  if (!sectorId) return NextResponse.json({ error: "Falta el sector" }, { status: 400 });
   try {
     const puesto = await prisma.puesto.create({
       data: {
         nombre,
         descripcion: body?.descripcion ? String(body.descripcion) : null,
-        sectorId: body?.sectorId ? Number(body.sectorId) : null,
+        sectorId,
       },
     });
     return NextResponse.json(puesto, { status: 201 });

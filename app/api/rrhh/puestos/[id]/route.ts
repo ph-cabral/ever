@@ -17,7 +17,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const data: Record<string, unknown> = {};
   if (body.nombre !== undefined) data.nombre = String(body.nombre).trim();
   if (body.descripcion !== undefined) data.descripcion = body.descripcion ? String(body.descripcion) : null;
-  if (body.sectorId !== undefined) data.sectorId = body.sectorId ? Number(body.sectorId) : null;
+  if (body.sectorId !== undefined) {
+    if (!body.sectorId) return NextResponse.json({ error: "Falta el sector" }, { status: 400 });
+    data.sectorId = Number(body.sectorId);
+  }
   if (body.activo !== undefined) data.activo = Boolean(body.activo);
 
   try {

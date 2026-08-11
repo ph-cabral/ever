@@ -68,6 +68,7 @@ export default function PuestosPage() {
   // ── acciones puesto ──
   async function guardarPuesto() {
     if (!editPuesto?.nombre?.trim()) return;
+    if (!editPuesto?.sectorId) { avisar("❌ Elegí un sector"); return; }
     setSaving(true);
     try {
       const body = { nombre: editPuesto.nombre.trim(), descripcion: editPuesto.descripcion ?? null, sectorId: editPuesto.sectorId ?? null };
@@ -233,9 +234,9 @@ export default function PuestosPage() {
         <Modal titulo={editPuesto.id ? "Editar puesto" : "Nuevo puesto"} onClose={() => setEditPuesto(null)}>
           <label className="block text-xs text-zinc-500 mb-1">Nombre *</label>
           <input className={inputCls} value={editPuesto.nombre ?? ""} onChange={(e) => setEditPuesto({ ...editPuesto, nombre: e.target.value })} autoFocus />
-          <label className="block text-xs text-zinc-500 mb-1 mt-3">Sector</label>
+          <label className="block text-xs text-zinc-500 mb-1 mt-3">Sector *</label>
           <select className={inputCls} value={editPuesto.sectorId ?? ""} onChange={(e) => setEditPuesto({ ...editPuesto, sectorId: e.target.value ? Number(e.target.value) : null })}>
-            <option value="">Sin sector</option>
+            <option value="">Elegí un sector…</option>
             {areas.map((a) => (
               <optgroup key={a.id} label={a.nombre}>
                 {a.sectores.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
