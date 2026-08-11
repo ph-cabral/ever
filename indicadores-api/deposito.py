@@ -43,36 +43,8 @@ UBIC_COL_ART  = "UbicacionDetalleArticuloId"
 UBIC_COL_UBI  = "UbicacionCodigo"
 UBIC_COL_CANT = "UbicacionDetalleCantidad"
 
-# ── Productividad WMS (lean) ──────────────────────────────────────────────────
-# SQL_WMS = """
-# SELECT
-#     CONVERT(varchar(10), OT.OTFechaHoraEjecucion, 103) AS [FECHA EJECUCION],
-#     CASE Codot.CodotProcesoNegocio
-#         WHEN 1 THEN 'Reposicion'
-#         WHEN 2 THEN 'Interdeposito'
-#         WHEN 3 THEN 'Re-Ubicacion'
-#         WHEN 4 THEN 'Picking'
-#         WHEN 5 THEN 'Libre'
-#     END                              AS [PROCESO],
-#     P_Repositor.PersonalNombre       AS [OPERARIO],
-#     ISNULL(i.[CANT. ITEM DE RECOLECCION], 0) AS [CANT. ITEM DE RECOLECCION],
-#     ISNULL(i.[CANT. ITEM RECOLECTADOS], 0)   AS [CANT. ITEM RECOLECTADOS]
-# FROM OT
-# INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
-# LEFT JOIN Personal P_Repositor ON OT.OTUsuarioGUID_Repositor = P_Repositor.PersonalId
-# LEFT JOIN (
-#     SELECT OTId,
-#         SUM(CASE WHEN OTItemTipo = 1 THEN 1 ELSE 0 END)                          AS [CANT. ITEM DE RECOLECCION],
-#         SUM(CASE WHEN OTItemTipo = 1 AND OTItemCantCumplida > 0 THEN 1 ELSE 0 END) AS [CANT. ITEM RECOLECTADOS]
-#     FROM OTItem GROUP BY OTId
-# ) i ON OT.OTId = i.OTId
-# WHERE OT.OTEstado IN (2, 3, 4)
-#   AND OT.OTFechaHoraEjecucion >= ?
-#   AND OT.OTFechaHoraEjecucion <= ?
-# ORDER BY OT.OTId DESC
-# """
 
-CODIGOS_COMPROBANTE_WMS = (10, 70, 100, 210, 310)
+CODIGOS_COMPROBANTE_WMS = (10, 70, 75, 100, 210, 310)
 
 # /deposito (productividad cruda) -> TODA la actividad WMS, SIN filtrar por
 # comprobante de Magnus (no debe verse afectada por ese filtro).
@@ -187,18 +159,6 @@ def _safe(value, colname=""):
 def _rows(cur):
     cols = [c[0] for c in cur.description]
     return [{c: _safe(v, c) for c, v in zip(cols, row)} for row in cur.fetchall()]
-
-
-# def fetch_wms(desde: datetime, hasta: datetime):
-#     conn = get_connection("WMS")
-#     try:
-#         cur = conn.cursor()
-#         # es-AR puede venir dmy; READ UNCOMMITTED para no lockear el WMS productivo
-#         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
-#         cur.execute(SQL_WMS, (desde, hasta))
-#         return _rows(cur)
-#     finally:
-#         conn.close()
 
 
 def fetch_tiempo():

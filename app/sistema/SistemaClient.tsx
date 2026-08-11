@@ -185,36 +185,26 @@ export default function SistemaClient() {
     tableroId: number;
   } | null>(null);
 
-  const dragCard = useRef<{ id: number; fromColId: number } | null>(null);
-  const dragCol = useRef<{ id: number } | null>(null);
-  const [draggingCardId, setDraggingCardId] = useState<number | null>(null);
-  // posición donde se soltaría ahora mismo (solo visual, no toca `tableros` hasta soltar)
-  const [hoverSlot, setHoverSlot] = useState<{ colId: number; index: number } | null>(null);
+  // ---------- drag & drop de tarjetas (pointer events, estilo Trello) ----------
+  // Sin drag nativo HTML5: un clon de la tarjeta flota en un portal siguiendo el
+  // puntero (inclinado, como Trello) y un bloque gris del tamaño real marca dónde
+  // caería. En columnas con orden manual el bloque es posicional; en las
+  // autoordenadas por fecha se resalta la columna entera (la posición la decide
+  // columnaDesde, no el mouse).
+  type DragData = { id: number; fromColId: number; w: number; h: number; dx: number; dy: number; card: Tarjeta };
+  const drag = useRef<DragData | null>(null);
+  const pendiente = useRef<{ id: number; colId: number; x: number; y: number; card: Tarjeta; el: HTMLElement } | null>(
+    null
+  );
+  const [dragActivo, setDragActivo] = useState<DragData | null>(null);
+  // dónde caería ahora mismo: index numérico = hueco en columna manual;
+  // index null = columna autoordenada (solo se resalta, sin posición elegible)
+  const [hover, setHover] = useState<{ colId: number; index: number | null } | null>(null);
+  const hoverRef = useRef(hover);
+  hoverRef.current = hover;
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
-  const pointerX = useRef<number | null>(null);
-
-  // auto-scroll horizontal del tablero al arrastrar una tarjeta cerca del borde
-  useEffect(() => {
-    if (draggingCardId == null) return;
-    const EDGE = 90;
-    const MAX_SPEED = 22;
-    let raf: number;
-    const tick = () => {
-      const el = boardRef.current;
-      const x = pointerX.current;
-      if (el && x != null) {
-        const rect = el.getBoundingClientRect();
-        if (x < rect.left + EDGE) {
-          el.scrollLeft -= MAX_SPEED * ((rect.left + EDGE - x) / EDGE);
-        } else if (x > rect.right - EDGE) {
-          el.scrollLeft += MAX_SPEED * ((x - (rect.right - EDGE)) / EDGE);
-        }
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [draggingCardId]);
+  const puntero = useRef<{ x: number; y: number } | null>(null);
 
   const cargar = async () => {
     try {
@@ -231,6 +221,219 @@ export default function SistemaClient() {
   }, []);
 
   const tablero = useMemo(() => tableros.find((t) => t.clave === tab), [tableros, tab]);
+
+  const tablerosRef = useRef(tableros);
+  tablerosRef.current = tableros;
+  // Columnas con orden manual del tablero visible (hoy solo las tiene "sistema";
+  // en el resto de tableros TODAS se autoordenan por fecha de entrada).
+  const colsManual = useMemo(() => {
+    const s = new Set<number>();
+    if (tablero?.clave === "sistema")
+      for (const c of tablero.columnas) if (esOrdenManual(c.nombre)) s.add(c.id);
+    return s;
+  }, [tablero]);
+  const colsManualRef = useRef(colsManual);
+  colsManualRef.current = colsManual;
+
+  // Wrappers con identidad estable para poder sacar los listeners de window
+  // aunque el componente re-renderice a mitad del drag.
+  const moverPunteroRef = useRef<(e: PointerEvent) => void>(() => {});
+  const soltarRef = useRef<() => void>(() => {});
+  const cancelarRef = useRef<() => void>(() => {});
+  const onDragMove = useRef((e: PointerEvent) => moverPunteroRef.current(e)).current;
+  const onDragUp = useRef(() => soltarRef.current()).current;
+  const onDragCancel = useRef(() => cancelarRef.current()).current;
+
+  const terminarDrag = () => {
+    pendiente.current = null;
+    drag.current = null;
+    setDragActivo(null);
+    setHover(null);
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+    window.removeEventListener("pointermove", onDragMove);
+    window.removeEventListener("pointerup", onDragUp);
+    window.removeEventListener("pointercancel", onDragCancel);
+  };
+  cancelarRef.current = terminarDrag;
+
+  moverPunteroRef.current = (e: PointerEvent) => {
+    puntero.current = { x: e.clientX, y: e.clientY };
+    const p = pendiente.current;
+    if (!drag.current && p) {
+      // umbral de 6px: menos que eso sigue siendo un click (abre el modal)
+      if (Math.hypot(e.clientX - p.x, e.clientY - p.y) < 6) return;
+      const r = p.el.getBoundingClientRect();
+      drag.current = {
+        id: p.id,
+        fromColId: p.colId,
+        w: r.width,
+        h: r.height,
+        dx: Math.min(Math.max(p.x - r.left, 8), r.width - 8),
+        dy: Math.min(Math.max(p.y - r.top, 8), r.height - 8),
+        card: p.card,
+      };
+      setDragActivo(drag.current);
+      document.body.style.userSelect = "none";
+      document.body.style.cursor = "grabbing";
+    }
+    const d = drag.current;
+    if (!d) return;
+    e.preventDefault();
+    if (overlayRef.current) {
+      overlayRef.current.style.transform = `translate(${e.clientX - d.dx}px, ${e.clientY - d.dy}px) rotate(4deg)`;
+    }
+    // ¿Sobre qué columna / hueco está el puntero? Los índices se calculan contra
+    // el DOM visible, que durante el drag NO incluye la tarjeta arrastrada (el
+    // original se desmonta), así que el hueco marcado es exactamente donde cae.
+    const cols = boardRef.current?.querySelectorAll<HTMLElement>("[data-col-id]");
+    let destino: { colId: number; index: number | null } | null = null;
+    if (cols)
+      for (const el of Array.from(cols)) {
+        const r = el.getBoundingClientRect();
+        if (e.clientX < r.left || e.clientX > r.right) continue;
+        const colId = Number(el.dataset.colId);
+        if (!colsManualRef.current.has(colId)) {
+          destino = { colId, index: null };
+        } else {
+          const cardEls = Array.from(el.querySelectorAll<HTMLElement>("[data-card-id]"));
+          let idx = cardEls.length;
+          for (let i = 0; i < cardEls.length; i++) {
+            const cr = cardEls[i].getBoundingClientRect();
+            if (e.clientY < cr.top + cr.height / 2) {
+              idx = i;
+              break;
+            }
+          }
+          destino = { colId, index: idx };
+        }
+        break;
+      }
+    const prev = hoverRef.current;
+    if (prev?.colId !== destino?.colId || prev?.index !== destino?.index) setHover(destino);
+  };
+
+  soltarRef.current = () => {
+    const d = drag.current;
+    const destino = hoverRef.current;
+    terminarDrag();
+    if (!d || !destino) return;
+
+    const tcopy: Tablero[] = tablerosRef.current.map((t) => ({
+      ...t,
+      columnas: t.columnas.map((c) => ({ ...c, tarjetas: [...c.tarjetas] })),
+    }));
+
+    let card: Tarjeta | undefined;
+    let srcCol: Columna | undefined;
+    for (const t of tcopy)
+      for (const c of t.columnas) {
+        const idx = c.tarjetas.findIndex((tj) => tj.id === d.id);
+        if (idx >= 0) {
+          card = c.tarjetas[idx];
+          srcCol = c;
+          c.tarjetas.splice(idx, 1);
+        }
+      }
+    if (!card || !srcCol) return;
+
+    let destCol: Columna | undefined;
+    for (const t of tcopy) for (const c of t.columnas) if (c.id === destino.colId) destCol = c;
+    if (!destCol) return;
+    // Columna autoordenada y no cambió de columna: nada que mover.
+    if (destino.index === null && destCol.id === srcCol.id) return;
+
+    // destino.index viene calculado contra la lista SIN la tarjeta arrastrada,
+    // por eso insertar acá no sufre el off-by-one clásico de mover hacia abajo
+    // dentro de la misma columna.
+    const idx =
+      destino.index === null
+        ? destCol.tarjetas.length
+        : Math.max(0, Math.min(destino.index, destCol.tarjetas.length));
+    destCol.tarjetas.splice(idx, 0, {
+      ...card,
+      columnaId: destCol.id,
+      // Optimista: el servidor confirma/persiste columnaDesde en el PATCH de abajo;
+      // esto solo evita un parpadeo de orden hasta que refresque con cargar().
+      columnaDesde: destCol.id !== srcCol.id ? new Date().toISOString() : card.columnaDesde,
+    });
+
+    const cambios: { id: number; columnaId: number; orden: number }[] = [];
+    srcCol.tarjetas.forEach((tj, i) => cambios.push({ id: tj.id, columnaId: srcCol!.id, orden: i }));
+    if (destCol.id !== srcCol.id) {
+      destCol.tarjetas.forEach((tj, i) => cambios.push({ id: tj.id, columnaId: destCol!.id, orden: i }));
+    }
+
+    setTableros(tcopy);
+    if (cambios.length) {
+      apiJson("/api/sistema/tarjetas/reorder", {
+        method: "PATCH",
+        body: JSON.stringify({ cambios }),
+      })
+        .then(() => cargar())
+        .catch(() => cargar());
+    }
+  };
+
+  const onCardPointerDown = (e: React.PointerEvent, card: Tarjeta, colId: number) => {
+    if (e.button !== 0 || e.pointerType === "touch") return;
+    if ((e.target as HTMLElement).closest("a")) return; // links (Jira) siguen clickeables
+    pendiente.current = {
+      id: card.id,
+      colId,
+      x: e.clientX,
+      y: e.clientY,
+      card,
+      el: e.currentTarget as HTMLElement,
+    };
+    window.addEventListener("pointermove", onDragMove, { passive: false });
+    window.addEventListener("pointerup", onDragUp);
+    window.addEventListener("pointercancel", onDragCancel);
+  };
+
+  // Escape cancela el drag (la tarjeta vuelve a su lugar).
+  useEffect(() => {
+    if (!dragActivo) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") terminarDrag();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragActivo]);
+
+  // Auto-scroll al arrastrar cerca de los bordes: horizontal del tablero y
+  // vertical dentro de la columna bajo el puntero (como Trello).
+  useEffect(() => {
+    if (!dragActivo) return;
+    const EDGE = 90;
+    const MAX_SPEED = 20;
+    let raf: number;
+    const tick = () => {
+      const el = boardRef.current;
+      const p = puntero.current;
+      if (el && p) {
+        const rect = el.getBoundingClientRect();
+        if (p.x < rect.left + EDGE) {
+          el.scrollLeft -= MAX_SPEED * ((rect.left + EDGE - p.x) / EDGE);
+        } else if (p.x > rect.right - EDGE) {
+          el.scrollLeft += MAX_SPEED * ((p.x - (rect.right - EDGE)) / EDGE);
+        }
+        const colId = hoverRef.current?.colId;
+        if (colId != null) {
+          const lista = el.querySelector<HTMLElement>(`[data-col-id="${colId}"] [data-col-lista]`);
+          if (lista) {
+            const lr = lista.getBoundingClientRect();
+            if (p.y < lr.top + 60) lista.scrollTop -= MAX_SPEED * ((lr.top + 60 - p.y) / 60);
+            else if (p.y > lr.bottom - 60) lista.scrollTop += MAX_SPEED * ((p.y - (lr.bottom - 60)) / 60);
+          }
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [dragActivo]);
 
   // ---------- tableros ----------
   const crearTablero = async () => {
@@ -312,70 +515,6 @@ export default function SistemaClient() {
   };
 
   // ---------- tarjetas ----------
-  // Mientras se arrastra NO se toca `tableros` (evita repintar/mover el nodo que
-  // el navegador está arrastrando, cosa que corta el drag nativo a mitad de
-  // camino). Solo se guarda dónde caería (`hoverSlot`) y eso pinta un hueco.
-  // El reacomodo real de datos se hace una sola vez al soltar, en finalizarDrop.
-  const finalizarDrop = () => {
-    const dc = dragCard.current;
-    const slot = hoverSlot;
-    dragCard.current = null;
-    setDraggingCardId(null);
-    setHoverSlot(null);
-    if (!dc) return;
-
-    const destColId = slot?.colId ?? dc.fromColId;
-    const destIndexRaw = slot?.index ?? 0;
-
-    const tcopy: Tablero[] = tableros.map((t) => ({
-      ...t,
-      columnas: t.columnas.map((c) => ({ ...c, tarjetas: [...c.tarjetas] })),
-    }));
-
-    let card: Tarjeta | undefined;
-    let srcCol: Columna | undefined;
-    for (const t of tcopy)
-      for (const c of t.columnas) {
-        const idx = c.tarjetas.findIndex((tj) => tj.id === dc.id);
-        if (idx >= 0) {
-          card = c.tarjetas[idx];
-          srcCol = c;
-          c.tarjetas.splice(idx, 1);
-        }
-      }
-    if (!card || !srcCol) return;
-
-    let destCol: Columna | undefined;
-    for (const t of tcopy) for (const c of t.columnas) if (c.id === destColId) destCol = c;
-    if (!destCol) return;
-
-    const idx = Math.max(0, Math.min(destIndexRaw, destCol.tarjetas.length));
-    destCol.tarjetas.splice(idx, 0, {
-      ...card,
-      columnaId: destCol.id,
-      // Optimista: el servidor confirma/persiste columnaDesde en el PATCH de abajo;
-      // esto solo evita un parpadeo de orden hasta que refresque con cargar().
-      columnaDesde:
-        destCol.id !== srcCol.id ? new Date().toISOString() : card.columnaDesde,
-    });
-
-    const cambios: { id: number; columnaId: number; orden: number }[] = [];
-    srcCol.tarjetas.forEach((tj, i) => cambios.push({ id: tj.id, columnaId: srcCol!.id, orden: i }));
-    if (destCol.id !== srcCol.id) {
-      destCol.tarjetas.forEach((tj, i) => cambios.push({ id: tj.id, columnaId: destCol!.id, orden: i }));
-    }
-
-    setTableros(tcopy);
-    if (cambios.length) {
-      apiJson("/api/sistema/tarjetas/reorder", {
-        method: "PATCH",
-        body: JSON.stringify({ cambios }),
-      })
-        .then(() => cargar())
-        .catch(() => cargar());
-    }
-  };
-
   const borrarTarjeta = async (id: number) => {
     if (!window.confirm("¿Borrar esta tarjeta?")) return;
     await fetch(`/api/sistema/tarjetas/${id}`, { method: "DELETE" });
@@ -514,13 +653,7 @@ export default function SistemaClient() {
               )}
             </div>
 
-            <div
-              ref={boardRef}
-              className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide"
-              onDragOver={(e) => {
-                pointerX.current = e.clientX;
-              }}
-            >
+            <div ref={boardRef} className="flex items-start gap-3 overflow-x-auto pb-4 scrollbar-hide">
               {tablero.columnas.map((col) => {
                 const sch = schemaFor(tablero.clave);
                 const titleKey = sch.titleKey;
@@ -552,56 +685,36 @@ export default function SistemaClient() {
                       return esSistema ? mk === mesActualG : mk === mesActualG || mk === mesCerradoG;
                     })
                   : ordenadas;
+                // Durante el drag el original se desmonta: los índices de hover se
+                // calculan contra esta lista (sin la tarjeta arrastrada).
+                const listaRender = dragActivo
+                  ? tarjetasVisibles.filter((c) => c.id !== dragActivo.id)
+                  : tarjetasVisibles;
+                const hoverAca = hover?.colId === col.id;
+                const hoverAuto = hoverAca && hover?.index === null;
                 return (
                   <div
                     key={col.id}
-                    className="bg-[#161616] border border-zinc-800 rounded-xl w-72 shrink-0 flex flex-col max-h-[calc(100vh-220px)]"
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      const dc = dragCard.current;
-                      if (!dc) return;
-                      // hueco vacío debajo de la última tarjeta (o columna vacía): mandar al final
-                      const cardEls = Array.from(
-                        e.currentTarget.querySelectorAll<HTMLElement>("[data-card-id]")
-                      );
-                      const last = cardEls[cardEls.length - 1];
-                      if (!last) {
-                        setHoverSlot({ colId: col.id, index: 0 });
-                      } else if (e.clientY > last.getBoundingClientRect().bottom) {
-                        setHoverSlot({ colId: col.id, index: col.tarjetas.length });
-                      }
-                    }}
-                    onDrop={() => finalizarDrop()}
+                    data-col-id={col.id}
+                    className={`group/col w-[272px] shrink-0 flex flex-col max-h-[calc(100vh-225px)] rounded-xl bg-[#16191d] shadow-[0_1px_2px_rgba(0,0,0,0.55)] ${
+                      hoverAuto ? "ring-2 ring-rose-500/60" : ""
+                    }`}
                   >
-                    <div
-                      className="flex items-center justify-between px-3 py-2 border-b border-zinc-800"
-                      draggable
-                      onDragStart={() => (dragCol.current = { id: col.id })}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        if (dragCard.current) setHoverSlot({ colId: col.id, index: 0 });
-                      }}
-                      onDrop={(e) => {
-                        e.stopPropagation();
-                        if (dragCard.current) finalizarDrop();
-                        dragCol.current = null;
-                      }}
-                    >
+                    <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
                       <button
                         className="text-sm font-semibold text-zinc-200 truncate text-left flex-1"
                         onClick={() => renombrarColumna(col)}
                         title="Click para renombrar"
                       >
                         {col.nombre}{" "}
-                        <span className="text-zinc-500 font-normal">
-                          ({tarjetasVisibles.length}
+                        <span className="text-zinc-500 font-normal text-xs">
+                          {tarjetasVisibles.length}
                           {soloMesActual && tarjetasVisibles.length !== col.tarjetas.length
                             ? ` de ${col.tarjetas.length}`
                             : ""}
-                          )
                         </span>
                       </button>
-                      <div className="flex items-center gap-0.5 text-zinc-500">
+                      <div className="flex items-center gap-0.5 text-zinc-500 opacity-0 group-hover/col:opacity-100 transition-opacity">
                         <button
                           onClick={() => moverColumna(tablero.id, col.id, -1)}
                           className="hover:text-zinc-200 px-1"
@@ -626,91 +739,48 @@ export default function SistemaClient() {
                       </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2 scrollbar-hide">
-                      {tarjetasVisibles.map((card) => {
-                        const cardIdx = col.tarjetas.findIndex((tj) => tj.id === card.id);
-                        const txt = String(card.campos[titleKey] || "(sin descripción)");
-                        const [first, ...rest] = txt.split("\n");
-                        const sinUbicacion = tablero.clave === "sistema" && !card.campos.ubicacion;
-                        const sinCategoria = tablero.clave === "sistema" && !card.campos.categoria;
-                        return (
-                          <Fragment key={card.id}>
-                            {hoverSlot?.colId === col.id && hoverSlot.index === cardIdx && (
-                              <div className="h-14 shrink-0 rounded-lg border-2 border-dashed border-rose-500/50 bg-rose-500/5" />
-                            )}
-                            <div
-                              data-card-id={card.id}
-                              draggable
-                              onDragStart={(e) => {
-                                dragCard.current = { id: card.id, fromColId: col.id };
-                                setDraggingCardId(card.id);
-                                e.dataTransfer.effectAllowed = "move";
-                              }}
-                              onDragEnd={() => finalizarDrop()}
-                              onDragOver={(e) => {
-                                e.preventDefault();
-                                const dc = dragCard.current;
-                                if (!dc || dc.id === card.id) return;
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const before = e.clientY < rect.top + rect.height / 2;
-                                setHoverSlot({ colId: col.id, index: before ? cardIdx : cardIdx + 1 });
-                              }}
-                              onDrop={(e) => {
-                                e.stopPropagation();
-                                finalizarDrop();
-                              }}
-                              onClick={() =>
-                                setModalTarjeta({
-                                  tarjeta: card,
-                                  columnaId: col.id,
-                                  clave: tablero.clave,
-                                  tableroId: tablero.id,
-                                })
-                              }
-                              className={`group border rounded-lg p-2.5 cursor-pointer transition-all duration-150 ${
-                                sinUbicacion ? "bg-rose-950/40" : sinCategoria ? "bg-amber-950/40" : "bg-[#1f1f1f]"
-                              } ${
-                                draggingCardId === card.id
-                                  ? "opacity-40 scale-95 rotate-1 border-rose-500 shadow-lg shadow-black/50"
-                                  : "border-zinc-800 hover:border-zinc-600"
-                              }`}
-                            >
-                              <p className="text-sm text-zinc-100 whitespace-pre-line">{first}</p>
-                              {rest.length > 0 && (
-                                <div
-                                  className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
-                                    draggingCardId == null
-                                      ? "grid-rows-[0fr] group-hover:grid-rows-[1fr]"
-                                      : "grid-rows-[0fr]"
-                                  }`}
-                                >
-                                  <p className="overflow-hidden text-sm text-zinc-300 whitespace-pre-line">
-                                    {rest.join("\n")}
-                                  </p>
-                                </div>
-                              )}
-                              {subtitleField && card.campos[subtitleField.k] && (
-                                <p className="text-xs text-zinc-500 mt-1">
-                                  {card.campos[subtitleField.k]}
-                                </p>
-                              )}
-                              {tablero.clave === "softech" && card.campos.jiraUrl && (
-                                <a
-                                  href={card.campos.jiraUrl as string}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="text-xs text-rose-400 hover:text-rose-300 mt-1 inline-block"
-                                >
-                                  {card.campos.jiraKey} ↗
-                                </a>
-                              )}
-                            </div>
-                          </Fragment>
-                        );
-                      })}
-                      {hoverSlot?.colId === col.id && hoverSlot.index === col.tarjetas.length && (
-                        <div className="h-14 shrink-0 rounded-lg border-2 border-dashed border-rose-500/50 bg-rose-500/5" />
+                    <div
+                      data-col-lista
+                      className="flex-1 min-h-[6px] overflow-y-auto px-2 pb-1 flex flex-col gap-2 scrollbar-hide"
+                    >
+                      {hoverAuto && dragActivo && (
+                        <div className="shrink-0 flex flex-col gap-1">
+                          <p className="text-center text-[11px] text-zinc-500">columna ordenada por fecha</p>
+                          {dragActivo.fromColId !== col.id && (
+                            <div className="rounded-lg bg-white/[0.12]" style={{ height: dragActivo.h }} />
+                          )}
+                        </div>
+                      )}
+                      {listaRender.map((card, i) => (
+                        <Fragment key={card.id}>
+                          {hoverAca && dragActivo && hover?.index === i && (
+                            <div className="shrink-0 rounded-lg bg-white/[0.12]" style={{ height: dragActivo.h }} />
+                          )}
+                          <div
+                            data-card-id={card.id}
+                            onPointerDown={(e) => onCardPointerDown(e, card, col.id)}
+                            onClick={() =>
+                              setModalTarjeta({
+                                tarjeta: card,
+                                columnaId: col.id,
+                                clave: tablero.clave,
+                                tableroId: tablero.id,
+                              })
+                            }
+                            className="group cursor-pointer select-none"
+                          >
+                            <TarjetaVisual
+                              card={card}
+                              titleKey={titleKey}
+                              subtitleField={subtitleField}
+                              clave={tablero.clave}
+                              expandir={dragActivo == null}
+                            />
+                          </div>
+                        </Fragment>
+                      ))}
+                      {hoverAca && dragActivo && hover?.index === listaRender.length && (
+                        <div className="shrink-0 rounded-lg bg-white/[0.12]" style={{ height: dragActivo.h }} />
                       )}
                     </div>
 
@@ -723,7 +793,7 @@ export default function SistemaClient() {
                           tableroId: tablero.id,
                         })
                       }
-                      className="text-xs text-zinc-500 hover:text-zinc-200 px-3 py-2 text-left border-t border-zinc-800"
+                      className="mx-2 mb-2 mt-1 rounded-lg px-2.5 py-1.5 text-left text-sm text-zinc-500 hover:bg-white/[0.07] hover:text-zinc-200 transition-colors"
                     >
                       ＋ Agregar tarjeta
                     </button>
@@ -733,7 +803,7 @@ export default function SistemaClient() {
 
               <button
                 onClick={crearColumna}
-                className="shrink-0 w-56 h-12 self-start rounded-xl border border-dashed border-zinc-700 text-zinc-500 hover:text-zinc-200 hover:border-zinc-500 text-sm"
+                className="w-[272px] shrink-0 self-start rounded-xl bg-white/[0.05] hover:bg-white/[0.09] text-zinc-500 hover:text-zinc-200 text-sm text-left px-4 py-3 transition-colors"
               >
                 ＋ Agregar columna
               </button>
@@ -758,6 +828,120 @@ export default function SistemaClient() {
           onClose={() => setUnificarAbierto(false)}
           onDone={cargar}
         />
+      )}
+
+      {/* Clon flotante de la tarjeta arrastrada, inclinado como en Trello. */}
+      {dragActivo &&
+        tablero &&
+        createPortal(
+          <div
+            ref={overlayRef}
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              width: dragActivo.w,
+              transform: `translate(${(puntero.current?.x ?? 0) - dragActivo.dx}px, ${
+                (puntero.current?.y ?? 0) - dragActivo.dy
+              }px) rotate(4deg)`,
+              zIndex: 100,
+              pointerEvents: "none",
+            }}
+          >
+            <TarjetaVisual
+              card={dragActivo.card}
+              titleKey={schemaFor(tablero.clave).titleKey}
+              subtitleField={schemaFor(tablero.clave).fields.find((f) => f.t === "date")}
+              clave={tablero.clave}
+              expandir={false}
+              flotante
+            />
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}
+
+// Cuerpo visual de una tarjeta (se usa en la lista y en el clon flotante del drag).
+function TarjetaVisual({
+  card,
+  titleKey,
+  subtitleField,
+  clave,
+  expandir,
+  flotante,
+}: {
+  card: Tarjeta;
+  titleKey: string;
+  subtitleField?: CampoDef;
+  clave: string;
+  /** habilita el despliegue del resto del texto al hacer hover (requiere wrapper .group) */
+  expandir: boolean;
+  flotante?: boolean;
+}) {
+  const txt = String(card.campos[titleKey] || "(sin descripción)");
+  const [first, ...rest] = txt.split("\n");
+  const sinUbicacion = clave === "sistema" && !card.campos.ubicacion;
+  const sinCategoria = clave === "sistema" && !card.campos.categoria;
+  const fecha = subtitleField ? parseDate(card.campos[subtitleField.k]) : null;
+  const imp = String(card.campos.importancia ?? "");
+  const impColor =
+    imp === "Alta" ? "bg-red-500" : imp === "Media" ? "bg-amber-400" : imp === "Baja" ? "bg-emerald-500" : "";
+  const chips = [card.campos.categoria, card.campos.sistema, card.campos.ubicacion].filter(Boolean) as string[];
+  const bgBase = sinUbicacion
+    ? "bg-rose-950/50"
+    : sinCategoria
+      ? "bg-amber-950/40"
+      : "bg-[#22272b] group-hover:bg-[#282e33]";
+  return (
+    <div
+      className={`rounded-lg px-3 py-2 ring-1 transition-[background-color,box-shadow] duration-150 ${bgBase} ${
+        flotante
+          ? "ring-white/10 shadow-2xl shadow-black/70 opacity-95"
+          : "ring-white/[0.04] shadow-[0_1px_1px_rgba(0,0,0,0.45)] group-hover:ring-zinc-500/70"
+      }`}
+    >
+      {impColor && (
+        <span title={`Importancia ${imp}`} className={`block h-1.5 w-10 rounded-full mb-1.5 ${impColor}`} />
+      )}
+      <p className="text-sm text-zinc-100 leading-snug whitespace-pre-line break-words">{first}</p>
+      {rest.length > 0 && (
+        <div
+          className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
+            expandir ? "grid-rows-[0fr] group-hover:grid-rows-[1fr]" : "grid-rows-[0fr]"
+          }`}
+        >
+          <p className="overflow-hidden text-sm text-zinc-400 whitespace-pre-line break-words">{rest.join("\n")}</p>
+        </div>
+      )}
+      {(fecha || chips.length > 0 || (clave === "softech" && card.campos.jiraUrl)) && (
+        <div className="flex flex-wrap items-center gap-1 mt-1.5">
+          {fecha && (
+            <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[11px] text-zinc-400">
+              🕒 {fecha.toLocaleDateString("es-AR", { day: "2-digit", month: "short" })}
+            </span>
+          )}
+          {chips.map((c) => (
+            <span
+              key={c}
+              className="max-w-full truncate rounded bg-white/[0.06] px-1.5 py-0.5 text-[11px] text-zinc-400"
+            >
+              {c}
+            </span>
+          ))}
+          {clave === "softech" && card.campos.jiraUrl && (
+            <a
+              href={card.campos.jiraUrl as string}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="rounded bg-rose-500/15 px-1.5 py-0.5 text-[11px] text-rose-300 hover:text-rose-200"
+            >
+              {card.campos.jiraKey} ↗
+            </a>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1101,8 +1285,18 @@ function ModalTarjeta({
           ) : (
             <span />
           )}
-          <p className="text-[11px] text-zinc-500">Esc cancela · Ctrl+Enter guarda</p>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button size="sm" onClick={() => onSave(campos, destinoTablero)}>
+              Guardar
+            </Button>
+          </div>
         </div>
+        <p className="hidden sm:block text-[11px] text-zinc-500 text-right mt-2">
+          Esc cancela · Ctrl+Enter guarda
+        </p>
       </div>
     </div>
   );
