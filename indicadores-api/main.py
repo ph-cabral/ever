@@ -18,7 +18,7 @@ from deposito import (
 )
 from compras import (
     fetch_ordenes_pendientes, fetch_ordenes_articulos_rango, fetch_compras_valorizado,
-    fetch_consumo_articulo,
+    fetch_consumo_articulo, fetch_consumo_articulos,
 )
 from ingresos import fetch_remitos_ingreso
 from ventas import fetch_pedidos_mes
@@ -473,6 +473,23 @@ def compras_consumo_articulo(
     por cada mes del rango aunque la venta sea 0, + stock por depósito."""
     try:
         return fetch_consumo_articulo(codigo, desde, hasta)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+# ── Compras: consumo mensual de TODOS los artículos + stock (vista "Tabla") ──
+# Para el botón "Tabla" de /compras/consumo (pedido de Pablo 2026-08-11):
+# mismo cálculo que /compras/consumo-articulo pero sin filtrar por código.
+@app.get("/compras/consumo-articulos")
+def compras_consumo_articulos(
+    desde: str = Query(...),
+    hasta: str = Query(...),
+):
+    """Vendido/promedio/máximo/mínimo>0 y stock por artículo, para TODOS los
+    artículos con venta en el rango o stock actual > 0."""
+    try:
+        return fetch_consumo_articulos(desde, hasta)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

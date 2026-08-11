@@ -528,3 +528,161 @@ def fetch_consumo_articulo(codigo: str, desde: str, hasta: str):
             "total": round(sum(stock_por_dep.values()), 2),
         },
     }
+
+
+# ── Consumo mensual de TODOS los artículos + stock (vista "Tabla") ───────────
+# Pedido de Pablo 2026-08-11 (mismo día que fetch_consumo_articulo, arriba):
+# botón en /compras/consumo para alternar de "un artículo" a una TABLA con
+# todos los artículos del rango, una fila por artículo, paginada de a 20 y
+# ordenable por Código/Stock/Vendido/Promedio/Máximo/Mínimo en el front.
+#
+# Mismo criterio de "vendido" y de stock que fetch_consumo_articulo, pero sin
+# filtrar por CodArticu — se trae TODO el rango (mismo patrón sin filtro por
+# artículo que ya usa fetch_pedidos_mes/fetch_ordenes_pendientes en este
+# proyecto) y se agrupa en Python por (artículo, mes). Solo se listan
+# artículos con alguna venta en el rango O con stock actual > 0 en algún
+# depósito (evita listar SKUs de baja sin stock ni movimiento).
+#
+# NOTA rendimiento: para rangos largos (varios meses) esto trae muchas más
+# filas que la versión de un solo artículo — si se vuelve lento, considerar
+# acotar el rango máximo desde el front o agregar un filtro adicional acá.
+
+SQL_CONSUMO_TODOS = """
+SELECT
+    LTRIM(RTRIM(r.CodArticu))             AS CodArticu,
+    cab.FechaPedido                       AS FechaPedido,
+    cab.CompCodigo                        AS CompCodigo,
+    est.Ped_EstadoDescripcion             AS Estado,
+    r.CantidadPedida                      AS Cantidad
+FROM EVERWEAR.dbo.VenFer_PedidoReng r
+INNER JOIN EVERWEAR.dbo.VenFer_PedidoCabecera cab ON cab.NroMovVenta = r.NroMovVenta
+LEFT  JOIN MAGNUS_SITD.dbo.Pedido_Estados     est ON cab.EstadoPedido = est.Ped_Estado
+WHERE cab.FechaPedido BETWEEN ? AND ?
+"""
+
+SQL_STOCK_TODOS = """
+SELECT LTRIM(RTRIM(a.CodArticulo)) AS CodArticulo, a.Deposito, SUM(a.StkReal) AS Stock
+FROM EVERWEAR.dbo.Stk_ArticSucursalDeposito a
+GROUP BY LTRIM(RTRIM(a.CodArticulo)), a.Deposito
+"""
+
+SQL_NOMBRES_CHUNK = """
+SELECT LTRIM(RTRIM(s.CodArticulo)) AS CodArticulo, ap.Detalle, s.DetalleMedida, s.UnidadMedida
+FROM EVERWEAR.dbo.[StkFer_Articulos] s
+LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloPatron
+WHERE LTRIM(RTRIM(s.CodArticulo)) IN ({ph})
+"""
+
+
+def fetch_consumo_articulos(desde: str, hasta: str):
+    """Igual que fetch_consumo_articulo pero para TODOS los artículos a la
+    vez: vendido por mes, total, promedio, máximo, mínimo > 0 y stock actual
+    (1+2+3), uno por artículo. El front pagina/ordena el resultado completo
+    (de a 20, por columna)."""
+    meses = _meses_rango(str(desde)[:7], str(hasta)[:7])
+    y1, m1 = int(meses[0][:4]), int(meses[0][5:7])
+    y2, m2 = int(meses[-1][:4]), int(meses[-1][5:7])
+    d1 = date(y1, m1, 1)
+    d2 = (date(y2 + 1, 1, 1) if m2 == 12 else date(y2, m2 + 1, 1)) - timedelta(days=1)
+    d1n = (d1 - BASE_DATE).days
+    d2n = (d2 - BASE_DATE).days
+    n_meses = len(meses)
+    meses_set = set(meses)
+
+    ventas: dict[str, dict[str, float]] = {}
+    stock_por_dep: dict[str, dict[int, float]] = {}
+    nombres: dict[str, str] = {}
+    codigos: list[str] = []
+
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+
+        cur.execute(SQL_CONSUMO_TODOS, (d1n, d2n))
+        cols = [c[0] for c in cur.description]
+        for row in cur.fetchall():
+            d = dict(zip(cols, row))
+            cod = (str(d.get("CodArticu") or "")).strip()
+            if not cod:
+                continue
+            try:
+                comp = int(d.get("CompCodigo")) if d.get("CompCodigo") is not None else None
+            except (TypeError, ValueError):
+                comp = None
+            if comp in COMP_CODIGOS_EXCLUIDOS:
+                continue
+            if not _es_valido(d.get("Estado")):
+                continue
+            fec = _to_date(d.get("FechaPedido"))
+            if fec is None:
+                continue
+            key = f"{fec.year:04d}-{fec.month:02d}"
+            if key not in meses_set:
+                continue
+            m = ventas.get(cod)
+            if m is None:
+                m = {mes: 0.0 for mes in meses}
+                ventas[cod] = m
+            m[key] += float(_safe(d.get("Cantidad")) or 0)
+
+        cur.execute(SQL_STOCK_TODOS)
+        for cod, dep, stk in cur.fetchall():
+            cod = (str(cod or "")).strip()
+            if not cod:
+                continue
+            try:
+                dep_i = int(dep)
+            except (TypeError, ValueError):
+                continue
+            if dep_i not in CONSUMO_DEPOSITOS:
+                continue
+            d = stock_por_dep.get(cod)
+            if d is None:
+                d = {dd: 0.0 for dd in CONSUMO_DEPOSITOS}
+                stock_por_dep[cod] = d
+            d[dep_i] += float(_safe(stk) or 0)
+
+        codigos = sorted(set(ventas.keys()) | set(stock_por_dep.keys()))
+        CH = 1000
+        for i in range(0, len(codigos), CH):
+            chunk = codigos[i:i + CH]
+            ph = ",".join("?" for _ in chunk)
+            cur.execute(SQL_NOMBRES_CHUNK.format(ph=ph), chunk)
+            for cod, detalle, dmed, umed in cur.fetchall():
+                cod = (str(cod or "")).strip()
+                nombre = " ".join(
+                    " ".join(str(_safe(x) or "").strip() for x in (detalle, dmed, umed)).split()
+                ) or None
+                if nombre:
+                    nombres[cod] = nombre
+    finally:
+        conn.close()
+
+    out = []
+    for cod in codigos:
+        ventas_cod = ventas.get(cod)
+        cantidades = [round(ventas_cod[m], 2) for m in meses] if ventas_cod else [0.0] * n_meses
+        total = round(sum(cantidades), 2)
+        promedio = round(total / n_meses, 2) if n_meses else 0.0
+        maximo = max(cantidades) if cantidades else 0.0
+        positivos = [c for c in cantidades if c > 0]
+        minimo = min(positivos) if positivos else None
+        stock_total = round(sum(stock_por_dep.get(cod, {}).values()), 2)
+        out.append({
+            "codigo": cod,
+            "nombre": nombres.get(cod),
+            "totalVendido": total,
+            "promedio": promedio,
+            "maximo": maximo,
+            "minimo": minimo,
+            "stock": stock_total,
+        })
+
+    return {
+        "desde": meses[0],
+        "hasta": meses[-1],
+        "mesesEnRango": n_meses,
+        "total": len(out),
+        "articulos": out,
+    }

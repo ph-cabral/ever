@@ -1,8 +1,9 @@
 "use client";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   Loader2, AlertTriangle, Search, LineChart, Package, Sigma, Divide,
-  ArrowUpToLine, ArrowDownToLine, Warehouse,
+  ArrowUpToLine, ArrowDownToLine, Warehouse, Table2, LayoutGrid,
+  ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 import KpiCard from "@/app/rrhh/components/KpiCard";
@@ -16,6 +17,12 @@ import KpiCard from "@/app/rrhh/components/KpiCard";
 // elegidos. Fuente: /api/compras/consumo-articulo (proxy → indicadores-api).
 // "Vendido" = mismo criterio de pedido válido que /ventas/pedidos-mes
 // (Cerrado/Facturado, blacklist de comprobantes).
+//
+// Vista "Tabla" (pedido de Pablo 2026-08-11, mismo día): botón para alternar
+// de la vista de artículo individual a una tabla con TODOS los artículos del
+// rango de meses elegido, una fila por artículo, paginada de a 20 y ordenable
+// por Código/Stock/Vendido/Promedio/Máximo/Mínimo (clic en el encabezado).
+// Fuente: /api/compras/consumo-articulos (plural, sin filtro de código).
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface MesRow {
@@ -65,6 +72,71 @@ const mesLocal = (retro = 0) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
 
+// ── Vista "Tabla" (todos los artículos del rango) ───────────────────────────
+type Vista = "individual" | "tabla";
+interface ArticuloRow {
+  codigo: string;
+  nombre: string | null;
+  totalVendido: number;
+  promedio: number;
+  maximo: number;
+  minimo: number | null;
+  stock: number;
+}
+interface RespTabla {
+  desde: string;
+  hasta: string;
+  mesesEnRango: number;
+  total: number;
+  articulos: ArticuloRow[];
+}
+type SortKey = "codigo" | "stock" | "totalVendido" | "promedio" | "maximo" | "minimo";
+const PAGE_SIZE = 20;
+
+// Encabezado de columna ordenable (clic alterna asc/desc; cambiar de columna
+// arranca en desc). Mismo patrón visual que el resto de la vista (amarillo =
+// activo).
+function ThSort({
+  label,
+  sortKey,
+  active,
+  dir,
+  onClick,
+  align = "left",
+}: {
+  label: string;
+  sortKey: SortKey;
+  active: SortKey;
+  dir: "asc" | "desc";
+  onClick: (k: SortKey) => void;
+  align?: "left" | "right";
+}) {
+  const isActive = active === sortKey;
+  return (
+    <th
+      className={`px-3 py-2 font-medium whitespace-nowrap ${align === "right" ? "text-right" : "text-left"}`}
+    >
+      <button
+        onClick={() => onClick(sortKey)}
+        className={`inline-flex items-center gap-1 hover:text-yellow-400 transition-colors ${
+          isActive ? "text-yellow-400" : "text-zinc-400"
+        } ${align === "right" ? "flex-row-reverse" : ""}`}
+      >
+        {label}
+        {isActive ? (
+          dir === "asc" ? (
+            <ArrowUp size={12} />
+          ) : (
+            <ArrowDown size={12} />
+          )
+        ) : (
+          <ArrowUpDown size={12} className="opacity-40" />
+        )}
+      </button>
+    </th>
+  );
+}
+
 export default function ComprasConsumoPage() {
   const [cod, setCod] = useState("");
   const [desde, setDesde] = useState(() => mesLocal(5)); // últimos 6 meses
@@ -74,6 +146,85 @@ export default function ComprasConsumoPage() {
   const [error, setError] = useState<string | null>(null);
   // Depósitos tildados para el stock (default: todos)
   const [deps, setDeps] = useState<Set<number>>(() => new Set([1, 2, 3]));
+
+  // Vista: "individual" (artículo por código, como antes) o "tabla" (todos
+  // los artículos del rango, paginados de a 20 y ordenables).
+  const [vista, setVista] = useState<Vista>("individual");
+  const [tablaData, setTablaData] = useState<RespTabla | null>(null);
+  const [tablaLoading, setTablaLoading] = useState(false);
+  const [tablaError, setTablaError] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("totalVendido");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [page, setPage] = useState(1);
+  const [filtroCod, setFiltroCod] = useState(""); // filtro rápido por código dentro de la tabla
+
+  const loadTabla = useCallback(async () => {
+    setTablaLoading(true);
+    setTablaError(null);
+    try {
+      const res = await fetch(
+        `/api/compras/consumo-articulos?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`,
+        { cache: "no-store" },
+      );
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setTablaData(j);
+      setPage(1);
+    } catch (e) {
+      setTablaError(e instanceof Error ? e.message : "Error al cargar");
+      setTablaData(null);
+    } finally {
+      setTablaLoading(false);
+    }
+  }, [desde, hasta]);
+
+  // Carga automática al entrar en modo "tabla" y cada vez que cambia el rango
+  // de meses mientras se está en esa vista.
+  useEffect(() => {
+    if (vista === "tabla") loadTabla();
+  }, [vista, loadTabla]);
+
+  const toggleSort = useCallback(
+    (k: SortKey) => {
+      if (k === sortKey) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      } else {
+        setSortKey(k);
+        setSortDir("desc");
+      }
+      setPage(1);
+    },
+    [sortKey],
+  );
+
+  const articulosFiltrados = useMemo(() => {
+    const base = tablaData?.articulos ?? [];
+    const q = filtroCod.trim().toLowerCase();
+    return q ? base.filter((a) => a.codigo.toLowerCase().includes(q)) : base;
+  }, [tablaData, filtroCod]);
+
+  const articulosOrdenados = useMemo(() => {
+    const arr = [...articulosFiltrados];
+    arr.sort((a, b) => {
+      let cmp: number;
+      if (sortKey === "codigo") {
+        cmp = a.codigo.localeCompare(b.codigo, "es");
+      } else {
+        const va = (a[sortKey] ?? 0) as number;
+        const vb = (b[sortKey] ?? 0) as number;
+        cmp = va - vb;
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return arr;
+  }, [articulosFiltrados, sortKey, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(articulosOrdenados.length / PAGE_SIZE));
+  const pageClamped = Math.min(page, totalPages);
+  const pageRows = useMemo(
+    () => articulosOrdenados.slice((pageClamped - 1) * PAGE_SIZE, pageClamped * PAGE_SIZE),
+    [articulosOrdenados, pageClamped],
+  );
 
   const load = useCallback(async () => {
     const codigo = cod.trim();
@@ -143,6 +294,30 @@ export default function ComprasConsumoPage() {
           <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
           <span className="hidden md:inline text-zinc-500 text-sm">Compras · Consumo por artículo</span>
         </div>
+        <div className="flex items-center gap-1 bg-[#1f1f1f] border border-zinc-700 rounded-lg p-1">
+          <button
+            onClick={() => setVista("individual")}
+            title="Ver un artículo por código"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              vista === "individual"
+                ? "bg-yellow-400 text-black"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            <LayoutGrid size={14} /> Individual
+          </button>
+          <button
+            onClick={() => setVista("tabla")}
+            title="Ver todos los artículos en una tabla"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              vista === "tabla"
+                ? "bg-yellow-400 text-black"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            <Table2 size={14} /> Tabla
+          </button>
+        </div>
       </header>
 
       <main className="max-w-[1400px] mx-auto px-4 md:px-8 py-8 space-y-6">
@@ -151,12 +326,14 @@ export default function ComprasConsumoPage() {
             <LineChart size={20} /> Consumo por artículo
           </h1>
           <p className="text-zinc-500 text-sm mt-1">
-            Cantidad vendida por mes (pedidos Cerrados/Facturados) de un artículo en el rango de
-            meses elegido, con total, promedio mensual, máximo, mínimo &gt; 0 y stock actual por
-            depósito.
+            {vista === "individual"
+              ? "Cantidad vendida por mes (pedidos Cerrados/Facturados) de un artículo en el rango de meses elegido, con total, promedio mensual, máximo, mínimo > 0 y stock actual por depósito."
+              : "Todos los artículos del rango de meses elegido, uno por fila: total vendido, promedio mensual, máximo, mínimo > 0 y stock actual. Ordená por columna y navegá de a 20."}
           </p>
         </div>
 
+        {vista === "individual" && (
+        <>
         {/* Filtros: Cod Art + rango de meses */}
         <form
           onSubmit={(e) => {
@@ -387,6 +564,170 @@ export default function ComprasConsumoPage() {
                 </div>
               </div>
             </div>
+          </>
+        )}
+        </>
+        )}
+
+        {vista === "tabla" && (
+          <>
+            {/* Filtros: rango de meses (compartido) + búsqueda rápida por código */}
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="mes-desde-t" className="text-xs text-zinc-400 uppercase tracking-wide">
+                  Desde (mes)
+                </label>
+                <input
+                  id="mes-desde-t"
+                  type="month"
+                  value={desde}
+                  max={hasta}
+                  onChange={(e) => setDesde(e.target.value || mesLocal(5))}
+                  className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-2 text-sm text-zinc-200 outline-none [color-scheme:dark] focus:border-yellow-400"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="mes-hasta-t" className="text-xs text-zinc-400 uppercase tracking-wide">
+                  Hasta (mes)
+                </label>
+                <input
+                  id="mes-hasta-t"
+                  type="month"
+                  value={hasta}
+                  min={desde}
+                  max={mesLocal(0)}
+                  onChange={(e) => setHasta(e.target.value || mesLocal(0))}
+                  className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-2 text-sm text-zinc-200 outline-none [color-scheme:dark] focus:border-yellow-400"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="filtro-cod" className="text-xs text-zinc-400 uppercase tracking-wide">
+                  Buscar código
+                </label>
+                <div className="relative">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    id="filtro-cod"
+                    type="text"
+                    value={filtroCod}
+                    onChange={(e) => {
+                      setFiltroCod(e.target.value);
+                      setPage(1);
+                    }}
+                    placeholder="Ej: E730020"
+                    className="bg-[#1f1f1f] border border-zinc-700 rounded-md pl-7 pr-3 py-2 text-sm text-zinc-100 outline-none w-44 focus:border-yellow-400 placeholder:text-zinc-600"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={loadTabla}
+                disabled={tablaLoading}
+                className="btn-anim flex items-center gap-2 bg-yellow-400 text-black font-semibold text-sm rounded-md px-4 py-2 disabled:opacity-40"
+              >
+                {tablaLoading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
+                Refrescar
+              </button>
+              {tablaData && (
+                <span className="text-sm text-zinc-500 pb-2">
+                  {articulosOrdenados.length} artículo(s)
+                  {filtroCod ? ` (de ${tablaData.total})` : ""}
+                </span>
+              )}
+            </div>
+
+            {tablaError && (
+              <div className="flex items-center gap-1.5 text-xs text-red-300">
+                <AlertTriangle size={13} /> {tablaError}
+              </div>
+            )}
+
+            {!tablaData && !tablaLoading && !tablaError && (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
+                <Table2 size={40} className="text-zinc-700" />
+                <p className="text-zinc-500 text-sm">Cargando la tabla de artículos…</p>
+              </div>
+            )}
+
+            {tablaData && articulosOrdenados.length === 0 && (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
+                <Search size={40} className="text-zinc-700" />
+                <p className="text-zinc-500 text-sm">
+                  {filtroCod ? "Sin artículos que coincidan con la búsqueda." : "Sin artículos en el rango elegido."}
+                </p>
+              </div>
+            )}
+
+            {tablaData && articulosOrdenados.length > 0 && (
+              <div className="rounded-xl border border-zinc-800 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-max text-sm">
+                    <thead className="bg-[#1A1A1A] text-zinc-400">
+                      <tr>
+                        <ThSort label="Código" sortKey="codigo" active={sortKey} dir={sortDir} onClick={toggleSort} />
+                        <th className="px-3 py-2 font-medium text-left whitespace-nowrap">Artículo</th>
+                        <ThSort label="Stock" sortKey="stock" active={sortKey} dir={sortDir} onClick={toggleSort} align="right" />
+                        <ThSort label="Vendido" sortKey="totalVendido" active={sortKey} dir={sortDir} onClick={toggleSort} align="right" />
+                        <ThSort label="Promedio" sortKey="promedio" active={sortKey} dir={sortDir} onClick={toggleSort} align="right" />
+                        <ThSort label="Máximo" sortKey="maximo" active={sortKey} dir={sortDir} onClick={toggleSort} align="right" />
+                        <ThSort label="Mínimo" sortKey="minimo" active={sortKey} dir={sortDir} onClick={toggleSort} align="right" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pageRows.map((r) => (
+                        <tr
+                          key={r.codigo}
+                          className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors"
+                        >
+                          <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{r.codigo}</td>
+                          <td className="px-3 py-2 text-zinc-100 whitespace-nowrap max-w-xs truncate">
+                            {r.nombre ?? "—"}
+                          </td>
+                          <td className={`px-3 py-2 text-right tabular-nums ${r.stock > 0 ? "text-green-400" : "text-zinc-600"}`}>
+                            {fmtNum(r.stock)}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-medium">
+                            {fmtNum(r.totalVendido)}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-zinc-200">
+                            {fmtNum(r.promedio)}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-orange-400">
+                            {fmtNum(r.maximo)}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-blue-400">
+                            {fmtNum(r.minimo)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Paginación de a 20 */}
+                <div className="flex items-center justify-between gap-4 border-t border-zinc-800 bg-[#1A1A1A] px-4 py-2.5">
+                  <span className="text-xs text-zinc-500">
+                    Página {pageClamped} de {totalPages} — {articulosOrdenados.length} artículo(s)
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      disabled={pageClamped <= 1}
+                      className="btn-anim p-1.5 rounded-md border border-zinc-700 text-zinc-400 hover:border-yellow-400 hover:text-yellow-400 disabled:opacity-30"
+                    >
+                      <ChevronLeft size={15} />
+                    </button>
+                    <button
+                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={pageClamped >= totalPages}
+                      className="btn-anim p-1.5 rounded-md border border-zinc-700 text-zinc-400 hover:border-yellow-400 hover:text-yellow-400 disabled:opacity-30"
+                    >
+                      <ChevronRight size={15} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
       </main>
