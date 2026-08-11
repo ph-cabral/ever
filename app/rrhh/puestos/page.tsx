@@ -40,15 +40,28 @@ export default function PuestosPage() {
 
   const cargar = useCallback(async () => {
     setLoading(true);
+    // fetches independientes: si una falla (ej. 500 en /documentos), las otras
+    // igual actualizan su estado en vez de quedar todas en blanco por un Promise.all.
+    const traer = async (url: string, label: string) => {
+      try {
+        const r = await fetch(url);
+        const j = await r.json();
+        if (!r.ok) throw new Error(j?.error ?? `HTTP ${r.status}`);
+        return Array.isArray(j) ? j : [];
+      } catch (e) {
+        avisar(`❌ No se pudo cargar ${label}: ${e instanceof Error ? e.message : String(e)}`);
+        return [];
+      }
+    };
     try {
       const [a, p, d] = await Promise.all([
-        fetch("/api/rrhh/areas").then((r) => r.json()),
-        fetch("/api/rrhh/puestos").then((r) => r.json()),
-        fetch("/api/rrhh/documentos").then((r) => r.json()),
+        traer("/api/rrhh/areas", "áreas/sectores"),
+        traer("/api/rrhh/puestos", "puestos"),
+        traer("/api/rrhh/documentos", "documentos"),
       ]);
-      setAreas(Array.isArray(a) ? a : []);
-      setPuestos(Array.isArray(p) ? p : []);
-      setDocs(Array.isArray(d) ? d : []);
+      setAreas(a);
+      setPuestos(p);
+      setDocs(d);
     } finally {
       setLoading(false);
     }
