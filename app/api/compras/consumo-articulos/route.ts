@@ -6,15 +6,22 @@ const API_URL =
 export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
-// Proxy → FastAPI indicadores-api: consumo mensual de TODOS los artículos
-// (sin filtro de código) en un rango de MESES (YYYY-MM) + stock por
-// depósito. Para el botón "Tabla" de /compras/consumo (pedido de Pablo
-// 2026-08-11) — mismo patrón que consumo-articulo (singular).
+// Proxy → FastAPI indicadores-api: consumo mensual de los artículos que
+// matchean código (q) y/o línea (linea) en un rango de MESES (YYYY-MM) +
+// stock por depósito. Para el botón "Tabla" de /compras/consumo (pedido de
+// Pablo 2026-08-11) — mismo patrón que consumo-articulo (singular).
+//
+// q y linea se combinan por AND cuando vienen los dos, pero NINGUNO es
+// obligatorio por separado — hace falta AL MENOS UNO (pedido de Pablo
+// 2026-08-12): sin filtro esto agregaría TODO el catálogo, el mismo
+// escenario que ya tiró abajo el proceso una vez (ver NOTA rendimiento en
+// fetch_consumo_articulos, indicadores-api/compras.py). Se corta acá mismo,
+// antes de pegarle al backend, además del mismo chequeo que ya hace
+// fetch_consumo_articulos.
 //
 // Timeout más alto que el del singular (2026-08-12): esta consulta agrega en
-// SQL las ventas de TODOS los artículos del rango — más pesada que un solo
-// artículo aunque el SUM ya se hace en SQL Server (ver NOTA rendimiento en
-// fetch_consumo_articulos, indicadores-api/compras.py).
+// SQL las ventas de TODOS los artículos que matchean el filtro — más pesada
+// que un solo artículo aunque el SUM ya se hace en SQL Server.
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const desde = sp.get("desde");
@@ -25,6 +32,14 @@ export async function GET(req: NextRequest) {
       { status: 400 },
     );
   }
+  const q = sp.get("q")?.trim() || null;
+  const linea = sp.get("linea")?.trim() || null;
+  if (!q && !linea) {
+    return NextResponse.json(
+      { error: "Ingresá código o línea para buscar" },
+      { status: 400 },
+    );
+  }
   // Orden/página/búsqueda — pasan directo al backend, que ordena y pagina en
   // el servidor (evita traer/serializar el catálogo completo, ver route.ts
   // anterior a 2026-08-12 y NOTA en fetch_consumo_articulos).
@@ -32,9 +47,9 @@ export async function GET(req: NextRequest) {
   const sortDir = sp.get("sortDir") ?? "desc";
   const page = sp.get("page") ?? "1";
   const pageSize = sp.get("pageSize") ?? "20";
-  const q = sp.get("q");
   const qs = new URLSearchParams({ desde, hasta, sort, sortDir, page, pageSize });
   if (q) qs.set("q", q);
+  if (linea) qs.set("linea", linea);
   try {
     const res = await fetch(
       `${API_URL}/compras/consumo-articulos?${qs.toString()}`,

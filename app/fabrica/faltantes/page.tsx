@@ -2,7 +2,15 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
-  Loader2, RefreshCw, AlertTriangle, PackageCheck, Truck, Check, Download, Trash2, X,
+  Loader2,
+  RefreshCw,
+  AlertTriangle,
+  PackageCheck,
+  Truck,
+  Check,
+  Download,
+  Trash2,
+  X,
 } from "lucide-react";
 import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
 import { InicioButton } from "@/components/ui/InicioButton";
@@ -56,8 +64,13 @@ interface Row {
 // Mismo patrón que lib/rrhh/aggregations.ts (norm + includes("ever wear")).
 const PROVEEDOR_OBJETIVO = "ever wear s.a. industrial";
 const norm = (s: string) =>
-  s.toLowerCase().normalize("NFD").replace(new RegExp("[\\u0300-\\u036f]", "g"), "").trim();
-const esProveedorObjetivo = (p: string | null) => !!p && norm(p).includes(PROVEEDOR_OBJETIVO);
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(new RegExp("[\\u0300-\\u036f]", "g"), "")
+    .trim();
+const esProveedorObjetivo = (p: string | null) =>
+  !!p && norm(p).includes(PROVEEDOR_OBJETIVO);
 
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(n || 0);
@@ -79,7 +92,8 @@ const todayISO = () => {
 // Rango fijo (sin selector): mismo ancla que /compras/faltantes
 // (OC_DESDE_DEFAULT del backend) → hoy.
 const DESDE_FIJO = "2026-06-26";
-const rowKey = (r: Pick<Row, "CodArticulo" | "fecha">) => `${r.CodArticulo}__${r.fecha}`;
+const rowKey = (r: Pick<Row, "CodArticulo" | "fecha">) =>
+  `${r.CodArticulo}__${r.fecha}`;
 
 const FILTROS: { key: Filtro; label: string }[] = [
   { key: "todos", label: "Todos" },
@@ -122,9 +136,10 @@ function ClientesCell({ clientes }: { clientes: Row["clientes"] }) {
               className="bg-[#1A1A1A] border border-zinc-700 rounded-xl max-w-md w-full max-h-[70vh] overflow-y-auto p-4"
               onClick={(e) => e.stopPropagation()}
             >
+              {" "}
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-medium text-zinc-200">
-                  {clientes.length} cliente{clientes.length > 1 ? "s" : ""}
+                  {clientes.length} cliente{clientes.length > 1 ? "s" : ""}{" "}
                 </h3>
                 <button
                   onClick={() => setOpen(false)}
@@ -135,13 +150,18 @@ function ClientesCell({ clientes }: { clientes: Row["clientes"] }) {
               </div>
               <ul className="flex flex-col gap-1.5">
                 {clientes.map((c) => (
-                  <li key={c.cod} className="text-xs text-zinc-300 flex justify-between gap-3">
+                  <li
+                    key={c.cod}
+                    className="text-xs text-zinc-300 flex justify-between gap-3"
+                  >
                     <span className="truncate">
                       {c.cod}
                       {c.nombre ? ` — ${c.nombre}` : ""}
                     </span>
                     {clientes.length > 1 && (
-                      <span className="text-zinc-500 shrink-0 tabular-nums">{fmtNum(c.cant)}</span>
+                      <span className="text-zinc-500 shrink-0 tabular-nums">
+                        {fmtNum(c.cant)}
+                      </span>
                     )}
                   </li>
                 ))}
@@ -170,150 +190,187 @@ function Tabla({
   return (
     <div className="rounded-xl border border-zinc-800 overflow-hidden">
       <div className="overflow-x-auto">
-      <table className="w-full min-w-max text-sm">
-        <thead className="bg-[#1A1A1A] text-zinc-400">
-          <tr className="text-left">
-            <th className="px-3 py-2 font-medium whitespace-nowrap">Cód.</th>
-            <th className="px-3 py-2 font-medium whitespace-nowrap">Artículo</th>
-            <th className="px-3 py-2 font-medium whitespace-nowrap">Línea</th>
-            <th className="px-3 py-2 font-medium whitespace-nowrap">Día</th>
-            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Faltan</th>
-            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Stock</th>
-            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">En OC</th>
-            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Falta OC</th>
-            <th className="px-3 py-2 font-medium whitespace-nowrap">Despacho</th>
-            <th className="px-3 py-2 font-medium whitespace-nowrap">Cliente</th>
-            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Importe</th>
-            <th className="px-3 py-2 font-medium whitespace-nowrap">Arribo</th>
-            <th className="px-2 py-2"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((r, i) => {
-            const prev = data[i - 1];
-            const nuevoArt = !prev || prev.CodArticulo !== r.CodArticulo;
-            const dir = leaving[rowKey(r)];
-            return (
-              <tr
-                key={rowKey(r)}
-                className={`transition-colors animate-in fade-in duration-300 ${
-                  dir === "right" ? "row-out-right" : dir === "left" ? "row-out-left" : ""
-                } ${rowCls[r.estado]} ${
-                  nuevoArt ? "border-t-2 border-zinc-700/80" : "border-t border-zinc-800/50"
-                }`}
-              >
-                <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">
-                  {r.CodArticulo}
-                </td>
-                <td className="px-3 py-2 text-zinc-100 whitespace-nowrap">
-                  <span>{r.Nombre}</span>
-                </td>
-                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{r.Linea ?? "—"}</td>
-                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">
-                  {fmtAr(r.fecha)}
-                  {r.pedidos > 1 && (
-                    <span className="ml-2 text-[11px] text-zinc-600">{r.pedidos} ped.</span>
-                  )}
-                </td>
-                <td
-                  className="px-3 py-2 text-right tabular-nums text-zinc-100"
-                  title={
-                    r.vivo && r.nuevoDelDia !== r.faltan
-                      ? `Acumulado. Nuevo este día: ${fmtNum(r.nuevoDelDia)}`
-                      : undefined
-                  }
-                >
-                  {fmtNum(r.faltan)}
-                  {r.vivo && r.nuevoDelDia > 0 && r.nuevoDelDia !== r.faltan && (
-                    <span className="ml-1 text-[11px] text-zinc-600">
-                      (+{fmtNum(r.nuevoDelDia)})
-                    </span>
-                  )}
-                </td>
-                <td
-                  className={`px-3 py-2 text-right tabular-nums ${
-                    r.stock > 0 ? "text-emerald-400" : "text-zinc-600"
+        <table className="w-full min-w-max text-sm">
+          <thead className="bg-[#1A1A1A] text-zinc-400">
+            <tr className="text-left">
+              <th className="px-3 py-2 font-medium whitespace-nowrap">Cód.</th>
+              <th className="px-3 py-2 font-medium whitespace-nowrap">
+                Artículo
+              </th>
+              <th className="px-3 py-2 font-medium whitespace-nowrap">Línea</th>
+              <th className="px-3 py-2 font-medium whitespace-nowrap">Día</th>
+              <th className="px-3 py-2 font-medium text-right whitespace-nowrap">
+                Faltan
+              </th>
+              <th className="px-3 py-2 font-medium text-right whitespace-nowrap">
+                Stock
+              </th>
+              <th className="px-3 py-2 font-medium text-right whitespace-nowrap">
+                En OC
+              </th>
+              <th className="px-3 py-2 font-medium text-right whitespace-nowrap">
+                Falta OC
+              </th>
+              <th className="px-3 py-2 font-medium whitespace-nowrap">
+                Despacho
+              </th>
+              <th className="px-3 py-2 font-medium whitespace-nowrap">
+                Cliente
+              </th>
+              <th className="px-3 py-2 font-medium text-right whitespace-nowrap">
+                Importe
+              </th>
+              <th className="px-3 py-2 font-medium whitespace-nowrap">
+                Arribo
+              </th>
+              <th className="px-2 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((r, i) => {
+              const prev = data[i - 1];
+              const nuevoArt = !prev || prev.CodArticulo !== r.CodArticulo;
+              const dir = leaving[rowKey(r)];
+              return (
+                <tr
+                  key={rowKey(r)}
+                  className={`transition-colors animate-in fade-in duration-300 ${
+                    dir === "right"
+                      ? "row-out-right"
+                      : dir === "left"
+                        ? "row-out-left"
+                        : ""
+                  } ${rowCls[r.estado]} ${
+                    nuevoArt
+                      ? "border-t-2 border-zinc-700/80"
+                      : "border-t border-zinc-800/50"
                   }`}
-                  title="Existencia real en depósito 1, en vivo (mismo dato que /deposito/stock)."
                 >
-                  {r.stock > 0 ? fmtNum(r.stock) : "—"}
-                </td>
-                <td
-                  className={`px-3 py-2 text-right tabular-nums font-medium ${cubiertoCls[r.estado]}`}
-                  title="Cantidad total pedida en la OC pendiente para este artículo (no acotada al faltante)."
-                >
-                  {r.ocTotal > 0 ? (
-                    <span className="inline-flex items-center gap-1 justify-end">
-                      {r.estado === "entregado" ? (
-                        <Check size={13} className="opacity-80" />
-                      ) : (
-                        <Truck size={13} className="opacity-70" />
-                      )}
-                      {fmtNum(r.ocTotal)}
-                    </span>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-red-300/90">
-                  {r.descubierto > 0 ? fmtNum(r.descubierto) : "—"}
-                </td>
-                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
-                  {r.estado === "entregado"
-                    ? <span className="text-emerald-400/80">Entregado</span>
-                    : r.cubierto > 0
-                      ? r.importacion
-                        ? <span className="text-amber-400/80">Importación</span>
-                        : fmtAr(r.fechaEntrega)
-                      : "—"}
-                </td>
-                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
-                  <ClientesCell clientes={r.clientes} />
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
-                  ${fmtNum(r.importe)}
-                </td>
-                <td className="px-3 py-2">
-                  {(() => {
-                    const sugerido = !r.fechaArribo && r.fechaEntrega ? addDaysISO(r.fechaEntrega, 2) : null;
-                    return (
-                      <input
-                        type="date"
-                        value={r.fechaArribo ?? sugerido ?? ""}
-                        onChange={(e) => onArribo(r, e.target.value || null)}
-                        title={
-                          r.tieneArribo
-                            ? "Ya cargada"
-                            : sugerido
-                              ? "Sugerido: Despacho + 2 días. No guardado — editá para confirmar."
-                              : "Cargar fecha de arribo"
-                        }
-                        className={`bg-[#1f1f1f] border rounded-md px-2 py-1 text-xs outline-none [color-scheme:dark] ${
-                          r.tieneArribo
-                            ? "border-emerald-600 text-emerald-300"
-                            : sugerido
-                              ? "border-dashed border-zinc-600 text-zinc-400 focus:border-yellow-400"
-                              : "border-zinc-700 text-zinc-200 focus:border-yellow-400"
-                        }`}
-                      />
-                    );
-                  })()}
-                </td>
-                <td className="px-2 py-2">
-                  <button
-                    onClick={() => onDescartar(r)}
-                    disabled={!!dir}
-                    title="Descartar (no se borra de la base, solo deja de mostrarse acá)"
-                    className="btn-anim text-zinc-600 hover:text-red-400 p-1 disabled:opacity-40"
+                  <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">
+                    {r.CodArticulo}
+                  </td>
+                  <td className="px-3 py-2 text-zinc-100 whitespace-nowrap">
+                    <span>{r.Nombre}</span>
+                  </td>
+                  <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
+                    {r.Linea ?? "—"}
+                  </td>
+                  <td className="px-3 py-2 text-zinc-400 whitespace-nowrap tabular-nums">
+                    {fmtAr(r.fecha)}
+                    {r.pedidos > 1 && (
+                      <span className="ml-2 text-[11px] text-zinc-600">
+                        {r.pedidos} ped.
+                      </span>
+                    )}
+                  </td>
+                  <td
+                    className="px-3 py-2 text-right tabular-nums text-zinc-100"
+                    title={
+                      r.vivo && r.nuevoDelDia !== r.faltan
+                        ? `Acumulado. Nuevo este día: ${fmtNum(r.nuevoDelDia)}`
+                        : undefined
+                    }
                   >
-                    <Trash2 size={14} />
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                    {fmtNum(r.faltan)}
+                    {r.vivo &&
+                      r.nuevoDelDia > 0 &&
+                      r.nuevoDelDia !== r.faltan && (
+                        <span className="ml-1 text-[11px] text-zinc-600">
+                          (+{fmtNum(r.nuevoDelDia)})
+                        </span>
+                      )}
+                  </td>
+                  <td
+                    className={`px-3 py-2 text-right tabular-nums ${
+                      r.stock > 0 ? "text-emerald-400" : "text-zinc-600"
+                    }`}
+                    title="Existencia real en depósito 1, en vivo (mismo dato que /deposito/stock)."
+                  >
+                    {r.stock > 0 ? fmtNum(r.stock) : "—"}
+                  </td>
+                  <td
+                    className={`px-3 py-2 text-right tabular-nums font-medium ${cubiertoCls[r.estado]}`}
+                    title="Cantidad total pedida en la OC pendiente para este artículo (no acotada al faltante)."
+                  >
+                    {r.ocTotal > 0 ? (
+                      <span className="inline-flex items-center gap-1 justify-end">
+                        {r.estado === "entregado" ? (
+                          <Check size={13} className="opacity-80" />
+                        ) : (
+                          <Truck size={13} className="opacity-70" />
+                        )}
+                        {fmtNum(r.ocTotal)}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-red-300/90">
+                    {r.descubierto > 0 ? fmtNum(r.descubierto) : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
+                    {r.estado === "entregado" ? (
+                      <span className="text-emerald-400/80">Entregado</span>
+                    ) : r.cubierto > 0 ? (
+                      r.importacion ? (
+                        <span className="text-amber-400/80">Importación</span>
+                      ) : (
+                        fmtAr(r.fechaEntrega)
+                      )
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
+                    <ClientesCell clientes={r.clientes} />
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
+                    ${fmtNum(r.importe)}
+                  </td>
+                  <td className="px-3 py-2">
+                    {(() => {
+                      const sugerido =
+                        !r.fechaArribo && r.fechaEntrega
+                          ? addDaysISO(r.fechaEntrega, 2)
+                          : null;
+                      return (
+                        <input
+                          type="date"
+                          value={r.fechaArribo ?? sugerido ?? ""}
+                          onChange={(e) => onArribo(r, e.target.value || null)}
+                          title={
+                            r.tieneArribo
+                              ? "Ya cargada"
+                              : sugerido
+                                ? "Sugerido: Despacho + 2 días. No guardado — editá para confirmar."
+                                : "Cargar fecha de arribo"
+                          }
+                          className={`bg-[#1f1f1f] border rounded-md px-2 py-1 text-xs outline-none [color-scheme:dark] ${
+                            r.tieneArribo
+                              ? "border-emerald-600 text-emerald-300"
+                              : sugerido
+                                ? "border-dashed border-zinc-600 text-zinc-400 focus:border-yellow-400"
+                                : "border-zinc-700 text-zinc-200 focus:border-yellow-400"
+                          }`}
+                        />
+                      );
+                    })()}
+                  </td>
+                  <td className="px-2 py-2">
+                    <button
+                      onClick={() => onDescartar(r)}
+                      disabled={!!dir}
+                      title="Descartar (no se borra de la base, solo deja de mostrarse acá)"
+                      className="btn-anim text-zinc-600 hover:text-red-400 p-1 disabled:opacity-40"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -337,7 +394,9 @@ export default function FabricaFaltantesPage() {
       const p = new URLSearchParams();
       p.set("desde", DESDE_FIJO);
       p.set("hasta", todayISO());
-      const res = await fetch(`/api/fabrica/faltantes?${p}`, { cache: "no-store" });
+      const res = await fetch(`/api/fabrica/faltantes?${p}`, {
+        cache: "no-store",
+      });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       setRows(j.rows ?? []);
@@ -363,25 +422,39 @@ export default function FabricaFaltantesPage() {
 
   const EXIT_MS = 260;
 
-  const guardarArribo = useCallback(async (row: Row, fechaArribo: string | null) => {
-    const prev = { fechaArribo: row.fechaArribo, tieneArribo: row.tieneArribo };
-    setRows((rs) =>
-      rs.map((r) =>
-        rowKey(r) === rowKey(row) ? { ...r, fechaArribo, tieneArribo: !!fechaArribo } : r,
-      ),
-    );
-    try {
-      const res = await fetch("/api/fabrica/faltantes-arribo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fecha: row.fecha, codArticulo: row.CodArticulo, fechaArribo }),
-      });
-      if (!res.ok) throw new Error();
-    } catch {
-      setRows((rs) => rs.map((r) => (rowKey(r) === rowKey(row) ? { ...r, ...prev } : r)));
-      setError("No se pudo guardar la fecha de arribo");
-    }
-  }, []);
+  const guardarArribo = useCallback(
+    async (row: Row, fechaArribo: string | null) => {
+      const prev = {
+        fechaArribo: row.fechaArribo,
+        tieneArribo: row.tieneArribo,
+      };
+      setRows((rs) =>
+        rs.map((r) =>
+          rowKey(r) === rowKey(row)
+            ? { ...r, fechaArribo, tieneArribo: !!fechaArribo }
+            : r,
+        ),
+      );
+      try {
+        const res = await fetch("/api/fabrica/faltantes-arribo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fecha: row.fecha,
+            codArticulo: row.CodArticulo,
+            fechaArribo,
+          }),
+        });
+        if (!res.ok) throw new Error();
+      } catch {
+        setRows((rs) =>
+          rs.map((r) => (rowKey(r) === rowKey(row) ? { ...r, ...prev } : r)),
+        );
+        setError("No se pudo guardar la fecha de arribo");
+      }
+    },
+    [],
+  );
 
   const descartarFaltante = useCallback((row: Row) => {
     const k = rowKey(row);
@@ -397,7 +470,11 @@ export default function FabricaFaltantesPage() {
         const res = await fetch("/api/fabrica/faltantes-descartar", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fecha: row.fecha, codArticulo: row.CodArticulo, descartado: true }),
+          body: JSON.stringify({
+            fecha: row.fecha,
+            codArticulo: row.CodArticulo,
+            descartado: true,
+          }),
         });
         if (!res.ok) throw new Error();
       } catch {
@@ -409,7 +486,8 @@ export default function FabricaFaltantesPage() {
 
   // Nunca extraordinario, y acotado al proveedor EVER WEAR S.A. INDUSTRIAL.
   const frontRows = useMemo(
-    () => rows.filter((r) => !r.extraordinario && esProveedorObjetivo(r.Proveedor)),
+    () =>
+      rows.filter((r) => !r.extraordinario && esProveedorObjetivo(r.Proveedor)),
     [rows],
   );
 
@@ -421,7 +499,8 @@ export default function FabricaFaltantesPage() {
     for (const r of frontRows) {
       if (r.vivo) {
         const prev = ultimaVivaPorArt.get(r.CodArticulo);
-        if (!prev || r.fecha > prev.fecha) ultimaVivaPorArt.set(r.CodArticulo, r);
+        if (!prev || r.fecha > prev.fecha)
+          ultimaVivaPorArt.set(r.CodArticulo, r);
       } else {
         historicas.push(r);
       }
@@ -430,39 +509,62 @@ export default function FabricaFaltantesPage() {
   }, [frontRows]);
 
   const conteo = useMemo(() => {
-    const c = { todos: porArticulo.length, completo: 0, incompleto: 0, sin_orden: 0, entregado: 0 };
+    const c = {
+      todos: porArticulo.length,
+      completo: 0,
+      incompleto: 0,
+      sin_orden: 0,
+      entregado: 0,
+    };
     for (const r of porArticulo) c[r.estado]++;
     return c as Record<Filtro, number>;
   }, [porArticulo]);
 
   // Orden: artículo por importe total desc, día asc dentro del artículo.
   const visibles = useMemo(() => {
-    const base = filtro === "todos" ? porArticulo : porArticulo.filter((r) => r.estado === filtro);
+    const base =
+      filtro === "todos"
+        ? porArticulo
+        : porArticulo.filter((r) => r.estado === filtro);
     const artImporte = new Map<string, number>();
-    for (const r of base) artImporte.set(r.CodArticulo, (artImporte.get(r.CodArticulo) ?? 0) + r.importe);
+    for (const r of base)
+      artImporte.set(
+        r.CodArticulo,
+        (artImporte.get(r.CodArticulo) ?? 0) + r.importe,
+      );
     return [...base].sort((a, b) => {
-      const dArt = (artImporte.get(b.CodArticulo) ?? 0) - (artImporte.get(a.CodArticulo) ?? 0);
+      const dArt =
+        (artImporte.get(b.CodArticulo) ?? 0) -
+        (artImporte.get(a.CodArticulo) ?? 0);
       if (dArt !== 0) return dArt;
-      if (a.CodArticulo !== b.CodArticulo) return a.CodArticulo < b.CodArticulo ? -1 : 1;
+      if (a.CodArticulo !== b.CodArticulo)
+        return a.CodArticulo < b.CodArticulo ? -1 : 1;
       return a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0;
     });
   }, [porArticulo, filtro]);
 
   const exportar = useCallback(() => {
-    exportarFaltantesCompras(visibles, { modo: "faltantes", desde: DESDE_FIJO, hasta: todayISO() });
+    exportarFaltantesCompras(visibles, {
+      modo: "faltantes",
+      desde: DESDE_FIJO,
+      hasta: todayISO(),
+    });
   }, [visibles]);
 
   const tot = useMemo(() => {
     let importe = 0;
     const arts = new Set<string>();
     const ultimaVivaPorArt = new Map<string, Row>();
-    let faltan = 0, cubierto = 0, descubierto = 0;
+    let faltan = 0,
+      cubierto = 0,
+      descubierto = 0;
     for (const r of visibles) {
       importe += r.importe;
       arts.add(r.CodArticulo);
       if (r.vivo) {
         const prev = ultimaVivaPorArt.get(r.CodArticulo);
-        if (!prev || r.fecha > prev.fecha) ultimaVivaPorArt.set(r.CodArticulo, r);
+        if (!prev || r.fecha > prev.fecha)
+          ultimaVivaPorArt.set(r.CodArticulo, r);
       } else {
         faltan += r.faltan;
         cubierto += r.cubierto;
@@ -485,7 +587,8 @@ export default function FabricaFaltantesPage() {
         <div className="fixed bottom-6 right-6 z-[110] flex flex-col gap-2">
           {loading && (
             <div className="flex items-center gap-3 bg-[#1A1A1A] border border-yellow-400/40 rounded-xl px-5 py-3 text-sm text-zinc-200">
-              <Loader2 size={16} className="animate-spin text-yellow-400" /> Consultando la base…
+              <Loader2 size={16} className="animate-spin text-yellow-400" />{" "}
+              Consultando la base…
             </div>
           )}
           {error && (
@@ -500,7 +603,8 @@ export default function FabricaFaltantesPage() {
         <div className="flex items-center gap-4 min-w-0">
           <InicioButton />
           <span className="font-bold text-yellow-400 text-xl md:text-2xl tracking-wide uppercase whitespace-nowrap">
-            EVER WEAR <span className="text-sm tracking-[3px] font-normal">S.A.</span>
+            EVER WEAR{" "}
+            <span className="text-sm tracking-[3px] font-normal">S.A.</span>
           </span>
           <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
           <span className="hidden md:inline text-zinc-500 text-sm">
@@ -569,7 +673,8 @@ export default function FabricaFaltantesPage() {
           ))}
           {ocWarn && (
             <span className="flex items-center gap-1.5 text-xs text-amber-400/80 ml-1">
-              <AlertTriangle size={13} /> OC no disponible — todo figura sin orden
+              <AlertTriangle size={13} /> OC no disponible — todo figura sin
+              orden
             </span>
           )}
         </div>

@@ -2,7 +2,7 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   Loader2, AlertTriangle, Search, LineChart, Package, Sigma, Divide,
-  ArrowUpToLine, ArrowDownToLine, Warehouse, Table2, LayoutGrid,
+  ArrowUpToLine, ArrowDownToLine, Warehouse, Table2,
   ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
@@ -18,11 +18,25 @@ import KpiCard from "@/app/rrhh/components/KpiCard";
 // "Vendido" = mismo criterio de pedido válido que /ventas/pedidos-mes
 // (Cerrado/Facturado, blacklist de comprobantes).
 //
-// Vista "Tabla" (pedido de Pablo 2026-08-11, mismo día): botón para alternar
-// de la vista de artículo individual a una tabla con TODOS los artículos del
-// rango de meses elegido, una fila por artículo, paginada de a 20 y ordenable
-// por Código/Stock/Vendido/Promedio/Máximo/Mínimo (clic en el encabezado).
-// Fuente: /api/compras/consumo-articulos (plural, sin filtro de código).
+// Vista "Tabla": TODOS los artículos que matchean el filtro (código y/o
+// línea) en el rango de meses elegido, una fila por artículo, paginada de a
+// 20 y ordenable por Código/Stock/Vendido/Promedio/Máximo/Mínimo (clic en el
+// encabezado). Fuente: /api/compras/consumo-articulos (plural).
+//
+// Rediseño 2026-08-12 (pedido de Pablo, mismo día que lo de arriba):
+//   · La tabla es ahora la vista principal (ya no hay toggle Individual/Tabla).
+//   · Filtro por Código y filtro por Línea (StkFer_ArtParamet.Nivel1) se
+//     combinan por AND, pero NINGUNO es obligatorio por separado — con la
+//     salvedad de que hace falta AL MENOS UNO de los dos antes de cargar
+//     nada (evita agregar el catálogo completo, ver NOTA en
+//     fetch_consumo_articulos, indicadores-api/compras.py).
+//   · El input de línea tiene un datalist con la cantidad de artículos por
+//     línea (fuente: /api/compras/lineas) — así se ve en la propia vista
+//     cuánto pesa cada línea, sin adivinar de antemano si conviene dropdown
+//     o texto libre.
+//   · La vista "individual" (detalle mensual + stock por depósito de UN
+//     artículo) ya no tiene su propio formulario de código: se abre haciendo
+//     clic en una fila de la tabla, con botón "Volver a la tabla".
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface MesRow {
@@ -150,29 +164,59 @@ export default function ComprasConsumoPage() {
   // Depósitos tildados para el stock (default: todos)
   const [deps, setDeps] = useState<Set<number>>(() => new Set([1, 2, 3]));
 
-  // Vista: "individual" (artículo por código, como antes) o "tabla" (todos
-  // los artículos del rango, paginados de a 20 y ordenables). La tabla se
+  // Vista: "tabla" (todos los artículos que matchean el filtro, paginados de
+  // a 20 y ordenables — vista principal) o "individual" (detalle de UN
+  // artículo, se abre haciendo clic en una fila de la tabla). La tabla se
   // ordena/pagina/filtra EN EL SERVIDOR (2026-08-12: traer el catálogo
   // completo al navegador y paginar ahí tiró abajo el proceso de
   // indicadores-api con un catálogo grande) — cada cambio de página, orden o
   // búsqueda dispara un fetch nuevo con esos parámetros.
-  const [vista, setVista] = useState<Vista>("individual");
+  const [vista, setVista] = useState<Vista>("tabla");
   const [tablaData, setTablaData] = useState<RespTabla | null>(null);
   const [tablaLoading, setTablaLoading] = useState(false);
   const [tablaError, setTablaError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("totalVendido");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
-  const [filtroCod, setFiltroCod] = useState(""); // valor del input (inmediato)
+  const [filtroCod, setFiltroCod] = useState(""); // código: valor del input (inmediato)
   const [filtroCodDebounced, setFiltroCodDebounced] = useState(""); // el que dispara el fetch
+  const [filtroLinea, setFiltroLinea] = useState(""); // línea: valor del input (inmediato)
+  const [filtroLineaDebounced, setFiltroLineaDebounced] = useState(""); // el que dispara el fetch
+
+  // Líneas del catálogo (Nivel1) con cantidad de artículos — alimenta el
+  // datalist del input "Buscar línea" (pedido de Pablo 2026-08-12: saber
+  // cuántos artículos hay por línea para decidir cómo dejar el filtro). Se
+  // trae una sola vez al entrar a la página, es liviano (agregado sobre el
+  // catálogo, no sobre ventas).
+  const [lineas, setLineas] = useState<{ linea: string; cantidadArticulos: number }[]>([]);
+  useEffect(() => {
+    fetch("/api/compras/lineas", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => setLineas(Array.isArray(j?.lineas) ? j.lineas : []))
+      .catch(() => setLineas([]));
+  }, []);
 
   // Espera 400ms sin tipear antes de buscar — evita un request por tecla.
   useEffect(() => {
     const t = setTimeout(() => setFiltroCodDebounced(filtroCod.trim()), 400);
     return () => clearTimeout(t);
   }, [filtroCod]);
+  useEffect(() => {
+    const t = setTimeout(() => setFiltroLineaDebounced(filtroLinea.trim()), 400);
+    return () => clearTimeout(t);
+  }, [filtroLinea]);
+
+  // Código y línea se combinan (AND), pero ninguno es obligatorio por
+  // separado — hace falta AL MENOS UNO antes de cargar nada (pedido de
+  // Pablo 2026-08-12): sin filtro se agregaría el catálogo completo.
+  const tieneFiltro = !!(filtroCodDebounced || filtroLineaDebounced);
 
   const loadTabla = useCallback(async () => {
+    if (!tieneFiltro) {
+      setTablaData(null);
+      setTablaError(null);
+      return;
+    }
     setTablaLoading(true);
     setTablaError(null);
     try {
@@ -185,6 +229,7 @@ export default function ComprasConsumoPage() {
         pageSize: String(PAGE_SIZE),
       });
       if (filtroCodDebounced) params.set("q", filtroCodDebounced);
+      if (filtroLineaDebounced) params.set("linea", filtroLineaDebounced);
       const res = await fetch(`/api/compras/consumo-articulos?${params.toString()}`, {
         cache: "no-store",
       });
@@ -197,13 +242,20 @@ export default function ComprasConsumoPage() {
     } finally {
       setTablaLoading(false);
     }
-  }, [desde, hasta, sortKey, sortDir, page, filtroCodDebounced]);
+  }, [desde, hasta, sortKey, sortDir, page, filtroCodDebounced, filtroLineaDebounced, tieneFiltro]);
 
   // Carga automática al entrar en modo "tabla" y cada vez que cambia el
-  // rango, el orden, la página o la búsqueda mientras se está en esa vista.
+  // rango, el orden, la página o los filtros mientras se está en esa vista
+  // (loadTabla ya no hace nada si no hay filtro, ver tieneFiltro arriba).
   useEffect(() => {
     if (vista === "tabla") loadTabla();
   }, [vista, loadTabla]);
+
+  // Abre el detalle de un artículo (clic en una fila de la tabla).
+  const abrirDetalle = useCallback((codigo: string) => {
+    setCod(codigo);
+    setVista("individual");
+  }, []);
 
   const toggleSort = useCallback(
     (k: SortKey) => {
@@ -245,6 +297,13 @@ export default function ComprasConsumoPage() {
       setLoading(false);
     }
   }, [cod, desde, hasta]);
+
+  // Carga automática del detalle al abrir la vista "individual" (clic en una
+  // fila de la tabla, ver abrirDetalle) — la vista ya no tiene su propio
+  // formulario/botón de búsqueda.
+  useEffect(() => {
+    if (vista === "individual" && cod.trim()) load();
+  }, [vista, cod, load]);
 
   const toggleDep = (d: number) =>
     setDeps((prev) => {
@@ -290,30 +349,6 @@ export default function ComprasConsumoPage() {
           <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
           <span className="hidden md:inline text-zinc-500 text-sm">Compras · Consumo por artículo</span>
         </div>
-        <div className="flex items-center gap-1 bg-[#1f1f1f] border border-zinc-700 rounded-lg p-1">
-          <button
-            onClick={() => setVista("individual")}
-            title="Ver un artículo por código"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-              vista === "individual"
-                ? "bg-yellow-400 text-black"
-                : "text-zinc-400 hover:text-zinc-200"
-            }`}
-          >
-            <LayoutGrid size={14} /> Individual
-          </button>
-          <button
-            onClick={() => setVista("tabla")}
-            title="Ver todos los artículos en una tabla"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-              vista === "tabla"
-                ? "bg-yellow-400 text-black"
-                : "text-zinc-400 hover:text-zinc-200"
-            }`}
-          >
-            <Table2 size={14} /> Tabla
-          </button>
-        </div>
       </header>
 
       <main className="max-w-[1400px] mx-auto px-4 md:px-8 py-8 space-y-6">
@@ -324,82 +359,37 @@ export default function ComprasConsumoPage() {
           <p className="text-zinc-500 text-sm mt-1">
             {vista === "individual"
               ? "Cantidad vendida por mes (pedidos Cerrados/Facturados) de un artículo en el rango de meses elegido, con total, promedio mensual, máximo, mínimo > 0 y stock actual por depósito."
-              : "Todos los artículos del rango de meses elegido, uno por fila: total vendido, promedio mensual, máximo, mínimo > 0 y stock actual. Ordená por columna y navegá de a 20."}
+              : "Buscá por código y/o línea, y hacé clic en una fila para ver el detalle mensual de ese artículo. Total vendido, promedio mensual, máximo, mínimo > 0 y stock actual por artículo."}
           </p>
         </div>
 
         {vista === "individual" && (
         <>
-        {/* Filtros: Cod Art + rango de meses */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            load();
-          }}
-          className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4"
+        {/* Detalle de un artículo — se abre desde la tabla, no tiene formulario propio */}
+        <button
+          type="button"
+          onClick={() => setVista("tabla")}
+          className="btn-anim inline-flex items-center gap-1.5 text-sm text-zinc-400 hover:text-yellow-400 transition-colors"
         >
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="cod-art" className="text-xs text-zinc-400 uppercase tracking-wide">
-              Cod Art
-            </label>
-            <input
-              id="cod-art"
-              type="text"
-              value={cod}
-              onChange={(e) => setCod(e.target.value)}
-              placeholder="Ej: E730020"
-              autoFocus
-              className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100 outline-none w-48 focus:border-yellow-400 placeholder:text-zinc-600"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="mes-desde" className="text-xs text-zinc-400 uppercase tracking-wide">
-              Desde (mes)
-            </label>
-            <input
-              id="mes-desde"
-              type="month"
-              value={desde}
-              max={hasta}
-              onChange={(e) => setDesde(e.target.value || mesLocal(5))}
-              className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-2 text-sm text-zinc-200 outline-none [color-scheme:dark] focus:border-yellow-400"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="mes-hasta" className="text-xs text-zinc-400 uppercase tracking-wide">
-              Hasta (mes)
-            </label>
-            <input
-              id="mes-hasta"
-              type="month"
-              value={hasta}
-              min={desde}
-              max={mesLocal(0)}
-              onChange={(e) => setHasta(e.target.value || mesLocal(0))}
-              className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-2 text-sm text-zinc-200 outline-none [color-scheme:dark] focus:border-yellow-400"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="btn-anim flex items-center gap-2 bg-yellow-400 text-black font-semibold text-sm rounded-md px-4 py-2 disabled:opacity-40"
-          >
-            {loading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
-            Buscar
-          </button>
-          {data && (
-            <span className="text-sm text-zinc-500 pb-2">
-              {data.codigo}
-              {data.nombre ? ` — ${data.nombre}` : ""}
-            </span>
-          )}
-        </form>
+          <ChevronLeft size={16} /> Volver a la tabla
+        </button>
+        {/* Encabezado del detalle — el código llega del clic en la tabla, sin formulario propio */}
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-center gap-3">
+          <span className="text-xs text-zinc-400 uppercase tracking-wide">Artículo</span>
+          <span className="text-sm text-zinc-100 font-semibold">
+            {cod || "—"}
+            {data?.nombre ? ` — ${data.nombre}` : ""}
+          </span>
+          <span className="text-xs text-zinc-500">
+            {fmtMesLabel(desde)} – {fmtMesLabel(hasta)}
+          </span>
+        </div>
 
         {!data && !loading && (
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
             <Search size={40} className="text-zinc-700" />
             <p className="text-zinc-500 text-sm">
-              Ingresá un código de artículo y un rango de meses para ver su consumo.
+              Volvé a la tabla y hacé clic en un artículo para ver su detalle.
             </p>
           </div>
         )}
@@ -617,14 +607,44 @@ export default function ComprasConsumoPage() {
                       setPage(1);
                     }}
                     placeholder="Ej: E730020"
+                    autoFocus
                     className="bg-[#1f1f1f] border border-zinc-700 rounded-md pl-7 pr-3 py-2 text-sm text-zinc-100 outline-none w-44 focus:border-yellow-400 placeholder:text-zinc-600"
                   />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="filtro-linea" className="text-xs text-zinc-400 uppercase tracking-wide">
+                  Buscar línea {lineas.length > 0 && (
+                    <span className="normal-case text-zinc-600">({lineas.length} en el catálogo)</span>
+                  )}
+                </label>
+                <div className="relative">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    id="filtro-linea"
+                    type="text"
+                    list="lineas-datalist"
+                    value={filtroLinea}
+                    onChange={(e) => {
+                      setFiltroLinea(e.target.value);
+                      setPage(1);
+                    }}
+                    placeholder="Ej: Premium"
+                    className="bg-[#1f1f1f] border border-zinc-700 rounded-md pl-7 pr-3 py-2 text-sm text-zinc-100 outline-none w-48 focus:border-yellow-400 placeholder:text-zinc-600"
+                  />
+                  <datalist id="lineas-datalist">
+                    {lineas.map((l) => (
+                      <option key={l.linea} value={l.linea}>
+                        {fmtNum(l.cantidadArticulos)} artículo(s)
+                      </option>
+                    ))}
+                  </datalist>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={loadTabla}
-                disabled={tablaLoading}
+                disabled={tablaLoading || !tieneFiltro}
                 className="btn-anim flex items-center gap-2 bg-yellow-400 text-black font-semibold text-sm rounded-md px-4 py-2 disabled:opacity-40"
               >
                 {tablaLoading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
@@ -637,20 +657,27 @@ export default function ComprasConsumoPage() {
               )}
             </div>
 
-            {tablaError && (
+            {!tieneFiltro && (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
+                <Search size={40} className="text-zinc-700" />
+                <p className="text-zinc-500 text-sm">Ingresá un código y/o una línea para buscar.</p>
+              </div>
+            )}
+
+            {tieneFiltro && tablaError && (
               <div className="flex items-center gap-1.5 text-xs text-red-300">
                 <AlertTriangle size={13} /> {tablaError}
               </div>
             )}
 
-            {!tablaData && !tablaLoading && !tablaError && (
+            {tieneFiltro && !tablaData && !tablaLoading && !tablaError && (
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
                 <Table2 size={40} className="text-zinc-700" />
                 <p className="text-zinc-500 text-sm">Cargando la tabla de artículos…</p>
               </div>
             )}
 
-            {!tablaData && tablaLoading && (
+            {tieneFiltro && !tablaData && tablaLoading && (
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
                 <Loader2 size={40} className="text-yellow-400 animate-spin" />
                 <p className="text-zinc-500 text-sm">Consultando la base…</p>
@@ -660,9 +687,7 @@ export default function ComprasConsumoPage() {
             {tablaData && filasTabla.length === 0 && (
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
                 <Search size={40} className="text-zinc-700" />
-                <p className="text-zinc-500 text-sm">
-                  {filtroCodDebounced ? "Sin artículos que coincidan con la búsqueda." : "Sin artículos en el rango elegido."}
-                </p>
+                <p className="text-zinc-500 text-sm">Sin artículos que coincidan con la búsqueda.</p>
               </div>
             )}
 
@@ -689,7 +714,9 @@ export default function ComprasConsumoPage() {
                       {filasTabla.map((r) => (
                         <tr
                           key={r.codigo}
-                          className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors"
+                          onClick={() => abrirDetalle(r.codigo)}
+                          title="Ver detalle mensual de este artículo"
+                          className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors cursor-pointer"
                         >
                           <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{r.codigo}</td>
                           <td className="px-3 py-2 text-zinc-100 whitespace-nowrap max-w-xs truncate">

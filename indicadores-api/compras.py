@@ -586,6 +586,51 @@ LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloP
 WHERE LTRIM(RTRIM(s.CodArticulo)) IN ({ph})
 """
 
+# Línea = StkFer_ArtParamet.Nivel1 (mismo campo que ya usa /deposito/faltantes,
+# ver deposito.py ap.Nivel1 AS Linea). Filtro por substring (LIKE), NO exacto:
+# no se conoce de antemano si Nivel1 son pocos valores fijos o texto libre, así
+# que se resuelve como búsqueda parcial — mismo criterio que el filtro `q` de
+# código. Se consulta directo contra el catálogo (sin IN de miles de códigos,
+# a diferencia de SQL_NOMBRES_CHUNK) y se intersecta en Python contra los
+# `codigos` candidatos (con venta o stock) ya calculados.
+SQL_CODIGOS_POR_LINEA = """
+SELECT LTRIM(RTRIM(s.CodArticulo)) AS CodArticulo
+FROM EVERWEAR.dbo.[StkFer_Articulos] s
+LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloPatron
+WHERE ap.Nivel1 LIKE ?
+"""
+
+# Líneas del catálogo con cantidad de artículos en cada una — para el
+# datalist del input "línea" de /compras/consumo (pedido de Pablo
+# 2026-08-12): así se ve en la propia vista cuántos artículos hay por línea,
+# sin tener que adivinar de antemano si conviene dropdown o texto libre.
+SQL_LINEAS_COUNT = """
+SELECT ap.Nivel1 AS Linea, COUNT(DISTINCT s.CodArticulo) AS Cantidad
+FROM EVERWEAR.dbo.[StkFer_Articulos] s
+LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloPatron
+GROUP BY ap.Nivel1
+"""
+
+
+def fetch_lineas():
+    """Líneas (Nivel1) con cantidad de artículos del catálogo en cada una,
+    ordenadas de mayor a menor. Ver SQL_LINEAS_COUNT."""
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_LINEAS_COUNT)
+        rows = []
+        for linea, cant in cur.fetchall():
+            nombre = (str(linea or "")).strip()
+            if not nombre:
+                continue
+            rows.append({"linea": nombre, "cantidadArticulos": int(cant or 0)})
+        rows.sort(key=lambda r: -r["cantidadArticulos"])
+        return {"total": len(rows), "lineas": rows}
+    finally:
+        conn.close()
+
 
 # Columnas ordenables desde el front (whitelist — nunca se interpola el sort
 # del cliente directo en SQL/Python, se mapea contra esto).
@@ -600,11 +645,21 @@ def fetch_consumo_articulos(
     page: int = 1,
     page_size: int = 20,
     q: str | None = None,
+    linea: str | None = None,
 ):
     """Igual que fetch_consumo_articulo pero para TODOS los artículos a la
     vez: vendido por mes, total, promedio, máximo, mínimo > 0 y stock actual
     (1+2+3), uno por artículo — ORDENADO Y PAGINADO EN EL SERVIDOR (de a
     `page_size`, default 20).
+
+    `q` (código, substring) y `linea` (StkFer_ArtParamet.Nivel1, substring) se
+    combinan con AND cuando vienen los dos, pero ninguno es obligatorio por
+    separado — CON UNA SALVEDAD (pedido de Pablo 2026-08-12): hace falta AL
+    MENOS UNO de los dos. Sin ningún filtro esto agregaría en SQL las ventas y
+    el stock de TODO el catálogo — exactamente el escenario que ya tiró abajo
+    el proceso una vez (ver NOTA rendimiento más abajo) — así que se corta
+    ACÁ, antes de tocar la base, en vez de confiar solo en que el front no
+    dispare el fetch.
 
     NOTA (2026-08-12, segundo incidente real): la primera versión traía el
     catálogo COMPLETO (nombre incluido) en cada respuesta y el front paginaba
@@ -616,6 +671,11 @@ def fetch_consumo_articulos(
     artículo (la parte pesada: join a StkFer_Articulos) se busca SOLO para
     los `page_size` códigos de la página pedida, así la respuesta nunca crece
     con el tamaño del catálogo."""
+    q_norm = (q or "").strip()
+    linea_norm = (linea or "").strip()
+    if not q_norm and not linea_norm:
+        raise ValueError("Ingresá 'q' (código) o 'linea' para buscar")
+
     meses = _meses_rango(str(desde)[:7], str(hasta)[:7])
     y1, m1 = int(meses[0][:4]), int(meses[0][5:7])
     y2, m2 = int(meses[-1][:4]), int(meses[-1][5:7])
@@ -690,13 +750,22 @@ def fetch_consumo_articulos(
             d[dep_i] += float(_safe(stk) or 0)
 
         codigos = sorted(set(ventas.keys()) | set(stock_por_dep.keys()))
-        ql = (q or "").strip().lower()
+        ql = q_norm.lower()
         if ql:
             codigos = [c for c in codigos if ql in c.lower()]
 
+        # Filtro por línea (Nivel1, substring) — se combina con `q` por AND.
+        # Se resuelve el universo de códigos que matchean la línea en una
+        # sola consulta al catálogo (NO con un IN de los `codigos` candidatos,
+        # que puede ser una lista larga) y se intersecta acá en Python.
+        if linea_norm:
+            cur.execute(SQL_CODIGOS_POR_LINEA, (f"%{linea_norm}%",))
+            set_linea = {(str(r[0] or "")).strip() for r in cur.fetchall()}
+            codigos = [c for c in codigos if c in set_linea]
+
         # Métricas por artículo — SOLO números (livianos), para TODO el
-        # universo filtrado por `q`: hace falta calcular todos para poder
-        # ordenar bien, pero no se le busca nombre a ninguno todavía.
+        # universo filtrado por `q`/`linea`: hace falta calcular todos para
+        # poder ordenar bien, pero no se le busca nombre a ninguno todavía.
         metrics = []
         for cod in codigos:
             ventas_cod = ventas.get(cod)

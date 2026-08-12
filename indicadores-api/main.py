@@ -18,7 +18,7 @@ from deposito import (
 )
 from compras import (
     fetch_ordenes_pendientes, fetch_ordenes_articulos_rango, fetch_compras_valorizado,
-    fetch_consumo_articulo, fetch_consumo_articulos,
+    fetch_consumo_articulo, fetch_consumo_articulos, fetch_lineas,
 )
 from ingresos import fetch_remitos_ingreso
 from ventas import fetch_pedidos_mes
@@ -493,16 +493,30 @@ def compras_consumo_articulos(
     page: int = Query(1, ge=1),
     pageSize: int = Query(20, ge=1, le=200),
     q: str | None = Query(None),
+    linea: str | None = Query(None),
 ):
-    """Vendido/promedio/máximo/mínimo>0 y stock por artículo, para TODOS los
-    artículos con venta en el rango o stock actual > 0 — una página (default
-    20) por respuesta, ya ordenada."""
+    """Vendido/promedio/máximo/mínimo>0 y stock por artículo, para los
+    artículos que matchean `q` (código) y/o `linea` (Nivel1) — al menos uno
+    de los dos es obligatorio (pedido de Pablo 2026-08-12, ver NOTA en
+    fetch_consumo_articulos): sin filtro se agregaría TODO el catálogo."""
     try:
         return fetch_consumo_articulos(
-            desde, hasta, sort=sort, sort_dir=sortDir, page=page, page_size=pageSize, q=q,
+            desde, hasta, sort=sort, sort_dir=sortDir, page=page, page_size=pageSize,
+            q=q, linea=linea,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+# ── Compras: líneas del catálogo con cantidad de artículos ───────────────────
+# Para el datalist del input "línea" de /compras/consumo (pedido de Pablo
+# 2026-08-12): saber cuántos artículos hay por línea antes de decidir cómo
+# dejar el filtro (dropdown vs texto libre) — con datos reales, no a ciegas.
+@app.get("/compras/lineas")
+def compras_lineas():
+    try:
+        return fetch_lineas()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
