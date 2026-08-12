@@ -25,9 +25,19 @@ export async function GET(req: NextRequest) {
       { status: 400 },
     );
   }
+  // Orden/página/búsqueda — pasan directo al backend, que ordena y pagina en
+  // el servidor (evita traer/serializar el catálogo completo, ver route.ts
+  // anterior a 2026-08-12 y NOTA en fetch_consumo_articulos).
+  const sort = sp.get("sort") ?? "totalVendido";
+  const sortDir = sp.get("sortDir") ?? "desc";
+  const page = sp.get("page") ?? "1";
+  const pageSize = sp.get("pageSize") ?? "20";
+  const q = sp.get("q");
+  const qs = new URLSearchParams({ desde, hasta, sort, sortDir, page, pageSize });
+  if (q) qs.set("q", q);
   try {
     const res = await fetch(
-      `${API_URL}/compras/consumo-articulos?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`,
+      `${API_URL}/compras/consumo-articulos?${qs.toString()}`,
       { cache: "no-store", signal: AbortSignal.timeout(85000) },
     );
     if (!res.ok) {

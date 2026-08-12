@@ -481,15 +481,26 @@ def compras_consumo_articulo(
 # ── Compras: consumo mensual de TODOS los artículos + stock (vista "Tabla") ──
 # Para el botón "Tabla" de /compras/consumo (pedido de Pablo 2026-08-11):
 # mismo cálculo que /compras/consumo-articulo pero sin filtrar por código.
+# Ordenado y paginado EN EL SERVIDOR (2026-08-12: la v1 devolvía el catálogo
+# completo y tiraba abajo el proceso con catálogos grandes — ver NOTA en
+# fetch_consumo_articulos).
 @app.get("/compras/consumo-articulos")
 def compras_consumo_articulos(
     desde: str = Query(...),
     hasta: str = Query(...),
+    sort: str = Query("totalVendido"),
+    sortDir: str = Query("desc"),
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=200),
+    q: str | None = Query(None),
 ):
     """Vendido/promedio/máximo/mínimo>0 y stock por artículo, para TODOS los
-    artículos con venta en el rango o stock actual > 0."""
+    artículos con venta en el rango o stock actual > 0 — una página (default
+    20) por respuesta, ya ordenada."""
     try:
-        return fetch_consumo_articulos(desde, hasta)
+        return fetch_consumo_articulos(
+            desde, hasta, sort=sort, sort_dir=sortDir, page=page, page_size=pageSize, q=q,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

@@ -587,11 +587,35 @@ WHERE LTRIM(RTRIM(s.CodArticulo)) IN ({ph})
 """
 
 
-def fetch_consumo_articulos(desde: str, hasta: str):
+# Columnas ordenables desde el front (whitelist — nunca se interpola el sort
+# del cliente directo en SQL/Python, se mapea contra esto).
+_SORT_KEYS = ("codigo", "stock", "totalVendido", "promedio", "maximo", "minimo")
+
+
+def fetch_consumo_articulos(
+    desde: str,
+    hasta: str,
+    sort: str = "totalVendido",
+    sort_dir: str = "desc",
+    page: int = 1,
+    page_size: int = 20,
+    q: str | None = None,
+):
     """Igual que fetch_consumo_articulo pero para TODOS los artículos a la
     vez: vendido por mes, total, promedio, máximo, mínimo > 0 y stock actual
-    (1+2+3), uno por artículo. El front pagina/ordena el resultado completo
-    (de a 20, por columna)."""
+    (1+2+3), uno por artículo — ORDENADO Y PAGINADO EN EL SERVIDOR (de a
+    `page_size`, default 20).
+
+    NOTA (2026-08-12, segundo incidente real): la primera versión traía el
+    catálogo COMPLETO (nombre incluido) en cada respuesta y el front paginaba
+    en el navegador — con un catálogo grande eso tira abajo el proceso
+    (killed a mitad de respuesta, sin log de uvicorn: 'other side closed').
+    Ahora los números (vendido/promedio/máximo/mínimo/stock) SÍ se calculan
+    para todo el catálogo filtrado por `q` — hace falta para poder ordenar
+    correctamente — pero eso es liviano (son floats, no texto). El nombre del
+    artículo (la parte pesada: join a StkFer_Articulos) se busca SOLO para
+    los `page_size` códigos de la página pedida, así la respuesta nunca crece
+    con el tamaño del catálogo."""
     meses = _meses_rango(str(desde)[:7], str(hasta)[:7])
     y1, m1 = int(meses[0][:4]), int(meses[0][5:7])
     y2, m2 = int(meses[-1][:4]), int(meses[-1][5:7])
@@ -602,10 +626,13 @@ def fetch_consumo_articulos(desde: str, hasta: str):
     n_meses = len(meses)
     meses_set = set(meses)
 
+    sort = sort if sort in _SORT_KEYS else "totalVendido"
+    reverse = str(sort_dir).lower() != "asc"
+    page = max(1, int(page or 1))
+    page_size = max(1, min(int(page_size or 20), 200))  # tope defensivo
+
     ventas: dict[str, dict[str, float]] = {}
     stock_por_dep: dict[str, dict[int, float]] = {}
-    nombres: dict[str, str] = {}
-    codigos: list[str] = []
 
     conn = get_connection("EVERWEAR")
     try:
@@ -663,11 +690,51 @@ def fetch_consumo_articulos(desde: str, hasta: str):
             d[dep_i] += float(_safe(stk) or 0)
 
         codigos = sorted(set(ventas.keys()) | set(stock_por_dep.keys()))
-        CH = 1000
-        for i in range(0, len(codigos), CH):
-            chunk = codigos[i:i + CH]
-            ph = ",".join("?" for _ in chunk)
-            cur.execute(SQL_NOMBRES_CHUNK.format(ph=ph), chunk)
+        ql = (q or "").strip().lower()
+        if ql:
+            codigos = [c for c in codigos if ql in c.lower()]
+
+        # Métricas por artículo — SOLO números (livianos), para TODO el
+        # universo filtrado por `q`: hace falta calcular todos para poder
+        # ordenar bien, pero no se le busca nombre a ninguno todavía.
+        metrics = []
+        for cod in codigos:
+            ventas_cod = ventas.get(cod)
+            cantidades = [round(ventas_cod[m], 2) for m in meses] if ventas_cod else [0.0] * n_meses
+            total = round(sum(cantidades), 2)
+            promedio = round(total / n_meses, 2) if n_meses else 0.0
+            maximo = max(cantidades) if cantidades else 0.0
+            positivos = [c for c in cantidades if c > 0]
+            minimo = min(positivos) if positivos else None
+            stock_total = round(sum(stock_por_dep.get(cod, {}).values()), 2)
+            metrics.append({
+                "codigo": cod,
+                "totalVendido": total,
+                "promedio": promedio,
+                "maximo": maximo,
+                "minimo": minimo,
+                "stock": stock_total,
+            })
+
+        if sort == "codigo":
+            metrics.sort(key=lambda r: r["codigo"], reverse=reverse)
+        else:
+            metrics.sort(key=lambda r: (r[sort] if r[sort] is not None else -1), reverse=reverse)
+
+        total_items = len(metrics)
+        total_pages = max(1, -(-total_items // page_size))  # ceil
+        page = min(page, total_pages)
+        start = (page - 1) * page_size
+        page_rows = metrics[start:start + page_size]
+
+        # Nombre del artículo: SOLO para los códigos de esta página (máx.
+        # page_size, nunca todo el catálogo) — es la parte pesada (join a
+        # StkFer_Articulos/StkFer_ArtParamet).
+        page_codes = [r["codigo"] for r in page_rows]
+        nombres: dict[str, str] = {}
+        if page_codes:
+            ph = ",".join("?" for _ in page_codes)
+            cur.execute(SQL_NOMBRES_CHUNK.format(ph=ph), page_codes)
             for cod, detalle, dmed, umed in cur.fetchall():
                 cod = (str(cod or "")).strip()
                 nombre = " ".join(
@@ -675,33 +742,20 @@ def fetch_consumo_articulos(desde: str, hasta: str):
                 ) or None
                 if nombre:
                     nombres[cod] = nombre
+        for r in page_rows:
+            r["nombre"] = nombres.get(r["codigo"])
     finally:
         conn.close()
-
-    out = []
-    for cod in codigos:
-        ventas_cod = ventas.get(cod)
-        cantidades = [round(ventas_cod[m], 2) for m in meses] if ventas_cod else [0.0] * n_meses
-        total = round(sum(cantidades), 2)
-        promedio = round(total / n_meses, 2) if n_meses else 0.0
-        maximo = max(cantidades) if cantidades else 0.0
-        positivos = [c for c in cantidades if c > 0]
-        minimo = min(positivos) if positivos else None
-        stock_total = round(sum(stock_por_dep.get(cod, {}).values()), 2)
-        out.append({
-            "codigo": cod,
-            "nombre": nombres.get(cod),
-            "totalVendido": total,
-            "promedio": promedio,
-            "maximo": maximo,
-            "minimo": minimo,
-            "stock": stock_total,
-        })
 
     return {
         "desde": meses[0],
         "hasta": meses[-1],
         "mesesEnRango": n_meses,
-        "total": len(out),
-        "articulos": out,
+        "total": total_items,
+        "page": page,
+        "pageSize": page_size,
+        "totalPages": total_pages,
+        "sort": sort,
+        "sortDir": "asc" if not reverse else "desc",
+        "articulos": page_rows,
     }

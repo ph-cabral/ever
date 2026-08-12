@@ -88,6 +88,9 @@ interface RespTabla {
   hasta: string;
   mesesEnRango: number;
   total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
   articulos: ArticuloRow[];
 }
 type SortKey = "codigo" | "stock" | "totalVendido" | "promedio" | "maximo" | "minimo";
@@ -148,7 +151,11 @@ export default function ComprasConsumoPage() {
   const [deps, setDeps] = useState<Set<number>>(() => new Set([1, 2, 3]));
 
   // Vista: "individual" (artículo por código, como antes) o "tabla" (todos
-  // los artículos del rango, paginados de a 20 y ordenables).
+  // los artículos del rango, paginados de a 20 y ordenables). La tabla se
+  // ordena/pagina/filtra EN EL SERVIDOR (2026-08-12: traer el catálogo
+  // completo al navegador y paginar ahí tiró abajo el proceso de
+  // indicadores-api con un catálogo grande) — cada cambio de página, orden o
+  // búsqueda dispara un fetch nuevo con esos parámetros.
   const [vista, setVista] = useState<Vista>("individual");
   const [tablaData, setTablaData] = useState<RespTabla | null>(null);
   const [tablaLoading, setTablaLoading] = useState(false);
@@ -156,30 +163,44 @@ export default function ComprasConsumoPage() {
   const [sortKey, setSortKey] = useState<SortKey>("totalVendido");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
-  const [filtroCod, setFiltroCod] = useState(""); // filtro rápido por código dentro de la tabla
+  const [filtroCod, setFiltroCod] = useState(""); // valor del input (inmediato)
+  const [filtroCodDebounced, setFiltroCodDebounced] = useState(""); // el que dispara el fetch
+
+  // Espera 400ms sin tipear antes de buscar — evita un request por tecla.
+  useEffect(() => {
+    const t = setTimeout(() => setFiltroCodDebounced(filtroCod.trim()), 400);
+    return () => clearTimeout(t);
+  }, [filtroCod]);
 
   const loadTabla = useCallback(async () => {
     setTablaLoading(true);
     setTablaError(null);
     try {
-      const res = await fetch(
-        `/api/compras/consumo-articulos?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`,
-        { cache: "no-store" },
-      );
+      const params = new URLSearchParams({
+        desde,
+        hasta,
+        sort: sortKey,
+        sortDir,
+        page: String(page),
+        pageSize: String(PAGE_SIZE),
+      });
+      if (filtroCodDebounced) params.set("q", filtroCodDebounced);
+      const res = await fetch(`/api/compras/consumo-articulos?${params.toString()}`, {
+        cache: "no-store",
+      });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       setTablaData(j);
-      setPage(1);
     } catch (e) {
       setTablaError(e instanceof Error ? e.message : "Error al cargar");
       setTablaData(null);
     } finally {
       setTablaLoading(false);
     }
-  }, [desde, hasta]);
+  }, [desde, hasta, sortKey, sortDir, page, filtroCodDebounced]);
 
-  // Carga automática al entrar en modo "tabla" y cada vez que cambia el rango
-  // de meses mientras se está en esa vista.
+  // Carga automática al entrar en modo "tabla" y cada vez que cambia el
+  // rango, el orden, la página o la búsqueda mientras se está en esa vista.
   useEffect(() => {
     if (vista === "tabla") loadTabla();
   }, [vista, loadTabla]);
@@ -197,34 +218,9 @@ export default function ComprasConsumoPage() {
     [sortKey],
   );
 
-  const articulosFiltrados = useMemo(() => {
-    const base = tablaData?.articulos ?? [];
-    const q = filtroCod.trim().toLowerCase();
-    return q ? base.filter((a) => a.codigo.toLowerCase().includes(q)) : base;
-  }, [tablaData, filtroCod]);
-
-  const articulosOrdenados = useMemo(() => {
-    const arr = [...articulosFiltrados];
-    arr.sort((a, b) => {
-      let cmp: number;
-      if (sortKey === "codigo") {
-        cmp = a.codigo.localeCompare(b.codigo, "es");
-      } else {
-        const va = (a[sortKey] ?? 0) as number;
-        const vb = (b[sortKey] ?? 0) as number;
-        cmp = va - vb;
-      }
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-    return arr;
-  }, [articulosFiltrados, sortKey, sortDir]);
-
-  const totalPages = Math.max(1, Math.ceil(articulosOrdenados.length / PAGE_SIZE));
-  const pageClamped = Math.min(page, totalPages);
-  const pageRows = useMemo(
-    () => articulosOrdenados.slice((pageClamped - 1) * PAGE_SIZE, pageClamped * PAGE_SIZE),
-    [articulosOrdenados, pageClamped],
-  );
+  const filasTabla = tablaData?.articulos ?? [];
+  const totalPages = tablaData?.totalPages ?? 1;
+  const pageClamped = tablaData?.page ?? page;
 
   const load = useCallback(async () => {
     const codigo = cod.trim();
@@ -582,7 +578,10 @@ export default function ComprasConsumoPage() {
                   type="month"
                   value={desde}
                   max={hasta}
-                  onChange={(e) => setDesde(e.target.value || mesLocal(5))}
+                  onChange={(e) => {
+                    setDesde(e.target.value || mesLocal(5));
+                    setPage(1);
+                  }}
                   className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-2 text-sm text-zinc-200 outline-none [color-scheme:dark] focus:border-yellow-400"
                 />
               </div>
@@ -596,7 +595,10 @@ export default function ComprasConsumoPage() {
                   value={hasta}
                   min={desde}
                   max={mesLocal(0)}
-                  onChange={(e) => setHasta(e.target.value || mesLocal(0))}
+                  onChange={(e) => {
+                    setHasta(e.target.value || mesLocal(0));
+                    setPage(1);
+                  }}
                   className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-2 text-sm text-zinc-200 outline-none [color-scheme:dark] focus:border-yellow-400"
                 />
               </div>
@@ -630,8 +632,7 @@ export default function ComprasConsumoPage() {
               </button>
               {tablaData && (
                 <span className="text-sm text-zinc-500 pb-2">
-                  {articulosOrdenados.length} artículo(s)
-                  {filtroCod ? ` (de ${tablaData.total})` : ""}
+                  {tablaData.total} artículo(s){tablaLoading ? " — actualizando…" : ""}
                 </span>
               )}
             </div>
@@ -649,17 +650,28 @@ export default function ComprasConsumoPage() {
               </div>
             )}
 
-            {tablaData && articulosOrdenados.length === 0 && (
+            {!tablaData && tablaLoading && (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
+                <Loader2 size={40} className="text-yellow-400 animate-spin" />
+                <p className="text-zinc-500 text-sm">Consultando la base…</p>
+              </div>
+            )}
+
+            {tablaData && filasTabla.length === 0 && (
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
                 <Search size={40} className="text-zinc-700" />
                 <p className="text-zinc-500 text-sm">
-                  {filtroCod ? "Sin artículos que coincidan con la búsqueda." : "Sin artículos en el rango elegido."}
+                  {filtroCodDebounced ? "Sin artículos que coincidan con la búsqueda." : "Sin artículos en el rango elegido."}
                 </p>
               </div>
             )}
 
-            {tablaData && articulosOrdenados.length > 0 && (
-              <div className="rounded-xl border border-zinc-800 overflow-hidden">
+            {tablaData && filasTabla.length > 0 && (
+              <div
+                className={`rounded-xl border border-zinc-800 overflow-hidden transition-opacity ${
+                  tablaLoading ? "opacity-50 pointer-events-none" : ""
+                }`}
+              >
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-max text-sm">
                     <thead className="bg-[#1A1A1A] text-zinc-400">
@@ -674,7 +686,7 @@ export default function ComprasConsumoPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {pageRows.map((r) => (
+                      {filasTabla.map((r) => (
                         <tr
                           key={r.codigo}
                           className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors"
@@ -704,22 +716,22 @@ export default function ComprasConsumoPage() {
                   </table>
                 </div>
 
-                {/* Paginación de a 20 */}
+                {/* Paginación de a 20 (servidor) */}
                 <div className="flex items-center justify-between gap-4 border-t border-zinc-800 bg-[#1A1A1A] px-4 py-2.5">
                   <span className="text-xs text-zinc-500">
-                    Página {pageClamped} de {totalPages} — {articulosOrdenados.length} artículo(s)
+                    Página {pageClamped} de {totalPages} — {tablaData.total} artículo(s)
                   </span>
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={() => setPage((p) => Math.max(1, p - 1))}
-                      disabled={pageClamped <= 1}
+                      disabled={tablaLoading || pageClamped <= 1}
                       className="btn-anim p-1.5 rounded-md border border-zinc-700 text-zinc-400 hover:border-yellow-400 hover:text-yellow-400 disabled:opacity-30"
                     >
                       <ChevronLeft size={15} />
                     </button>
                     <button
                       onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                      disabled={pageClamped >= totalPages}
+                      disabled={tablaLoading || pageClamped >= totalPages}
                       className="btn-anim p-1.5 rounded-md border border-zinc-700 text-zinc-400 hover:border-yellow-400 hover:text-yellow-400 disabled:opacity-30"
                     >
                       <ChevronRight size={15} />
