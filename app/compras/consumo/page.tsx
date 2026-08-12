@@ -736,15 +736,18 @@ export default function ComprasConsumoPage() {
                         // Cobertura = máximo/mínimo mensual sobre el stock actual (pedido
                         // de Pablo 2026-08-12) — cuánto "pesa" un mes pico/piso frente a lo
                         // que hay en stock hoy. Sin stock (0) queda sin definir ("—").
-                        const cobMax = r.stock > 0 ? r.maximo / r.stock : null;
-                        const cobMin = r.stock > 0 && r.minimo != null ? r.minimo / r.stock : null;
+                        const cobMax = r.stock > 0 ?  r.stock / r.maximo: null;
+                        const cobMin =
+                          r.stock > 0 && r.minimo != null
+                            ? r.stock / r.minimo
+                            : null;
                         // Semáforo por fila (pedido de Pablo 2026-08-12): promedio*2 vs
                         // stock actual — 2 meses de demanda promedio como referencia.
                         // Menos que eso en stock (promedio*2 < stock es FALSO) no entra acá;
                         // literal: promedio*2 < stock ⇒ rojo, promedio*2 > stock ⇒ verde,
                         // igualdad ⇒ sin color.
                         const tone =
-                          r.promedio * 2 < r.stock ? "red" : r.promedio * 2 > r.stock ? "green" : null;
+                          r.promedio * 2 > r.stock ? "red" : r.promedio * 2 < r.stock ? "green" : null;
                         return (
                           <tr
                             key={r.codigo}
