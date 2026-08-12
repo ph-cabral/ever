@@ -646,11 +646,21 @@ def fetch_consumo_articulos(
     page_size: int = 20,
     q: str | None = None,
     linea: str | None = None,
+    export: bool = False,
 ):
     """Igual que fetch_consumo_articulo pero para TODOS los artículos a la
     vez: vendido por mes, total, promedio, máximo, mínimo > 0 y stock actual
     (1+2+3), uno por artículo — ORDENADO Y PAGINADO EN EL SERVIDOR (de a
     `page_size`, default 20).
+
+    `export=True` (para el botón "Exportar Excel" de /compras/consumo, pedido
+    de Pablo 2026-08-12) devuelve TODOS los artículos que matchean el filtro
+    de una sola vez, sin paginar — y exige `linea` (no alcanza con `q`): sin
+    esa exigencia, exportar por código de forma amplia podría volcar a Excel
+    una porción enorme del catálogo por accidente. El nombre de cada artículo
+    (la parte pesada) se resuelve igual que en la vista paginada, pero en
+    chunks (ver CHUNK_NOMBRES abajo) porque acá la lista de códigos no está
+    acotada a `page_size`.
 
     `q` (código, substring) y `linea` (StkFer_ArtParamet.Nivel1, substring) se
     combinan con AND cuando vienen los dos, pero ninguno es obligatorio por
@@ -675,6 +685,8 @@ def fetch_consumo_articulos(
     linea_norm = (linea or "").strip()
     if not q_norm and not linea_norm:
         raise ValueError("Ingresá 'q' (código) o 'linea' para buscar")
+    if export and not linea_norm:
+        raise ValueError("Elegí una línea para exportar")
 
     meses = _meses_rango(str(desde)[:7], str(hasta)[:7])
     y1, m1 = int(meses[0][:4]), int(meses[0][5:7])
@@ -791,19 +803,32 @@ def fetch_consumo_articulos(
             metrics.sort(key=lambda r: (r[sort] if r[sort] is not None else -1), reverse=reverse)
 
         total_items = len(metrics)
-        total_pages = max(1, -(-total_items // page_size))  # ceil
-        page = min(page, total_pages)
-        start = (page - 1) * page_size
-        page_rows = metrics[start:start + page_size]
+        if export:
+            # Sin paginar — TODOS los artículos filtrados, de una vez (ver
+            # docstring: exige `linea`, gateado más arriba).
+            page = 1
+            page_size = total_items or 1
+            total_pages = 1
+            page_rows = metrics
+        else:
+            total_pages = max(1, -(-total_items // page_size))  # ceil
+            page = min(page, total_pages)
+            start = (page - 1) * page_size
+            page_rows = metrics[start:start + page_size]
 
-        # Nombre del artículo: SOLO para los códigos de esta página (máx.
-        # page_size, nunca todo el catálogo) — es la parte pesada (join a
-        # StkFer_Articulos/StkFer_ArtParamet).
+        # Nombre del artículo: para export, TODOS los códigos filtrados; si
+        # no, solo los de esta página (máx. page_size) — es la parte pesada
+        # (join a StkFer_Articulos/StkFer_ArtParamet). Se pide en chunks
+        # (tope defensivo de parámetros por consulta a SQL Server) en vez de
+        # un solo IN gigante — relevante sobre todo para export, donde la
+        # lista de códigos no está acotada a 200.
         page_codes = [r["codigo"] for r in page_rows]
         nombres: dict[str, str] = {}
-        if page_codes:
-            ph = ",".join("?" for _ in page_codes)
-            cur.execute(SQL_NOMBRES_CHUNK.format(ph=ph), page_codes)
+        CHUNK_NOMBRES = 500
+        for i in range(0, len(page_codes), CHUNK_NOMBRES):
+            batch = page_codes[i:i + CHUNK_NOMBRES]
+            ph = ",".join("?" for _ in batch)
+            cur.execute(SQL_NOMBRES_CHUNK.format(ph=ph), batch)
             for cod, detalle, dmed, umed in cur.fetchall():
                 cod = (str(cod or "")).strip()
                 nombre = " ".join(

@@ -509,6 +509,32 @@ def compras_consumo_articulos(
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
+# ── Compras: export a Excel de la tabla de consumo (TODOS los artículos, sin
+# paginar) — botón "Exportar Excel" de /compras/consumo (pedido de Pablo
+# 2026-08-12). Requiere `linea`: no se puede exportar sin elegir una línea
+# (ver NOTA en fetch_consumo_articulos, gateado también acá con Query(...)).
+@app.get("/compras/consumo-articulos/export")
+def compras_consumo_articulos_export(
+    desde: str = Query(...),
+    hasta: str = Query(...),
+    sort: str = Query("totalVendido"),
+    sortDir: str = Query("desc"),
+    q: str | None = Query(None),
+    linea: str = Query(...),
+):
+    """Igual que /compras/consumo-articulos pero sin paginar: TODOS los
+    artículos de la línea (y opcionalmente código) elegida, para volcar a
+    Excel."""
+    try:
+        return fetch_consumo_articulos(
+            desde, hasta, sort=sort, sort_dir=sortDir,
+            q=q, linea=linea, export=True,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
 # ── Compras: líneas del catálogo con cantidad de artículos ───────────────────
 # Para el datalist del input "línea" de /compras/consumo (pedido de Pablo
 # 2026-08-12): saber cuántos artículos hay por línea antes de decidir cómo

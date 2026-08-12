@@ -3,7 +3,7 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   Loader2, AlertTriangle, Search, LineChart, Package, Sigma, Divide,
   ArrowUpToLine, ArrowDownToLine, Warehouse, Table2,
-  ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight,
+  ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight, Download,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 import KpiCard from "@/app/rrhh/components/KpiCard";
@@ -37,6 +37,13 @@ import KpiCard from "@/app/rrhh/components/KpiCard";
 //   · La vista "individual" (detalle mensual + stock por depósito de UN
 //     artículo) ya no tiene su propio formulario de código: se abre haciendo
 //     clic en una fila de la tabla, con botón "Volver a la tabla".
+//
+// Export a Excel (pedido de Pablo 2026-08-12): botón "Exportar Excel" en la
+// vista "Tabla", trae TODOS los artículos que matchean el filtro (sin
+// paginar) vía /api/compras/consumo-articulos/export. Habilitado SOLO si hay
+// una línea aplicada (appliedLinea) — código solo no alcanza, para no
+// exportar por error una porción enorme del catálogo. Mismo chequeo también
+// del lado del servidor (route.ts e indicadores-api/compras.py).
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface MesRow {
@@ -260,6 +267,43 @@ export default function ComprasConsumoPage() {
     setPage(1);
     setRefreshTick((t) => t + 1);
   }, [filtroCod, filtroLinea]);
+
+  // Exportar a Excel — SOLO habilitado con una línea aplicada (appliedLinea),
+  // código solo no alcanza (pedido de Pablo 2026-08-12). Trae TODOS los
+  // artículos del filtro actual (desde/hasta/orden/código/línea), sin
+  // paginar — mismo patrón fetch→blob→<a download> que /deposito/stock.
+  const [exporting, setExporting] = useState(false);
+  const handleExport = useCallback(async () => {
+    if (!appliedLinea) return;
+    setExporting(true);
+    setTablaError(null);
+    try {
+      const params = new URLSearchParams({
+        desde,
+        hasta,
+        sort: sortKey,
+        sortDir,
+        linea: appliedLinea,
+      });
+      if (appliedCod) params.set("q", appliedCod);
+      const res = await fetch(`/api/compras/consumo-articulos/export?${params.toString()}`);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `consumo_${appliedLinea}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setTablaError(e instanceof Error ? e.message : "Error al exportar");
+    } finally {
+      setExporting(false);
+    }
+  }, [desde, hasta, sortKey, sortDir, appliedLinea, appliedCod]);
 
   // Abre el detalle de un artículo (clic en una fila de la tabla).
   const abrirDetalle = useCallback((codigo: string) => {
@@ -656,6 +700,20 @@ export default function ComprasConsumoPage() {
               >
                 {tablaLoading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
                 Refrescar
+              </button>
+              <button
+                type="button"
+                onClick={handleExport}
+                disabled={exporting || !appliedLinea}
+                title={
+                  appliedLinea
+                    ? "Exportar a Excel los artículos de esta línea (filtro actual)"
+                    : "Elegí una línea y presioná Refrescar para poder exportar"
+                }
+                className="btn-anim flex items-center gap-2 border border-zinc-700 text-zinc-200 text-sm rounded-md px-4 py-2 hover:border-yellow-400 disabled:opacity-40 transition-colors"
+              >
+                {exporting ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+                Exportar Excel
               </button>
               {tablaData && (
                 <span className="text-sm text-zinc-500 pb-2">
