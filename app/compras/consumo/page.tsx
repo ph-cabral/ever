@@ -178,10 +178,14 @@ export default function ComprasConsumoPage() {
   const [sortKey, setSortKey] = useState<SortKey>("totalVendido");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
-  const [filtroCod, setFiltroCod] = useState(""); // código: valor del input (inmediato)
-  const [filtroCodDebounced, setFiltroCodDebounced] = useState(""); // el que dispara el fetch
-  const [filtroLinea, setFiltroLinea] = useState(""); // línea: valor del input (inmediato)
-  const [filtroLineaDebounced, setFiltroLineaDebounced] = useState(""); // el que dispara el fetch
+  const [filtroCod, setFiltroCod] = useState(""); // código: lo tipeado, todavía no aplicado
+  const [filtroLinea, setFiltroLinea] = useState(""); // línea: lo tipeado, todavía no aplicado
+  // Lo efectivamente usado en la última consulta — solo cambia al presionar
+  // "Refrescar" (ver handleRefrescar). Escribir en los inputs de arriba NO
+  // dispara nada por sí solo (pedido de Pablo 2026-08-12).
+  const [appliedCod, setAppliedCod] = useState("");
+  const [appliedLinea, setAppliedLinea] = useState("");
+  const [refreshTick, setRefreshTick] = useState(0); // fuerza refetch aunque el filtro no cambie
 
   // Líneas del catálogo (Nivel1) con cantidad de artículos — alimenta el
   // datalist del input "Buscar línea" (pedido de Pablo 2026-08-12: saber
@@ -196,20 +200,13 @@ export default function ComprasConsumoPage() {
       .catch(() => setLineas([]));
   }, []);
 
-  // Espera 400ms sin tipear antes de buscar — evita un request por tecla.
-  useEffect(() => {
-    const t = setTimeout(() => setFiltroCodDebounced(filtroCod.trim()), 400);
-    return () => clearTimeout(t);
-  }, [filtroCod]);
-  useEffect(() => {
-    const t = setTimeout(() => setFiltroLineaDebounced(filtroLinea.trim()), 400);
-    return () => clearTimeout(t);
-  }, [filtroLinea]);
-
   // Código y línea se combinan (AND), pero ninguno es obligatorio por
-  // separado — hace falta AL MENOS UNO antes de cargar nada (pedido de
-  // Pablo 2026-08-12): sin filtro se agregaría el catálogo completo.
-  const tieneFiltro = !!(filtroCodDebounced || filtroLineaDebounced);
+  // separado — hace falta AL MENOS UNO APLICADO antes de cargar nada. Mira
+  // appliedCod/appliedLinea (lo tipeado no cuenta) — así cambiar el
+  // rango/orden/página con un filtro ya aplicado sigue refrescando solo,
+  // pero tipear código/línea nunca dispara nada por sí mismo.
+  const tieneFiltro = !!(appliedCod || appliedLinea);
+  const tieneEntrada = !!(filtroCod.trim() || filtroLinea.trim()); // habilita el botón Refrescar
 
   const loadTabla = useCallback(async () => {
     if (!tieneFiltro) {
@@ -228,8 +225,8 @@ export default function ComprasConsumoPage() {
         page: String(page),
         pageSize: String(PAGE_SIZE),
       });
-      if (filtroCodDebounced) params.set("q", filtroCodDebounced);
-      if (filtroLineaDebounced) params.set("linea", filtroLineaDebounced);
+      if (appliedCod) params.set("q", appliedCod);
+      if (appliedLinea) params.set("linea", appliedLinea);
       const res = await fetch(`/api/compras/consumo-articulos?${params.toString()}`, {
         cache: "no-store",
       });
@@ -242,14 +239,27 @@ export default function ComprasConsumoPage() {
     } finally {
       setTablaLoading(false);
     }
-  }, [desde, hasta, sortKey, sortDir, page, filtroCodDebounced, filtroLineaDebounced, tieneFiltro]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshTick solo fuerza el refetch, no participa del fetch en sí
+  }, [desde, hasta, sortKey, sortDir, page, appliedCod, appliedLinea, tieneFiltro, refreshTick]);
 
-  // Carga automática al entrar en modo "tabla" y cada vez que cambia el
-  // rango, el orden, la página o los filtros mientras se está en esa vista
-  // (loadTabla ya no hace nada si no hay filtro, ver tieneFiltro arriba).
+  // Carga automática cada vez que cambia el rango/orden/página, o cuando se
+  // aplica un filtro nuevo (Refrescar) — mientras se esté en la vista
+  // "tabla". loadTabla ya no hace nada si no hay filtro APLICADO (ver
+  // tieneFiltro arriba), así que tipear solo no alcanza para disparar nada.
   useEffect(() => {
     if (vista === "tabla") loadTabla();
   }, [vista, loadTabla]);
+
+  // Único disparador de una búsqueda nueva por texto (pedido de Pablo
+  // 2026-08-12): aplica lo tipeado en código/línea y fuerza el refetch
+  // (refreshTick) — así "Refrescar" siempre trae datos frescos, incluso
+  // repitiendo el mismo filtro.
+  const handleRefrescar = useCallback(() => {
+    setAppliedCod(filtroCod.trim());
+    setAppliedLinea(filtroLinea.trim());
+    setPage(1);
+    setRefreshTick((t) => t + 1);
+  }, [filtroCod, filtroLinea]);
 
   // Abre el detalle de un artículo (clic en una fila de la tabla).
   const abrirDetalle = useCallback((codigo: string) => {
@@ -602,10 +612,8 @@ export default function ComprasConsumoPage() {
                     id="filtro-cod"
                     type="text"
                     value={filtroCod}
-                    onChange={(e) => {
-                      setFiltroCod(e.target.value);
-                      setPage(1);
-                    }}
+                    onChange={(e) => setFiltroCod(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleRefrescar()}
                     placeholder="Ej: E730020"
                     autoFocus
                     className="bg-[#1f1f1f] border border-zinc-700 rounded-md pl-7 pr-3 py-2 text-sm text-zinc-100 outline-none w-44 focus:border-yellow-400 placeholder:text-zinc-600"
@@ -625,10 +633,8 @@ export default function ComprasConsumoPage() {
                     type="text"
                     list="lineas-datalist"
                     value={filtroLinea}
-                    onChange={(e) => {
-                      setFiltroLinea(e.target.value);
-                      setPage(1);
-                    }}
+                    onChange={(e) => setFiltroLinea(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleRefrescar()}
                     placeholder="Ej: Premium"
                     className="bg-[#1f1f1f] border border-zinc-700 rounded-md pl-7 pr-3 py-2 text-sm text-zinc-100 outline-none w-48 focus:border-yellow-400 placeholder:text-zinc-600"
                   />
@@ -643,8 +649,9 @@ export default function ComprasConsumoPage() {
               </div>
               <button
                 type="button"
-                onClick={loadTabla}
-                disabled={tablaLoading || !tieneFiltro}
+                onClick={handleRefrescar}
+                disabled={tablaLoading || !tieneEntrada}
+                title="Escribir código/línea no busca solo — hay que presionar acá (o Enter)"
                 className="btn-anim flex items-center gap-2 bg-yellow-400 text-black font-semibold text-sm rounded-md px-4 py-2 disabled:opacity-40"
               >
                 {tablaLoading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
@@ -660,7 +667,9 @@ export default function ComprasConsumoPage() {
             {!tieneFiltro && (
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
                 <Search size={40} className="text-zinc-700" />
-                <p className="text-zinc-500 text-sm">Ingresá un código y/o una línea para buscar.</p>
+                <p className="text-zinc-500 text-sm">
+                  Ingresá un código y/o una línea, y presioná Refrescar (o Enter).
+                </p>
               </div>
             )}
 
@@ -707,38 +716,76 @@ export default function ComprasConsumoPage() {
                         <ThSort label="Vendido" sortKey="totalVendido" active={sortKey} dir={sortDir} onClick={toggleSort} align="right" />
                         <ThSort label="Promedio" sortKey="promedio" active={sortKey} dir={sortDir} onClick={toggleSort} align="right" />
                         <ThSort label="Máximo" sortKey="maximo" active={sortKey} dir={sortDir} onClick={toggleSort} align="right" />
+                        <th
+                          className="px-3 py-2 font-medium text-right whitespace-nowrap text-zinc-400"
+                          title="Máximo mensual / Stock actual"
+                        >
+                          Cobertura máx.
+                        </th>
                         <ThSort label="Mínimo" sortKey="minimo" active={sortKey} dir={sortDir} onClick={toggleSort} align="right" />
+                        <th
+                          className="px-3 py-2 font-medium text-right whitespace-nowrap text-zinc-400"
+                          title="Mínimo mensual / Stock actual"
+                        >
+                          Cobertura mín.
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filasTabla.map((r) => (
-                        <tr
-                          key={r.codigo}
-                          onClick={() => abrirDetalle(r.codigo)}
-                          title="Ver detalle mensual de este artículo"
-                          className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors cursor-pointer"
-                        >
-                          <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{r.codigo}</td>
-                          <td className="px-3 py-2 text-zinc-100 whitespace-nowrap max-w-xs truncate">
-                            {r.nombre ?? "—"}
-                          </td>
-                          <td className={`px-3 py-2 text-right tabular-nums ${r.stock > 0 ? "text-green-400" : "text-zinc-600"}`}>
-                            {fmtNum(r.stock)}
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-medium">
-                            {fmtNum(r.totalVendido)}
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums text-zinc-200">
-                            {fmtNum(r.promedio)}
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums text-orange-400">
-                            {fmtNum(r.maximo)}
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums text-blue-400">
-                            {fmtNum(r.minimo)}
-                          </td>
-                        </tr>
-                      ))}
+                      {filasTabla.map((r) => {
+                        // Cobertura = máximo/mínimo mensual sobre el stock actual (pedido
+                        // de Pablo 2026-08-12) — cuánto "pesa" un mes pico/piso frente a lo
+                        // que hay en stock hoy. Sin stock (0) queda sin definir ("—").
+                        const cobMax = r.stock > 0 ? r.maximo / r.stock : null;
+                        const cobMin = r.stock > 0 && r.minimo != null ? r.minimo / r.stock : null;
+                        // Semáforo por fila (pedido de Pablo 2026-08-12): promedio*2 vs
+                        // stock actual — 2 meses de demanda promedio como referencia.
+                        // Menos que eso en stock (promedio*2 < stock es FALSO) no entra acá;
+                        // literal: promedio*2 < stock ⇒ rojo, promedio*2 > stock ⇒ verde,
+                        // igualdad ⇒ sin color.
+                        const tone =
+                          r.promedio * 2 < r.stock ? "red" : r.promedio * 2 > r.stock ? "green" : null;
+                        return (
+                          <tr
+                            key={r.codigo}
+                            onClick={() => abrirDetalle(r.codigo)}
+                            title="Ver detalle mensual de este artículo"
+                            className={`border-t border-zinc-800/60 transition-colors cursor-pointer ${
+                              tone === "red"
+                                ? "bg-red-500/10 hover:bg-red-500/20"
+                                : tone === "green"
+                                  ? "bg-green-500/10 hover:bg-green-500/20"
+                                  : "hover:bg-zinc-800/30"
+                            }`}
+                          >
+                            <td className="px-3 py-2 font-mono text-zinc-300 whitespace-nowrap">{r.codigo}</td>
+                            <td className="px-3 py-2 text-zinc-100 whitespace-nowrap max-w-xs truncate">
+                              {r.nombre ?? "—"}
+                            </td>
+                            <td className={`px-3 py-2 text-right tabular-nums ${r.stock > 0 ? "text-green-400" : "text-zinc-600"}`}>
+                              {fmtNum(r.stock)}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-medium">
+                              {fmtNum(r.totalVendido)}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-zinc-200">
+                              {fmtNum(r.promedio)}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-orange-400">
+                              {fmtNum(r.maximo)}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-orange-300">
+                              {cobMax !== null ? fmtNum(cobMax) : "—"}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-blue-400">
+                              {fmtNum(r.minimo)}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-blue-300">
+                              {cobMin !== null ? fmtNum(cobMin) : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
