@@ -537,27 +537,40 @@ def fetch_consumo_articulo(codigo: str, desde: str, hasta: str):
 # ordenable por Código/Stock/Vendido/Promedio/Máximo/Mínimo en el front.
 #
 # Mismo criterio de "vendido" y de stock que fetch_consumo_articulo, pero sin
-# filtrar por CodArticu — se trae TODO el rango (mismo patrón sin filtro por
-# artículo que ya usa fetch_pedidos_mes/fetch_ordenes_pendientes en este
-# proyecto) y se agrupa en Python por (artículo, mes). Solo se listan
-# artículos con alguna venta en el rango O con stock actual > 0 en algún
-# depósito (evita listar SKUs de baja sin stock ni movimiento).
+# filtrar por CodArticu — se trae TODO el rango, agrupado por artículo+mes
+# (ver NOTA rendimiento abajo). Solo se listan artículos con alguna venta en
+# el rango O con stock actual > 0 en algún depósito (evita listar SKUs de
+# baja sin stock ni movimiento).
 #
-# NOTA rendimiento: para rangos largos (varios meses) esto trae muchas más
-# filas que la versión de un solo artículo — si se vuelve lento, considerar
-# acotar el rango máximo desde el front o agregar un filtro adicional acá.
-
+# NOTA rendimiento (2026-08-12, timeout real reportado por Pablo): traer CADA
+# renglón de pedido de TODA la empresa para sumar en Python era demasiado
+# lento (>45s, nunca llegaba a responder). Se mueve el SUM a SQL Server,
+# agrupando por (artículo, año, mes, CompCodigo, Estado) — el filtrado
+# (blacklist de comprobantes + _es_valido) se sigue haciendo en Python, IGUAL
+# que en fetch_consumo_articulo, así que el criterio de "vendido" no cambia;
+# solo se reduce drásticamente la cantidad de filas que viajan de SQL Server a
+# Python (de un renglón por pedido a un renglón por artículo+mes+combinación
+# de comprobante/estado). Año/mes se reconstruyen con DATEADD a partir del
+# mismo FechaPedido int-días-desde-1800-12-28 que ya usa el resto de este
+# archivo (confirmado: la versión de un solo artículo ya compara ese mismo
+# campo contra enteros directamente, sin CAST).
 SQL_CONSUMO_TODOS = """
 SELECT
-    LTRIM(RTRIM(r.CodArticu))             AS CodArticu,
-    cab.FechaPedido                       AS FechaPedido,
-    cab.CompCodigo                        AS CompCodigo,
-    est.Ped_EstadoDescripcion             AS Estado,
-    r.CantidadPedida                      AS Cantidad
+    LTRIM(RTRIM(r.CodArticu))                                     AS CodArticu,
+    DATEPART(year,  DATEADD(day, cab.FechaPedido, '1800-12-28'))  AS Anio,
+    DATEPART(month, DATEADD(day, cab.FechaPedido, '1800-12-28'))  AS Mes,
+    cab.CompCodigo                                                 AS CompCodigo,
+    est.Ped_EstadoDescripcion                                      AS Estado,
+    SUM(r.CantidadPedida)                                          AS Cantidad
 FROM EVERWEAR.dbo.VenFer_PedidoReng r
 INNER JOIN EVERWEAR.dbo.VenFer_PedidoCabecera cab ON cab.NroMovVenta = r.NroMovVenta
 LEFT  JOIN MAGNUS_SITD.dbo.Pedido_Estados     est ON cab.EstadoPedido = est.Ped_Estado
 WHERE cab.FechaPedido BETWEEN ? AND ?
+GROUP BY LTRIM(RTRIM(r.CodArticu)),
+         DATEPART(year,  DATEADD(day, cab.FechaPedido, '1800-12-28')),
+         DATEPART(month, DATEADD(day, cab.FechaPedido, '1800-12-28')),
+         cab.CompCodigo,
+         est.Ped_EstadoDescripcion
 """
 
 SQL_STOCK_TODOS = """
@@ -601,6 +614,10 @@ def fetch_consumo_articulos(desde: str, hasta: str):
 
         cur.execute(SQL_CONSUMO_TODOS, (d1n, d2n))
         cols = [c[0] for c in cur.description]
+        # Ya viene agrupado por (artículo, año, mes, CompCodigo, Estado) —
+        # muchas menos filas que un renglón por pedido. El filtrado (blacklist
+        # de comprobantes + _es_valido) se hace acá, IGUAL que en
+        # fetch_consumo_articulo, así que el criterio de "vendido" es el mismo.
         for row in cur.fetchall():
             d = dict(zip(cols, row))
             cod = (str(d.get("CodArticu") or "")).strip()
@@ -614,10 +631,12 @@ def fetch_consumo_articulos(desde: str, hasta: str):
                 continue
             if not _es_valido(d.get("Estado")):
                 continue
-            fec = _to_date(d.get("FechaPedido"))
-            if fec is None:
+            try:
+                anio = int(d.get("Anio"))
+                mes_n = int(d.get("Mes"))
+            except (TypeError, ValueError):
                 continue
-            key = f"{fec.year:04d}-{fec.month:02d}"
+            key = f"{anio:04d}-{mes_n:02d}"
             if key not in meses_set:
                 continue
             m = ventas.get(cod)
