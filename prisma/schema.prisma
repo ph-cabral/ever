@@ -661,14 +661,14 @@ model puesto_documento {
   @@schema("everwear")
 }
 
-// ===== Tableros de tareas de RRHH y Calidad (duplicados de "sistema") =====
+// ===== Tableros de tareas de RRHH y Compras (duplicados de "sistema") =====
 // A pedido de Pablo (2026-08-13): mismo patrón visual/funcional que el tablero
 // Trello de "sistema" (ver sistema_tablero/columna/tarjeta más arriba), pero
 // un tablero simple por área (sin múltiples tableros ni vinculación entre
-// ellos) y con tablas 100% propias — RRHH y Calidad gestionan sus propias
+// ellos) y con tablas 100% propias — RRHH y Compras gestionan sus propias
 // columnas y no comparten datos entre sí ni con sistema_*.
 // NOTA: este bloque es de referencia. El flujo real es: correr
-// sql/rrhh_tareas.sql y sql/calidad_tareas.sql contra la base y después
+// sql/rrhh_tareas.sql y sql/compras_tareas.sql contra la base y después
 // `npx prisma generate` (alcanza con generate; no hace falta `db pull` salvo
 // que se edite el DDL a mano y se quiera resincronizar este bloque).
 model rrhh_tarea_columna {
@@ -709,17 +709,17 @@ model rrhh_tarea_config {
   @@schema("everwear")
 }
 
-model calidad_tarea_columna {
+model compras_tarea_columna {
   id        Int                     @id @default(autoincrement())
   nombre    String                  @unique @db.VarChar(100)
   orden     Int                     @default(0)
   createdAt DateTime                @default(now())
-  tarjetas  calidad_tarea_tarjeta[]
+  tarjetas  compras_tarea_tarjeta[]
 
   @@schema("everwear")
 }
 
-model calidad_tarea_tarjeta {
+model compras_tarea_tarjeta {
   id           Int                   @id @default(autoincrement())
   columnaId    Int
   orden        Int                   @default(0)
@@ -727,13 +727,13 @@ model calidad_tarea_tarjeta {
   columnaDesde DateTime              @default(now())
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @updatedAt
-  columna      calidad_tarea_columna @relation(fields: [columnaId], references: [id], onDelete: Cascade)
+  columna      compras_tarea_columna @relation(fields: [columnaId], references: [id], onDelete: Cascade)
 
   @@index([columnaId])
   @@schema("everwear")
 }
 
-model calidad_tarea_config {
+model compras_tarea_config {
   clave         String   @id @default("default") @db.VarChar(20)
   criterioOrden String   @default("POSICION") @db.VarChar(20)
   updatedAt     DateTime @updatedAt

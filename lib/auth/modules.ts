@@ -95,12 +95,6 @@ const RAW_MODULES: Omit<ModuleDef, "children" | "hasIndex">[] = [
     href: "/sistema",
     color: "bg-rose-700 hover:bg-rose-600",
   },
-  {
-    key: "calidad",
-    label: "Calidad",
-    href: "/calidad",
-    color: "bg-fuchsia-700 hover:bg-fuchsia-600",
-  },
 ];
 
 // Paleta default para módulos nuevos que no tienen entrada manual en RAW_MODULES.
@@ -234,8 +228,6 @@ const ROUTE_MODULE: { prefix: string; mod: ModuleKey }[] = [
   { prefix: "/api/buscador", mod: "buscador" },
   { prefix: "/sistema", mod: "sistema" },
   { prefix: "/api/sistema", mod: "sistema" },
-  { prefix: "/calidad", mod: "calidad" },
-  { prefix: "/api/calidad", mod: "calidad" },
 ];
 
 /** Módulo requerido por una ruta, o null si no exige un módulo en particular. */
@@ -276,7 +268,6 @@ export const DEFAULT_SECTOR_MODULOS: Record<string, ModuleKey[]> = {
   administración: ["finanza", "rrhh", "buscador"],
   sistemas: ["sistema"],
   soporte: ["sistema"],
-  calidad: ["calidad"],
   finanzas: ["finanza"],
   comercial: ["buscador"],
   ventas: ["buscador", "ventas"],

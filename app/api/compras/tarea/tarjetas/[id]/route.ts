@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { PATCH_tarjeta, DELETE_tarjeta, type TableroModels } from "@/lib/tareas/server";
 
-const MODELS: TableroModels = { columna: "calidad_tarea_columna", tarjeta: "calidad_tarea_tarjeta", config: "calidad_tarea_config" };
+const MODELS: TableroModels = { columna: "compras_tarea_columna", tarjeta: "compras_tarea_tarjeta", config: "compras_tarea_config" };
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

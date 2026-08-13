@@ -1,9 +1,9 @@
-// Tipos y helpers compartidos por los tableros de tareas de RRHH y Calidad
+// Tipos y helpers compartidos por los tableros de tareas de RRHH y Compras
 // (components/tareas/TareasBoard.tsx). Duplican el patrón visual/funcional del
 // tablero de /sistema (app/sistema/SistemaClient.tsx) pero simplificado: un solo
 // tablero por área (sin tabs de múltiples tableros, sin vinculación entre
 // tableros, sin integraciones tipo Softech/Jira) y con datos 100% propios — ver
-// lib/tareas/server.ts y sql/rrhh_tareas.sql / sql/calidad_tareas.sql.
+// lib/tareas/server.ts y sql/rrhh_tareas.sql / sql/compras_tareas.sql.
 
 export type Campos = Record<string, string | null>;
 
@@ -45,7 +45,7 @@ export type CampoDef = {
   auto?: boolean;
 };
 
-// Campos de la tarjeta: iguales para RRHH y Calidad (no fue pedido que
+// Campos de la tarjeta: iguales para RRHH y Compras (no fue pedido que
 // difieran entre áreas). titleKey = campo usado como título de la tarjeta.
 // "importancia" existe para que el criterio de orden IMPORTANCIA tenga de
 // qué agarrarse.

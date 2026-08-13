@@ -1,21 +1,21 @@
-// Motor de API compartido por los tableros de tareas de RRHH y Calidad.
-// Cada área (RRHH, Calidad) tiene sus propias 3 tablas Prisma (columna,
-// tarjeta, config) — ver sql/rrhh_tareas.sql, sql/calidad_tareas.sql y el
+// Motor de API compartido por los tableros de tareas de RRHH y Compras.
+// Cada área (RRHH, Compras) tiene sus propias 3 tablas Prisma (columna,
+// tarjeta, config) — ver sql/rrhh_tareas.sql, sql/compras_tareas.sql y el
 // bloque "tareas" de prisma/schema.prisma. Estas funciones son agnósticas del
 // área: reciben los nombres de esos 3 modelos y operan siempre sobre ESA
 // terna, nunca las mezclan entre sí ni con sistema_*. Así el motor (drag&drop,
 // columnas, config de orden) se escribe una sola vez y cada área queda con
 // datos completamente separados.
 //
-// Los route.ts de app/api/rrhh/tareas/** y app/api/calidad/tarea/** son
+// Los route.ts de app/api/rrhh/tareas/** y app/api/compras/tarea/** son
 // wrappers finitos que solo fijan la terna de modelos y delegan acá.
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 export type TableroModels = {
-  columna: "rrhh_tarea_columna" | "calidad_tarea_columna";
-  tarjeta: "rrhh_tarea_tarjeta" | "calidad_tarea_tarjeta";
-  config: "rrhh_tarea_config" | "calidad_tarea_config";
+  columna: "rrhh_tarea_columna" | "compras_tarea_columna";
+  tarjeta: "rrhh_tarea_tarjeta" | "compras_tarea_tarjeta";
+  config: "rrhh_tarea_config" | "compras_tarea_config";
 };
 
 // Los 3 modelos difieren por área pero comparten exactamente la misma forma

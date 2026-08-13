@@ -1,12 +1,12 @@
 "use client";
 
-// Tablero de tareas tipo Trello, reutilizado por /rrhh/tareas y /calidad/tarea.
+// Tablero de tareas tipo Trello, reutilizado por /rrhh/tareas y /compras/tarea.
 // Es una versión de un solo tablero (sin tabs de múltiples tableros, sin
 // vinculación entre tableros, sin métricas ni integraciones tipo Softech/Jira)
 // del mismo patrón visual/funcional que app/sistema/SistemaClient.tsx — cada
 // área instancia este componente apuntando a su propia API (apiBase), que a su
 // vez pega contra sus propias tablas (ver lib/tareas/server.ts). RRHH y
-// Calidad no comparten datos entre sí ni con /sistema.
+// Compras no comparten datos entre sí ni con /sistema.
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";

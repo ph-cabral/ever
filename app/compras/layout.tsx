@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, PackageX, LineChart, ChevronRight, ShoppingCart } from "lucide-react";
+import { BarChart3, PackageX, LineChart, ChevronRight, ShoppingCart, ListTodo } from "lucide-react";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Layout de /compras/* — sidebar auto-oculta (pedido de Pablo 2026-08-11):
@@ -18,6 +18,7 @@ const NAV: { href: string; label: string; icon: typeof BarChart3 }[] = [
   { href: "/compras", label: "Métricas", icon: BarChart3 },
   { href: "/compras/faltantes", label: "Faltantes", icon: PackageX },
   { href: "/compras/consumo", label: "Consumo por artículo", icon: LineChart },
+  { href: "/compras/tarea", label: "Tarea", icon: ListTodo },
 ];
 
 export default function ComprasLayout({ children }: { children: React.ReactNode }) {
