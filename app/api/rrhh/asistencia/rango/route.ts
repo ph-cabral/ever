@@ -125,11 +125,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Match exacto: employee_no acá viene de un legajo ya elegido en la UI
+    // (no es un ID crudo de reloj), así que no hace falta tolerar padding —
+    // y no conviene: dos legajos que sólo difieren en ceros a la izquierda
+    // (ej. "40" vs "00000040") son personas DISTINTAS (bug 2026-08-13).
     const empRows = await prisma.$queryRaw<{ employee_name: string | null }[]>`
       SELECT NULLIF(TRIM(l.nombre), '') AS employee_name
       FROM everwear.legajo l
-      WHERE l."employeeNo" IS NOT NULL
-        AND ltrim(l."employeeNo", '0') = ltrim(${employee_no}, '0')
+      WHERE l."employeeNo" = ${employee_no}
       LIMIT 1
     `;
     const employeeName = empRows[0]?.employee_name ?? `#${employee_no}`;

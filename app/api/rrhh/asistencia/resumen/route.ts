@@ -77,7 +77,6 @@ export async function GET(req: NextRequest) {
       ),
       act AS (
         SELECT l."employeeNo" AS employee_no,
-               ltrim(l."employeeNo", '0') AS emp_key,
                NULLIF(TRIM(l.nombre), '') AS employee_name,
                COALESCE(ar.nombre, l.sector) AS departamento,
                COALESCE(s.nombre, l.sector) AS sector,
@@ -87,7 +86,46 @@ export async function GET(req: NextRequest) {
         LEFT JOIN everwear.area   ar ON ar.id = s."areaId"
         LEFT JOIN everwear.lugar  lu ON lu.id = l."lugarId"
         WHERE l.estado = 'ACTIVO' AND l."employeeNo" IS NOT NULL
-        ${employee_no ? `AND ltrim(l."employeeNo", '0') = ltrim($3, '0')` : ""}
+        ${employee_no ? `AND l."employeeNo" = $3` : ""}
+      ),
+      -- Cuántos legajos activos comparten la misma clave "sin ceros a la
+      -- izquierda" (ej. "40" y "00000040" comparten clave "40" pero son
+      -- personas DISTINTAS — bug reportado 2026-08-13: Boscacci Vladimir
+      -- vs Pereyra Francisco quedaban fusionados en asistencia).
+      fuzzy_counts AS (
+        SELECT ltrim(employee_no, '0') AS fuzzy_key, COUNT(*) AS n
+        FROM act
+        GROUP BY ltrim(employee_no, '0')
+      ),
+      ev_ids AS (
+        SELECT DISTINCT e.employee_no AS raw_no
+        FROM asistencia.evento e, bounds b
+        WHERE e.event_time >= b.lo AND e.event_time < b.hi
+      ),
+      -- Resuelve cada ID crudo que manda el reloj al employeeNo real del
+      -- legajo:
+      --   1) match EXACTO si existe — nunca se mezclan dos legajos activos
+      --      que sólo difieren en ceros a la izquierda.
+      --   2) si no hay exacto, cae al match "sin ceros" (mismo criterio que
+      --      antes) SÓLO si es único entre los legajos activos — cubre el
+      --      caso real (commit "fix match employee chock") donde un reloj
+      --      devuelve el ID con padding distinto al del legajo para la
+      --      MISMA persona.
+      emp_map AS (
+        SELECT
+          i.raw_no,
+          COALESCE(exacto.employee_no, difuso.employee_no) AS employee_no
+        FROM ev_ids i
+        LEFT JOIN act exacto ON exacto.employee_no = i.raw_no
+        LEFT JOIN LATERAL (
+          SELECT a.employee_no
+          FROM act a
+          JOIN fuzzy_counts fc ON fc.fuzzy_key = ltrim(a.employee_no, '0')
+          WHERE exacto.employee_no IS NULL
+            AND ltrim(a.employee_no, '0') = ltrim(i.raw_no, '0')
+            AND fc.n = 1
+          LIMIT 1
+        ) difuso ON true
       ),
       -- Margen anti-duplicado: 2 marcas del mismo reloj a menos de esto se
       -- colapsan en 1 sola (el reloj a veces tipea 2 veces el mismo toque).
@@ -96,12 +134,14 @@ export async function GET(req: NextRequest) {
       ),
       raw_ev AS (
         SELECT
-          ltrim(e.employee_no, '0') AS emp_key,
+          m.employee_no AS emp_key,
           (e.event_time AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS fecha,
           e.device,
           e.event_time
         FROM asistencia.evento e, bounds b
+        JOIN emp_map m ON m.raw_no = e.employee_no
         WHERE e.event_time >= b.lo AND e.event_time < b.hi
+          AND m.employee_no IS NOT NULL
       ),
       devices_agg AS (
         SELECT emp_key, fecha, string_agg(DISTINCT device, ',' ORDER BY device) AS devices
@@ -214,7 +254,7 @@ export async function GET(req: NextRequest) {
         nd.novedades AS novedades
       FROM dias d
       CROSS JOIN act a
-      LEFT JOIN ev ON ev.emp_key = a.emp_key AND ev.fecha = d.fecha
+      LEFT JOIN ev ON ev.emp_key = a.employee_no AND ev.fecha = d.fecha
       LEFT JOIN asistencia.ajuste_manual am
         ON am.employee_no = a.employee_no AND am.fecha = d.fecha
       LEFT JOIN asistencia.feriado fer

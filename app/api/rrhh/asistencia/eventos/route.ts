@@ -30,6 +30,36 @@ export async function GET(req: NextRequest) {
   try {
   const rows = await prisma.$queryRawUnsafe<any[]>(
     `
+    WITH match_no AS (
+      -- Resuelve cada ID crudo del reloj al employeeNo real del legajo:
+      --   1) match EXACTO si existe — nunca mezcla dos legajos que sólo
+      --      difieren en ceros a la izquierda (ej. "40" vs "00000040" son
+      --      personas DISTINTAS — bug reportado 2026-08-13: Boscacci
+      --      Vladimir vs Pereyra Francisco quedaban fusionados).
+      --   2) si no hay exacto, cae al match "sin ceros" SÓLO si es único
+      --      entre los legajos — cubre el caso real donde un reloj devuelve
+      --      el ID con padding distinto al del legajo para la MISMA persona.
+      SELECT
+        raw.employee_no AS raw_no,
+        COALESCE(exacto."employeeNo", difuso."employeeNo") AS legajo_no
+      FROM (
+        SELECT DISTINCT e2.employee_no
+        FROM asistencia.evento e2
+        WHERE e2.event_time BETWEEN $1::timestamptz AND $2::timestamptz
+      ) raw
+      LEFT JOIN everwear.legajo exacto ON exacto."employeeNo" = raw.employee_no
+      LEFT JOIN LATERAL (
+        SELECT lg."employeeNo"
+        FROM everwear.legajo lg
+        WHERE exacto."employeeNo" IS NULL
+          AND ltrim(lg."employeeNo", '0') = ltrim(raw.employee_no, '0')
+          AND (
+            SELECT COUNT(*) FROM everwear.legajo lg2
+            WHERE ltrim(lg2."employeeNo", '0') = ltrim(lg."employeeNo", '0')
+          ) = 1
+        LIMIT 1
+      ) difuso ON true
+    )
     SELECT
       e.device,
       e.employee_no,
@@ -40,12 +70,12 @@ export async function GET(req: NextRequest) {
       e.major,
       e.minor
     FROM asistencia.evento e
-    LEFT JOIN everwear.legajo l
-      ON ltrim(l."employeeNo", '0') = ltrim(e.employee_no, '0')
+    JOIN match_no mn ON mn.raw_no = e.employee_no
+    LEFT JOIN everwear.legajo l ON l."employeeNo" = mn.legajo_no
     LEFT JOIN everwear.sector s ON s.id = l."sectorId"
     LEFT JOIN everwear.area   a ON a.id = s."areaId"
     WHERE e.event_time BETWEEN $1::timestamptz AND $2::timestamptz
-      ${employee_no ? `AND ltrim(e.employee_no, '0') = ltrim($3, '0')` : ""}
+      ${employee_no ? `AND (e.employee_no = $3 OR mn.legajo_no = $3)` : ""}
     ORDER BY employee_name NULLS LAST, e.event_time
     `,
     desdeTs,
