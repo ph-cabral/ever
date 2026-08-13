@@ -138,8 +138,9 @@ export async function GET(req: NextRequest) {
           (e.event_time AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS fecha,
           e.device,
           e.event_time
-        FROM asistencia.evento e, bounds b
+        FROM asistencia.evento e
         JOIN emp_map m ON m.raw_no = e.employee_no
+        CROSS JOIN bounds b
         WHERE e.event_time >= b.lo AND e.event_time < b.hi
           AND m.employee_no IS NOT NULL
       ),
