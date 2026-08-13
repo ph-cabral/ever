@@ -660,3 +660,83 @@ model puesto_documento {
   @@id([puestoId, documentoId])
   @@schema("everwear")
 }
+
+// ===== Tableros de tareas de RRHH y Calidad (duplicados de "sistema") =====
+// A pedido de Pablo (2026-08-13): mismo patrón visual/funcional que el tablero
+// Trello de "sistema" (ver sistema_tablero/columna/tarjeta más arriba), pero
+// un tablero simple por área (sin múltiples tableros ni vinculación entre
+// ellos) y con tablas 100% propias — RRHH y Calidad gestionan sus propias
+// columnas y no comparten datos entre sí ni con sistema_*.
+// NOTA: este bloque es de referencia. El flujo real es: correr
+// sql/rrhh_tareas.sql y sql/calidad_tareas.sql contra la base y después
+// `npx prisma generate` (alcanza con generate; no hace falta `db pull` salvo
+// que se edite el DDL a mano y se quiera resincronizar este bloque).
+model rrhh_tarea_columna {
+  id        Int                  @id @default(autoincrement())
+  nombre    String               @unique @db.VarChar(100)
+  orden     Int                  @default(0)
+  createdAt DateTime             @default(now())
+  tarjetas  rrhh_tarea_tarjeta[]
+
+  @@schema("everwear")
+}
+
+model rrhh_tarea_tarjeta {
+  id           Int                @id @default(autoincrement())
+  columnaId    Int
+  orden        Int                @default(0)
+  campos       Json               @default("{}")
+  // Fecha/hora en que entró a columnaId actual (se actualiza al cambiar de
+  // columna, sea por drag&drop o PATCH externo). No confundir con createdAt.
+  columnaDesde DateTime           @default(now())
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  columna      rrhh_tarea_columna @relation(fields: [columnaId], references: [id], onDelete: Cascade)
+
+  @@index([columnaId])
+  @@schema("everwear")
+}
+
+// Config singleton (1 sola fila, clave fija "default"): cómo se acomodan las
+// tarjetas dentro de cada columna. POSICION = orden manual (drag&drop, campo
+// `orden`). CREACION = automático por fecha de alta. IMPORTANCIA = automático
+// por campos.importancia (Alta > Media > Baja). Ver lib/tareas/types.ts.
+model rrhh_tarea_config {
+  clave         String   @id @default("default") @db.VarChar(20)
+  criterioOrden String   @default("POSICION") @db.VarChar(20)
+  updatedAt     DateTime @updatedAt
+
+  @@schema("everwear")
+}
+
+model calidad_tarea_columna {
+  id        Int                     @id @default(autoincrement())
+  nombre    String                  @unique @db.VarChar(100)
+  orden     Int                     @default(0)
+  createdAt DateTime                @default(now())
+  tarjetas  calidad_tarea_tarjeta[]
+
+  @@schema("everwear")
+}
+
+model calidad_tarea_tarjeta {
+  id           Int                   @id @default(autoincrement())
+  columnaId    Int
+  orden        Int                   @default(0)
+  campos       Json                  @default("{}")
+  columnaDesde DateTime              @default(now())
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  columna      calidad_tarea_columna @relation(fields: [columnaId], references: [id], onDelete: Cascade)
+
+  @@index([columnaId])
+  @@schema("everwear")
+}
+
+model calidad_tarea_config {
+  clave         String   @id @default("default") @db.VarChar(20)
+  criterioOrden String   @default("POSICION") @db.VarChar(20)
+  updatedAt     DateTime @updatedAt
+
+  @@schema("everwear")
+}
