@@ -16,6 +16,7 @@ export async function GET() {
       nombre: true,
       rol: true,
       sector: true,
+      vendedorCodigo: true,
       activo: true,
       ultimoAcceso: true,
       createdAt: true,

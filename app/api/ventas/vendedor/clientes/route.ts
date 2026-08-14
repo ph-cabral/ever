@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolverAccesoVendedor } from "@/lib/ventas/vendedorAcceso";
 
 const API_URL =
   process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
@@ -10,13 +11,30 @@ export const maxDuration = 30;
 // o nombre (substring) — alimenta el autocomplete del filtro de
 // /ventas/vendedor (pedido de Pablo 2026-08-14). Sin `q`, no busca nada (evita
 // traer el padrón completo por accidente).
+//
+// Acceso por vendedor (mismo pedido, 2026-08-14): un usuario no-admin NUNCA
+// debe encontrar acá un cliente que no es suyo — se resuelve su
+// vendedorCodigo server-side (ver resolverAccesoVendedor) y se lo pasa al
+// backend, que filtra ANTES de devolver la lista. Sin vendedor asignado
+// todavía: lista vacía siempre, ni siquiera pega al backend.
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim();
   if (!q) {
     return NextResponse.json({ clientes: [] });
   }
+
+  const acceso = await resolverAccesoVendedor();
+  if (!acceso.ok) {
+    return NextResponse.json({ error: acceso.error }, { status: acceso.status });
+  }
+  if (!acceso.isAdmin && !acceso.vendedorCodigo) {
+    return NextResponse.json({ clientes: [], sinVendedorAsignado: true });
+  }
+
   try {
-    const res = await fetch(`${API_URL}/clientes?q=${encodeURIComponent(q)}`, {
+    const qs = new URLSearchParams({ q });
+    if (!acceso.isAdmin) qs.set("vendedor", String(acceso.vendedorCodigo));
+    const res = await fetch(`${API_URL}/clientes?${qs.toString()}`, {
       cache: "no-store",
       signal: AbortSignal.timeout(25000),
     });

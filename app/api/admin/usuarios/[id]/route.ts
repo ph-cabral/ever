@@ -19,9 +19,29 @@ export async function PATCH(
   }
 
   const body = await req.json().catch(() => ({}));
-  const data: { activo?: boolean; rol?: string; passwordHash?: string } = {};
+  const data: {
+    activo?: boolean;
+    rol?: string;
+    passwordHash?: string;
+    vendedorCodigo?: number | null;
+  } = {};
   if (typeof body?.activo === "boolean") data.activo = body.activo;
   if (body?.rol === "ADMIN" || body?.rol === "USUARIO") data.rol = body.rol;
+
+  // Vendedor asignado (Magnus, Ped_Usu_Arma) — para /ventas/vendedor (pedido
+  // de Pablo 2026-08-14). `null` desasigna (el usuario vuelve a ver 0
+  // clientes en esa vista hasta que se le asigne otro).
+  if ("vendedorCodigo" in body) {
+    if (body.vendedorCodigo === null) {
+      data.vendedorCodigo = null;
+    } else {
+      const v = Number(body.vendedorCodigo);
+      if (!Number.isInteger(v)) {
+        return NextResponse.json({ error: "vendedorCodigo inválido" }, { status: 400 });
+      }
+      data.vendedorCodigo = v;
+    }
+  }
 
   // Reseteo de contraseña: el admin asigna una nueva (mín. 6 caracteres).
   if (body?.password !== undefined) {
@@ -60,7 +80,7 @@ export async function PATCH(
     const usuario = await prisma.usuario.update({
       where: { id },
       data,
-      select: { id: true, nombre: true, rol: true, activo: true },
+      select: { id: true, nombre: true, rol: true, activo: true, vendedorCodigo: true },
     });
     return NextResponse.json({ ok: true, usuario });
   } catch {

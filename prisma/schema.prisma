@@ -483,18 +483,24 @@ model faltante_existencia {
 // Login de la app. Cada usuario se vincula a un legajo existente de everwear.
 // El login es por DNI + contraseña; los permisos salen del sector (ver sector_permiso).
 model usuario {
-  id           Int       @id @default(autoincrement())
-  legajoId     Int       @unique
-  dni          String    @unique @db.VarChar(20)
-  nombre       String    @db.VarChar(100)
-  passwordHash String
-  rol          String    @default("USUARIO") @db.VarChar(20) // ADMIN | USUARIO
-  sector       String?   @db.VarChar(80)
-  activo       Boolean   @default(true)
-  ultimoAcceso DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  legajo       legajo    @relation(fields: [legajoId], references: [id])
+  id             Int       @id @default(autoincrement())
+  legajoId       Int       @unique
+  dni            String    @unique @db.VarChar(20)
+  nombre         String    @db.VarChar(100)
+  passwordHash   String
+  rol            String    @default("USUARIO") @db.VarChar(20) // ADMIN | USUARIO
+  sector         String?   @db.VarChar(80)
+  // Código de vendedor en Magnus (MAGNUS_SITD.dbo.Ped_Usu_Arma.Usu_Arma_Codigo)
+  // — para /ventas/vendedor (pedido de Pablo 2026-08-14): un usuario
+  // no-admin solo ve los clientes de SU vendedor. null = sin asignar (ve 0
+  // clientes en esa vista hasta que un admin se lo asigne en
+  // /admin/usuarios). Los ADMIN ignoran este campo (ven todos).
+  vendedorCodigo Int?
+  activo         Boolean   @default(true)
+  ultimoAcceso   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  legajo         legajo    @relation(fields: [legajoId], references: [id])
 
   @@index([dni])
   @@schema("everwear")

@@ -21,7 +21,7 @@ from compras import (
     fetch_consumo_articulo, fetch_consumo_articulos, fetch_lineas,
 )
 from ingresos import fetch_remitos_ingreso
-from ventas import fetch_pedidos_mes, fetch_ventas_por_linea
+from ventas import fetch_pedidos_mes, fetch_ventas_por_linea, fetch_vendedores
 from finanza import (
     fetch_facturacion_dia,
     fetch_descubrir,
@@ -684,24 +684,46 @@ def clientes_get(numero: int):
 
 
 @app.get("/clientes")
-def clientes_buscar(q: str = Query(..., min_length=1)):
+def clientes_buscar(
+    q: str = Query(..., min_length=1),
+    vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
+):
     """Búsqueda de clientes por código o nombre (substring) — para el filtro
-    de /ventas/vendedor (pedido de Pablo 2026-08-14). Solo lectura, Magnus."""
+    de /ventas/vendedor (pedido de Pablo 2026-08-14). Solo lectura, Magnus.
+    `vendedor`: acceso por vendedor — Next.js lo resuelve del usuario
+    logueado y lo manda SOLO para no-admins (nunca confiar en un valor que
+    venga directo del navegador sin pasar por esa resolución de sesión)."""
     try:
-        return {"clientes": fetch_clientes_search(q)}
+        return {"clientes": fetch_clientes_search(q, vendedor=vendedor)}
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
 
 # ── Ventas por línea de un cliente — /ventas/vendedor ──────────────────────
 @app.get("/ventas/vendedor")
-def ventas_vendedor(cliente: int = Query(..., description="CodCliente (Magnus)")):
+def ventas_vendedor(
+    cliente: int = Query(..., description="CodCliente (Magnus)"),
+    vendedor: int | None = Query(default=None, description="Exige que este sea el vendedor principal del cliente (no-admin)"),
+):
     """Ventas (cantidad y monto, netas de nota de crédito) de un cliente,
     agrupadas por línea de artículo y por año actual/anterior, con desglose
     mensual — para /ventas/vendedor (pedido de Pablo 2026-08-14). Ver
-    docstring de fetch_ventas_por_linea (ventas.py) para la fuente."""
+    docstring de fetch_ventas_por_linea (ventas.py) para la fuente y para el
+    chequeo de `vendedor` (devuelve permitido=false + nada de datos si el
+    cliente no es de ese vendedor)."""
     try:
-        return fetch_ventas_por_linea(cliente)
+        return fetch_ventas_por_linea(cliente, vendedor=vendedor)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+
+@app.get("/vendedores")
+def vendedores_listar():
+    """Catálogo de vendedores (Magnus, Ped_Usu_Arma) — para el selector de
+    /admin/usuarios (pedido de Pablo 2026-08-14, asignar qué vendedor es
+    cada usuario). Solo lectura."""
+    try:
+        return {"vendedores": fetch_vendedores()}
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

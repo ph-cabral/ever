@@ -14,10 +14,13 @@ type U = {
   nombre: string;
   rol: string;
   sector: string | null;
+  vendedorCodigo: number | null;
   activo: boolean;
   ultimoAcceso: string | null;
   createdAt: string;
 };
+
+type Vendedor = { codigo: number; nombre: string | null };
 
 const fmt = (d: string | null) =>
   d ? new Date(d).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" }) : "—";
@@ -30,6 +33,11 @@ export function UsuariosClient() {
   const [pwd, setPwd] = useState("");
   const [pwd2, setPwd2] = useState("");
   const [savingPwd, setSavingPwd] = useState(false);
+  // Catálogo de vendedores (Magnus, Ped_Usu_Arma) para el selector de la
+  // columna "Vendedor" — pedido de Pablo 2026-08-14, acceso por vendedor en
+  // /ventas/vendedor. Se trae una sola vez, catálogo chico.
+  const [vendedores, setVendedores] = useState<Vendedor[]>([]);
+  const [vendedoresError, setVendedoresError] = useState(false);
 
   const puedeResetear = pwd.length >= 6 && pwd === pwd2;
 
@@ -49,6 +57,13 @@ export function UsuariosClient() {
 
   useEffect(() => {
     load();
+    fetch("/api/admin/usuarios/vendedores")
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d?.vendedores)) setVendedores(d.vendedores);
+        else setVendedoresError(true);
+      })
+      .catch(() => setVendedoresError(true));
   }, []);
 
   async function patch(id: number, body: Record<string, unknown>) {
@@ -124,6 +139,7 @@ export function UsuariosClient() {
               <th className="px-3 py-2 font-medium">Nombre</th>
               <th className="px-3 py-2 font-medium">DNI</th>
               <th className="px-3 py-2 font-medium">Sector</th>
+              <th className="px-3 py-2 font-medium">Vendedor</th>
               <th className="px-3 py-2 font-medium">Rol</th>
               <th className="px-3 py-2 font-medium">Estado</th>
               <th className="px-3 py-2 font-medium">Último acceso</th>
@@ -133,13 +149,13 @@ export function UsuariosClient() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
+                <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">
                   <Loader2 className="inline size-5 animate-spin" />
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
+                <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">
                   Todavía no hay usuarios.
                 </td>
               </tr>
@@ -149,6 +165,30 @@ export function UsuariosClient() {
                   <td className="px-3 py-2">{u.nombre}</td>
                   <td className="px-3 py-2 tabular-nums">{u.dni}</td>
                   <td className="px-3 py-2">{u.sector || "—"}</td>
+                  <td className="px-3 py-2">
+                    <select
+                      value={u.vendedorCodigo ?? ""}
+                      disabled={busy === u.id || (vendedores.length === 0 && !vendedoresError)}
+                      onChange={(e) =>
+                        patch(u.id, {
+                          vendedorCodigo: e.target.value === "" ? null : Number(e.target.value),
+                        })
+                      }
+                      title={
+                        vendedoresError
+                          ? "No se pudo cargar el catálogo de vendedores de Magnus"
+                          : "Vendedor de Magnus asignado a este usuario (acceso en /ventas/vendedor)"
+                      }
+                      className="rounded-md border border-input bg-background px-2 py-1 text-sm disabled:opacity-50"
+                    >
+                      <option value="">Sin asignar</option>
+                      {vendedores.map((v) => (
+                        <option key={v.codigo} value={v.codigo}>
+                          {v.nombre ?? `Código ${v.codigo}`}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
                   <td className="px-3 py-2">
                     <span
                       className={
@@ -204,7 +244,8 @@ export function UsuariosClient() {
         </table>
       </div>
       <p className="text-xs text-muted-foreground">
-        Nota: los cambios de rol o de permisos se aplican la próxima vez que la persona inicia sesión.
+        Nota: los cambios de rol o de permisos se aplican la próxima vez que la persona inicia sesión. El
+        vendedor asignado, en cambio, se aplica al toque (no hace falta relogin).
       </p>
 
       {resetUser && (

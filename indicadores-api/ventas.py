@@ -152,6 +152,7 @@ SELECT
     LTRIM(RTRIM(ap.Nivel1)) AS Linea,
     dbo.fecha_cla2sql(c.FecMovim) AS Fecha,
     cc.EvitaInformesYListados AS Evita,
+    c.vendedor AS CodVendedor,
     CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END AS CantidadNeta,
     CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END AS MontoNeto
 FROM Ven_CompCabecera c
@@ -161,6 +162,32 @@ LEFT JOIN StkFer_Articulos  s  ON s.CodArticulo     = r.CodArticu
 LEFT JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
 WHERE c.CodCliente = ?
 """
+
+# Vendedores (Magnus) — para el selector de "vendedorCodigo" de
+# /admin/usuarios (pedido de Pablo 2026-08-14, acceso por vendedor).
+SQL_VENDEDORES = """
+SELECT Usu_Arma_Codigo AS codigo, LTRIM(RTRIM(Usu_Arma_Nombre)) AS nombre
+FROM MAGNUS_SITD.dbo.Ped_Usu_Arma
+ORDER BY Usu_Arma_Nombre
+"""
+
+
+def fetch_vendedores() -> list[dict]:
+    """Lista de vendedores {'codigo', 'nombre'} desde Magnus
+    (Ped_Usu_Arma) — catálogo chico, sin paginar."""
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_VENDEDORES)
+        out = []
+        for cod, nombre in cur.fetchall():
+            if cod is None:
+                continue
+            out.append({"codigo": int(cod), "nombre": (str(nombre).strip() if nombre else None)})
+        return out
+    finally:
+        conn.close()
 
 
 def _anio_vacio() -> dict:
@@ -180,11 +207,37 @@ def _round_anio(a: dict) -> dict:
     return a
 
 
-def fetch_ventas_por_linea(cod_cliente: int) -> dict:
+def _bloqueado(cod_cliente: int, anio_anterior: int, anio_actual: int) -> dict:
+    """Respuesta para un cliente que NO corresponde al vendedor logueado —
+    a propósito no incluye nombre del cliente ni ningún número (ver
+    docstring de fetch_ventas_por_linea): esto es el chequeo de defensa en
+    profundidad server-side, no debería alcanzarse en uso normal (el
+    buscador de clientes ya filtra antes), pero si alguien arma la URL a
+    mano con un `cliente=` ajeno no tiene que filtrar nada."""
+    return {
+        "cliente": {"codigo": int(cod_cliente), "nombre": None},
+        "anioAnterior": anio_anterior,
+        "anioActual": anio_actual,
+        "tieneDatos": False,
+        "permitido": False,
+        "lineas": [],
+        "totales": {"anioAnterior": _anio_vacio(), "anioActual": _anio_vacio()},
+    }
+
+
+def fetch_ventas_por_linea(cod_cliente: int, vendedor: int | None = None) -> dict:
     """Ventas (cantidad neta y monto neto) de UN cliente, agrupadas por línea
     de artículo y por año actual/año anterior, con desglose mensual — para
     /ventas/vendedor. Ver docstring del módulo (arriba) para la fuente y el
-    criterio de "venta neta"."""
+    criterio de "venta neta".
+
+    `vendedor` (pedido de Pablo 2026-08-14, acceso por vendedor): si se
+    pasa, se resuelve el "vendedor principal" de ESTE cliente (código de
+    vendedor más frecuente en TODO su historial de comprobantes — ver nota
+    PROVISORIO en clientes.py sobre esta derivación) y, si no coincide, se
+    devuelve `_bloqueado(...)` SIN calcular ni filtrar/agrupar nada más —
+    nunca se arma `lineas`/`totales` reales para un cliente ajeno. `None`
+    (admin) no filtra nada, mismo comportamiento que antes."""
     hoy = date.today()
     anio_actual = hoy.year
     anio_anterior = anio_actual - 1
@@ -195,13 +248,42 @@ def fetch_ventas_por_linea(cod_cliente: int) -> dict:
         cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cur.execute(SQL_VENTAS_CLIENTE, (int(cod_cliente),))
         cols = [c[0] for c in cur.description]
+        filas = cur.fetchall()
+
+        # Vendedor "principal" — sobre TODO el historial devuelto (sin
+        # filtro de año, señal más estable), excluyendo comprobantes evitados
+        # de informes (mismo criterio que el resto del filtrado). Se calcula
+        # SIEMPRE (aunque `vendedor` sea None) porque es barato — ya tenemos
+        # las filas en memoria — y así se puede exponer en la respuesta si
+        # hace falta más adelante.
+        if vendedor is not None:
+            vendedor_conteo: dict[int, int] = {}
+            for row in filas:
+                d = dict(zip(cols, row))
+                try:
+                    evita = int(d.get("Evita")) if d.get("Evita") is not None else 0
+                except (TypeError, ValueError):
+                    evita = 0
+                if evita == 1:
+                    continue
+                cod_vend = d.get("CodVendedor")
+                if cod_vend is None:
+                    continue
+                try:
+                    cv = int(cod_vend)
+                except (TypeError, ValueError):
+                    continue
+                vendedor_conteo[cv] = vendedor_conteo.get(cv, 0) + 1
+            principal = max(vendedor_conteo.items(), key=lambda kv: kv[1])[0] if vendedor_conteo else None
+            if principal != int(vendedor):
+                return _bloqueado(cod_cliente, anio_anterior, anio_actual)
 
         lineas: dict[str, dict] = {}
         tot_anterior = _anio_vacio()
         tot_actual = _anio_vacio()
         tiene_datos = False
 
-        for row in cur.fetchall():
+        for row in filas:
             d = dict(zip(cols, row))
             try:
                 evita = int(d.get("Evita")) if d.get("Evita") is not None else 0
@@ -263,6 +345,7 @@ def fetch_ventas_por_linea(cod_cliente: int) -> dict:
             "anioAnterior": anio_anterior,
             "anioActual": anio_actual,
             "tieneDatos": tiene_datos,
+            "permitido": True,
             "lineas": lineas_out,
             "totales": {
                 "anioAnterior": _round_anio(tot_anterior),
