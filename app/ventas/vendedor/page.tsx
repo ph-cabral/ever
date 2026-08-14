@@ -11,9 +11,9 @@ import { InicioButton } from "@/components/ui/InicioButton";
 // artículo de UN cliente, con año actual y año anterior lado a lado.
 //
 //   · Filtro arriba: búsqueda de cliente por código O por nombre (substring),
-//     autocomplete contra /api/ventas/vendedor/clientes. Elegir un cliente de
-//     la lista y presionar "Filtrar" (o Enter) — la tabla NO se carga sola,
-//     solo al presionar el botón (mismo criterio que /compras/consumo).
+//     autocomplete contra /api/ventas/vendedor/clientes. Al elegir un cliente
+//     de la lista la tabla se carga sola (pedido de Pablo 2026-08-14: se
+//     sacó el botón "Filtrar", antes había que elegir y después presionarlo).
 //   · Switch "Unidades / Pesos": cambia qué valor muestra la tabla (cantidad
 //     neta vendida vs. monto neto vendido) — mismos datos, otra columna.
 //   · Tabla: primera columna = línea de artículo (StkFer_ArtParamet.Nivel1),
@@ -124,19 +124,44 @@ export default function VentasVendedorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qCliente]);
 
-  const elegirCliente = useCallback((c: Cliente) => {
-    setClienteSel(c);
-    setQCliente(labelCliente(c));
-    setSugerencias([]);
-    setMostrarSug(false);
-  }, []);
-
-  // ── Tabla: se carga SOLO al presionar "Filtrar" ────────────────────────
+  // ── Tabla: se carga automáticamente al elegir un cliente de la lista ───
   const [data, setData] = useState<RespVentasVendedor | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [modo, setModo] = useState<Modo>("unidades");
   const [desglosado, setDesglosado] = useState(false);
+
+  // Recibe el código directamente (en vez de leer clienteSel) porque
+  // setClienteSel es asíncrono — si dependiéramos del estado, elegirCliente
+  // dispararía la consulta con el valor viejo (null) en el mismo render.
+  const fetchVentas = useCallback(async (codigo: number) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/ventas/vendedor?cliente=${codigo}`, {
+        cache: "no-store",
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setData(j);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al cargar");
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const elegirCliente = useCallback(
+    (c: Cliente) => {
+      setClienteSel(c);
+      setQCliente(labelCliente(c));
+      setSugerencias([]);
+      setMostrarSug(false);
+      fetchVentas(c.numero);
+    },
+    [fetchVentas],
+  );
 
   // ── Período: botón dividido "YTD" / "Seleccionar meses" (pedido de Pablo
   // 2026-08-14). No pega al back — la respuesta ya trae el desglose mensual
@@ -158,24 +183,10 @@ export default function VentasVendedorPage() {
     });
   }, []);
 
-  const handleFiltrar = useCallback(async () => {
+  const handleFiltrar = useCallback(() => {
     if (!clienteSel) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/ventas/vendedor?cliente=${clienteSel.numero}`, {
-        cache: "no-store",
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-      setData(j);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error al cargar");
-      setData(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [clienteSel]);
+    fetchVentas(clienteSel.numero);
+  }, [clienteSel, fetchVentas]);
 
   // Meses que entran en el "Total" mostrado, según el modo de período.
   const mesesActivos =
@@ -248,7 +259,7 @@ export default function VentasVendedorPage() {
             <Users size={20} /> Ventas por cliente y línea
           </h1>
           <p className="text-zinc-500 text-sm mt-1">
-            Buscá un cliente por código o nombre y presioná Filtrar. La tabla agrupa por línea
+            Buscá un cliente por código o nombre y elegilo de la lista. La tabla agrupa por línea
             de artículo, comparando el año en curso contra el anterior.
           </p>
         </div>
@@ -308,17 +319,6 @@ export default function VentasVendedorPage() {
               )}
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={handleFiltrar}
-            disabled={loading || !clienteSel}
-            title={clienteSel ? "Cargar la tabla de este cliente" : "Elegí un cliente de la lista primero"}
-            className="btn-anim flex items-center gap-2 bg-yellow-400 text-black font-semibold text-sm rounded-md px-4 py-2 disabled:opacity-40"
-          >
-            {loading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
-            Filtrar
-          </button>
 
           {/* Switch unidades / pesos */}
           <div className="flex flex-col gap-1.5">
@@ -429,7 +429,7 @@ export default function VentasVendedorPage() {
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
             <Search size={40} className="text-zinc-700" />
             <p className="text-zinc-500 text-sm">
-              Buscá un cliente por código o nombre, elegilo de la lista y presioná Filtrar.
+              Buscá un cliente por código o nombre y elegilo de la lista.
             </p>
           </div>
         )}
