@@ -19,7 +19,7 @@ Tablas (EVERWEAR, confirmadas por deposito.py/main.py):
 from datetime import datetime, date
 from decimal import Decimal
 from db import get_connection
-from clientes import fetch_cliente
+from clientes import fetch_cliente, fetch_vendedor_fijo_cliente
 
 BASE_DATE = date(1800, 12, 28)  # Magnus guarda fechas como días desde esta base
 
@@ -152,7 +152,6 @@ SELECT
     LTRIM(RTRIM(ap.Nivel1)) AS Linea,
     dbo.fecha_cla2sql(c.FecMovim) AS Fecha,
     cc.EvitaInformesYListados AS Evita,
-    c.vendedor AS CodVendedor,
     CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END AS CantidadNeta,
     CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END AS MontoNeto
 FROM Ven_CompCabecera c
@@ -232,15 +231,23 @@ def fetch_ventas_por_linea(cod_cliente: int, vendedor: int | None = None) -> dic
     criterio de "venta neta".
 
     `vendedor` (pedido de Pablo 2026-08-14, acceso por vendedor): si se
-    pasa, se resuelve el "vendedor principal" de ESTE cliente (código de
-    vendedor más frecuente en TODO su historial de comprobantes — ver nota
-    PROVISORIO en clientes.py sobre esta derivación) y, si no coincide, se
-    devuelve `_bloqueado(...)` SIN calcular ni filtrar/agrupar nada más —
-    nunca se arma `lineas`/`totales` reales para un cliente ajeno. `None`
-    (admin) no filtra nada, mismo comportamiento que antes."""
+    pasa, se resuelve el "Vendedor por Defecto" FIJO de ESTE cliente (ver
+    clientes.fetch_vendedor_fijo_cliente — maestro Magnus, Clientes.
+    Clasif_VendZona → Vendedor_Zona → Ped_Usu_Arma, confirmado 2026-08-14;
+    reemplaza el criterio anterior de "vendedor más frecuente en el
+    historial", que podía no coincidir con el mismo filtro ya aplicado en
+    /clientes) y, si no coincide, se devuelve `_bloqueado(...)` SIN calcular
+    ni filtrar/agrupar nada más — nunca se arma `lineas`/`totales` reales
+    para un cliente ajeno. `None` (admin) no filtra nada, mismo
+    comportamiento que antes."""
     hoy = date.today()
     anio_actual = hoy.year
     anio_anterior = anio_actual - 1
+
+    if vendedor is not None:
+        principal = fetch_vendedor_fijo_cliente(cod_cliente)
+        if principal != int(vendedor):
+            return _bloqueado(cod_cliente, anio_anterior, anio_actual)
 
     conn = get_connection("EVERWEAR")
     try:
@@ -249,34 +256,6 @@ def fetch_ventas_por_linea(cod_cliente: int, vendedor: int | None = None) -> dic
         cur.execute(SQL_VENTAS_CLIENTE, (int(cod_cliente),))
         cols = [c[0] for c in cur.description]
         filas = cur.fetchall()
-
-        # Vendedor "principal" — sobre TODO el historial devuelto (sin
-        # filtro de año, señal más estable), excluyendo comprobantes evitados
-        # de informes (mismo criterio que el resto del filtrado). Se calcula
-        # SIEMPRE (aunque `vendedor` sea None) porque es barato — ya tenemos
-        # las filas en memoria — y así se puede exponer en la respuesta si
-        # hace falta más adelante.
-        if vendedor is not None:
-            vendedor_conteo: dict[int, int] = {}
-            for row in filas:
-                d = dict(zip(cols, row))
-                try:
-                    evita = int(d.get("Evita")) if d.get("Evita") is not None else 0
-                except (TypeError, ValueError):
-                    evita = 0
-                if evita == 1:
-                    continue
-                cod_vend = d.get("CodVendedor")
-                if cod_vend is None:
-                    continue
-                try:
-                    cv = int(cod_vend)
-                except (TypeError, ValueError):
-                    continue
-                vendedor_conteo[cv] = vendedor_conteo.get(cv, 0) + 1
-            principal = max(vendedor_conteo.items(), key=lambda kv: kv[1])[0] if vendedor_conteo else None
-            if principal != int(vendedor):
-                return _bloqueado(cod_cliente, anio_anterior, anio_actual)
 
         lineas: dict[str, dict] = {}
         tot_anterior = _anio_vacio()
