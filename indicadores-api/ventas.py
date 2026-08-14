@@ -224,6 +224,133 @@ def _bloqueado(cod_cliente: int, anio_anterior: int, anio_actual: int) -> dict:
     }
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# Top clientes (cantidad/monto del año en curso) — /ventas/vendedor, debajo
+# de la tabla principal (pedido de Pablo 2026-08-14): "top 10 de los
+# clientes que más compraron", tomando SOLO los clientes que ya pasan el
+# mismo filtro de acceso por vendedor que usa el buscador de clientes
+# (fetch_clientes_search/SQL_CLIENTES_SEARCH_POR_VENDEDOR) — un no-admin
+# nunca ve en este ranking un cliente que no es suyo. Admin (`vendedor=None`)
+# ve el ranking de toda la empresa.
+#
+# A diferencia de fetch_ventas_por_linea (un solo cliente, se puede filtrar
+# por CodCliente = ? que es "columna simple" y filtra bien), acá hay muchos
+# clientes: se resuelve primero la LISTA de códigos permitidos (consulta
+# chica, contra el maestro Magnus.Clientes) y se filtra Ven_CompCabecera con
+# `CodCliente IN (...)` en chunks de 1000 (mismo patrón que
+# fetch_pedidos_mes) — sigue siendo "columna simple", filtra bien. La suma
+# por cliente/año se hace en SQL (GROUP BY), no se traen renglones sueltos a
+# Python, para que el caso admin (toda la empresa) no sea pesado. El año se
+# filtra en Python después de traer el agregado (mismo gotcha que en
+# fetch_ventas_por_linea: comparar fecha_cla2sql() contra un parámetro en el
+# WHERE no filtra bien con este driver — pero como acá ya viene agregado por
+# año, el volumen que se descarta en Python es chico).
+SQL_TOP_CLIENTES_CODIGOS_VENDEDOR = """
+SELECT c.CodCliente AS numero, LTRIM(RTRIM(c.Cliente_Nombre)) AS nombre
+FROM MAGNUS_SITD.dbo.Clientes c
+JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
+JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma pu  ON LTRIM(RTRIM(pu.Usu_Arma_Nombre)) = LTRIM(RTRIM(vz.Vendedor))
+WHERE pu.Usu_Arma_Codigo = ?
+"""
+
+SQL_TOP_CLIENTES_CODIGOS_TODOS = """
+SELECT c.CodCliente AS numero, LTRIM(RTRIM(c.Cliente_Nombre)) AS nombre
+FROM MAGNUS_SITD.dbo.Clientes c
+"""
+
+SQL_VENTAS_POR_CLIENTE_ANIO = """
+SELECT
+    c.CodCliente AS CodCliente,
+    YEAR(dbo.fecha_cla2sql(c.FecMovim)) AS Anio,
+    SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS CantidadNeta,
+    SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
+FROM Ven_CompCabecera c
+JOIN Ven_CompRenglon r ON r.NroMovVenta = c.NroMovVenta
+JOIN Ven_CodCom cc      ON c.CompCodigo = cc.CompCodigo
+WHERE cc.EvitaInformesYListados <> 1
+  AND c.CodCliente IN ({ph})
+GROUP BY c.CodCliente, YEAR(dbo.fecha_cla2sql(c.FecMovim))
+"""
+
+
+def fetch_top_clientes(vendedor: int | None = None, limit: int = 10) -> dict:
+    """Top clientes por cantidad y por monto (venta neta) del año en curso —
+    para el ranking debajo de la tabla de /ventas/vendedor (pedido de Pablo
+    2026-08-14). Devuelve DOS rankings ya armados (`porCantidad`,
+    `porMonto`) para que el front elija cuál mostrar según el switch
+    Unidades/Pesos, sin tener que reordenar en el cliente.
+
+    `vendedor`: mismo criterio de acceso que fetch_clientes_search — si se
+    pasa, el ranking sale SOLO de los clientes cuyo "Vendedor por Defecto"
+    fijo es ese código (ver clientes.SQL_VENDEDOR_FIJO_CLIENTE). `None`
+    (admin) no filtra, ranking de toda la empresa.
+
+    Solo año en curso (no hay comparación con el año anterior acá, a
+    diferencia de fetch_ventas_por_linea) y no respeta el selector de
+    período (YTD/meses) de la tabla principal — es un ranking anual simple."""
+    anio_actual = date.today().year
+
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        if vendedor is None:
+            cur.execute(SQL_TOP_CLIENTES_CODIGOS_TODOS)
+        else:
+            cur.execute(SQL_TOP_CLIENTES_CODIGOS_VENDEDOR, (int(vendedor),))
+        cols = [c[0] for c in cur.description]
+        nombres: dict[int, str | None] = {}
+        for row in cur.fetchall():
+            d = dict(zip(cols, row))
+            num = d.get("numero")
+            if num is None:
+                continue
+            nombre = d.get("nombre")
+            nombres[int(num)] = str(nombre).strip() if nombre else None
+
+        codigos = sorted(nombres.keys())
+        totales: dict[int, dict] = {}
+        CH = 1000
+        for i in range(0, len(codigos), CH):
+            chunk = codigos[i:i + CH]
+            ph = ",".join("?" for _ in chunk)
+            cur.execute(SQL_VENTAS_POR_CLIENTE_ANIO.format(ph=ph), chunk)
+            rcols = [c[0] for c in cur.description]
+            for row in cur.fetchall():
+                d = dict(zip(rcols, row))
+                if d.get("Anio") != anio_actual:
+                    continue
+                cod = int(d.get("CodCliente"))
+                cant = float(_safe(d.get("CantidadNeta")) or 0)
+                monto = float(_safe(d.get("MontoNeto")) or 0)
+                acc = totales.setdefault(cod, {"cantidad": 0.0, "monto": 0.0})
+                acc["cantidad"] += cant
+                acc["monto"] += monto
+
+        clientes = [
+            {
+                "numero": cod,
+                "nombre": nombres.get(cod),
+                "cantidad": round(vals["cantidad"], 2),
+                "monto": round(vals["monto"], 2),
+            }
+            for cod, vals in totales.items()
+            if vals["cantidad"] > 0 or vals["monto"] > 0
+        ]
+
+        limit_i = max(1, min(int(limit or 10), 50))
+        top_cantidad = sorted(clientes, key=lambda c: c["cantidad"], reverse=True)[:limit_i]
+        top_monto = sorted(clientes, key=lambda c: c["monto"], reverse=True)[:limit_i]
+
+        return {
+            "anioActual": anio_actual,
+            "porCantidad": top_cantidad,
+            "porMonto": top_monto,
+        }
+    finally:
+        conn.close()
+
+
 def fetch_ventas_por_linea(cod_cliente: int, vendedor: int | None = None) -> dict:
     """Ventas (cantidad neta y monto neto) de UN cliente, agrupadas por línea
     de artículo y por año actual/año anterior, con desglose mensual — para

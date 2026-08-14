@@ -21,7 +21,7 @@ from compras import (
     fetch_consumo_articulo, fetch_consumo_articulos, fetch_lineas,
 )
 from ingresos import fetch_remitos_ingreso
-from ventas import fetch_pedidos_mes, fetch_ventas_por_linea, fetch_vendedores
+from ventas import fetch_pedidos_mes, fetch_ventas_por_linea, fetch_vendedores, fetch_top_clientes
 from finanza import (
     fetch_facturacion_dia,
     fetch_descubrir,
@@ -713,6 +713,21 @@ def ventas_vendedor(
     cliente no es de ese vendedor)."""
     try:
         return fetch_ventas_por_linea(cliente, vendedor=vendedor)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+
+@app.get("/ventas/vendedor/top-clientes")
+def ventas_vendedor_top_clientes(
+    vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
+    limit: int = Query(default=10, ge=1, le=50),
+):
+    """Top clientes por cantidad y por monto (venta neta) del año en curso —
+    para el ranking debajo de la tabla de /ventas/vendedor (pedido de Pablo
+    2026-08-14). Ver docstring de fetch_top_clientes (ventas.py) para el
+    criterio de acceso por vendedor (mismo que /clientes y /ventas/vendedor)."""
+    try:
+        return fetch_top_clientes(vendedor=vendedor, limit=limit)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
