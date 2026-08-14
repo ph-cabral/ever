@@ -21,7 +21,7 @@ from compras import (
     fetch_consumo_articulo, fetch_consumo_articulos, fetch_lineas,
 )
 from ingresos import fetch_remitos_ingreso
-from ventas import fetch_pedidos_mes
+from ventas import fetch_pedidos_mes, fetch_ventas_por_linea
 from finanza import (
     fetch_facturacion_dia,
     fetch_descubrir,
@@ -31,7 +31,7 @@ from finanza import (
     insert_ajuste_manual,
     fetch_ajuste_manual_list,
 )
-from clientes import fetch_cliente
+from clientes import fetch_cliente, fetch_clientes_search
 from mesa_control import (
     fetch_mesa_control, fetch_mesa_control_diag,
     fetch_mesa_control_sp_definicion, fetch_mesa_control_tablas_diag,
@@ -681,6 +681,29 @@ def clientes_get(numero: int):
     if not cli:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     return cli
+
+
+@app.get("/clientes")
+def clientes_buscar(q: str = Query(..., min_length=1)):
+    """Búsqueda de clientes por código o nombre (substring) — para el filtro
+    de /ventas/vendedor (pedido de Pablo 2026-08-14). Solo lectura, Magnus."""
+    try:
+        return {"clientes": fetch_clientes_search(q)}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+
+# ── Ventas por línea de un cliente — /ventas/vendedor ──────────────────────
+@app.get("/ventas/vendedor")
+def ventas_vendedor(cliente: int = Query(..., description="CodCliente (Magnus)")):
+    """Ventas (cantidad y monto, netas de nota de crédito) de un cliente,
+    agrupadas por línea de artículo y por año actual/anterior, con desglose
+    mensual — para /ventas/vendedor (pedido de Pablo 2026-08-14). Ver
+    docstring de fetch_ventas_por_linea (ventas.py) para la fuente."""
+    try:
+        return fetch_ventas_por_linea(cliente)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
 @app.get("/indicadores/tiempos")
 def get_tiempos(meses: int = Query(default=7, ge=1, le=12)):

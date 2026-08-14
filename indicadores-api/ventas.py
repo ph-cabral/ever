@@ -19,6 +19,7 @@ Tablas (EVERWEAR, confirmadas por deposito.py/main.py):
 from datetime import datetime, date
 from decimal import Decimal
 from db import get_connection
+from clientes import fetch_cliente
 
 BASE_DATE = date(1800, 12, 28)  # Magnus guarda fechas como días desde esta base
 
@@ -113,6 +114,160 @@ def fetch_pedidos_mes(desde: str, hasta: str) -> dict:
             "pedidos": len(pedidos_lista),
             "totalUnidades": round(total_unidades, 2),
             "totalImporte": round(total_importe, 2),
+        }
+    finally:
+        conn.close()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Ventas por línea de un cliente — /ventas/vendedor (pedido de Pablo
+# 2026-08-14): vista con filtro de cliente (código/nombre), tabla líneas x
+# año actual/anterior (con desglose mensual opcional) y switch
+# unidades/pesos.
+#
+# Fuente y criterio de "venta neta" — MISMOS que ya se verificaron a mano
+# contra el pivot Excel real (ver HANDOFF_extracciones_sql.md,
+# extraccion_ventas_todos_C00.py, ver_sp_ventas_hechos.py → SP
+# _VEN_01_REAL_Ventas_Hechos): Ven_CompCabecera + Ven_CompRenglon
+# (comprobantes REALES, no pedidos), cantidad/monto NETOS de nota de crédito
+# según Ven_CodCom.DebitoCredito (1=Débito suma, 2=Crédito resta), filtro
+# cc.EvitaInformesYListados <> 1, mes = FecMovim del COMPROBANTE vía
+# dbo.fecha_cla2sql() (no FechaPedido del pedido — ver nota en el HANDOFF de
+# por qué esto importa: un pedido de un mes facturado al siguiente cae en el
+# mes de la factura).
+#
+# Línea = StkFer_ArtParamet.Nivel1 (mismo campo que ya usa /compras/consumo y
+# /deposito/faltantes), vía StkFer_Articulos.ArticuloPatron.
+#
+# Gotcha fecha (ver HANDOFF): NO se filtra por fecha en el SQL (comparar una
+# fecha calculada con dbo.fecha_cla2sql() contra un parámetro de fecha no
+# filtra bien con el driver viejo, se pierden filas sin error). Acá se filtra
+# por CodCliente en el WHERE (columna simple, sí filtra bien) — se trae TODO
+# el historial de ESE cliente y se agrupa por año/mes en Python.
+MESES_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+SIN_LINEA = "(Sin línea)"
+
+SQL_VENTAS_CLIENTE = """
+SELECT
+    LTRIM(RTRIM(ap.Nivel1)) AS Linea,
+    dbo.fecha_cla2sql(c.FecMovim) AS Fecha,
+    cc.EvitaInformesYListados AS Evita,
+    CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END AS CantidadNeta,
+    CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END AS MontoNeto
+FROM Ven_CompCabecera c
+JOIN Ven_CompRenglon r ON r.NroMovVenta = c.NroMovVenta
+JOIN Ven_CodCom cc      ON c.CompCodigo = cc.CompCodigo
+LEFT JOIN StkFer_Articulos  s  ON s.CodArticulo     = r.CodArticu
+LEFT JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
+WHERE c.CodCliente = ?
+"""
+
+
+def _anio_vacio() -> dict:
+    return {
+        "cantidad": 0.0,
+        "monto": 0.0,
+        "meses": [{"mes": m, "label": MESES_ES[m - 1], "cantidad": 0.0, "monto": 0.0} for m in range(1, 13)],
+    }
+
+
+def _round_anio(a: dict) -> dict:
+    a["cantidad"] = round(a["cantidad"], 2)
+    a["monto"] = round(a["monto"], 2)
+    for m in a["meses"]:
+        m["cantidad"] = round(m["cantidad"], 2)
+        m["monto"] = round(m["monto"], 2)
+    return a
+
+
+def fetch_ventas_por_linea(cod_cliente: int) -> dict:
+    """Ventas (cantidad neta y monto neto) de UN cliente, agrupadas por línea
+    de artículo y por año actual/año anterior, con desglose mensual — para
+    /ventas/vendedor. Ver docstring del módulo (arriba) para la fuente y el
+    criterio de "venta neta"."""
+    hoy = date.today()
+    anio_actual = hoy.year
+    anio_anterior = anio_actual - 1
+
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_VENTAS_CLIENTE, (int(cod_cliente),))
+        cols = [c[0] for c in cur.description]
+
+        lineas: dict[str, dict] = {}
+        tot_anterior = _anio_vacio()
+        tot_actual = _anio_vacio()
+        tiene_datos = False
+
+        for row in cur.fetchall():
+            d = dict(zip(cols, row))
+            try:
+                evita = int(d.get("Evita")) if d.get("Evita") is not None else 0
+            except (TypeError, ValueError):
+                evita = 0
+            if evita == 1:
+                continue
+            fecha = d.get("Fecha")
+            if fecha is None:
+                continue
+            anio = fecha.year
+            if anio not in (anio_actual, anio_anterior):
+                continue
+            mes = fecha.month
+            linea = (str(d.get("Linea") or "")).strip() or SIN_LINEA
+            cant = float(_safe(d.get("CantidadNeta")) or 0)
+            monto = float(_safe(d.get("MontoNeto")) or 0)
+            tiene_datos = True
+
+            bucket = lineas.get(linea)
+            if bucket is None:
+                bucket = {"linea": linea, "anioAnterior": _anio_vacio(), "anioActual": _anio_vacio()}
+                lineas[linea] = bucket
+
+            destino = bucket["anioActual"] if anio == anio_actual else bucket["anioAnterior"]
+            destino["cantidad"] += cant
+            destino["monto"] += monto
+            destino["meses"][mes - 1]["cantidad"] += cant
+            destino["meses"][mes - 1]["monto"] += monto
+
+            tot_destino = tot_actual if anio == anio_actual else tot_anterior
+            tot_destino["cantidad"] += cant
+            tot_destino["monto"] += monto
+            tot_destino["meses"][mes - 1]["cantidad"] += cant
+            tot_destino["meses"][mes - 1]["monto"] += monto
+
+        lineas_out = []
+        for b in lineas.values():
+            b["anioAnterior"] = _round_anio(b["anioAnterior"])
+            b["anioActual"] = _round_anio(b["anioActual"])
+            lineas_out.append(b)
+        # Orden por peso (cantidad total de las 2 años) — línea más vendida
+        # primero, igual criterio que /compras/consumo (totalVendido desc).
+        lineas_out.sort(
+            key=lambda b: b["anioAnterior"]["cantidad"] + b["anioActual"]["cantidad"],
+            reverse=True,
+        )
+
+        cliente_nombre = None
+        try:
+            cli = fetch_cliente(cod_cliente)
+            if cli:
+                cliente_nombre = cli.get("nombre")
+        except Exception:
+            cliente_nombre = None
+
+        return {
+            "cliente": {"codigo": int(cod_cliente), "nombre": cliente_nombre},
+            "anioAnterior": anio_anterior,
+            "anioActual": anio_actual,
+            "tieneDatos": tiene_datos,
+            "lineas": lineas_out,
+            "totales": {
+                "anioAnterior": _round_anio(tot_anterior),
+                "anioActual": _round_anio(tot_actual),
+            },
         }
     finally:
         conn.close()

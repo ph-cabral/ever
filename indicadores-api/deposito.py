@@ -1408,7 +1408,8 @@ LEFT JOIN Personal P_Repositor ON OT.OTUsuarioGUID_Repositor = P_Repositor.Perso
 WHERE Codot.CodotProcesoNegocio = 4                    -- Picking
   AND OT.OTEstado = 2                                  -- Cumplido
   AND i.OTItemTipo = 1                                 -- Recolectar
-  AND i.OTItemCantPedida <> i.OTItemCantCumplida        -- solo diferencia
+  AND i.OTItemCantPedida > i.OTItemCantCumplida         -- solo faltante real (pedida > cumplida, excluye negativas de sobreenvíos previos)
+  AND LTRIM(RTRIM(i.OTItemUbicacionCodigo)) <> 'PLAYA_PEDIDOS'
   AND OT.OTFechaHoraEjecucion >= ?
   AND OT.OTFechaHoraEjecucion <= ?
 ORDER BY OT.OTId DESC, i.OTItemNroRenglon
@@ -1437,7 +1438,10 @@ def _rango_ot_diferencias(desde=None, hasta=None):
 
 
 def fetch_ot_diferencias(desde=None, hasta=None):
-    """Renglones de OT Picking Cumplidas con CantPedida != CantCumplida.
+    """Renglones de OT Picking Cumplidas con CantPedida > CantCumplida (faltante
+    real; se excluyen las diferencias negativas, que corresponden a sobreenvíos
+    de un faltante anterior, no a faltante actual). Excluye Ubicacion
+    PLAYA_PEDIDOS.
     Sin params → último día Cumplido antes de hoy. Con desde/hasta → ese rango
     ('hasta' hoy/futuro se resuelve al último día Cumplido < hoy).
     Excluye pedidos descartados/anulados (Magnus)."""
