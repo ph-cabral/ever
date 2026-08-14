@@ -7,15 +7,27 @@ const API_URL =
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Proxy → FastAPI indicadores-api: top clientes por cantidad/monto del año
-// en curso, para el ranking debajo de la tabla de /ventas/vendedor (pedido
-// de Pablo 2026-08-14). Ver fetch_top_clientes en ventas.py.
+// Proxy → FastAPI indicadores-api: top clientes por cantidad/monto en un
+// rango de meses (default: últimos 6), para el ranking debajo de la tabla
+// de /ventas/vendedor (pedido de Pablo 2026-08-14). Ver fetch_top_clientes
+// en ventas.py. `desde`/`hasta` ("YYYY-MM") pasan directo del front — el
+// rango en sí (y su default de 6 meses) lo resuelve el back, acá solo se
+// reenvían si vienen.
 //
 // Acceso por vendedor: mismo criterio que /api/ventas/vendedor y
 // /api/ventas/vendedor/clientes — se resuelve server-side si quien pide es
 // admin (ranking de toda la empresa) o no-admin (solo su vendedorCodigo,
 // ranking dentro de su propio portfolio de clientes).
+function mesActual(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 export async function GET(req: NextRequest) {
+  const sp = req.nextUrl.searchParams;
+  const desde = sp.get("desde")?.trim() || undefined;
+  const hasta = sp.get("hasta")?.trim() || undefined;
+
   const acceso = await resolverAccesoVendedor();
   if (!acceso.ok) {
     return NextResponse.json({ error: acceso.error }, { status: acceso.status });
@@ -24,12 +36,14 @@ export async function GET(req: NextRequest) {
     // Mismo tratamiento que el resto de las rutas de /ventas/vendedor: sin
     // vendedor asignado todavía = cero clientes visibles, no "sin
     // restricción".
-    return NextResponse.json({ anioActual: new Date().getFullYear(), porCantidad: [], porMonto: [] });
+    return NextResponse.json({ desde: desde ?? mesActual(), hasta: hasta ?? mesActual(), porCantidad: [], porMonto: [] });
   }
 
   try {
     const qs = new URLSearchParams();
     if (!acceso.isAdmin) qs.set("vendedor", String(acceso.vendedorCodigo));
+    if (desde) qs.set("desde", desde);
+    if (hasta) qs.set("hasta", hasta);
     const res = await fetch(`${API_URL}/ventas/vendedor/top-clientes?${qs.toString()}`, {
       cache: "no-store",
       signal: AbortSignal.timeout(55000),

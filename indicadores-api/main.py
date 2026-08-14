@@ -721,13 +721,17 @@ def ventas_vendedor(
 def ventas_vendedor_top_clientes(
     vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
     limit: int = Query(default=10, ge=1, le=50),
+    desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: 5 meses antes de `hasta`)"),
+    hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes actual)"),
 ):
-    """Top clientes por cantidad y por monto (venta neta) del año en curso —
-    para el ranking debajo de la tabla de /ventas/vendedor (pedido de Pablo
-    2026-08-14). Ver docstring de fetch_top_clientes (ventas.py) para el
-    criterio de acceso por vendedor (mismo que /clientes y /ventas/vendedor)."""
+    """Top clientes por cantidad y por monto (venta neta) en un rango de
+    meses — para el ranking debajo de la tabla de /ventas/vendedor (pedido
+    de Pablo 2026-08-14). Por defecto, últimos 6 meses. Ver docstring de
+    fetch_top_clientes (ventas.py) para el criterio de acceso por vendedor
+    (mismo que /clientes y /ventas/vendedor) y para el formato de
+    `desde`/`hasta`."""
     try:
-        return fetch_top_clientes(vendedor=vendedor, limit=limit)
+        return fetch_top_clientes(vendedor=vendedor, limit=limit, desde=desde, hasta=hasta)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

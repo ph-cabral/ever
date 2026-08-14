@@ -18,6 +18,8 @@ Tablas (EVERWEAR, confirmadas por deposito.py/main.py):
 """
 from datetime import datetime, date
 from decimal import Decimal
+import re
+import time
 from db import get_connection
 from clientes import fetch_cliente, fetch_vendedor_fijo_cliente
 
@@ -225,112 +227,199 @@ def _bloqueado(cod_cliente: int, anio_anterior: int, anio_actual: int) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Top clientes (cantidad/monto del año en curso) — /ventas/vendedor, debajo
-# de la tabla principal (pedido de Pablo 2026-08-14): "top 10 de los
+# Top clientes (cantidad/monto en un rango de meses) — /ventas/vendedor,
+# debajo de la tabla principal (pedido de Pablo 2026-08-14): "top 10 de los
 # clientes que más compraron", tomando SOLO los clientes que ya pasan el
 # mismo filtro de acceso por vendedor que usa el buscador de clientes
 # (fetch_clientes_search/SQL_CLIENTES_SEARCH_POR_VENDEDOR) — un no-admin
 # nunca ve en este ranking un cliente que no es suyo. Admin (`vendedor=None`)
 # ve el ranking de toda la empresa.
 #
-# A diferencia de fetch_ventas_por_linea (un solo cliente, se puede filtrar
-# por CodCliente = ? que es "columna simple" y filtra bien), acá hay muchos
-# clientes: se resuelve primero la LISTA de códigos permitidos (consulta
-# chica, contra el maestro Magnus.Clientes) y se filtra Ven_CompCabecera con
-# `CodCliente IN (...)` en chunks de 1000 (mismo patrón que
-# fetch_pedidos_mes) — sigue siendo "columna simple", filtra bien. La suma
-# por cliente/año se hace en SQL (GROUP BY), no se traen renglones sueltos a
-# Python, para que el caso admin (toda la empresa) no sea pesado. El año se
-# filtra en Python después de traer el agregado (mismo gotcha que en
-# fetch_ventas_por_linea: comparar fecha_cla2sql() contra un parámetro en el
-# WHERE no filtra bien con este driver — pero como acá ya viene agregado por
-# año, el volumen que se descarta en Python es chico).
-SQL_TOP_CLIENTES_CODIGOS_VENDEDOR = """
-SELECT c.CodCliente AS numero, LTRIM(RTRIM(c.Cliente_Nombre)) AS nombre
+# PERF (pedido de Pablo 2026-08-14, "el top 10 tarda mucho"): la primera
+# versión resolvía esto en DOS pasos — 1) traer TODOS los códigos de
+# cliente del maestro Magnus, 2) volver a pegarle a
+# Ven_CompCabecera/Renglon en chunks de 1000 códigos (`CodCliente IN
+# (...)`) — o sea, tantos round-trips como chunks, cada uno re-armando el
+# JOIN completo. Ahora es UNA sola consulta: se hace el JOIN
+# Clientes→Vendedor_Zona→Ped_Usu_Arma→Ven_CompCabecera→Ven_CompRenglon→
+# Ven_CodCom de una, dejando que el motor arme un solo plan (en vez de
+# N ejecuciones separadas) — el filtro de vendedor (cuando aplica) entra
+# en el WHERE de esta misma consulta, no en un round-trip aparte. La suma
+# se sigue haciendo en SQL (GROUP BY por cliente/año/MES ahora, antes solo
+# año), no se traen renglones sueltos a Python.
+#
+# RANGO DE MESES (pedido de Pablo 2026-08-14, mismo día): por defecto trae
+# los últimos 6 meses (mes actual + 5 anteriores), y se puede pedir
+# cualquier otro rango con `desde`/`hasta` ("YYYY-MM"). El filtro de rango
+# se aplica en PYTHON después de traer el agregado por (cliente, año, mes)
+# — A PROPÓSITO no se agregó `WHERE` filtrando por fecha en SQL: el mismo
+# gotcha que ya tiene fetch_ventas_por_linea (comparar
+# dbo.fecha_cla2sql(...) contra un parámetro de fecha no filtra bien con
+# este driver viejo — se pierden filas SIN error) hace arriesgado meter
+# un filtro de fecha en el WHERE sin poder probarlo primero contra Magnus
+# real. Como el agregado ya viene resumido a nivel (cliente, año, mes) —
+# no a nivel renglón — lo que se descarta en Python después es chico, así
+# que el costo de no filtrar en SQL es aceptable. Si en el futuro hace
+# falta más velocidad, ahí sí vale la pena probar con cuidado un filtro
+# `WHERE YEAR(...)=? AND MONTH(...) IN (...)` contra la base real (no
+# contra un `BETWEEN` de fechas, que es justo el patrón que falla).
+#
+# Además se cachea el resultado en memoria por `_TOP_CLIENTES_TTL_SEG`
+# (el front pide esto solo en /ventas/vendedor apenas se monta la
+# página o cambia el rango elegido, no hace falta que sea al segundo).
+# Cache simple de proceso (uvicorn corre con 1 worker, ver main.py) — si
+# el día de mañana hay más workers, cada uno cachea por su lado, lo cual
+# sigue siendo correcto, solo menos efectivo.
+_TOP_CLIENTES_CACHE: dict[tuple, tuple[float, dict]] = {}
+_TOP_CLIENTES_TTL_SEG = 15 * 60  # 15 minutos
+
+_YM_RE = re.compile(r"^(\d{4})-(\d{1,2})$")
+
+
+def _parse_ym(s: str) -> tuple[int, int]:
+    """'YYYY-MM' -> (año, mes). ValueError si no matchea o el mes no es
+    1..12 — se propaga tal cual (el caller/ruta HTTP lo envuelve)."""
+    m = _YM_RE.match((s or "").strip())
+    if not m:
+        raise ValueError(f"Formato de mes inválido: {s!r} (esperado YYYY-MM)")
+    anio, mes = int(m.group(1)), int(m.group(2))
+    if not (1 <= mes <= 12):
+        raise ValueError(f"Mes inválido: {s!r}")
+    return anio, mes
+
+
+def _mes_atras(ym: tuple[int, int], n: int) -> tuple[int, int]:
+    """(año, mes) que queda `n` meses antes de `ym`."""
+    anio, mes = ym
+    idx = anio * 12 + (mes - 1) - n
+    return idx // 12, idx % 12 + 1
+
+
+def _rango_meses(desde: tuple[int, int], hasta: tuple[int, int]) -> set[tuple[int, int]]:
+    """Todos los (año, mes) entre desde y hasta, inclusive — se banca que
+    vengan invertidos (los reordena)."""
+    a, b = (desde, hasta) if desde <= hasta else (hasta, desde)
+    out: set[tuple[int, int]] = set()
+    anio, mes = a
+    while (anio, mes) <= b:
+        out.add((anio, mes))
+        mes += 1
+        if mes > 12:
+            mes = 1
+            anio += 1
+    return out
+
+
+SQL_TOP_CLIENTES_VENDEDOR = """
+SELECT
+    c.CodCliente AS CodCliente,
+    LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
+    YEAR(dbo.fecha_cla2sql(vc.FecMovim)) AS Anio,
+    MONTH(dbo.fecha_cla2sql(vc.FecMovim)) AS Mes,
+    SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS CantidadNeta,
+    SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
 FROM MAGNUS_SITD.dbo.Clientes c
 JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
 JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma pu  ON LTRIM(RTRIM(pu.Usu_Arma_Nombre)) = LTRIM(RTRIM(vz.Vendedor))
+JOIN Ven_CompCabecera vc ON vc.CodCliente = c.CodCliente
+JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
+JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
 WHERE pu.Usu_Arma_Codigo = ?
+  AND cc.EvitaInformesYListados <> 1
+GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre)), YEAR(dbo.fecha_cla2sql(vc.FecMovim)), MONTH(dbo.fecha_cla2sql(vc.FecMovim))
 """
 
-SQL_TOP_CLIENTES_CODIGOS_TODOS = """
-SELECT c.CodCliente AS numero, LTRIM(RTRIM(c.Cliente_Nombre)) AS nombre
-FROM MAGNUS_SITD.dbo.Clientes c
-"""
-
-SQL_VENTAS_POR_CLIENTE_ANIO = """
+SQL_TOP_CLIENTES_TODOS = """
 SELECT
     c.CodCliente AS CodCliente,
-    YEAR(dbo.fecha_cla2sql(c.FecMovim)) AS Anio,
+    LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
+    YEAR(dbo.fecha_cla2sql(vc.FecMovim)) AS Anio,
+    MONTH(dbo.fecha_cla2sql(vc.FecMovim)) AS Mes,
     SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS CantidadNeta,
     SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
-FROM Ven_CompCabecera c
-JOIN Ven_CompRenglon r ON r.NroMovVenta = c.NroMovVenta
-JOIN Ven_CodCom cc      ON c.CompCodigo = cc.CompCodigo
+FROM MAGNUS_SITD.dbo.Clientes c
+JOIN Ven_CompCabecera vc ON vc.CodCliente = c.CodCliente
+JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
+JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
 WHERE cc.EvitaInformesYListados <> 1
-  AND c.CodCliente IN ({ph})
-GROUP BY c.CodCliente, YEAR(dbo.fecha_cla2sql(c.FecMovim))
+GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre)), YEAR(dbo.fecha_cla2sql(vc.FecMovim)), MONTH(dbo.fecha_cla2sql(vc.FecMovim))
 """
 
 
-def fetch_top_clientes(vendedor: int | None = None, limit: int = 10) -> dict:
-    """Top clientes por cantidad y por monto (venta neta) del año en curso —
-    para el ranking debajo de la tabla de /ventas/vendedor (pedido de Pablo
-    2026-08-14). Devuelve DOS rankings ya armados (`porCantidad`,
+def fetch_top_clientes(
+    vendedor: int | None = None,
+    limit: int = 10,
+    desde: str | None = None,
+    hasta: str | None = None,
+    forzar: bool = False,
+) -> dict:
+    """Top clientes por cantidad y por monto (venta neta) en un rango de
+    meses — para el ranking debajo de la tabla de /ventas/vendedor (pedido
+    de Pablo 2026-08-14). Devuelve DOS rankings ya armados (`porCantidad`,
     `porMonto`) para que el front elija cuál mostrar según el switch
     Unidades/Pesos, sin tener que reordenar en el cliente.
 
     `vendedor`: mismo criterio de acceso que fetch_clientes_search — si se
     pasa, el ranking sale SOLO de los clientes cuyo "Vendedor por Defecto"
-    fijo es ese código (ver clientes.SQL_VENDEDOR_FIJO_CLIENTE). `None`
-    (admin) no filtra, ranking de toda la empresa.
+    fijo es ese código (ver clientes.SQL_VENDEDOR_FIJO_CLIENTE, mismo JOIN
+    Clientes→Vendedor_Zona→Ped_Usu_Arma, ahora en la MISMA consulta — ver
+    nota de PERF arriba). `None` (admin) no filtra, ranking de toda la
+    empresa.
 
-    Solo año en curso (no hay comparación con el año anterior acá, a
-    diferencia de fetch_ventas_por_linea) y no respeta el selector de
-    período (YTD/meses) de la tabla principal — es un ranking anual simple."""
-    anio_actual = date.today().year
+    `desde`/`hasta` ("YYYY-MM"): rango de meses a incluir, AMBOS
+    inclusive. Default (pedido de Pablo 2026-08-14): últimos 6 meses —
+    `hasta` = mes actual, `desde` = 5 meses antes. No respeta el selector
+    de período (YTD/meses) de la tabla principal, es un filtro propio de
+    este ranking. Lanza `ValueError` si el formato no es "YYYY-MM".
+
+    `forzar=True` ignora el cache (por si hace falta refrescar a mano sin
+    esperar el TTL — no está expuesto todavía en la ruta HTTP, pensado para
+    debug)."""
+    hoy_ym = (date.today().year, date.today().month)
+    hasta_ym = _parse_ym(hasta) if hasta else hoy_ym
+    desde_ym = _parse_ym(desde) if desde else _mes_atras(hasta_ym, 5)
+    periodo = _rango_meses(desde_ym, hasta_ym)
+    # Por si vinieron invertidos: _rango_meses ya los reordena, pero lo que
+    # devolvemos como "desde"/"hasta" tiene que reflejar el orden real.
+    desde_ym, hasta_ym = min(periodo), max(periodo)
+
+    limit_i = max(1, min(int(limit or 10), 50))
+    cache_key = (vendedor, limit_i, desde_ym, hasta_ym)
+    ahora = time.monotonic()
+    if not forzar:
+        cacheado = _TOP_CLIENTES_CACHE.get(cache_key)
+        if cacheado is not None and (ahora - cacheado[0]) < _TOP_CLIENTES_TTL_SEG:
+            return cacheado[1]
 
     conn = get_connection("EVERWEAR")
     try:
         cur = conn.cursor()
         cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         if vendedor is None:
-            cur.execute(SQL_TOP_CLIENTES_CODIGOS_TODOS)
+            cur.execute(SQL_TOP_CLIENTES_TODOS)
         else:
-            cur.execute(SQL_TOP_CLIENTES_CODIGOS_VENDEDOR, (int(vendedor),))
+            cur.execute(SQL_TOP_CLIENTES_VENDEDOR, (int(vendedor),))
         cols = [c[0] for c in cur.description]
-        nombres: dict[int, str | None] = {}
+        totales: dict[int, dict] = {}
         for row in cur.fetchall():
             d = dict(zip(cols, row))
-            num = d.get("numero")
-            if num is None:
+            anio, mes = d.get("Anio"), d.get("Mes")
+            if anio is None or mes is None or (anio, mes) not in periodo:
                 continue
-            nombre = d.get("nombre")
-            nombres[int(num)] = str(nombre).strip() if nombre else None
-
-        codigos = sorted(nombres.keys())
-        totales: dict[int, dict] = {}
-        CH = 1000
-        for i in range(0, len(codigos), CH):
-            chunk = codigos[i:i + CH]
-            ph = ",".join("?" for _ in chunk)
-            cur.execute(SQL_VENTAS_POR_CLIENTE_ANIO.format(ph=ph), chunk)
-            rcols = [c[0] for c in cur.description]
-            for row in cur.fetchall():
-                d = dict(zip(rcols, row))
-                if d.get("Anio") != anio_actual:
-                    continue
-                cod = int(d.get("CodCliente"))
-                cant = float(_safe(d.get("CantidadNeta")) or 0)
-                monto = float(_safe(d.get("MontoNeto")) or 0)
-                acc = totales.setdefault(cod, {"cantidad": 0.0, "monto": 0.0})
-                acc["cantidad"] += cant
-                acc["monto"] += monto
+            cod = int(d.get("CodCliente"))
+            cant = float(_safe(d.get("CantidadNeta")) or 0)
+            monto = float(_safe(d.get("MontoNeto")) or 0)
+            acc = totales.setdefault(
+                cod,
+                {"nombre": (str(d.get("Nombre")).strip() if d.get("Nombre") else None), "cantidad": 0.0, "monto": 0.0},
+            )
+            acc["cantidad"] += cant
+            acc["monto"] += monto
 
         clientes = [
             {
                 "numero": cod,
-                "nombre": nombres.get(cod),
+                "nombre": vals["nombre"],
                 "cantidad": round(vals["cantidad"], 2),
                 "monto": round(vals["monto"], 2),
             }
@@ -338,15 +427,17 @@ def fetch_top_clientes(vendedor: int | None = None, limit: int = 10) -> dict:
             if vals["cantidad"] > 0 or vals["monto"] > 0
         ]
 
-        limit_i = max(1, min(int(limit or 10), 50))
         top_cantidad = sorted(clientes, key=lambda c: c["cantidad"], reverse=True)[:limit_i]
         top_monto = sorted(clientes, key=lambda c: c["monto"], reverse=True)[:limit_i]
 
-        return {
-            "anioActual": anio_actual,
+        resultado = {
+            "desde": f"{desde_ym[0]:04d}-{desde_ym[1]:02d}",
+            "hasta": f"{hasta_ym[0]:04d}-{hasta_ym[1]:02d}",
             "porCantidad": top_cantidad,
             "porMonto": top_monto,
         }
+        _TOP_CLIENTES_CACHE[cache_key] = (ahora, resultado)
+        return resultado
     finally:
         conn.close()
 

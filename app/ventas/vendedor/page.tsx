@@ -63,8 +63,10 @@ interface RespVentasVendedor {
 
 // Top 10 clientes que más compraron (pedido de Pablo 2026-08-14) — debajo
 // de la tabla principal, cambia entre cantidad/monto con el mismo switch
-// Unidades/Pesos de arriba. Ranking del año en curso, independiente del
-// cliente elegido en el buscador.
+// Unidades/Pesos de arriba. Ranking de un rango de meses propio (default
+// últimos 6, seleccionable — pedido de Pablo 2026-08-14, mismo día),
+// independiente del cliente elegido en el buscador y del período YTD/meses
+// de la tabla principal.
 interface TopCliente {
   numero: number;
   nombre: string | null;
@@ -73,10 +75,32 @@ interface TopCliente {
 }
 
 interface RespTopClientes {
-  anioActual: number;
+  desde: string; // "YYYY-MM"
+  hasta: string; // "YYYY-MM"
   porCantidad: TopCliente[];
   porMonto: TopCliente[];
 }
+
+// "YYYY-MM" de hoy y de `n` meses antes — para el default del rango (6
+// meses) y para acotar el <input type="month"> a fechas razonables.
+const ymHoy = (): string => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+const ymMesesAtras = (ym: string, n: number): string => {
+  const [a, m] = ym.split("-").map(Number);
+  const idx = a * 12 + (m - 1) - n;
+  const anio = Math.floor(idx / 12);
+  const mes = (idx % 12) + 1;
+  return `${anio}-${String(mes).padStart(2, "0")}`;
+};
+const MESES_CORTOS_ES = [
+  "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
+];
+const formatYm = (ym: string): string => {
+  const [a, m] = ym.split("-").map(Number);
+  return `${MESES_CORTOS_ES[m - 1] ?? ym} ${a}`;
+};
 
 type Modo = "unidades" | "pesos";
 type Periodo = "ytd" | "meses";
@@ -181,9 +205,12 @@ export default function VentasVendedorPage() {
   );
 
   // ── Top 10 clientes que más compraron (pedido de Pablo 2026-08-14) ─────
-  // Independiente del cliente buscado arriba — se carga sola al entrar a la
-  // página (ya viene filtrada por vendedor server-side, mismo criterio que
-  // el buscador de clientes) y no se vuelve a pedir al cambiar de cliente.
+  // Independiente del cliente buscado arriba y del período YTD/meses de la
+  // tabla principal — tiene su PROPIO rango de meses (pedido de Pablo
+  // 2026-08-14, mismo día: "que por defecto sean 6 meses para atrás y uno
+  // pueda seleccionar el rango"). Se recarga cada vez que cambia el rango.
+  const [topDesde, setTopDesde] = useState(() => ymMesesAtras(ymHoy(), 5));
+  const [topHasta, setTopHasta] = useState(() => ymHoy());
   const [topClientes, setTopClientes] = useState<RespTopClientes | null>(null);
   const [topLoading, setTopLoading] = useState(false);
   const [topError, setTopError] = useState<string | null>(null);
@@ -191,7 +218,8 @@ export default function VentasVendedorPage() {
   useEffect(() => {
     let cancelado = false;
     setTopLoading(true);
-    fetch("/api/ventas/vendedor/top-clientes", { cache: "no-store" })
+    const qs = new URLSearchParams({ desde: topDesde, hasta: topHasta });
+    fetch(`/api/ventas/vendedor/top-clientes?${qs.toString()}`, { cache: "no-store" })
       .then(async (res) => {
         const j = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
@@ -206,7 +234,7 @@ export default function VentasVendedorPage() {
     return () => {
       cancelado = true;
     };
-  }, []);
+  }, [topDesde, topHasta]);
 
   // ── Período: botón dividido "YTD" / "Seleccionar meses" (pedido de Pablo
   // 2026-08-14). No pega al back — la respuesta ya trae el desglose mensual
@@ -813,15 +841,55 @@ export default function VentasVendedorPage() {
         )}
 
         {/* Top 10 clientes que más compraron — cambia entre unidades/pesos
-            con el mismo switch de arriba */}
-        <div>
-          <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
-            <Trophy size={18} /> Top 10 clientes que más compraron
-          </h2>
-          <p className="text-zinc-500 text-sm mt-1">
-            Año {topClientes?.anioActual ?? new Date().getFullYear()} — según tu acceso (tu cartera
-            de clientes, o todos si sos admin).
-          </p>
+            con el mismo switch de arriba, y tiene su propio rango de meses
+            (pedido de Pablo 2026-08-14: default últimos 6, seleccionable) */}
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4">
+          <div className="flex flex-col gap-1.5">
+            <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
+              <Trophy size={18} /> Top 10 clientes que más compraron
+            </h2>
+            <p className="text-zinc-500 text-sm">
+              {topClientes ? `${formatYm(topClientes.desde)} – ${formatYm(topClientes.hasta)}` : "…"} — según tu
+              acceso (tu cartera de clientes, o todos si sos admin).
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="top-desde" className="text-xs text-zinc-400 uppercase tracking-wide">
+              Desde
+            </label>
+            <input
+              id="top-desde"
+              type="month"
+              value={topDesde}
+              max={topHasta}
+              onChange={(e) => e.target.value && setTopDesde(e.target.value)}
+              className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100 outline-none focus:border-yellow-400"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="top-hasta" className="text-xs text-zinc-400 uppercase tracking-wide">
+              Hasta
+            </label>
+            <input
+              id="top-hasta"
+              type="month"
+              value={topHasta}
+              min={topDesde}
+              max={ymHoy()}
+              onChange={(e) => e.target.value && setTopHasta(e.target.value)}
+              className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100 outline-none focus:border-yellow-400"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setTopHasta(ymHoy());
+              setTopDesde(ymMesesAtras(ymHoy(), 5));
+            }}
+            className="btn-anim border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
+          >
+            Últimos 6 meses
+          </button>
         </div>
 
         {topError && (
@@ -838,7 +906,7 @@ export default function VentasVendedorPage() {
                 return (
                   <div className="px-5 py-12 flex flex-col items-center gap-3 text-center">
                     <Trophy size={32} className="text-zinc-700" />
-                    <p className="text-zinc-500 text-sm">Todavía no hay ventas registradas este año.</p>
+                    <p className="text-zinc-500 text-sm">Sin ventas registradas en el rango elegido.</p>
                   </div>
                 );
               }
