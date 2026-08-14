@@ -969,8 +969,9 @@ class AsignarIn(BaseModel):
 
 @app.get("/deposito/pedido/{nro}")
 def deposito_pedido(nro: int):
-    """Lookup por Nro Pedido (NroMovVenta): Fecha + Tipo Pedido (Magnus) + OT +
-    N° Armador/Nombre (WMS). Solo lectura. 404 si no existe en Magnus."""
+    """Lookup por Nro Pedido (NroMovVenta): Fecha (registracion) + fechaArmado
+    (OT) + fechaControl (Mesa de Control) + Tipo Pedido (Magnus) + OT +
+    N Armador/Nombre (WMS). Solo lectura. 404 si no existe en Magnus."""
     try:
         info = fetch_pedido_lookup(nro)
     except Exception as e:

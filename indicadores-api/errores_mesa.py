@@ -115,6 +115,7 @@ def _col_observaciones_ot(conn) -> str | None:
 SQL_PEDIDO_OT_ARMADOR_BASE = f"""
 SELECT TOP 1
     OT.OTId,
+    OT.OTFechaHoraEjecucion    AS FechaArmado,
     P_Repositor.PersonalId     AS NroArmador,
     P_Repositor.PersonalNombre AS NombreArmador{{observ_select}}
 FROM OT
@@ -128,7 +129,22 @@ ORDER BY OT.OTFechaHoraEjecucion DESC
 
 def fetch_pedido_lookup(nro_pedido: int) -> dict | None:
     """Fecha + Tipo Pedido (Magnus) + OT + N° Armador/Nombre + Ubicación (WMS),
-    por Nro Pedido (NroMovVenta). None si el pedido no existe en Magnus."""
+    por Nro Pedido (NroMovVenta). None si el pedido no existe en Magnus.
+
+    CAMBIO 2026-08-14 (a pedido de Pablo): el pedido en Magnus tiene varias
+    fechas vinculadas, no solo la de registración — se agregan al lookup
+    (todas opcionales, `None` si esa etapa todavía no pasó):
+      · `fecha`         — FechaPedido (registración), como ya estaba.
+      · `fechaArmado`   — OT.OTFechaHoraEjecucion (WMS), la misma OT de
+        Picking que ya resuelve `ot`/`nroArmador`/`nombreArmador` — no es
+        una consulta nueva, se agrega al SELECT que ya se hacía
+        (SQL_PEDIDO_OT_ARMADOR_BASE).
+      · `fechaControl`  — Magnus Ven_PedImpresoCP.FechaControl, mismo
+        criterio (tabla/filtro/orden) que ya usa `fetch_controlador_pedido`
+        para resolver el controlador real (más reciente CON
+        CodControlador1/2 > 0) — se reusa esa función para no duplicar el
+        filtro, y se descarta el resto de lo que devuelve (nroControlador/
+        nombreControlador ya se resuelven aparte donde hacen falta)."""
     conn = get_connection()  # default EVERWEAR
     try:
         cur = conn.cursor()
@@ -143,7 +159,7 @@ def fetch_pedido_lookup(nro_pedido: int) -> dict | None:
     fecha_int, tipo_pedido = row
     fecha = (BASE_DATE + timedelta(days=int(fecha_int))).isoformat() if fecha_int else None
 
-    ot, nro_armador, nombre_armador, ubicacion = (None, None, None, None)
+    ot, fecha_armado, nro_armador, nombre_armador, ubicacion = (None, None, None, None, None)
     conn = get_connection("WMS")
     try:
         cur = conn.cursor()
@@ -156,6 +172,7 @@ def fetch_pedido_lookup(nro_pedido: int) -> dict | None:
         if ot_row:
             d = dict(zip(cols, ot_row))
             ot = d.get("OTId")
+            fecha_armado = d.get("FechaArmado")
             nro_armador = d.get("NroArmador")
             nombre_armador = (d.get("NombreArmador") or "").strip() or None
             ubicacion = d.get("Ubicacion")
@@ -164,9 +181,16 @@ def fetch_pedido_lookup(nro_pedido: int) -> dict | None:
     finally:
         conn.close()
 
+    # Fecha de control (Mesa de Control), mismo criterio que el controlador
+    # real — ver docstring arriba. None si el pedido todavía no pasó control.
+    ctrl = fetch_controlador_pedido(nro_pedido)
+    fecha_control = ctrl.get("fechaControl") if ctrl else None
+
     return {
         "nroPedido": nro_pedido,
         "fecha": fecha,
+        "fechaArmado": fecha_armado.isoformat() if fecha_armado is not None else None,
+        "fechaControl": fecha_control.isoformat() if fecha_control is not None else None,
         "tipoPedido": (tipo_pedido or "").strip() or None,
         "ot": int(ot) if ot is not None else None,
         "nroArmador": int(nro_armador) if nro_armador is not None else None,
@@ -540,7 +564,7 @@ def insert_error_mesa_items(
 # mesa_control.py — cod1==cod2 confirmado ahí). A pedido de Pablo (2026-07-16):
 # esta alta NO guarda preparador (nroArmador/nombreArmador quedan NULL).
 SQL_CONTROLADOR_PEDIDO = """
-SELECT TOP 1 CodControlador1, CodControlador2
+SELECT TOP 1 CodControlador1, CodControlador2, FechaControl
 FROM dbo.Ven_PedImpresoCP
 WHERE NroMovVenta = ?
   AND (CodControlador1 > 0 OR CodControlador2 > 0)
@@ -572,14 +596,18 @@ def fetch_controlador_pedido(nro_pedido: int) -> dict | None:
         row = cur.fetchone()
         if not row:
             return None
-        cod1, cod2 = row
+        cod1, cod2, fecha_control = row
         codigo = int(cod1) if cod1 and cod1 > 0 else (int(cod2) if cod2 and cod2 > 0 else None)
         if not codigo:
             return None
         cur.execute("SELECT Nombre FROM dbo.Gen_Usuarios WHERE Numero = ?", (codigo,))
         nrow = cur.fetchone()
         nombre = (nrow[0] or "").strip() if nrow else None
-        return {"nroControlador": codigo, "nombreControlador": nombre or f"Controlador {codigo}"}
+        return {
+            "nroControlador": codigo,
+            "nombreControlador": nombre or f"Controlador {codigo}",
+            "fechaControl": fecha_control,
+        }
     finally:
         conn.close()
 

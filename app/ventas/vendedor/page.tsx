@@ -267,20 +267,25 @@ export default function VentasVendedorPage() {
   const sinDatos = !!data && !data.tieneDatos;
   const faltanMeses = periodo === "meses" && mesesSel.size === 0;
 
-  const colSpanAnio = desglosado ? 13 : 1;
+  // Desglosado: pedido de Pablo 2026-08-14 — al elegir meses puntuales
+  // (periodo "meses") solo se muestran esas columnas, no las 12 (antes se
+  // mostraban todas, dimeadas las no elegidas). En "ytd" equivale a
+  // Enero..mes actual, mismo criterio que ya usa sumaPeriodo/mesesActivos.
+  const mesesMostrados = mesesActivos;
+  const nMesesMostrados = mesesMostrados.length;
+  const colSpanAnio = desglosado ? nMesesMostrados + 1 : 1;
   const mesesLabel = (a: AnioVal) => a.meses.find((m) => m.mes === mesActualNum)?.label ?? "";
 
   // ── Fila verde si creció + fila/columna iluminada según el mouse (pedido
   // de Pablo 2026-08-14) ──────────────────────────────────────────────────
-  // Índices de columna fijos (Línea=0, meses 1..12 del año anterior,
-  // Total anterior, meses 1..12 del año actual, Total actual) — el número
-  // de mes (1..12) mapea directo a su índice de columna porque `meses`
-  // siempre viene ordenado Ene..Dic desde el back (_anio_vacio).
+  // Índices de columna: Línea=0, después las columnas de meses mostrados
+  // del año anterior (en el mismo orden que mesesMostrados), Total
+  // anterior, columnas de meses mostrados del año actual, Total actual.
   const COL_LINEA = 0;
-  const colAnteriorMes = (mes: number) => mes; // 1..12
-  const colAnteriorTotal = desglosado ? 13 : 1;
-  const colActualMes = (mes: number) => 13 + mes; // 14..25
-  const colActualTotal = desglosado ? 26 : 2;
+  const colAnteriorMes = (mes: number) => 1 + mesesMostrados.indexOf(mes);
+  const colAnteriorTotal = desglosado ? 1 + nMesesMostrados : 1;
+  const colActualMes = (mes: number) => colAnteriorTotal + 1 + mesesMostrados.indexOf(mes);
+  const colActualTotal = desglosado ? colAnteriorTotal + 1 + nMesesMostrados : 2;
 
   const [hoverRow, setHoverRow] = useState<number | null>(null);
   const [hoverCol, setHoverCol] = useState<number | null>(null);
@@ -596,20 +601,22 @@ export default function VentasVendedorPage() {
                   </tr>
                   {desglosado && (
                     <tr className="text-[11px] text-zinc-500">
-                      {data!.totales.anioAnterior.meses.map((m) => (
-                        <th
-                          key={`pa-${m.mes}`}
-                          className={`px-2 py-1.5 font-normal text-right whitespace-nowrap border-l border-zinc-800/60 cursor-default ${
-                            mesesActivos.includes(m.mes) ? "" : "opacity-40"
-                          } ${hoverCol === colAnteriorMes(m.mes) ? "bg-yellow-400/10" : ""}`}
-                          onMouseEnter={() => {
-                            setHoverRow(null);
-                            setHoverCol(colAnteriorMes(m.mes));
-                          }}
-                        >
-                          {m.label}
-                        </th>
-                      ))}
+                      {data!.totales.anioAnterior.meses
+                        .filter((m) => mesesActivos.includes(m.mes))
+                        .map((m) => (
+                          <th
+                            key={`pa-${m.mes}`}
+                            className={`px-2 py-1.5 font-normal text-right whitespace-nowrap border-l border-zinc-800/60 cursor-default ${
+                              hoverCol === colAnteriorMes(m.mes) ? "bg-yellow-400/10" : ""
+                            }`}
+                            onMouseEnter={() => {
+                              setHoverRow(null);
+                              setHoverCol(colAnteriorMes(m.mes));
+                            }}
+                          >
+                            {m.label}
+                          </th>
+                        ))}
                       <th
                         className={`px-2 py-1.5 font-semibold text-right whitespace-nowrap border-l border-zinc-800 text-zinc-300 cursor-default ${
                           hoverCol === colAnteriorTotal ? "bg-yellow-400/10" : ""
@@ -621,20 +628,22 @@ export default function VentasVendedorPage() {
                       >
                         Total
                       </th>
-                      {data!.totales.anioActual.meses.map((m) => (
-                        <th
-                          key={`pc-${m.mes}`}
-                          className={`px-2 py-1.5 font-normal text-right whitespace-nowrap border-l border-zinc-800/60 cursor-default ${
-                            mesesActivos.includes(m.mes) ? "" : "opacity-40"
-                          } ${hoverCol === colActualMes(m.mes) ? "bg-yellow-400/10" : ""}`}
-                          onMouseEnter={() => {
-                            setHoverRow(null);
-                            setHoverCol(colActualMes(m.mes));
-                          }}
-                        >
-                          {m.label}
-                        </th>
-                      ))}
+                      {data!.totales.anioActual.meses
+                        .filter((m) => mesesActivos.includes(m.mes))
+                        .map((m) => (
+                          <th
+                            key={`pc-${m.mes}`}
+                            className={`px-2 py-1.5 font-normal text-right whitespace-nowrap border-l border-zinc-800/60 cursor-default ${
+                              hoverCol === colActualMes(m.mes) ? "bg-yellow-400/10" : ""
+                            }`}
+                            onMouseEnter={() => {
+                              setHoverRow(null);
+                              setHoverCol(colActualMes(m.mes));
+                            }}
+                          >
+                            {m.label}
+                          </th>
+                        ))}
                       <th
                         className={`px-2 py-1.5 font-semibold text-right whitespace-nowrap border-l border-zinc-800 text-yellow-400 cursor-default ${
                           hoverCol === colActualTotal ? "bg-yellow-400/10" : ""
@@ -664,23 +673,23 @@ export default function VentasVendedorPage() {
                           {r.linea}
                         </td>
                         {desglosado &&
-                          r.anioAnterior.meses.map((m) => {
-                            const colIdx = colAnteriorMes(m.mes);
-                            return (
-                              <td
-                                key={`a-${m.mes}`}
-                                className={`px-2 py-2 text-right tabular-nums text-zinc-400 border-l border-zinc-800/40 cursor-default ${
-                                  mesesActivos.includes(m.mes) ? "" : "opacity-40"
-                                } ${celda(rowIdx, colIdx, rowCrece)}`}
-                                onMouseEnter={() => {
-                                  setHoverRow(rowIdx);
-                                  setHoverCol(colIdx);
-                                }}
-                              >
-                                {valorMes(m) === 0 ? "—" : fmt(valorMes(m))}
-                              </td>
-                            );
-                          })}
+                          r.anioAnterior.meses
+                            .filter((m) => mesesActivos.includes(m.mes))
+                            .map((m) => {
+                              const colIdx = colAnteriorMes(m.mes);
+                              return (
+                                <td
+                                  key={`a-${m.mes}`}
+                                  className={`px-2 py-2 text-right tabular-nums text-zinc-400 border-l border-zinc-800/40 cursor-default ${celda(rowIdx, colIdx, rowCrece)}`}
+                                  onMouseEnter={() => {
+                                    setHoverRow(rowIdx);
+                                    setHoverCol(colIdx);
+                                  }}
+                                >
+                                  {valorMes(m) === 0 ? "—" : fmt(valorMes(m))}
+                                </td>
+                              );
+                            })}
                         <td
                           className={`px-3 py-2 text-right tabular-nums text-zinc-200 font-medium border-l border-zinc-800 cursor-default ${celda(rowIdx, colAnteriorTotal, rowCrece)}`}
                           onMouseEnter={() => {
@@ -691,23 +700,23 @@ export default function VentasVendedorPage() {
                           {fmt(valor(sumaPeriodo(r.anioAnterior)))}
                         </td>
                         {desglosado &&
-                          r.anioActual.meses.map((m) => {
-                            const colIdx = colActualMes(m.mes);
-                            return (
-                              <td
-                                key={`c-${m.mes}`}
-                                className={`px-2 py-2 text-right tabular-nums text-zinc-400 border-l border-zinc-800/40 cursor-default ${
-                                  mesesActivos.includes(m.mes) ? "" : "opacity-40"
-                                } ${celda(rowIdx, colIdx, rowCrece)}`}
-                                onMouseEnter={() => {
-                                  setHoverRow(rowIdx);
-                                  setHoverCol(colIdx);
-                                }}
-                              >
-                                {valorMes(m) === 0 ? "—" : fmt(valorMes(m))}
-                              </td>
-                            );
-                          })}
+                          r.anioActual.meses
+                            .filter((m) => mesesActivos.includes(m.mes))
+                            .map((m) => {
+                              const colIdx = colActualMes(m.mes);
+                              return (
+                                <td
+                                  key={`c-${m.mes}`}
+                                  className={`px-2 py-2 text-right tabular-nums text-zinc-400 border-l border-zinc-800/40 cursor-default ${celda(rowIdx, colIdx, rowCrece)}`}
+                                  onMouseEnter={() => {
+                                    setHoverRow(rowIdx);
+                                    setHoverCol(colIdx);
+                                  }}
+                                >
+                                  {valorMes(m) === 0 ? "—" : fmt(valorMes(m))}
+                                </td>
+                              );
+                            })}
                         <td
                           className={`px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 cursor-default ${celda(rowIdx, colActualTotal, rowCrece)}`}
                           onMouseEnter={() => {
@@ -735,23 +744,25 @@ export default function VentasVendedorPage() {
                       Total
                     </td>
                     {desglosado &&
-                      data!.totales.anioAnterior.meses.map((m) => {
-                        const colIdx = colAnteriorMes(m.mes);
-                        return (
-                          <td
-                            key={`ta-${m.mes}`}
-                            className={`px-2 py-2 text-right tabular-nums text-zinc-300 font-medium border-l border-zinc-800/40 cursor-default ${
-                              mesesActivos.includes(m.mes) ? "" : "opacity-40"
-                            } ${hoverCol === colIdx ? "bg-yellow-400/10" : ""}`}
-                            onMouseEnter={() => {
-                              setHoverRow(null);
-                              setHoverCol(colIdx);
-                            }}
-                          >
-                            {fmt(valorMes(m))}
-                          </td>
-                        );
-                      })}
+                      data!.totales.anioAnterior.meses
+                        .filter((m) => mesesActivos.includes(m.mes))
+                        .map((m) => {
+                          const colIdx = colAnteriorMes(m.mes);
+                          return (
+                            <td
+                              key={`ta-${m.mes}`}
+                              className={`px-2 py-2 text-right tabular-nums text-zinc-300 font-medium border-l border-zinc-800/40 cursor-default ${
+                                hoverCol === colIdx ? "bg-yellow-400/10" : ""
+                              }`}
+                              onMouseEnter={() => {
+                                setHoverRow(null);
+                                setHoverCol(colIdx);
+                              }}
+                            >
+                              {fmt(valorMes(m))}
+                            </td>
+                          );
+                        })}
                     <td
                       className={`px-3 py-2 text-right tabular-nums text-zinc-100 font-bold border-l border-zinc-800 cursor-default ${
                         hoverCol === colAnteriorTotal ? "bg-yellow-400/10" : ""
@@ -764,23 +775,25 @@ export default function VentasVendedorPage() {
                       {fmt(valor(sumaPeriodo(data!.totales.anioAnterior)))}
                     </td>
                     {desglosado &&
-                      data!.totales.anioActual.meses.map((m) => {
-                        const colIdx = colActualMes(m.mes);
-                        return (
-                          <td
-                            key={`tc-${m.mes}`}
-                            className={`px-2 py-2 text-right tabular-nums text-zinc-300 font-medium border-l border-zinc-800/40 cursor-default ${
-                              mesesActivos.includes(m.mes) ? "" : "opacity-40"
-                            } ${hoverCol === colIdx ? "bg-yellow-400/10" : ""}`}
-                            onMouseEnter={() => {
-                              setHoverRow(null);
-                              setHoverCol(colIdx);
-                            }}
-                          >
-                            {fmt(valorMes(m))}
-                          </td>
-                        );
-                      })}
+                      data!.totales.anioActual.meses
+                        .filter((m) => mesesActivos.includes(m.mes))
+                        .map((m) => {
+                          const colIdx = colActualMes(m.mes);
+                          return (
+                            <td
+                              key={`tc-${m.mes}`}
+                              className={`px-2 py-2 text-right tabular-nums text-zinc-300 font-medium border-l border-zinc-800/40 cursor-default ${
+                                hoverCol === colIdx ? "bg-yellow-400/10" : ""
+                              }`}
+                              onMouseEnter={() => {
+                                setHoverRow(null);
+                                setHoverCol(colIdx);
+                              }}
+                            >
+                              {fmt(valorMes(m))}
+                            </td>
+                          );
+                        })}
                     <td
                       className={`px-3 py-2 text-right tabular-nums text-yellow-400 font-bold border-l border-zinc-800 cursor-default ${
                         hoverCol === colActualTotal ? "bg-yellow-400/10" : ""
