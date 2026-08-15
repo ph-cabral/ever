@@ -19,6 +19,7 @@
 
 # production
 /build
+/dist
 
 # misc
 .DS_Store
@@ -30,9 +31,8 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — no se commitea ninguno, tampoco los .example.
 .env*
-!.env.example
 
 # vercel
 .vercel
@@ -41,27 +41,40 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# prisma: el cliente generado y la base local de desarrollo
 /app/generated/prisma
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
 
-/package-lock.json
-/package.json
-
-.gitignore
-/migrations
+# fotos y documentos de legajos (datos personales, no van al repo)
 /employee
-.png
-.jpg
-.jepg
-.svg
-img_sorteo/
 employees/
 emp/
+img_sorteo/
+/documentos/
+*.png
+*.jpg
+*.jpeg
+*.svg
+# ...salvo los assets de la app, que si son parte del codigo
+!public/**/*.png
+!public/**/*.jpg
+!public/**/*.jpeg
+!public/**/*.svg
+
+# basura de compilacion / pruebas (ver limpieza 2026-08-15)
+*.tmp
+*.err
+tscout.txt
+_tmp_*
+__test_*__*
+
+# El DDL de sql/ NO se versiona: se corre a mano contra Postgres y los
+# archivos se van borrando a medida que se aplican. No sacar esta regla.
 sql/
 
 # python (indicadores-api)
 __pycache__/
 *.pyc
-.env
-.env.example
-/documentos/
-sql/
