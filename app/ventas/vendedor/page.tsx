@@ -494,6 +494,33 @@ export default function VentasVendedorPage() {
     [valor, sumaPeriodo],
   );
 
+  // Triángulo ▲/▼ por línea, columna nueva al final de la tabla (pedido de
+  // Pablo 2026-08-18). Compara año actual vs. año anterior sobre el MISMO
+  // valor/período que ya muestra la fila (sumaPeriodo + valor: respeta
+  // YTD/meses y pesos/unidades, igual que `crece`). "sube" = año actual >
+  // año anterior (▲ verde), "baja" = año actual < año anterior (▼ rojo),
+  // "igual" = mismo valor — incluye 0 vs 0 (sin ventas) y empates reales:
+  // sin triángulo, sin tocar el fondo de esa celda.
+  const tendencia = useCallback(
+    (r: { anioAnterior: AnioVal; anioActual: AnioVal }): "sube" | "baja" | "igual" => {
+      const ant = valor(sumaPeriodo(r.anioAnterior));
+      const act = valor(sumaPeriodo(r.anioActual));
+      if (act > ant) return "sube";
+      if (act < ant) return "baja";
+      return "igual";
+    },
+    [valor, sumaPeriodo],
+  );
+  // Celda de la columna "Tendencia": fondo sólido verde/rojo solo cuando hay
+  // una dirección real (pedido de Pablo: "si no hay ventas o es 0 no hay
+  // que tocarle el fondo").
+  const celdaTendencia = (t: "sube" | "baja" | "igual") => {
+    if (t === "sube") return "bg-green-500/20 text-green-400";
+    if (t === "baja") return "bg-red-500/20 text-red-400";
+    return "text-zinc-600";
+  };
+  const iconoTendencia = (t: "sube" | "baja" | "igual") => (t === "sube" ? "▲" : t === "baja" ? "▼" : "—");
+
   return (
     <div className="min-h-screen bg-[#111111] text-white">
       {(loading || error) && (
@@ -833,6 +860,13 @@ export default function VentasVendedorPage() {
                                 <span className="text-yellow-400/60 font-normal"> (Ene–{mesesLabel(data!.totales.anioActual)})</span>
                               )}
                             </th>
+                            <th
+                              rowSpan={desglosado ? 2 : 1}
+                              className="px-3 py-2 font-medium text-center whitespace-nowrap align-bottom border-l border-zinc-800 cursor-default"
+                              title="Año actual vs. año anterior"
+                            >
+                              Tend.
+                            </th>
                           </tr>
                           {desglosado && (
                             <tr className="text-[11px] text-zinc-500">
@@ -896,6 +930,7 @@ export default function VentasVendedorPage() {
                         <tbody>
                           {filas.map((r, rowIdx) => {
                             const rowCrece = crece(r);
+                            const rowTendencia = tendencia(r);
                             return (
                               <tr key={r.linea} className="border-t border-zinc-800/60 transition-colors">
                                 <td
@@ -960,6 +995,11 @@ export default function VentasVendedorPage() {
                                   }}
                                 >
                                   {fmt(valor(sumaPeriodo(r.anioActual)))}
+                                </td>
+                                <td
+                                  className={`px-3 py-2 text-center text-base font-bold border-l border-zinc-800 cursor-default ${celdaTendencia(rowTendencia)}`}
+                                >
+                                  {iconoTendencia(rowTendencia)}
                                 </td>
                               </tr>
                             );
@@ -1040,6 +1080,11 @@ export default function VentasVendedorPage() {
                             >
                               {fmt(valor(sumaPeriodo(data!.totales.anioActual)))}
                             </td>
+                            <td
+                              className={`px-3 py-2 text-center text-base font-bold border-l border-zinc-800 cursor-default ${celdaTendencia(tendencia(data!.totales))}`}
+                            >
+                              {iconoTendencia(tendencia(data!.totales))}
+                            </td>
                           </tr>
                         </tfoot>
                       </table>
@@ -1085,36 +1130,43 @@ export default function VentasVendedorPage() {
                     )}
 
                     {!clientesLineaError && (clientesLinea?.porMonto?.length ?? 0) > 0 && (
-                      <table className="w-full min-w-max text-sm">
-                        <thead className="bg-[#1A1A1A] text-zinc-400">
-                          <tr>
-                            <th className="px-3 py-2 font-medium text-left whitespace-nowrap w-12">#</th>
-                            <th className="px-3 py-2 font-medium text-left whitespace-nowrap">Cliente</th>
-                            <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800">
-                              Gasto
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {clientesLinea!.porMonto.map((c, i) => (
-                            <tr
-                              key={c.numero}
-                              className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors cursor-pointer"
-                              onClick={() => abrirModalCliente({ numero: c.numero, nombre: c.nombre })}
-                              title="Ver ventas de este cliente"
-                            >
-                              <td className="px-3 py-2 text-zinc-500 tabular-nums">{i + 1}</td>
-                              <td className="px-3 py-2 text-zinc-100 whitespace-nowrap">
-                                {c.nombre ?? "(sin nombre)"}{" "}
-                                <span className="text-zinc-500 font-mono text-xs">({c.numero})</span>
-                              </td>
-                              <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800">
-                                {fmtMoney(c.monto)}
-                              </td>
+                      // overflow-x-auto (pedido de Pablo 2026-08-18: "que la tabla no
+                      // se exceda de la ventana") — en mobile la tabla scrollea
+                      // horizontal en vez de recortarse contra el borde del modal;
+                      // el nombre del cliente además puede ajustar (wrap) a una
+                      // segunda línea, así casi nunca hace falta ese scroll.
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-max text-sm">
+                          <thead className="bg-[#1A1A1A] text-zinc-400">
+                            <tr>
+                              <th className="px-3 py-2 font-medium text-left whitespace-nowrap w-12">#</th>
+                              <th className="px-3 py-2 font-medium text-left">Cliente</th>
+                              <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800">
+                                Gasto
+                              </th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {clientesLinea!.porMonto.map((c, i) => (
+                              <tr
+                                key={c.numero}
+                                className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors cursor-pointer"
+                                onClick={() => abrirModalCliente({ numero: c.numero, nombre: c.nombre })}
+                                title="Ver ventas de este cliente"
+                              >
+                                <td className="px-3 py-2 text-zinc-500 tabular-nums">{i + 1}</td>
+                                <td className="px-3 py-2 text-zinc-100">
+                                  {c.nombre ?? "(sin nombre)"}{" "}
+                                  <span className="text-zinc-500 font-mono text-xs whitespace-nowrap">({c.numero})</span>
+                                </td>
+                                <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
+                                  {fmtMoney(c.monto)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     )}
                   </div>
                 )}
@@ -1196,59 +1248,68 @@ export default function VentasVendedorPage() {
                 );
               }
               return (
-                <table className="w-full min-w-max text-sm">
-                  <thead className="bg-[#1A1A1A] text-zinc-400">
-                    <tr>
-                      <th className="px-3 py-2 font-medium text-left whitespace-nowrap w-12">#</th>
-                      <th className="px-3 py-2 font-medium text-left whitespace-nowrap">
-                        {topVista === "clientes" ? "Cliente" : "Línea"}
-                      </th>
-                      <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800">
-                        {topVista === "clientes" ? "Pesos" : "Unidades"}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {topVista === "clientes"
-                      ? (topClientes?.porMonto ?? []).map((c, i) => (
-                          <tr key={c.numero} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
-                            <td className="px-3 py-2 text-zinc-500 tabular-nums">{i + 1}</td>
-                            <td className="px-3 py-2 text-zinc-100 whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() => abrirModalCliente({ numero: c.numero, nombre: c.nombre })}
-                                className="hover:text-yellow-400 hover:underline transition-colors text-left"
-                                title="Ver ventas de este cliente"
-                              >
-                                {c.nombre ?? "(sin nombre)"}
-                              </button>{" "}
-                              <span className="text-zinc-500 font-mono text-xs">({c.numero})</span>
-                            </td>
-                            <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800">
-                              {fmtTop(c.monto)}
-                            </td>
-                          </tr>
-                        ))
-                      : (topLineas?.porUnidades ?? []).map((l, i) => (
-                          <tr key={l.linea} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
-                            <td className="px-3 py-2 text-zinc-500 tabular-nums">{i + 1}</td>
-                            <td className="px-3 py-2 text-zinc-100 whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() => abrirModalLinea(l.linea)}
-                                className="hover:text-yellow-400 hover:underline transition-colors text-left"
-                                title="Ver clientes que compraron esta línea"
-                              >
-                                {l.linea}
-                              </button>
-                            </td>
-                            <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800">
-                              {fmtTop(l.unidades)}
-                            </td>
-                          </tr>
-                        ))}
-                  </tbody>
-                </table>
+                // overflow-x-auto (pedido de Pablo 2026-08-18: "que la tabla no se
+                // exceda de la ventana") — antes este contenedor era
+                // overflow-hidden, así que en mobile el nombre/código quedaba
+                // directamente recortado contra el borde en vez de scrollear.
+                // El nombre además ya no fuerza una sola línea (whitespace-nowrap
+                // sacado de esa celda): si es muy largo, ajusta a la línea
+                // siguiente en vez de necesitar ese scroll.
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-max text-sm">
+                    <thead className="bg-[#1A1A1A] text-zinc-400">
+                      <tr>
+                        <th className="px-3 py-2 font-medium text-left whitespace-nowrap w-12">#</th>
+                        <th className="px-3 py-2 font-medium text-left whitespace-nowrap">
+                          {topVista === "clientes" ? "Cliente" : "Línea"}
+                        </th>
+                        <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800">
+                          {topVista === "clientes" ? "Pesos" : "Unidades"}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {topVista === "clientes"
+                        ? (topClientes?.porMonto ?? []).map((c, i) => (
+                            <tr key={c.numero} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
+                              <td className="px-3 py-2 text-zinc-500 tabular-nums">{i + 1}</td>
+                              <td className="px-3 py-2 text-zinc-100">
+                                <button
+                                  type="button"
+                                  onClick={() => abrirModalCliente({ numero: c.numero, nombre: c.nombre })}
+                                  className="hover:text-yellow-400 hover:underline transition-colors text-left"
+                                  title="Ver ventas de este cliente"
+                                >
+                                  {c.nombre ?? "(sin nombre)"}
+                                </button>{" "}
+                                <span className="text-zinc-500 font-mono text-xs whitespace-nowrap">({c.numero})</span>
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
+                                {fmtTop(c.monto)}
+                              </td>
+                            </tr>
+                          ))
+                        : (topLineas?.porUnidades ?? []).map((l, i) => (
+                            <tr key={l.linea} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
+                              <td className="px-3 py-2 text-zinc-500 tabular-nums">{i + 1}</td>
+                              <td className="px-3 py-2 text-zinc-100">
+                                <button
+                                  type="button"
+                                  onClick={() => abrirModalLinea(l.linea)}
+                                  className="hover:text-yellow-400 hover:underline transition-colors text-left"
+                                  title="Ver clientes que compraron esta línea"
+                                >
+                                  {l.linea}
+                                </button>
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
+                                {fmtTop(l.unidades)}
+                              </td>
+                            </tr>
+                          ))}
+                    </tbody>
+                  </table>
+                </div>
               );
             })()}
           </div>
