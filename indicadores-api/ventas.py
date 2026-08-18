@@ -235,9 +235,11 @@ def _bloqueado(cod_cliente: int, anio_anterior: int, anio_actual: int) -> dict:
 # no-admin nunca ve acá un cliente que no es suyo. Admin (`vendedor=None`)
 # ve el ranking de toda la empresa.
 #
-# RANGO (pedido de Pablo 2026-08-18): por defecto los últimos 12 meses
-# (mes actual + 11 anteriores). Sigue siendo configurable con
-# `desde`/`hasta` ("YYYY-MM"), pero el default ya no son 6.
+# RANGO (pedido de Pablo 2026-08-18): ventana FIJA de 12 meses que termina
+# en el MES ANTERIOR al actual — el mes en curso queda afuera por estar
+# incompleto. En agosto 2026 eso es agosto 2025 → julio 2026. El front ya
+# no manda `desde`/`hasta` ni deja elegir el rango; los parámetros siguen
+# existiendo en la ruta HTTP solo para debug.
 #
 # FILTRO DE FECHA EN SQL (pedido de Pablo 2026-08-18, "todo el trabajo
 # debe ser en sql porque se ralentiza mucho la consulta"): ahora el rango
@@ -266,6 +268,9 @@ def _bloqueado(cod_cliente: int, anio_anterior: int, anio_actual: int) -> dict:
 # falta que sea al segundo. Cache simple de proceso (uvicorn con 1 worker,
 # ver main.py); con más workers cada uno cachea por su lado, lo cual sigue
 # siendo correcto, solo menos efectivo.
+# Largo de la ventana, en meses. Fijo — no es configurable desde la vista.
+TOP_MESES = 12
+
 _TOP_CLIENTES_CACHE: dict[tuple, tuple[float, dict]] = {}
 _TOP_CLIENTES_TTL_SEG = 15 * 60  # 15 minutos
 
@@ -294,18 +299,23 @@ def _mes_atras(ym: tuple[int, int], n: int) -> tuple[int, int]:
     return idx // 12, idx % 12 + 1
 
 
-def _resolver_rango(desde: str | None, hasta: str | None, meses_default: int = 11):
+def _resolver_rango(desde: str | None, hasta: str | None, meses: int = TOP_MESES):
     """('YYYY-MM'|None, 'YYYY-MM'|None) -> (desde_ym, hasta_ym, dia_desde,
     dia_hasta), donde los `dia_*` son el entero Magnus (días desde
     BASE_DATE) del PRIMER día del mes `desde` y del ÚLTIMO día del mes
     `hasta` — o sea, ambos meses quedan incluidos completos.
 
-    Default: `hasta` = mes actual, `desde` = `meses_default` meses antes
-    (11 → ventana de 12 meses contando el actual). Si vienen invertidos se
-    reordenan. Lanza ValueError si el formato no es 'YYYY-MM'."""
+    Default (pedido de Pablo 2026-08-18): ventana FIJA de `meses` meses que
+    termina en el MES ANTERIOR al actual — el mes en curso NO entra porque
+    está incompleto. Corriendo en agosto 2026 da agosto 2025 → julio 2026.
+
+    `desde`/`hasta` explícitos siguen andando (la ruta HTTP los expone para
+    debug y consultas puntuales), pero el front ya no los manda: la vista
+    usa siempre la ventana fija. Si vienen invertidos se reordenan. Lanza
+    ValueError si el formato no es 'YYYY-MM'."""
     hoy_ym = (date.today().year, date.today().month)
-    hasta_ym = _parse_ym(hasta) if hasta else hoy_ym
-    desde_ym = _parse_ym(desde) if desde else _mes_atras(hasta_ym, meses_default)
+    hasta_ym = _parse_ym(hasta) if hasta else _mes_atras(hoy_ym, 1)
+    desde_ym = _parse_ym(desde) if desde else _mes_atras(hasta_ym, meses - 1)
     if desde_ym > hasta_ym:
         desde_ym, hasta_ym = hasta_ym, desde_ym
 
@@ -377,10 +387,10 @@ def fetch_top_clientes(
     MISMA consulta). `None` (admin) no filtra, ranking de toda la empresa.
 
     `desde`/`hasta` ("YYYY-MM"): rango de meses, AMBOS inclusive y
-    completos. Default: últimos 12 meses (mes actual + 11 anteriores). No
-    respeta el selector de período (YTD/meses) de la tabla principal, es un
-    filtro propio de este ranking. Lanza `ValueError` si el formato no es
-    "YYYY-MM".
+    completos. Default: ventana fija de TOP_MESES (12) meses terminando en
+    el MES ANTERIOR al actual — ver _resolver_rango. No respeta el selector
+    de período (YTD/meses) de la tabla principal. Lanza `ValueError` si el
+    formato no es "YYYY-MM".
 
     `forzar=True` ignora el cache (para refrescar a mano sin esperar el
     TTL — no expuesto en la ruta HTTP, pensado para debug)."""

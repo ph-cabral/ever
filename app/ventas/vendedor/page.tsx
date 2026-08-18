@@ -104,24 +104,12 @@ interface RespTopLineas {
 
 type TopVista = "clientes" | "lineas";
 
-// Meses del rango por defecto de los rankings, contando el mes actual:
-// 12 = mes en curso + 11 hacia atrás (pedido de Pablo 2026-08-18).
-const TOP_MESES_DEFAULT = 12;
+// Largo de la ventana de los rankings, solo para el texto del subtítulo —
+// quién la calcula de verdad es el back (TOP_MESES en ventas.py), que
+// además la cierra en el MES ANTERIOR al actual. Acá no se derivan fechas:
+// las que se muestran vienen en la respuesta.
+const TOP_MESES = 12;
 
-// "YYYY-MM" de hoy y de `n` meses antes — para el default del rango
-// (TOP_MESES_DEFAULT) y para acotar el <input type="month"> a fechas
-// razonables.
-const ymHoy = (): string => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-};
-const ymMesesAtras = (ym: string, n: number): string => {
-  const [a, m] = ym.split("-").map(Number);
-  const idx = a * 12 + (m - 1) - n;
-  const anio = Math.floor(idx / 12);
-  const mes = (idx % 12) + 1;
-  return `${anio}-${String(mes).padStart(2, "0")}`;
-};
 const MESES_CORTOS_ES = [
   "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
 ];
@@ -197,7 +185,14 @@ export default function VentasVendedorPage() {
   const [data, setData] = useState<RespVentasVendedor | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [modo, setModo] = useState<Modo>("unidades");
+  // Vista activa — la alterna el único botón "Mostrar" del encabezado
+  // (pedido de Pablo 2026-08-18). Manda tanto la métrica de la tabla
+  // principal como cuál de los dos rankings del pie se muestra; se declara
+  // acá arriba porque `modo` deriva de ella.
+  const [topVista, setTopVista] = useState<TopVista>("clientes");
+  // La métrica ya no se elige por separado: sale de la vista activa.
+  // Clientes → pesos, Líneas → unidades.
+  const modo: Modo = topVista === "clientes" ? "pesos" : "unidades";
   const [desglosado, setDesglosado] = useState(false);
 
   // Recibe el código directamente (en vez de leer clienteSel) porque
@@ -234,16 +229,15 @@ export default function VentasVendedorPage() {
 
   // ── Rankings del pie: top clientes ($) y top líneas (unidades) ─────────
   // Independientes del cliente buscado arriba y del período YTD/meses de la
-  // tabla principal — tienen su PROPIO rango de meses, compartido entre los
-  // dos (pedido de Pablo 2026-08-18: "rango de 12 meses desde el mes en
-  // curso para atrás"), y se recargan cada vez que cambia ese rango.
+  // tabla principal. El rango es FIJO y lo resuelve el back (pedido de
+  // Pablo 2026-08-18): 12 meses terminando en el MES ANTERIOR al actual —
+  // en agosto 2026, agosto 2025 a julio 2026. Ya no hay selector de fechas,
+  // así que acá no se manda `desde`/`hasta` y el fetch corre UNA sola vez
+  // al montar.
   //
-  // Se piden los DOS al montar (no solo el de la pestaña activa): el back
-  // cachea 15 min por rango, así que alternar entre Clientes y Líneas es
-  // instantáneo en vez de disparar un fetch nuevo cada vez.
-  const [topDesde, setTopDesde] = useState(() => ymMesesAtras(ymHoy(), TOP_MESES_DEFAULT - 1));
-  const [topHasta, setTopHasta] = useState(() => ymHoy());
-  const [topVista, setTopVista] = useState<TopVista>("clientes");
+  // Se piden los DOS (no solo el de la vista activa): el back cachea 15 min,
+  // así que alternar Clientes/Líneas es instantáneo en vez de disparar un
+  // fetch nuevo cada vez.
   const [topClientes, setTopClientes] = useState<RespTopClientes | null>(null);
   const [topLineas, setTopLineas] = useState<RespTopLineas | null>(null);
   const [topLoading, setTopLoading] = useState(false);
@@ -253,9 +247,8 @@ export default function VentasVendedorPage() {
     let cancelado = false;
     setTopLoading(true);
     setTopError(null);
-    const qs = new URLSearchParams({ desde: topDesde, hasta: topHasta });
     const pedir = async (ruta: string) => {
-      const res = await fetch(`/api/ventas/vendedor/${ruta}?${qs.toString()}`, { cache: "no-store" });
+      const res = await fetch(`/api/ventas/vendedor/${ruta}`, { cache: "no-store" });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       return j;
@@ -275,7 +268,7 @@ export default function VentasVendedorPage() {
     return () => {
       cancelado = true;
     };
-  }, [topDesde, topHasta]);
+  }, []);
 
   // Respuesta y total de la pestaña activa. El rango que se muestra en el
   // encabezado sale del BACK (que es quien resuelve el default), no del
@@ -486,29 +479,26 @@ export default function VentasVendedorPage() {
             </div>
           </div>
 
-          {/* Switch unidades / pesos */}
+          {/* Un solo botón que alterna toda la vista entre Clientes y
+              Líneas (pedido de Pablo 2026-08-18). Reemplaza al viejo switch
+              Unidades/Pesos: la métrica ya no se elige aparte, sale de la
+              vista elegida — Clientes → $, Líneas → unidades. */}
           <div className="flex flex-col gap-1.5">
             <span className="text-xs text-zinc-400 uppercase tracking-wide">Mostrar</span>
-            <div className="inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm">
-              <button
-                type="button"
-                onClick={() => setModo("unidades")}
-                className={`px-3 py-2 transition-colors ${
-                  modo === "unidades" ? "bg-yellow-400 text-black font-semibold" : "text-zinc-300 hover:bg-zinc-800"
-                }`}
-              >
-                Unidades
-              </button>
-              <button
-                type="button"
-                onClick={() => setModo("pesos")}
-                className={`px-3 py-2 transition-colors inline-flex items-center gap-1 ${
-                  modo === "pesos" ? "bg-yellow-400 text-black font-semibold" : "text-zinc-300 hover:bg-zinc-800"
-                }`}
-              >
-                <ArrowLeftRight size={12} /> Pesos
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setTopVista(topVista === "clientes" ? "lineas" : "clientes")}
+              title={`Ver ${topVista === "clientes" ? "líneas (unidades)" : "clientes (pesos)"}`}
+              className="btn-anim inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors"
+            >
+              <ArrowLeftRight size={14} className="text-yellow-400" />
+              <span className="font-semibold">
+                {topVista === "clientes" ? "Clientes" : "Líneas"}
+              </span>
+              <span className="text-zinc-500 text-xs">
+                {topVista === "clientes" ? "($)" : "(unidades)"}
+              </span>
+            </button>
           </div>
 
           {hayTabla && (
@@ -892,11 +882,11 @@ export default function VentasVendedorPage() {
           </div>
         )}
 
-        {/* Rankings del pie — top clientes ($) y top líneas (unidades), con
-            un rango de meses compartido (pedido de Pablo 2026-08-18: 12
-            meses por defecto, desde el mes en curso para atrás). El switch
-            Unidades/Pesos de arriba NO aplica acá: cada ranking muestra su
-            única métrica (clientes → $, líneas → unidades). */}
+        {/* Rankings del pie — top clientes ($) o top líneas (unidades),
+            según el botón "Mostrar" del encabezado. El rango es FIJO
+            (pedido de Pablo 2026-08-18: 12 meses terminando en el mes
+            anterior) y lo resuelve el back, así que acá no hay selector de
+            fechas: el subtítulo solo informa qué ventana se está viendo. */}
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4">
           <div className="flex flex-col gap-1.5">
             <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
@@ -904,71 +894,11 @@ export default function VentasVendedorPage() {
               {topVista === "clientes" ? "Top 10 clientes que más compraron" : "Top 10 líneas más compradas"}
             </h2>
             <p className="text-zinc-500 text-sm">
-              {topResp ? `${formatYm(topResp.desde)} – ${formatYm(topResp.hasta)}` : "…"} — según tu
-              acceso (tu cartera de clientes, o todos si sos admin).
+              {topResp ? `${formatYm(topResp.desde)} – ${formatYm(topResp.hasta)}` : "…"} (últimos{" "}
+              {TOP_MESES} meses cerrados) — según tu acceso (tu cartera de clientes, o todos si sos
+              admin).
             </p>
           </div>
-
-          {/* Switch Clientes / Líneas — mismo rango para los dos, los datos
-              de ambos ya están cargados así que alternar no dispara fetch. */}
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs text-zinc-400 uppercase tracking-wide">Ver</span>
-            <div className="inline-flex rounded-md border border-zinc-700 overflow-hidden">
-              {(["clientes", "lineas"] as TopVista[]).map((v) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setTopVista(v)}
-                  aria-pressed={topVista === v}
-                  className={`btn-anim px-3 py-2 text-sm transition-colors ${
-                    topVista === v
-                      ? "bg-yellow-400 text-zinc-900 font-semibold"
-                      : "text-zinc-300 hover:bg-zinc-800"
-                  }`}
-                >
-                  {v === "clientes" ? "Clientes" : "Líneas"}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="top-desde" className="text-xs text-zinc-400 uppercase tracking-wide">
-              Desde
-            </label>
-            <input
-              id="top-desde"
-              type="month"
-              value={topDesde}
-              max={topHasta}
-              onChange={(e) => e.target.value && setTopDesde(e.target.value)}
-              className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100 outline-none focus:border-yellow-400"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="top-hasta" className="text-xs text-zinc-400 uppercase tracking-wide">
-              Hasta
-            </label>
-            <input
-              id="top-hasta"
-              type="month"
-              value={topHasta}
-              min={topDesde}
-              max={ymHoy()}
-              onChange={(e) => e.target.value && setTopHasta(e.target.value)}
-              className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100 outline-none focus:border-yellow-400"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setTopHasta(ymHoy());
-              setTopDesde(ymMesesAtras(ymHoy(), TOP_MESES_DEFAULT - 1));
-            }}
-            className="btn-anim border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
-          >
-            Últimos {TOP_MESES_DEFAULT} meses
-          </button>
 
           {/* Total de filas que entran en la filtración (pedido de Pablo
               2026-08-18) — es el universo completo del rango, no las 10
