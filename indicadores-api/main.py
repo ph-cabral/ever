@@ -23,7 +23,7 @@ from compras import (
 from ingresos import fetch_remitos_ingreso
 from ventas import (
     fetch_pedidos_mes, fetch_ventas_por_linea, fetch_vendedores,
-    fetch_top_clientes, fetch_top_lineas,
+    fetch_top_clientes, fetch_top_lineas, fetch_clientes_por_linea,
 )
 from finanza import (
     fetch_facturacion_dia,
@@ -757,6 +757,28 @@ def ventas_vendedor_top_lineas(
     y `totalLineas`. Ver fetch_top_lineas (ventas.py)."""
     try:
         return fetch_top_lineas(vendedor=vendedor, limit=limit, desde=desde, hasta=hasta)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+
+@app.get("/ventas/vendedor/clientes-por-linea")
+def ventas_vendedor_clientes_por_linea(
+    linea: str = Query(..., min_length=1, description="Nombre de línea (StkFer_ArtParamet.Nivel1), o '(Sin línea)'"),
+    vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
+    limit: int = Query(default=100, ge=1, le=500),
+    desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: 11 meses antes de `hasta`)"),
+    hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes actual)"),
+):
+    """Clientes que compraron una línea de artículo, ordenados por MONTO ($)
+    de mayor a menor, en el mismo rango de 12 meses que
+    /ventas/vendedor/top-clientes y /ventas/vendedor/top-lineas — para el
+    modal de /ventas/vendedor al hacer click en una línea del ranking
+    "Top 10 líneas" (pedido de Pablo 2026-08-18). Ver fetch_clientes_por_linea
+    (ventas.py)."""
+    try:
+        return fetch_clientes_por_linea(linea, vendedor=vendedor, limit=limit, desde=desde, hasta=hasta)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

@@ -541,6 +541,151 @@ def fetch_top_lineas(
         conn.close()
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# Clientes por línea — /ventas/vendedor/clientes-por-linea (pedido de Pablo
+# 2026-08-18: al hacer click en una línea del ranking "Top 10 líneas", el
+# modal de /ventas/vendedor tiene que mostrar los CLIENTES que compraron esa
+# línea, ordenados de mayor a menor por $ gastado). Gemelo de
+# fetch_top_clientes: mismo rango fijo (_resolver_rango), mismo cache 15
+# min, mismo criterio de acceso por vendedor — lo único que cambia es que
+# acá se agrega un filtro por línea de artículo (ap.Nivel1) al WHERE/JOIN
+# que ya usa fetch_top_clientes.
+#
+# `linea == SIN_LINEA` es un caso especial: no hay ningún valor de
+# ap.Nivel1 literal "(Sin línea)" en la base, ese texto lo arma
+# fetch_top_lineas en Python para consolidar NULL y '' — así que acá, para
+# ese caso, el filtro es "sin línea" (IS NULL o vacío) en vez de una
+# comparación exacta de string.
+_TOP_CLIENTES_LINEA_CACHE: dict[tuple, tuple[float, dict]] = {}
+_TOP_CLIENTES_LINEA_TTL_SEG = 15 * 60  # 15 minutos
+
+SQL_CLIENTES_LINEA_VENDEDOR_TPL = """
+SELECT
+    c.CodCliente AS CodCliente,
+    LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
+    SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
+FROM MAGNUS_SITD.dbo.Clientes c
+JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
+JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma pu  ON LTRIM(RTRIM(pu.Usu_Arma_Nombre)) = LTRIM(RTRIM(vz.Vendedor))
+JOIN Ven_CompCabecera vc ON vc.CodCliente = c.CodCliente
+JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
+JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
+LEFT JOIN StkFer_Articulos  s  ON s.CodArticulo    = r.CodArticu
+LEFT JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
+WHERE pu.Usu_Arma_Codigo = ?
+  AND cc.EvitaInformesYListados <> 1
+  AND vc.FecMovim BETWEEN ? AND ?
+  AND {linea_cond}
+GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre))
+HAVING SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) > 0
+ORDER BY MontoNeto DESC
+"""
+
+SQL_CLIENTES_LINEA_TODOS_TPL = """
+SELECT
+    c.CodCliente AS CodCliente,
+    LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
+    SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
+FROM MAGNUS_SITD.dbo.Clientes c
+JOIN Ven_CompCabecera vc ON vc.CodCliente = c.CodCliente
+JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
+JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
+LEFT JOIN StkFer_Articulos  s  ON s.CodArticulo    = r.CodArticu
+LEFT JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
+WHERE cc.EvitaInformesYListados <> 1
+  AND vc.FecMovim BETWEEN ? AND ?
+  AND {linea_cond}
+GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre))
+HAVING SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) > 0
+ORDER BY MontoNeto DESC
+"""
+
+_LINEA_COND_EXACTA = "LTRIM(RTRIM(ap.Nivel1)) = ?"
+_LINEA_COND_SIN_LINEA = "(ap.Nivel1 IS NULL OR LTRIM(RTRIM(ap.Nivel1)) = '')"
+
+
+def fetch_clientes_por_linea(
+    linea: str,
+    vendedor: int | None = None,
+    limit: int = 100,
+    desde: str | None = None,
+    hasta: str | None = None,
+    forzar: bool = False,
+) -> dict:
+    """Clientes que compraron una línea de artículo, ordenados por MONTO
+    (venta neta, $) de mayor a menor, en el mismo rango fijo de 12 meses que
+    fetch_top_clientes/fetch_top_lineas — para el modal de
+    /ventas/vendedor cuando se hace click en una línea del ranking "Top 10
+    líneas" (pedido de Pablo 2026-08-18).
+
+    Devuelve `porMonto` (las `limit` primeras, ya ordenadas por SQL) y
+    `totalClientes` (cuántos clientes distintos compraron esa línea en el
+    rango, no cuántos se muestran).
+
+    `linea`: nombre de línea tal cual lo devuelve fetch_top_lineas
+    (ap.Nivel1 trimeado) — o SIN_LINEA, caso especial que no compara texto
+    sino que filtra Nivel1 NULL/''.
+
+    `vendedor`: mismo criterio de acceso que fetch_top_clientes — si se
+    pasa, solo clientes de la cartera de ese vendedor."""
+    desde_ym, hasta_ym, dia_desde, dia_hasta = _resolver_rango(desde, hasta)
+
+    linea_norm = (linea or "").strip()
+    if not linea_norm:
+        raise ValueError("Falta 'linea'")
+
+    limit_i = max(1, min(int(limit or 100), 500))
+    cache_key = (linea_norm, vendedor, limit_i, desde_ym, hasta_ym)
+    ahora = time.monotonic()
+    if not forzar:
+        cacheado = _TOP_CLIENTES_LINEA_CACHE.get(cache_key)
+        if cacheado is not None and (ahora - cacheado[0]) < _TOP_CLIENTES_LINEA_TTL_SEG:
+            return cacheado[1]
+
+    es_sin_linea = linea_norm == SIN_LINEA
+    linea_cond = _LINEA_COND_SIN_LINEA if es_sin_linea else _LINEA_COND_EXACTA
+
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        if vendedor is None:
+            sql = SQL_CLIENTES_LINEA_TODOS_TPL.format(linea_cond=linea_cond)
+            params = (dia_desde, dia_hasta) if es_sin_linea else (dia_desde, dia_hasta, linea_norm)
+        else:
+            sql = SQL_CLIENTES_LINEA_VENDEDOR_TPL.format(linea_cond=linea_cond)
+            params = (
+                (int(vendedor), dia_desde, dia_hasta)
+                if es_sin_linea
+                else (int(vendedor), dia_desde, dia_hasta, linea_norm)
+            )
+        cur.execute(sql, params)
+
+        clientes: list[dict] = []
+        for cod, nombre, monto in cur.fetchall():
+            if cod is None:
+                continue
+            clientes.append(
+                {
+                    "numero": int(cod),
+                    "nombre": (str(nombre).strip() if nombre else None),
+                    "monto": round(float(_safe(monto) or 0), 2),
+                }
+            )
+
+        resultado = {
+            "linea": linea_norm,
+            "desde": f"{desde_ym[0]:04d}-{desde_ym[1]:02d}",
+            "hasta": f"{hasta_ym[0]:04d}-{hasta_ym[1]:02d}",
+            "totalClientes": len(clientes),
+            "porMonto": clientes[:limit_i],
+        }
+        _TOP_CLIENTES_LINEA_CACHE[cache_key] = (ahora, resultado)
+        return resultado
+    finally:
+        conn.close()
+
+
 def fetch_ventas_por_linea(cod_cliente: int, vendedor: int | None = None) -> dict:
     """Ventas (cantidad neta y monto neto) de UN cliente, agrupadas por línea
     de artículo y por año actual/año anterior, con desglose mensual — para
