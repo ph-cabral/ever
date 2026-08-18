@@ -61,28 +61,56 @@ interface RespVentasVendedor {
   totales: { anioAnterior: AnioVal; anioActual: AnioVal };
 }
 
-// Top 10 clientes que más compraron (pedido de Pablo 2026-08-14) — debajo
-// de la tabla principal, cambia entre cantidad/monto con el mismo switch
-// Unidades/Pesos de arriba. Ranking de un rango de meses propio (default
-// últimos 6, seleccionable — pedido de Pablo 2026-08-14, mismo día),
-// independiente del cliente elegido en el buscador y del período YTD/meses
-// de la tabla principal.
+// Rankings del pie de la vista — debajo de la tabla principal, con su
+// PROPIO rango de meses (default últimos 12 — pedido de Pablo 2026-08-18,
+// "de septiembre 2025 a agosto 2026"), independiente del cliente elegido en
+// el buscador y del período YTD/meses de la tabla principal.
+//
+// Son DOS rankings que comparten el rango y se alternan con un switch
+// propio (pedido de Pablo 2026-08-18):
+//   · Clientes → solo $ gastado (ya NO cambia con el switch Unidades/Pesos
+//     de la tabla de arriba: acá el monto es lo único que se muestra).
+//   · Líneas   → solo unidades compradas.
+// Cada uno trae además el TOTAL de filas que entran en la filtración
+// (`totalClientes` / `totalLineas`), que es mayor que las 10 que se listan.
+//
+// Todo el recorte por fecha y el orden lo hace el back en SQL (ver
+// fetch_top_clientes / fetch_top_lineas en ventas.py) — acá no se filtra ni
+// se reordena nada.
 interface TopCliente {
   numero: number;
   nombre: string | null;
-  cantidad: number;
   monto: number;
 }
 
 interface RespTopClientes {
   desde: string; // "YYYY-MM"
   hasta: string; // "YYYY-MM"
-  porCantidad: TopCliente[];
+  totalClientes: number;
   porMonto: TopCliente[];
 }
 
-// "YYYY-MM" de hoy y de `n` meses antes — para el default del rango (6
-// meses) y para acotar el <input type="month"> a fechas razonables.
+interface TopLinea {
+  linea: string;
+  unidades: number;
+}
+
+interface RespTopLineas {
+  desde: string; // "YYYY-MM"
+  hasta: string; // "YYYY-MM"
+  totalLineas: number;
+  porUnidades: TopLinea[];
+}
+
+type TopVista = "clientes" | "lineas";
+
+// Meses del rango por defecto de los rankings, contando el mes actual:
+// 12 = mes en curso + 11 hacia atrás (pedido de Pablo 2026-08-18).
+const TOP_MESES_DEFAULT = 12;
+
+// "YYYY-MM" de hoy y de `n` meses antes — para el default del rango
+// (TOP_MESES_DEFAULT) y para acotar el <input type="month"> a fechas
+// razonables.
 const ymHoy = (): string => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -204,29 +232,42 @@ export default function VentasVendedorPage() {
     [fetchVentas],
   );
 
-  // ── Top 10 clientes que más compraron (pedido de Pablo 2026-08-14) ─────
-  // Independiente del cliente buscado arriba y del período YTD/meses de la
-  // tabla principal — tiene su PROPIO rango de meses (pedido de Pablo
-  // 2026-08-14, mismo día: "que por defecto sean 6 meses para atrás y uno
-  // pueda seleccionar el rango"). Se recarga cada vez que cambia el rango.
-  const [topDesde, setTopDesde] = useState(() => ymMesesAtras(ymHoy(), 5));
+  // ── Rankings del pie: top clientes ($) y top líneas (unidades) ─────────
+  // Independientes del cliente buscado arriba y del período YTD/meses de la
+  // tabla principal — tienen su PROPIO rango de meses, compartido entre los
+  // dos (pedido de Pablo 2026-08-18: "rango de 12 meses desde el mes en
+  // curso para atrás"), y se recargan cada vez que cambia ese rango.
+  //
+  // Se piden los DOS al montar (no solo el de la pestaña activa): el back
+  // cachea 15 min por rango, así que alternar entre Clientes y Líneas es
+  // instantáneo en vez de disparar un fetch nuevo cada vez.
+  const [topDesde, setTopDesde] = useState(() => ymMesesAtras(ymHoy(), TOP_MESES_DEFAULT - 1));
   const [topHasta, setTopHasta] = useState(() => ymHoy());
+  const [topVista, setTopVista] = useState<TopVista>("clientes");
   const [topClientes, setTopClientes] = useState<RespTopClientes | null>(null);
+  const [topLineas, setTopLineas] = useState<RespTopLineas | null>(null);
   const [topLoading, setTopLoading] = useState(false);
   const [topError, setTopError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelado = false;
     setTopLoading(true);
+    setTopError(null);
     const qs = new URLSearchParams({ desde: topDesde, hasta: topHasta });
-    fetch(`/api/ventas/vendedor/top-clientes?${qs.toString()}`, { cache: "no-store" })
-      .then(async (res) => {
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-        if (!cancelado) setTopClientes(j);
+    const pedir = async (ruta: string) => {
+      const res = await fetch(`/api/ventas/vendedor/${ruta}?${qs.toString()}`, { cache: "no-store" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      return j;
+    };
+    Promise.all([pedir("top-clientes"), pedir("top-lineas")])
+      .then(([cli, lin]) => {
+        if (cancelado) return;
+        setTopClientes(cli);
+        setTopLineas(lin);
       })
       .catch((e) => {
-        if (!cancelado) setTopError(e instanceof Error ? e.message : "Error al cargar el top de clientes");
+        if (!cancelado) setTopError(e instanceof Error ? e.message : "Error al cargar los rankings");
       })
       .finally(() => {
         if (!cancelado) setTopLoading(false);
@@ -235,6 +276,17 @@ export default function VentasVendedorPage() {
       cancelado = true;
     };
   }, [topDesde, topHasta]);
+
+  // Respuesta y total de la pestaña activa. El rango que se muestra en el
+  // encabezado sale del BACK (que es quien resuelve el default), no del
+  // estado local, así lo que dice el título siempre coincide con los datos
+  // que hay en la tabla.
+  const topResp: { desde: string; hasta: string } | null =
+    topVista === "clientes" ? topClientes : topLineas;
+  const topTotal: number | null =
+    topVista === "clientes"
+      ? topClientes?.totalClientes ?? null
+      : topLineas?.totalLineas ?? null;
 
   // ── Período: botón dividido "YTD" / "Seleccionar meses" (pedido de Pablo
   // 2026-08-14). No pega al back — la respuesta ya trae el desglose mensual
@@ -840,19 +892,46 @@ export default function VentasVendedorPage() {
           </div>
         )}
 
-        {/* Top 10 clientes que más compraron — cambia entre unidades/pesos
-            con el mismo switch de arriba, y tiene su propio rango de meses
-            (pedido de Pablo 2026-08-14: default últimos 6, seleccionable) */}
+        {/* Rankings del pie — top clientes ($) y top líneas (unidades), con
+            un rango de meses compartido (pedido de Pablo 2026-08-18: 12
+            meses por defecto, desde el mes en curso para atrás). El switch
+            Unidades/Pesos de arriba NO aplica acá: cada ranking muestra su
+            única métrica (clientes → $, líneas → unidades). */}
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4">
           <div className="flex flex-col gap-1.5">
             <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
-              <Trophy size={18} /> Top 10 clientes que más compraron
+              <Trophy size={18} />
+              {topVista === "clientes" ? "Top 10 clientes que más compraron" : "Top 10 líneas más compradas"}
             </h2>
             <p className="text-zinc-500 text-sm">
-              {topClientes ? `${formatYm(topClientes.desde)} – ${formatYm(topClientes.hasta)}` : "…"} — según tu
+              {topResp ? `${formatYm(topResp.desde)} – ${formatYm(topResp.hasta)}` : "…"} — según tu
               acceso (tu cartera de clientes, o todos si sos admin).
             </p>
           </div>
+
+          {/* Switch Clientes / Líneas — mismo rango para los dos, los datos
+              de ambos ya están cargados así que alternar no dispara fetch. */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs text-zinc-400 uppercase tracking-wide">Ver</span>
+            <div className="inline-flex rounded-md border border-zinc-700 overflow-hidden">
+              {(["clientes", "lineas"] as TopVista[]).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setTopVista(v)}
+                  aria-pressed={topVista === v}
+                  className={`btn-anim px-3 py-2 text-sm transition-colors ${
+                    topVista === v
+                      ? "bg-yellow-400 text-zinc-900 font-semibold"
+                      : "text-zinc-300 hover:bg-zinc-800"
+                  }`}
+                >
+                  {v === "clientes" ? "Clientes" : "Líneas"}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="flex flex-col gap-1.5">
             <label htmlFor="top-desde" className="text-xs text-zinc-400 uppercase tracking-wide">
               Desde
@@ -884,12 +963,24 @@ export default function VentasVendedorPage() {
             type="button"
             onClick={() => {
               setTopHasta(ymHoy());
-              setTopDesde(ymMesesAtras(ymHoy(), 5));
+              setTopDesde(ymMesesAtras(ymHoy(), TOP_MESES_DEFAULT - 1));
             }}
             className="btn-anim border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
           >
-            Últimos 6 meses
+            Últimos {TOP_MESES_DEFAULT} meses
           </button>
+
+          {/* Total de filas que entran en la filtración (pedido de Pablo
+              2026-08-18) — es el universo completo del rango, no las 10
+              que se listan abajo. */}
+          <div className="flex flex-col gap-1.5 ml-auto text-right">
+            <span className="text-xs text-zinc-400 uppercase tracking-wide">
+              {topVista === "clientes" ? "Clientes en el período" : "Líneas en el período"}
+            </span>
+            <span className="text-2xl font-bold text-yellow-400 tabular-nums leading-none py-1">
+              {topTotal === null ? "…" : fmt(topTotal)}
+            </span>
+          </div>
         </div>
 
         {topError && (
@@ -901,8 +992,10 @@ export default function VentasVendedorPage() {
         {!topError && (
           <div className={`rounded-xl border border-zinc-800 overflow-hidden transition-opacity ${topLoading ? "opacity-50" : ""}`}>
             {(() => {
-              const topFilas = modo === "unidades" ? topClientes?.porCantidad : topClientes?.porMonto;
-              if (!topLoading && (!topFilas || topFilas.length === 0)) {
+              const vacio = topVista === "clientes"
+                ? !topClientes?.porMonto?.length
+                : !topLineas?.porUnidades?.length;
+              if (!topLoading && vacio) {
                 return (
                   <div className="px-5 py-12 flex flex-col items-center gap-3 text-center">
                     <Trophy size={32} className="text-zinc-700" />
@@ -915,25 +1008,37 @@ export default function VentasVendedorPage() {
                   <thead className="bg-[#1A1A1A] text-zinc-400">
                     <tr>
                       <th className="px-3 py-2 font-medium text-left whitespace-nowrap w-12">#</th>
-                      <th className="px-3 py-2 font-medium text-left whitespace-nowrap">Cliente</th>
+                      <th className="px-3 py-2 font-medium text-left whitespace-nowrap">
+                        {topVista === "clientes" ? "Cliente" : "Línea"}
+                      </th>
                       <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800">
-                        {modo === "unidades" ? "Unidades" : "Pesos"}
+                        {topVista === "clientes" ? "Pesos" : "Unidades"}
                       </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(topFilas ?? []).map((c, i) => (
-                      <tr key={c.numero} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
-                        <td className="px-3 py-2 text-zinc-500 tabular-nums">{i + 1}</td>
-                        <td className="px-3 py-2 text-zinc-100 whitespace-nowrap">
-                          {c.nombre ?? "(sin nombre)"}{" "}
-                          <span className="text-zinc-500 font-mono text-xs">({c.numero})</span>
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800">
-                          {fmt(modo === "unidades" ? c.cantidad : c.monto)}
-                        </td>
-                      </tr>
-                    ))}
+                    {topVista === "clientes"
+                      ? (topClientes?.porMonto ?? []).map((c, i) => (
+                          <tr key={c.numero} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
+                            <td className="px-3 py-2 text-zinc-500 tabular-nums">{i + 1}</td>
+                            <td className="px-3 py-2 text-zinc-100 whitespace-nowrap">
+                              {c.nombre ?? "(sin nombre)"}{" "}
+                              <span className="text-zinc-500 font-mono text-xs">({c.numero})</span>
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800">
+                              {fmt(c.monto)}
+                            </td>
+                          </tr>
+                        ))
+                      : (topLineas?.porUnidades ?? []).map((l, i) => (
+                          <tr key={l.linea} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
+                            <td className="px-3 py-2 text-zinc-500 tabular-nums">{i + 1}</td>
+                            <td className="px-3 py-2 text-zinc-100 whitespace-nowrap">{l.linea}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800">
+                              {fmt(l.unidades)}
+                            </td>
+                          </tr>
+                        ))}
                   </tbody>
                 </table>
               );

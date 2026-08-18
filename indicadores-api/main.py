@@ -21,7 +21,10 @@ from compras import (
     fetch_consumo_articulo, fetch_consumo_articulos, fetch_lineas,
 )
 from ingresos import fetch_remitos_ingreso
-from ventas import fetch_pedidos_mes, fetch_ventas_por_linea, fetch_vendedores, fetch_top_clientes
+from ventas import (
+    fetch_pedidos_mes, fetch_ventas_por_linea, fetch_vendedores,
+    fetch_top_clientes, fetch_top_lineas,
+)
 from finanza import (
     fetch_facturacion_dia,
     fetch_descubrir,
@@ -721,17 +724,41 @@ def ventas_vendedor(
 def ventas_vendedor_top_clientes(
     vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
     limit: int = Query(default=10, ge=1, le=50),
-    desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: 5 meses antes de `hasta`)"),
+    desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: 11 meses antes de `hasta`)"),
     hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes actual)"),
 ):
-    """Top clientes por cantidad y por monto (venta neta) en un rango de
-    meses — para el ranking debajo de la tabla de /ventas/vendedor (pedido
-    de Pablo 2026-08-14). Por defecto, últimos 6 meses. Ver docstring de
-    fetch_top_clientes (ventas.py) para el criterio de acceso por vendedor
-    (mismo que /clientes y /ventas/vendedor) y para el formato de
-    `desde`/`hasta`."""
+    """Top clientes por MONTO (venta neta, $) en un rango de meses — para el
+    ranking debajo de la tabla de /ventas/vendedor. Por defecto, últimos 12
+    meses (pedido de Pablo 2026-08-18). Devuelve también `totalClientes`:
+    cuántos clientes distintos entran en la filtración, no cuántos se
+    muestran. Ver docstring de fetch_top_clientes (ventas.py) para el
+    criterio de acceso por vendedor (mismo que /clientes y
+    /ventas/vendedor) y para el formato de `desde`/`hasta`."""
     try:
         return fetch_top_clientes(vendedor=vendedor, limit=limit, desde=desde, hasta=hasta)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+
+@app.get("/ventas/vendedor/top-lineas")
+def ventas_vendedor_top_lineas(
+    vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
+    limit: int = Query(default=10, ge=1, le=50),
+    desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: 11 meses antes de `hasta`)"),
+    hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes actual)"),
+):
+    """Top líneas por UNIDADES compradas en un rango de meses — gemelo de
+    /ventas/vendedor/top-clientes (pedido de Pablo 2026-08-18: "agregamos
+    vista de líneas, al igual que el top, traemos el total de líneas y acá
+    dejamos ver solo unidades compradas"). Mismo rango por defecto (12
+    meses) y mismo criterio de acceso por vendedor. Devuelve `porUnidades`
+    y `totalLineas`. Ver fetch_top_lineas (ventas.py)."""
+    try:
+        return fetch_top_lineas(vendedor=vendedor, limit=limit, desde=desde, hasta=hasta)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

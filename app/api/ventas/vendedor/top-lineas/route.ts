@@ -7,21 +7,22 @@ const API_URL =
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Proxy → FastAPI indicadores-api: top clientes por MONTO ($) en un rango
-// de meses (default: últimos 12 — pedido de Pablo 2026-08-18), para el
-// ranking debajo de la tabla de /ventas/vendedor. Ver fetch_top_clientes en
-// ventas.py. `desde`/`hasta` ("YYYY-MM") pasan directo del front — el rango
-// en sí (y su default) lo resuelve el back, acá solo se reenvían si vienen.
+// Proxy → FastAPI indicadores-api: top líneas por UNIDADES compradas en un
+// rango de meses (default: últimos 12), para el ranking debajo de la tabla
+// de /ventas/vendedor (pedido de Pablo 2026-08-18: "agregamos vista de
+// líneas, al igual que el top, traemos el total de líneas y acá dejamos ver
+// solo unidades compradas"). Gemelo de top-clientes/route.ts — mismo
+// contrato, misma resolución de acceso; lo único que cambia es la métrica
+// (unidades en vez de $) y el eje de agrupación (línea en vez de cliente).
 //
-// La respuesta trae `porMonto` (top N) y `totalClientes` (cuántos clientes
-// distintos entran en la filtración, mayor que los que se listan). El
-// ranking por unidades se sacó a propósito: ahora vive en
-// /api/ventas/vendedor/top-lineas, agrupado por línea de artículo.
+// La respuesta trae `porUnidades` (top N) y `totalLineas` (cuántas líneas
+// distintas entran en la filtración, mayor que las que se listan). Ver
+// fetch_top_lineas en ventas.py.
 //
 // Acceso por vendedor: mismo criterio que /api/ventas/vendedor y
 // /api/ventas/vendedor/clientes — se resuelve server-side si quien pide es
 // admin (ranking de toda la empresa) o no-admin (solo su vendedorCodigo,
-// ranking dentro de su propio portfolio de clientes).
+// o sea las líneas que compraron los clientes de su cartera).
 function mesActual(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -38,13 +39,13 @@ export async function GET(req: NextRequest) {
   }
   if (!acceso.isAdmin && !acceso.vendedorCodigo) {
     // Mismo tratamiento que el resto de las rutas de /ventas/vendedor: sin
-    // vendedor asignado todavía = cero clientes visibles, no "sin
-    // restricción".
+    // vendedor asignado todavía = cero clientes visibles, así que tampoco
+    // hay líneas que mostrar (no "sin restricción").
     return NextResponse.json({
       desde: desde ?? mesActual(),
       hasta: hasta ?? mesActual(),
-      totalClientes: 0,
-      porMonto: [],
+      totalLineas: 0,
+      porUnidades: [],
     });
   }
 
@@ -53,21 +54,21 @@ export async function GET(req: NextRequest) {
     if (!acceso.isAdmin) qs.set("vendedor", String(acceso.vendedorCodigo));
     if (desde) qs.set("desde", desde);
     if (hasta) qs.set("hasta", hasta);
-    const res = await fetch(`${API_URL}/ventas/vendedor/top-clientes?${qs.toString()}`, {
+    const res = await fetch(`${API_URL}/ventas/vendedor/top-lineas?${qs.toString()}`, {
       cache: "no-store",
       signal: AbortSignal.timeout(55000),
     });
     if (!res.ok) {
       const detail = await res.json().catch(() => null);
       return NextResponse.json(
-        { error: "Error en API de top clientes", detail },
+        { error: "Error en API de top líneas", detail },
         { status: res.status },
       );
     }
     const data = await res.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error("GET /api/ventas/vendedor/top-clientes", error);
+    console.error("GET /api/ventas/vendedor/top-lineas", error);
     return NextResponse.json(
       { error: "No se pudo conectar al servicio de ventas" },
       { status: 503 },

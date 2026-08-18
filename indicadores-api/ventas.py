@@ -18,6 +18,7 @@ Tablas (EVERWEAR, confirmadas por deposito.py/main.py):
 """
 from datetime import datetime, date
 from decimal import Decimal
+import calendar
 import re
 import time
 from db import get_connection
@@ -227,51 +228,49 @@ def _bloqueado(cod_cliente: int, anio_anterior: int, anio_actual: int) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Top clientes (cantidad/monto en un rango de meses) — /ventas/vendedor,
-# debajo de la tabla principal (pedido de Pablo 2026-08-14): "top 10 de los
-# clientes que más compraron", tomando SOLO los clientes que ya pasan el
-# mismo filtro de acceso por vendedor que usa el buscador de clientes
-# (fetch_clientes_search/SQL_CLIENTES_SEARCH_POR_VENDEDOR) — un no-admin
-# nunca ve en este ranking un cliente que no es suyo. Admin (`vendedor=None`)
+# Rankings del pie de /ventas/vendedor — top clientes ($) y top líneas
+# (unidades) en un rango de meses. Ambos toman SOLO los clientes que ya
+# pasan el mismo filtro de acceso por vendedor que usa el buscador de
+# clientes (fetch_clientes_search/SQL_CLIENTES_SEARCH_POR_VENDEDOR) — un
+# no-admin nunca ve acá un cliente que no es suyo. Admin (`vendedor=None`)
 # ve el ranking de toda la empresa.
 #
-# PERF (pedido de Pablo 2026-08-14, "el top 10 tarda mucho"): la primera
-# versión resolvía esto en DOS pasos — 1) traer TODOS los códigos de
-# cliente del maestro Magnus, 2) volver a pegarle a
-# Ven_CompCabecera/Renglon en chunks de 1000 códigos (`CodCliente IN
-# (...)`) — o sea, tantos round-trips como chunks, cada uno re-armando el
-# JOIN completo. Ahora es UNA sola consulta: se hace el JOIN
-# Clientes→Vendedor_Zona→Ped_Usu_Arma→Ven_CompCabecera→Ven_CompRenglon→
-# Ven_CodCom de una, dejando que el motor arme un solo plan (en vez de
-# N ejecuciones separadas) — el filtro de vendedor (cuando aplica) entra
-# en el WHERE de esta misma consulta, no en un round-trip aparte. La suma
-# se sigue haciendo en SQL (GROUP BY por cliente/año/MES ahora, antes solo
-# año), no se traen renglones sueltos a Python.
+# RANGO (pedido de Pablo 2026-08-18): por defecto los últimos 12 meses
+# (mes actual + 11 anteriores). Sigue siendo configurable con
+# `desde`/`hasta` ("YYYY-MM"), pero el default ya no son 6.
 #
-# RANGO DE MESES (pedido de Pablo 2026-08-14, mismo día): por defecto trae
-# los últimos 6 meses (mes actual + 5 anteriores), y se puede pedir
-# cualquier otro rango con `desde`/`hasta` ("YYYY-MM"). El filtro de rango
-# se aplica en PYTHON después de traer el agregado por (cliente, año, mes)
-# — A PROPÓSITO no se agregó `WHERE` filtrando por fecha en SQL: el mismo
-# gotcha que ya tiene fetch_ventas_por_linea (comparar
-# dbo.fecha_cla2sql(...) contra un parámetro de fecha no filtra bien con
-# este driver viejo — se pierden filas SIN error) hace arriesgado meter
-# un filtro de fecha en el WHERE sin poder probarlo primero contra Magnus
-# real. Como el agregado ya viene resumido a nivel (cliente, año, mes) —
-# no a nivel renglón — lo que se descarta en Python después es chico, así
-# que el costo de no filtrar en SQL es aceptable. Si en el futuro hace
-# falta más velocidad, ahí sí vale la pena probar con cuidado un filtro
-# `WHERE YEAR(...)=? AND MONTH(...) IN (...)` contra la base real (no
-# contra un `BETWEEN` de fechas, que es justo el patrón que falla).
+# FILTRO DE FECHA EN SQL (pedido de Pablo 2026-08-18, "todo el trabajo
+# debe ser en sql porque se ralentiza mucho la consulta"): ahora el rango
+# se recorta en el WHERE, no en Python. El filtro va contra la COLUMNA
+# CRUDA `vc.FecMovim` — entero base 1800-12-28, igual que FechaPedido en
+# fetch_pedidos_mes (ver HANDOFF_extracciones_sql.md: "las tablas Magnus
+# usan fecha entera base 1800-12-28") — y NO contra
+# `dbo.fecha_cla2sql(vc.FecMovim)`. Esto importa por dos razones:
 #
-# Además se cachea el resultado en memoria por `_TOP_CLIENTES_TTL_SEG`
-# (el front pide esto solo en /ventas/vendedor apenas se monta la
-# página o cambia el rango elegido, no hace falta que sea al segundo).
-# Cache simple de proceso (uvicorn corre con 1 worker, ver main.py) — si
-# el día de mañana hay más workers, cada uno cachea por su lado, lo cual
-# sigue siendo correcto, solo menos efectivo.
+#   1. Esquiva el gotcha ya documentado del driver viejo (comparar una
+#      fecha CALCULADA contra un parámetro de FECHA se come filas sin
+#      tirar error). Acá los dos lados son enteros, no fechas.
+#   2. Es sargable: sin UDF escalar por fila, el motor puede usar índice
+#      sobre FecMovim. Un `WHERE YEAR(dbo.fecha_cla2sql(...)) = ?` habría
+#      forzado igual el scan completo + una llamada a la UDF por renglón,
+#      o sea el problema de velocidad que Pablo pidió arreglar.
+#
+# Si `FecMovim` no fuera ese entero, esta query falla RUIDOSAMENTE (error
+# de conversión o cero filas), no en silencio — que es justo lo contrario
+# del gotcha de arriba, y por eso es una apuesta segura.
+#
+# La suma se hace entera en SQL (GROUP BY por cliente / por línea, ya sin
+# desglose año-mes: nada de lo que se traía a Python se usaba para otra
+# cosa que sumar). Además cada resultado se cachea en memoria por 15 min
+# — el front pide esto al montar la página o al cambiar el rango, no hace
+# falta que sea al segundo. Cache simple de proceso (uvicorn con 1 worker,
+# ver main.py); con más workers cada uno cachea por su lado, lo cual sigue
+# siendo correcto, solo menos efectivo.
 _TOP_CLIENTES_CACHE: dict[tuple, tuple[float, dict]] = {}
 _TOP_CLIENTES_TTL_SEG = 15 * 60  # 15 minutos
+
+_TOP_LINEAS_CACHE: dict[tuple, tuple[float, dict]] = {}
+_TOP_LINEAS_TTL_SEG = 15 * 60  # 15 minutos
 
 _YM_RE = re.compile(r"^(\d{4})-(\d{1,2})$")
 
@@ -295,28 +294,32 @@ def _mes_atras(ym: tuple[int, int], n: int) -> tuple[int, int]:
     return idx // 12, idx % 12 + 1
 
 
-def _rango_meses(desde: tuple[int, int], hasta: tuple[int, int]) -> set[tuple[int, int]]:
-    """Todos los (año, mes) entre desde y hasta, inclusive — se banca que
-    vengan invertidos (los reordena)."""
-    a, b = (desde, hasta) if desde <= hasta else (hasta, desde)
-    out: set[tuple[int, int]] = set()
-    anio, mes = a
-    while (anio, mes) <= b:
-        out.add((anio, mes))
-        mes += 1
-        if mes > 12:
-            mes = 1
-            anio += 1
-    return out
+def _resolver_rango(desde: str | None, hasta: str | None, meses_default: int = 11):
+    """('YYYY-MM'|None, 'YYYY-MM'|None) -> (desde_ym, hasta_ym, dia_desde,
+    dia_hasta), donde los `dia_*` son el entero Magnus (días desde
+    BASE_DATE) del PRIMER día del mes `desde` y del ÚLTIMO día del mes
+    `hasta` — o sea, ambos meses quedan incluidos completos.
+
+    Default: `hasta` = mes actual, `desde` = `meses_default` meses antes
+    (11 → ventana de 12 meses contando el actual). Si vienen invertidos se
+    reordenan. Lanza ValueError si el formato no es 'YYYY-MM'."""
+    hoy_ym = (date.today().year, date.today().month)
+    hasta_ym = _parse_ym(hasta) if hasta else hoy_ym
+    desde_ym = _parse_ym(desde) if desde else _mes_atras(hasta_ym, meses_default)
+    if desde_ym > hasta_ym:
+        desde_ym, hasta_ym = hasta_ym, desde_ym
+
+    primer_dia = date(desde_ym[0], desde_ym[1], 1)
+    ultimo_dia = date(
+        hasta_ym[0], hasta_ym[1], calendar.monthrange(hasta_ym[0], hasta_ym[1])[1]
+    )
+    return desde_ym, hasta_ym, (primer_dia - BASE_DATE).days, (ultimo_dia - BASE_DATE).days
 
 
 SQL_TOP_CLIENTES_VENDEDOR = """
 SELECT
     c.CodCliente AS CodCliente,
     LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
-    YEAR(dbo.fecha_cla2sql(vc.FecMovim)) AS Anio,
-    MONTH(dbo.fecha_cla2sql(vc.FecMovim)) AS Mes,
-    SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS CantidadNeta,
     SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
 FROM MAGNUS_SITD.dbo.Clientes c
 JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
@@ -326,23 +329,26 @@ JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
 JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
 WHERE pu.Usu_Arma_Codigo = ?
   AND cc.EvitaInformesYListados <> 1
-GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre)), YEAR(dbo.fecha_cla2sql(vc.FecMovim)), MONTH(dbo.fecha_cla2sql(vc.FecMovim))
+  AND vc.FecMovim BETWEEN ? AND ?
+GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre))
+HAVING SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) > 0
+ORDER BY MontoNeto DESC
 """
 
 SQL_TOP_CLIENTES_TODOS = """
 SELECT
     c.CodCliente AS CodCliente,
     LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
-    YEAR(dbo.fecha_cla2sql(vc.FecMovim)) AS Anio,
-    MONTH(dbo.fecha_cla2sql(vc.FecMovim)) AS Mes,
-    SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS CantidadNeta,
     SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
 FROM MAGNUS_SITD.dbo.Clientes c
 JOIN Ven_CompCabecera vc ON vc.CodCliente = c.CodCliente
 JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
 JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
 WHERE cc.EvitaInformesYListados <> 1
-GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre)), YEAR(dbo.fecha_cla2sql(vc.FecMovim)), MONTH(dbo.fecha_cla2sql(vc.FecMovim))
+  AND vc.FecMovim BETWEEN ? AND ?
+GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre))
+HAVING SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) > 0
+ORDER BY MontoNeto DESC
 """
 
 
@@ -353,35 +359,32 @@ def fetch_top_clientes(
     hasta: str | None = None,
     forzar: bool = False,
 ) -> dict:
-    """Top clientes por cantidad y por monto (venta neta) en un rango de
-    meses — para el ranking debajo de la tabla de /ventas/vendedor (pedido
-    de Pablo 2026-08-14). Devuelve DOS rankings ya armados (`porCantidad`,
-    `porMonto`) para que el front elija cuál mostrar según el switch
-    Unidades/Pesos, sin tener que reordenar en el cliente.
+    """Top clientes por MONTO (venta neta, $) en un rango de meses — para el
+    ranking debajo de la tabla de /ventas/vendedor.
+
+    Devuelve `porMonto` (las `limit` primeras, ya ordenadas por SQL) y
+    `totalClientes` (pedido de Pablo 2026-08-18: cuántos clientes distintos
+    entran en la filtración, NO cuántos se muestran — o sea, el total puede
+    ser mucho mayor que len(porMonto)).
+
+    Solo $: el ranking por unidades se sacó a propósito (pedido de Pablo
+    2026-08-18, "acá solo dejamos ver $ gastado por ese cliente"). Las
+    unidades ahora viven en fetch_top_lineas.
 
     `vendedor`: mismo criterio de acceso que fetch_clientes_search — si se
     pasa, el ranking sale SOLO de los clientes cuyo "Vendedor por Defecto"
-    fijo es ese código (ver clientes.SQL_VENDEDOR_FIJO_CLIENTE, mismo JOIN
-    Clientes→Vendedor_Zona→Ped_Usu_Arma, ahora en la MISMA consulta — ver
-    nota de PERF arriba). `None` (admin) no filtra, ranking de toda la
-    empresa.
+    fijo es ese código (JOIN Clientes→Vendedor_Zona→Ped_Usu_Arma en la
+    MISMA consulta). `None` (admin) no filtra, ranking de toda la empresa.
 
-    `desde`/`hasta` ("YYYY-MM"): rango de meses a incluir, AMBOS
-    inclusive. Default (pedido de Pablo 2026-08-14): últimos 6 meses —
-    `hasta` = mes actual, `desde` = 5 meses antes. No respeta el selector
-    de período (YTD/meses) de la tabla principal, es un filtro propio de
-    este ranking. Lanza `ValueError` si el formato no es "YYYY-MM".
+    `desde`/`hasta` ("YYYY-MM"): rango de meses, AMBOS inclusive y
+    completos. Default: últimos 12 meses (mes actual + 11 anteriores). No
+    respeta el selector de período (YTD/meses) de la tabla principal, es un
+    filtro propio de este ranking. Lanza `ValueError` si el formato no es
+    "YYYY-MM".
 
-    `forzar=True` ignora el cache (por si hace falta refrescar a mano sin
-    esperar el TTL — no está expuesto todavía en la ruta HTTP, pensado para
-    debug)."""
-    hoy_ym = (date.today().year, date.today().month)
-    hasta_ym = _parse_ym(hasta) if hasta else hoy_ym
-    desde_ym = _parse_ym(desde) if desde else _mes_atras(hasta_ym, 5)
-    periodo = _rango_meses(desde_ym, hasta_ym)
-    # Por si vinieron invertidos: _rango_meses ya los reordena, pero lo que
-    # devolvemos como "desde"/"hasta" tiene que reflejar el orden real.
-    desde_ym, hasta_ym = min(periodo), max(periodo)
+    `forzar=True` ignora el cache (para refrescar a mano sin esperar el
+    TTL — no expuesto en la ruta HTTP, pensado para debug)."""
+    desde_ym, hasta_ym, dia_desde, dia_hasta = _resolver_rango(desde, hasta)
 
     limit_i = max(1, min(int(limit or 10), 50))
     cache_key = (vendedor, limit_i, desde_ym, hasta_ym)
@@ -396,47 +399,133 @@ def fetch_top_clientes(
         cur = conn.cursor()
         cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         if vendedor is None:
-            cur.execute(SQL_TOP_CLIENTES_TODOS)
+            cur.execute(SQL_TOP_CLIENTES_TODOS, (dia_desde, dia_hasta))
         else:
-            cur.execute(SQL_TOP_CLIENTES_VENDEDOR, (int(vendedor),))
-        cols = [c[0] for c in cur.description]
-        totales: dict[int, dict] = {}
-        for row in cur.fetchall():
-            d = dict(zip(cols, row))
-            anio, mes = d.get("Anio"), d.get("Mes")
-            if anio is None or mes is None or (anio, mes) not in periodo:
+            cur.execute(SQL_TOP_CLIENTES_VENDEDOR, (int(vendedor), dia_desde, dia_hasta))
+
+        clientes: list[dict] = []
+        for cod, nombre, monto in cur.fetchall():
+            if cod is None:
                 continue
-            cod = int(d.get("CodCliente"))
-            cant = float(_safe(d.get("CantidadNeta")) or 0)
-            monto = float(_safe(d.get("MontoNeto")) or 0)
-            acc = totales.setdefault(
-                cod,
-                {"nombre": (str(d.get("Nombre")).strip() if d.get("Nombre") else None), "cantidad": 0.0, "monto": 0.0},
+            clientes.append(
+                {
+                    "numero": int(cod),
+                    "nombre": (str(nombre).strip() if nombre else None),
+                    "monto": round(float(_safe(monto) or 0), 2),
+                }
             )
-            acc["cantidad"] += cant
-            acc["monto"] += monto
-
-        clientes = [
-            {
-                "numero": cod,
-                "nombre": vals["nombre"],
-                "cantidad": round(vals["cantidad"], 2),
-                "monto": round(vals["monto"], 2),
-            }
-            for cod, vals in totales.items()
-            if vals["cantidad"] > 0 or vals["monto"] > 0
-        ]
-
-        top_cantidad = sorted(clientes, key=lambda c: c["cantidad"], reverse=True)[:limit_i]
-        top_monto = sorted(clientes, key=lambda c: c["monto"], reverse=True)[:limit_i]
 
         resultado = {
             "desde": f"{desde_ym[0]:04d}-{desde_ym[1]:02d}",
             "hasta": f"{hasta_ym[0]:04d}-{hasta_ym[1]:02d}",
-            "porCantidad": top_cantidad,
-            "porMonto": top_monto,
+            "totalClientes": len(clientes),
+            "porMonto": clientes[:limit_i],
         }
         _TOP_CLIENTES_CACHE[cache_key] = (ahora, resultado)
+        return resultado
+    finally:
+        conn.close()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Top líneas (pedido de Pablo 2026-08-18: "agregamos vista de líneas, al
+# igual que el top, traemos el total de líneas y acá dejamos ver solo
+# unidades compradas"). Línea = StkFer_ArtParamet.Nivel1 — el mismo campo
+# que ya usan la tabla principal de esta vista, /compras/consumo y
+# /deposito/faltantes; es texto libre y ES el nombre de la línea (POLEAS,
+# CORREAS, …), no un código a resolver aparte (ver compras.fetch_lineas).
+#
+# El JOIN a artículo/parámetros es LEFT a propósito: un renglón cuyo
+# artículo no está en el catálogo no se pierde, cae en SIN_LINEA. Por eso
+# el "> 0" va en Python y no en un HAVING — hay que consolidar el grupo
+# NULL con el grupo '' antes de decidir si la línea entra.
+SQL_TOP_LINEAS_VENDEDOR = """
+SELECT
+    LTRIM(RTRIM(ap.Nivel1)) AS Linea,
+    SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS UnidadesNetas
+FROM MAGNUS_SITD.dbo.Clientes c
+JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
+JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma pu  ON LTRIM(RTRIM(pu.Usu_Arma_Nombre)) = LTRIM(RTRIM(vz.Vendedor))
+JOIN Ven_CompCabecera vc ON vc.CodCliente = c.CodCliente
+JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
+JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
+LEFT JOIN StkFer_Articulos  s  ON s.CodArticulo    = r.CodArticu
+LEFT JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
+WHERE pu.Usu_Arma_Codigo = ?
+  AND cc.EvitaInformesYListados <> 1
+  AND vc.FecMovim BETWEEN ? AND ?
+GROUP BY LTRIM(RTRIM(ap.Nivel1))
+"""
+
+SQL_TOP_LINEAS_TODOS = """
+SELECT
+    LTRIM(RTRIM(ap.Nivel1)) AS Linea,
+    SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS UnidadesNetas
+FROM Ven_CompCabecera vc
+JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
+JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
+LEFT JOIN StkFer_Articulos  s  ON s.CodArticulo    = r.CodArticu
+LEFT JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
+WHERE cc.EvitaInformesYListados <> 1
+  AND vc.FecMovim BETWEEN ? AND ?
+GROUP BY LTRIM(RTRIM(ap.Nivel1))
+"""
+
+
+def fetch_top_lineas(
+    vendedor: int | None = None,
+    limit: int = 10,
+    desde: str | None = None,
+    hasta: str | None = None,
+    forzar: bool = False,
+) -> dict:
+    """Top líneas por UNIDADES compradas en un rango de meses — gemelo de
+    fetch_top_clientes, mismo rango/cache/criterio de acceso por vendedor,
+    pero agrupando por línea de artículo en vez de por cliente.
+
+    Devuelve `porUnidades` (las `limit` primeras) y `totalLineas` (cuántas
+    líneas distintas entran en la filtración, no cuántas se muestran).
+    Solo unidades — el $ vive en fetch_top_clientes."""
+    desde_ym, hasta_ym, dia_desde, dia_hasta = _resolver_rango(desde, hasta)
+
+    limit_i = max(1, min(int(limit or 10), 50))
+    cache_key = (vendedor, limit_i, desde_ym, hasta_ym)
+    ahora = time.monotonic()
+    if not forzar:
+        cacheado = _TOP_LINEAS_CACHE.get(cache_key)
+        if cacheado is not None and (ahora - cacheado[0]) < _TOP_LINEAS_TTL_SEG:
+            return cacheado[1]
+
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        if vendedor is None:
+            cur.execute(SQL_TOP_LINEAS_TODOS, (dia_desde, dia_hasta))
+        else:
+            cur.execute(SQL_TOP_LINEAS_VENDEDOR, (int(vendedor), dia_desde, dia_hasta))
+
+        # NULL y '' son grupos distintos para SQL pero la misma "sin línea"
+        # acá, así que se consolidan antes de filtrar/ordenar.
+        acumulado: dict[str, float] = {}
+        for linea, unidades in cur.fetchall():
+            nombre = (str(linea or "")).strip() or SIN_LINEA
+            acumulado[nombre] = acumulado.get(nombre, 0.0) + float(_safe(unidades) or 0)
+
+        lineas = [
+            {"linea": nombre, "unidades": round(u, 2)}
+            for nombre, u in acumulado.items()
+            if u > 0
+        ]
+        lineas.sort(key=lambda x: x["unidades"], reverse=True)
+
+        resultado = {
+            "desde": f"{desde_ym[0]:04d}-{desde_ym[1]:02d}",
+            "hasta": f"{hasta_ym[0]:04d}-{hasta_ym[1]:02d}",
+            "totalLineas": len(lineas),
+            "porUnidades": lineas[:limit_i],
+        }
+        _TOP_LINEAS_CACHE[cache_key] = (ahora, resultado)
         return resultado
     finally:
         conn.close()

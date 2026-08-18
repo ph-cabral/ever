@@ -57,6 +57,8 @@ las filas de Mesa de Control que quedaron con este dato de más durante la
 """
 from datetime import date, timedelta
 
+import pyodbc
+
 from db import get_connection
 from db_pg import get_pg_connection
 from deposito import OT_COL_PEDIDO
@@ -140,11 +142,13 @@ def fetch_pedido_lookup(nro_pedido: int) -> dict | None:
         una consulta nueva, se agrega al SELECT que ya se hacía
         (SQL_PEDIDO_OT_ARMADOR_BASE).
       · `fechaControl`  — Magnus Ven_PedImpresoCP.FechaControl, mismo
-        criterio (tabla/filtro/orden) que ya usa `fetch_controlador_pedido`
-        para resolver el controlador real (más reciente CON
-        CodControlador1/2 > 0) — se reusa esa función para no duplicar el
-        filtro, y se descarta el resto de lo que devuelve (nroControlador/
-        nombreControlador ya se resuelven aparte donde hacen falta)."""
+        criterio (tabla/filtro/orden) que usa `fetch_controlador_pedido`
+        para el controlador real (más reciente CON CodControlador1/2 > 0),
+        PERO con su propia query (`fetch_fecha_control_pedido`) en vez de
+        reusar esa función — ver docstring de esa función para el por qué
+        (dbo.FECHA_Cla2SQL puede reventar con datos viejos/corruptos, y no
+        queremos que eso afecte la resolución del controlador real que sí
+        bloquea el alta de Calidad)."""
     conn = get_connection()  # default EVERWEAR
     try:
         cur = conn.cursor()
@@ -182,9 +186,10 @@ def fetch_pedido_lookup(nro_pedido: int) -> dict | None:
         conn.close()
 
     # Fecha de control (Mesa de Control), mismo criterio que el controlador
-    # real — ver docstring arriba. None si el pedido todavía no pasó control.
-    ctrl = fetch_controlador_pedido(nro_pedido)
-    fecha_control = ctrl.get("fechaControl") if ctrl else None
+    # real — ver docstring arriba. None si el pedido todavía no paso control
+    # (o si el unico candidato tiene un FechaControl corrupto, ver docstring
+    # de fetch_fecha_control_pedido).
+    fecha_control = fetch_fecha_control_pedido(nro_pedido)
 
     return {
         "nroPedido": nro_pedido,
@@ -564,7 +569,7 @@ def insert_error_mesa_items(
 # mesa_control.py — cod1==cod2 confirmado ahí). A pedido de Pablo (2026-07-16):
 # esta alta NO guarda preparador (nroArmador/nombreArmador quedan NULL).
 SQL_CONTROLADOR_PEDIDO = """
-SELECT TOP 1 CodControlador1, CodControlador2, FechaControl
+SELECT TOP 1 CodControlador1, CodControlador2
 FROM dbo.Ven_PedImpresoCP
 WHERE NroMovVenta = ?
   AND (CodControlador1 > 0 OR CodControlador2 > 0)
@@ -596,18 +601,66 @@ def fetch_controlador_pedido(nro_pedido: int) -> dict | None:
         row = cur.fetchone()
         if not row:
             return None
-        cod1, cod2, fecha_control = row
+        cod1, cod2 = row
         codigo = int(cod1) if cod1 and cod1 > 0 else (int(cod2) if cod2 and cod2 > 0 else None)
         if not codigo:
             return None
         cur.execute("SELECT Nombre FROM dbo.Gen_Usuarios WHERE Numero = ?", (codigo,))
         nrow = cur.fetchone()
         nombre = (nrow[0] or "").strip() if nrow else None
-        return {
-            "nroControlador": codigo,
-            "nombreControlador": nombre or f"Controlador {codigo}",
-            "fechaControl": fecha_control,
-        }
+        return {"nroControlador": codigo, "nombreControlador": nombre or f"Controlador {codigo}"}
+    finally:
+        conn.close()
+
+
+# Fecha de control, en query APARTE de fetch_controlador_pedido (a proposito
+# — ver CAMBIO 2026-08-14 abajo).
+SQL_FECHA_CONTROL_PEDIDO = """
+SELECT TOP 1 dbo.FECHA_Cla2SQL(FechaControl) AS FechaControl
+FROM dbo.Ven_PedImpresoCP
+WHERE NroMovVenta = ?
+  AND (CodControlador1 > 0 OR CodControlador2 > 0)
+  AND FechaControl BETWEEN 1 AND 200000
+ORDER BY FechaControl DESC
+"""
+
+
+def fetch_fecha_control_pedido(nro_pedido: int):
+    """Fecha del control real (Mesa de Control), mismo criterio de fila que
+    fetch_controlador_pedido (mas reciente CON CodControlador1/2 > 0) — para
+    `fechaControl` en fetch_pedido_lookup. `datetime.date` o `None`.
+
+    CAMBIO 2026-08-14 (a pedido de Pablo, encontrado corriendo en bulk sobre
+    36 pedidos de acopio): dbo.FECHA_Cla2SQL(FechaControl) revienta (SQL
+    error 242, varchar->datetime fuera de rango) si el INT de FechaControl
+    no es un dia valido — pasa para datos viejos/corruptos en alguna fila
+    puntual de Ven_PedImpresoCP. Se probo un CASE adentro del SELECT primero
+    (no evito el error) y despues mover el filtro de rango al WHERE (`?
+    BETWEEN 1 AND 200000`, tampoco lo evito de forma confiable en la misma
+    sesion de pruebas) — asi que el `BETWEEN` queda igual (no esta de mas) PERO
+    ademas todo el bloque esta en try/except: si dbo.FECHA_Cla2SQL revienta
+    igual para este pedido puntual, se devuelve None (fecha desconocida) en
+    vez de que fetch_pedido_lookup completo tire 503 en el widget por un dato
+    de fecha corrupto que no tiene nada que ver con el resto del lookup.
+
+    Query SEPARADA de SQL_CONTROLADOR_PEDIDO (no comparten funcion) a
+    proposito: ese filtro de rango, si estuviera en la query que resuelve el
+    CONTROLADOR REAL (la que usa insert_error_calidad para bloquear el alta),
+    podria hacer que un pedido con controlador legitimo pero FechaControl
+    corrupta deje de resolver controlador — cambiando esa logica de bloqueo
+    por un problema que es solo del dato de fecha. Con la query separada,
+    fetch_controlador_pedido queda exactamente como estaba antes de este
+    cambio."""
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        try:
+            cur.execute(SQL_FECHA_CONTROL_PEDIDO, (nro_pedido,))
+            row = cur.fetchone()
+        except pyodbc.Error:
+            return None
+        return row[0] if row else None
     finally:
         conn.close()
 
