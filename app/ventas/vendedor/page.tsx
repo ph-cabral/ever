@@ -226,6 +226,12 @@ export default function VentasVendedorPage() {
   const [modalLinea, setModalLinea] = useState<string | null>(null);
   const cerrarModal = useCallback(() => setModalOpen(false), []);
 
+  // Filtro del modal colapsable (pedido de Pablo 2026-08-18: "abarca mucho
+  // la parte de filtro, pon que se esconda con un boton") — arranca visible
+  // y se puede plegar con el botón del header para dejarle más lugar a la
+  // tabla; se reabre solo cada vez que se abre el modal de nuevo.
+  const [filtroVisible, setFiltroVisible] = useState(true);
+
   // Métrica (pesos/unidades) de la tabla línea×año del modal, en modo
   // "cliente" — mismo switch "Mostrar" de siempre, pero ahora es un estado
   // PROPIO del modal (no el `topVista` de arriba): antes un solo botón
@@ -302,6 +308,7 @@ export default function VentasVendedorPage() {
   const abrirModalCliente = useCallback(
     (c: Cliente) => {
       setModalOpen(true);
+      setFiltroVisible(true);
       elegirCliente(c);
     },
     [elegirCliente],
@@ -314,6 +321,7 @@ export default function VentasVendedorPage() {
       setModalMode("linea");
       setModalLinea(linea);
       setModalOpen(true);
+      setFiltroVisible(true);
       fetchClientesPorLinea(linea);
     },
     [fetchClientesPorLinea],
@@ -329,6 +337,7 @@ export default function VentasVendedorPage() {
     setSugerencias([]);
     setData(null);
     setModalOpen(true);
+    setFiltroVisible(true);
   }, []);
 
   // ── Rankings del pie: top clientes ($) y top líneas (unidades) ─────────
@@ -594,18 +603,39 @@ export default function VentasVendedorPage() {
                       Buscá un cliente por código o nombre y elegilo de la lista. La tabla agrupa por línea
                       de artículo, comparando el año en curso contra el anterior.
                     </p>
+                    {/* Con el filtro plegado seguimos mostrando qué cliente se
+                        está viendo, para no perder el contexto. */}
+                    {!filtroVisible && modalMode === "cliente" && data && (
+                      <p className="text-sm text-zinc-300 mt-1">
+                        {data.cliente.nombre ?? "—"} <span className="text-zinc-500 font-mono text-xs">({data.cliente.codigo})</span>
+                      </p>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={cerrarModal}
-                    className="text-zinc-500 hover:text-zinc-200 transition-colors shrink-0"
-                    aria-label="Cerrar"
-                  >
-                    <X size={20} />
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setFiltroVisible((v) => !v)}
+                      className="btn-anim inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 transition-colors"
+                    >
+                      {filtroVisible ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                      {filtroVisible ? "Ocultar filtro" : "Mostrar filtro"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cerrarModal}
+                      className="text-zinc-500 hover:text-zinc-200 transition-colors"
+                      aria-label="Cerrar"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
                 </div>
 
-              {/* Filtro */}
+              {/* Filtro (pedido de Pablo 2026-08-18: colapsable con el botón
+                  de arriba — antes ocupaba mucho lugar fijo en el header del
+                  modal, que no scrollea, y le dejaba poco espacio a la
+                  tabla). */}
+              {filtroVisible && (
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4">
                 <div className="flex flex-col gap-1.5 relative">
                   <label htmlFor="filtro-cliente" className="text-xs text-zinc-400 uppercase tracking-wide">
@@ -734,8 +764,9 @@ export default function VentasVendedorPage() {
                   </>
                 )}
               </div>
+              )}
 
-              {hayTabla && !sinDatos && periodo === "meses" && (
+              {filtroVisible && hayTabla && !sinDatos && periodo === "meses" && (
                 <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-3 flex flex-wrap items-center gap-2">
                   <span className="text-xs text-zinc-400 uppercase tracking-wide mr-1">Meses:</span>
                   {data!.totales.anioActual.meses.map((m) => {
@@ -1131,15 +1162,18 @@ export default function VentasVendedorPage() {
 
                     {!clientesLineaError && (clientesLinea?.porMonto?.length ?? 0) > 0 && (
                       // overflow-x-auto (pedido de Pablo 2026-08-18: "que la tabla no
-                      // se exceda de la ventana") — en mobile la tabla scrollea
-                      // horizontal en vez de recortarse contra el borde del modal;
-                      // el nombre del cliente además puede ajustar (wrap) a una
-                      // segunda línea, así casi nunca hace falta ese scroll.
+                      // se exceda de la ventana"). Sin min-w-max y con el
+                      // nombre truncado (max-w-0 w-full truncate — pedido de
+                      // Pablo 2026-08-18: "se sigue escondiendo 3ra
+                      // columna"): la tabla ya no necesita scroll horizontal
+                      // para mostrar la columna de $, el nombre largo se
+                      // corta con "…" en vez de empujarla fuera de la
+                      // pantalla.
                       <div className="overflow-x-auto">
-                        <table className="w-full min-w-max text-sm">
+                        <table className="w-full text-sm">
                           <thead className="bg-[#1A1A1A] text-zinc-400">
                             <tr>
-                              <th className="px-3 py-2 font-medium text-left whitespace-nowrap w-12">#</th>
+                              <th className="px-3 py-2 font-medium text-left whitespace-nowrap w-10">#</th>
                               <th className="px-3 py-2 font-medium text-left">Cliente</th>
                               <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800">
                                 Gasto
@@ -1155,9 +1189,9 @@ export default function VentasVendedorPage() {
                                 title="Ver ventas de este cliente"
                               >
                                 <td className="px-3 py-2 text-zinc-500 tabular-nums">{i + 1}</td>
-                                <td className="px-3 py-2 text-zinc-100">
+                                <td className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate" title={c.nombre ?? undefined}>
                                   {c.nombre ?? "(sin nombre)"}{" "}
-                                  <span className="text-zinc-500 font-mono text-xs whitespace-nowrap">({c.numero})</span>
+                                  <span className="text-zinc-500 font-mono text-xs">({c.numero})</span>
                                 </td>
                                 <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
                                   {fmtMoney(c.monto)}
@@ -1249,17 +1283,17 @@ export default function VentasVendedorPage() {
               }
               return (
                 // overflow-x-auto (pedido de Pablo 2026-08-18: "que la tabla no se
-                // exceda de la ventana") — antes este contenedor era
-                // overflow-hidden, así que en mobile el nombre/código quedaba
-                // directamente recortado contra el borde en vez de scrollear.
-                // El nombre además ya no fuerza una sola línea (whitespace-nowrap
-                // sacado de esa celda): si es muy largo, ajusta a la línea
-                // siguiente en vez de necesitar ese scroll.
+                // exceda de la ventana"). Sin min-w-max y con la columna de
+                // nombre truncada (max-w-0 w-full truncate — pedido de Pablo
+                // 2026-08-18: "se sigue escondiendo 3ra columna"): la tabla
+                // ya no necesita scroll horizontal para mostrar la columna
+                // de $/unidades, el nombre largo se corta con "…" en vez de
+                // empujarla fuera de la pantalla.
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-max text-sm">
+                  <table className="w-full text-sm">
                     <thead className="bg-[#1A1A1A] text-zinc-400">
                       <tr>
-                        <th className="px-3 py-2 font-medium text-left whitespace-nowrap w-12">#</th>
+                        <th className="px-3 py-2 font-medium text-left whitespace-nowrap w-10">#</th>
                         <th className="px-3 py-2 font-medium text-left whitespace-nowrap">
                           {topVista === "clientes" ? "Cliente" : "Línea"}
                         </th>
@@ -1273,7 +1307,7 @@ export default function VentasVendedorPage() {
                         ? (topClientes?.porMonto ?? []).map((c, i) => (
                             <tr key={c.numero} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
                               <td className="px-3 py-2 text-zinc-500 tabular-nums">{i + 1}</td>
-                              <td className="px-3 py-2 text-zinc-100">
+                              <td className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate" title={c.nombre ?? undefined}>
                                 <button
                                   type="button"
                                   onClick={() => abrirModalCliente({ numero: c.numero, nombre: c.nombre })}
@@ -1282,7 +1316,7 @@ export default function VentasVendedorPage() {
                                 >
                                   {c.nombre ?? "(sin nombre)"}
                                 </button>{" "}
-                                <span className="text-zinc-500 font-mono text-xs whitespace-nowrap">({c.numero})</span>
+                                <span className="text-zinc-500 font-mono text-xs">({c.numero})</span>
                               </td>
                               <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
                                 {fmtTop(c.monto)}
@@ -1292,7 +1326,7 @@ export default function VentasVendedorPage() {
                         : (topLineas?.porUnidades ?? []).map((l, i) => (
                             <tr key={l.linea} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
                               <td className="px-3 py-2 text-zinc-500 tabular-nums">{i + 1}</td>
-                              <td className="px-3 py-2 text-zinc-100">
+                              <td className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate" title={l.linea}>
                                 <button
                                   type="button"
                                   onClick={() => abrirModalLinea(l.linea)}
