@@ -82,7 +82,7 @@ def fetch_pedidos_mes(desde: str, hasta: str) -> dict:
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cur.execute(SQL_PEDIDOS_RANGO, (d1n, d2n))
-        cols = [c[0] for c in cur.description]
+        colps = [c[0] for c in cur.description]
         pedidos_validos: set[int] = set()
         for row in cur.fetchall():
             d = dict(zip(cols, row))

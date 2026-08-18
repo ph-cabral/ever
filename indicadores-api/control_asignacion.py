@@ -138,14 +138,29 @@ INNER JOIN EVERWEAR.dbo.TMP_TiempoDePedidos   t   ON t.NroMovVenta   = cab.NroMo
 LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo   = cc.CompCodigo
 LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente   = cli.CodCliente
 WHERE LTRIM(RTRIM(t.Estado)) = 'Abierto'
-  AND cab.CompCodigo IN (10, 75, 100, 210, 310)  -- FIX 2026-08-04 (a pedido de
-  -- Pablo): antes era NOT IN (70) — dejaba pasar Factura Directa
-  -- (107/1107/1207/170/207/47/7) a la cola del widget de errores-mesa.
-  -- Whitelist explícita, solo para esta cola: Pedido Mayorista (10),
-  -- Pedido Mayorista Mostradores (100), Pedido Móvil (210), Pedido Web
-  -- (310). Acota mucho más que antes (ya no solo excluye acopios) — este
-  -- criterio es EXCLUSIVO de esta cola, no tocar las demás queries de
-  -- "Abiertos" del proyecto (deposito.py, etc.) con esta whitelist.
+  AND (
+        cab.CompCodigo IN (10, 75, 100, 210, 310)  -- FIX 2026-08-04 (a pedido
+        -- de Pablo): antes era NOT IN (70) — dejaba pasar Factura Directa
+        -- (107/1107/1207/170/207/47/7) a la cola del widget de errores-mesa.
+        -- Whitelist explícita, solo para esta cola: Pedido Mayorista (10),
+        -- Pedido Mayorista Mostradores (100), Pedido Móvil (210), Pedido Web
+        -- (310). Acota mucho más que antes (ya no solo excluye acopios) —
+        -- este criterio es EXCLUSIVO de esta cola, no tocar las demás
+        -- queries de "Abiertos" del proyecto (deposito.py, etc.).
+        OR (cab.CompCodigo = 70 AND cab.Prioridad IN (1, 3))
+        -- FIX 2026-08-18 (a pedido de Pablo, dato confirmado por él): acopio
+        -- (CompCodigo=70) vuelve a esta cola, pero SOLO Prioridad 1 y 3. El
+        -- resto de las prioridades de acopio se entregan de a poco durante
+        -- varios meses (una OT de Picking nueva por cada tanda que llega) y
+        -- NO tienen ninguna señal en Magnus/WMS de "esta tanda ya se
+        -- controló" — confirmado corriendo consulta_tandas_control_cod70.py
+        -- contra 8 pedidos cod.70 con 4 a 10 OT de Picking cada uno a lo
+        -- largo de varios meses: Ven_PedImpresoCP (Mesa de Control) da 0
+        -- filas en los 8, o sea el control de Magnus no se usa para esas
+        -- prioridades. Prioridad 1/3 quedan afuera de ese patrón (dato de
+        -- Pablo) y sí pueden entrar a la cola con el mismo criterio
+        -- Abierto+Cumplido que el resto de los tipos de pedido.
+      )
 ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
 -- 2026-08-03 (a pedido de Pablo): prioridad ASC (1 = más urgente) y, dentro
 -- de cada prioridad, fecha ASC (más viejo primero) — vaciar los atrasados de
@@ -619,9 +634,10 @@ def fetch_pedidos_asignados(desde: str | None = None, hasta: str | None = None) 
     """Historial de pedidos asignados (deposito.control_asignacion), con
     cantidad de ítems (Magnus) y "horaCierre" (próxima asignación del mismo
     operario). `desde`/`hasta` = 'YYYY-MM-DD', filtran por la FECHA de
-    "asignadoEn". Sin ninguno de los dos: HOY. Excluye acopios (CompCodigo
-    70/75 en vivo contra Magnus) — ver comentario junto al filtro más abajo.
-    Solo lectura."""
+    "asignadoEn". Sin ninguno de los dos: HOY. Excluye acopios (CompCodigo 75
+    siempre; CompCodigo 70 salvo Prioridad 1/3, mismo criterio que
+    SQL_MAGNUS_ABIERTOS_TODOS desde el FIX 2026-08-18) en vivo contra Magnus
+    — ver comentario junto al filtro más abajo. Solo lectura."""
     conn = get_pg_connection()
     try:
         cur = conn.cursor()
@@ -670,8 +686,14 @@ def fetch_pedidos_asignados(desde: str | None = None, hasta: str | None = None) 
     # VenFer_PedidoCabecera.CompCodigo ANTES de calcular cantidadItems, así
     # ni "Desglose por operario" ni "Detalle por pedido" (ambos salen de
     # `rows`) lo cuentan — ej. pedido 748595 (CompCodigo 70, Flores Marcos).
+    #
+    # FIX 2026-08-18 (a pedido de Pablo): CompCodigo 70 deja de excluirse
+    # entero — ahora entra al historial si Prioridad IN (1, 3), mismo
+    # criterio que SQL_MAGNUS_ABIERTOS_TODOS (ver ese comentario para el
+    # motivo). CompCodigo 75 se sigue excluyendo siempre, sin cambios. Por
+    # eso ahora también se trae Prioridad, no solo CompCodigo.
     nros = sorted({r["nroPedido"] for r in rows if r.get("nroPedido") is not None})
-    comp_codigo: dict[int, int | None] = {}
+    meta_pedido: dict[int, tuple[int | None, int | None]] = {}  # nro -> (CompCodigo, Prioridad)
     items_por_pedido: dict[int, int] = {}
     if nros:
         conn = get_connection("EVERWEAR")
@@ -683,14 +705,27 @@ def fetch_pedidos_asignados(desde: str | None = None, hasta: str | None = None) 
                 chunk = nros[i : i + CH]
                 ph = ",".join("?" for _ in chunk)
                 cur.execute(
-                    f"SELECT NroMovVenta, CompCodigo FROM dbo.VenFer_PedidoCabecera "
+                    f"SELECT NroMovVenta, CompCodigo, Prioridad FROM dbo.VenFer_PedidoCabecera "
                     f"WHERE NroMovVenta IN ({ph})",
                     chunk,
                 )
-                for nro, comp in cur.fetchall():
-                    comp_codigo[int(nro)] = int(comp) if comp is not None else None
+                for nro, comp, prioridad in cur.fetchall():
+                    meta_pedido[int(nro)] = (
+                        int(comp) if comp is not None else None,
+                        int(prioridad) if prioridad is not None else None,
+                    )
 
-            rows = [r for r in rows if comp_codigo.get(r["nroPedido"]) not in (70, 75)]
+            def _es_acopio_excluido(comp: int | None, prioridad: int | None) -> bool:
+                if comp == 75:
+                    return True
+                if comp == 70:
+                    return prioridad not in (1, 3)
+                return False
+
+            rows = [
+                r for r in rows
+                if not _es_acopio_excluido(*meta_pedido.get(r["nroPedido"], (None, None)))
+            ]
             nros = sorted({r["nroPedido"] for r in rows if r.get("nroPedido") is not None})
 
             for i in range(0, len(nros), CH):

@@ -174,7 +174,9 @@ export default function PuestosPage() {
         {/* ── columna puestos ── */}
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 overflow-hidden self-start">
           <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Puestos</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              Puestos <span className="text-zinc-600 normal-case tracking-normal">({puestos.length})</span>
+            </span>
             <button onClick={() => setEditPuesto({})} className="inline-flex items-center gap-1 text-xs text-yellow-400 hover:text-yellow-300">
               <Plus size={14} /> Nuevo
             </button>
