@@ -683,13 +683,6 @@ export default function VentasVendedorPage() {
               <div className="shrink-0 bg-[#1A1A1A] border-b border-zinc-800 px-5 py-4 space-y-4 max-h-[60vh] overflow-y-auto">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
-                      <Users size={18} /> Ventas por cliente y línea
-                    </h2>
-                    <p className="text-zinc-500 text-sm mt-1">
-                      Buscá un cliente por código o nombre y elegilo de la lista. La tabla agrupa por línea
-                      de artículo, comparando el año en curso contra el anterior.
-                    </p>
                     {/* Con el filtro plegado seguimos mostrando qué cliente se
                         está viendo, para no perder el contexto. */}
                     {!filtroVisible && modalMode === "cliente" && data && (
@@ -725,9 +718,6 @@ export default function VentasVendedorPage() {
               {filtroVisible && (
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4">
                 <div className="flex flex-col gap-1.5 relative">
-                  <label htmlFor="filtro-cliente" className="text-xs text-zinc-400 uppercase tracking-wide">
-                    Cliente (código o nombre)
-                  </label>
                   <div className="relative">
                     <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
                     <input
@@ -787,7 +777,6 @@ export default function VentasVendedorPage() {
                 {modalMode === "cliente" && (
                   <>
                   <div className="flex flex-col gap-1.5">
-                    <span className="text-xs text-zinc-400 uppercase tracking-wide">Mostrar</span>
                     <button
                       type="button"
                       onClick={() => setVistaModal(vistaModal === "clientes" ? "lineas" : "clientes")}
@@ -810,7 +799,6 @@ export default function VentasVendedorPage() {
                       onClick={() => setDesglosado((v) => !v)}
                       className="btn-anim flex items-center gap-1.5 border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
                     >
-                      {desglosado ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                       {desglosado ? "Agrupar por año" : "Desglosar por mes"}
                     </button>
                   )}
@@ -818,7 +806,6 @@ export default function VentasVendedorPage() {
                   {/* Botón dividido: período YTD vs. selección de meses puntuales */}
                   {hayTabla && !sinDatos && (
                     <div className="flex flex-col gap-1.5">
-                      <span className="text-xs text-zinc-400 uppercase tracking-wide">Período</span>
                       <div className="inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700">
                         <button
                           type="button"
@@ -845,7 +832,7 @@ export default function VentasVendedorPage() {
 
                   {data && (
                     <span className="text-sm text-zinc-500 pb-2">
-                      {data.cliente.nombre ?? "—"} ({data.cliente.codigo}) — {filas.length} línea(s)
+                      {filas.length} línea(s)
                     </span>
                   )}
                   </>
