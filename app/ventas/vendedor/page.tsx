@@ -696,73 +696,6 @@ export default function VentasVendedorPage() {
                 </span>
               </button>
             </div>
-            <div className="relative">
-              <Search
-                size={13}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500"
-              />
-              <input
-                id="filtro-cliente"
-                type="text"
-                value={qCliente}
-                onChange={(e) => {
-                  setQCliente(e.target.value);
-                  setClienteSel(null);
-                }}
-                onFocus={() => sugerencias.length > 0 && setMostrarSug(true)}
-                onBlur={() => {
-                  blurTimeout.current = setTimeout(
-                    () => setMostrarSug(false),
-                    150,
-                  );
-                }}
-                onKeyDown={(e) =>
-                  e.key === "Enter" && clienteSel && handleFiltrar()
-                }
-                placeholder="Ej: 1234 o ACME S.A."
-                autoFocus
-                className="bg-[#1f1f1f] border border-zinc-700 rounded-md pl-7 pr-3 py-2 text-sm text-zinc-100 outline-none w-72 focus:border-yellow-400 placeholder:text-zinc-600"
-              />
-              {buscando && (
-                <Loader2
-                  size={13}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 animate-spin"
-                />
-              )}
-              {mostrarSug && sugerencias.length > 0 && (
-                <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-md border border-zinc-700 bg-[#1A1A1A] shadow-xl">
-                  {sugerencias.map((c) => (
-                    <button
-                      key={c.numero}
-                      type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        if (blurTimeout.current)
-                          clearTimeout(blurTimeout.current);
-                        elegirCliente(c);
-                      }}
-                      className="w-full text-left px-3 py-2 text-sm text-zinc-200 hover:bg-yellow-400/10 hover:text-yellow-400 transition-colors flex items-center justify-between gap-2"
-                    >
-                      <span className="truncate">
-                        {c.nombre ?? "(sin nombre)"}
-                      </span>
-                      <span className="text-zinc-500 font-mono text-xs shrink-0">
-                        {c.numero}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {mostrarSug &&
-                sugerencias.length === 0 &&
-                sinVendedorAsignado && (
-                  <div className="absolute z-20 mt-1 w-full rounded-md border border-amber-400/40 bg-[#1A1A1A] shadow-xl px-3 py-2.5 text-xs text-amber-300">
-                    Tu usuario todavía no tiene un vendedor de Magnus asignado —
-                    pedile a un administrador que te lo asigne en Administración
-                    → Usuarios.
-                  </div>
-                )}
-            </div>
           </div>
         </div>
       </header>
@@ -803,7 +736,6 @@ export default function VentasVendedorPage() {
                   de arriba — antes ocupaba mucho lugar fijo en el header del
                   modal, que no scrollea, y le dejaba poco espacio a la
                   tabla). */}
-                {/* inicioaca */}
                 {filtroVisible && (
                   <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4">
                     <div className="flex flex-col gap-1.5 relative">
