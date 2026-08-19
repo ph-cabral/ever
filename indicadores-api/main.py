@@ -778,15 +778,21 @@ def ventas_vendedor_top_lineas(
 def ventas_vendedor_clientes_por_linea(
     linea: str = Query(..., min_length=1, description="Nombre de línea (StkFer_ArtParamet.Nivel1), o '(Sin línea)'"),
     vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
-    limit: int = Query(default=100, ge=1, le=500),
+    # Antes default=100, le=500: con líneas grandes (ej. línea 44, 385
+    # clientes) el modal se cortaba en el cliente 100 y no mostraba el
+    # resto. Mismo cambio que top-clientes/top-lineas (pedido de Pablo
+    # 2026-08-19): traer TODOS los clientes que compraron esa línea en el
+    # rango, no un recorte arbitrario — el front pagina de a 50 en pantalla.
+    limit: int = Query(default=10000, ge=1, le=10000),
     desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: 11 meses antes de `hasta`)"),
     hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes actual)"),
 ):
     """Clientes que compraron una línea de artículo, ordenados por MONTO ($)
     de mayor a menor, en el mismo rango de 12 meses que
     /ventas/vendedor/top-clientes y /ventas/vendedor/top-lineas — para el
-    modal de /ventas/vendedor al hacer click en una línea del ranking
-    "Top 10 líneas" (pedido de Pablo 2026-08-18). Ver fetch_clientes_por_linea
+    modal de /ventas/vendedor al hacer click en una línea del ranking de
+    líneas. Trae TODOS los clientes de esa línea en el rango (pedido de
+    Pablo 2026-08-19), no un recorte a 100. Ver fetch_clientes_por_linea
     (ventas.py)."""
     try:
         return fetch_clientes_por_linea(linea, vendedor=vendedor, limit=limit, desde=desde, hasta=hasta)

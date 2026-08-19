@@ -88,7 +88,7 @@ ORDER BY c.Cliente_Nombre
 # cargadas por otra persona, cambios de zona/vendedor a lo largo del tiempo,
 # etc. — exactamente lo que pasó con el cliente 7955).
 SQL_CLIENTES_SEARCH_POR_VENDEDOR = """
-SELECT TOP ({limit})
+SELECT TOP ({limit})3
     c.CodCliente                    AS numero,
     LTRIM(RTRIM(c.Cliente_Nombre))  AS nombre
 FROM MAGNUS_SITD.dbo.Clientes c
@@ -140,8 +140,7 @@ def fetch_clientes_search(q: str, limit: int = 20, vendedor: int | None = None):
     por código o por nombre (substring, no exacto). Lista vacía si `q` está
     vacío — no se trae el padrón completo de clientes por accidente.
 
-    `vendedor` (pedido de Pablo 2026-08-14, acceso por vendedor en
-    /ventas/vendedor): si se pasa, SOLO devuelve clientes cuyo "Vendedor por
+    `vendedor` si se pasa, SOLO devuelve clientes cuyo "Vendedor por
     Defecto" fijo (ver SQL_CLIENTES_SEARCH_POR_VENDEDOR arriba) coincide —
     filtrado server-side en el mismo SELECT, no hay pool ni post-filtrado en
     Python. Un usuario no-admin nunca debe ni siquiera ENCONTRAR en el

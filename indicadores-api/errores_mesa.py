@@ -70,11 +70,10 @@ BASE_DATE = date(1800, 12, 28)
 DETALLE_ERROR_OPCIONES = [
     "Error en cantidad",
     "Error en producto",
-    "Producto no conforme",
+    "Error en cantidad y producto",
     "Pedido incompleto",
+    "Producto no conforme",
     "Producto sin identificación",
-    "Pedido no encontrado",
-    "Error de mesa",
 ]
 
 # ── Lookup (solo lectura) ─────────────────────────────────────────────────────
