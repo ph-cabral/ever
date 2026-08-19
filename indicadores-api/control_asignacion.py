@@ -131,7 +131,6 @@ SELECT TOP ({limit})
     cab.FechaPedido,
     cc.DetalleCorto     AS TipoPedido,
     cli.Cliente_Nombre  AS Cliente,
-    cab.CodCliente      AS CodCliente,
     cab.Prioridad       AS Prioridad
 FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
 INNER JOIN EVERWEAR.dbo.TMP_TiempoDePedidos   t   ON t.NroMovVenta   = cab.NroMovVenta
@@ -246,7 +245,7 @@ def fetch_pedidos_cumplidos_abiertos_legacy(limit: int = MAGNUS_ABIERTOS_LIMIT) 
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cur.execute(SQL_MAGNUS_ABIERTOS_TODOS.format(limit=limit))
-        for nro, fecha_int, tipo_pedido, cliente, cod_cliente, prioridad in cur.fetchall():
+        for nro, fecha_int, tipo_pedido, cliente, prioridad in cur.fetchall():
             if nro is None:
                 continue
             # BASE_DATE ya es un datetime.date (ver errores_mesa.py) — sumarle
@@ -259,9 +258,6 @@ def fetch_pedidos_cumplidos_abiertos_legacy(limit: int = MAGNUS_ABIERTOS_LIMIT) 
                 "fecha": fecha,
                 "tipoPedido": (tipo_pedido or "").strip() or None,
                 "cliente": (cliente or "").strip() or None,
-                # Número de cliente (Magnus CodCliente) — a pedido de Pablo
-                # 2026-07-31, el widget lo muestra junto al nombre.
-                "codCliente": int(cod_cliente) if cod_cliente is not None else None,
                 # Orden de la cola (a pedido de Pablo, 2026-08-03) — ver
                 # SQL_MAGNUS_ABIERTOS_TODOS. None = sin prioridad cargada.
                 "prioridad": int(prioridad) if prioridad is not None else None,
@@ -327,7 +323,6 @@ def fetch_pedidos_cumplidos_abiertos_legacy(limit: int = MAGNUS_ABIERTOS_LIMIT) 
             "fecha": ab["fecha"],
             "tipoPedido": ab["tipoPedido"],
             "cliente": ab["cliente"],
-            "codCliente": ab["codCliente"],
             "prioridad": ab["prioridad"],
             "ubicacion": w["ubicacion"],
             "ot": w["ot"],
@@ -353,7 +348,7 @@ def fetch_pedidos_en_playa_pedidos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[d
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cur.execute(SQL_MAGNUS_ABIERTOS_TODOS.format(limit=limit))
-        for nro, fecha_int, tipo_pedido, cliente, cod_cliente, prioridad in cur.fetchall():
+        for nro, fecha_int, tipo_pedido, cliente, prioridad in cur.fetchall():
             if nro is None:
                 continue
             fecha = (BASE_DATE + timedelta(days=int(fecha_int))) if fecha_int else None
@@ -361,7 +356,6 @@ def fetch_pedidos_en_playa_pedidos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[d
                 "fecha": fecha,
                 "tipoPedido": (tipo_pedido or "").strip() or None,
                 "cliente": (cliente or "").strip() or None,
-                "codCliente": int(cod_cliente) if cod_cliente is not None else None,
                 "prioridad": int(prioridad) if prioridad is not None else None,
             }
     finally:
@@ -419,7 +413,6 @@ def fetch_pedidos_en_playa_pedidos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[d
             "fecha": ab["fecha"],
             "tipoPedido": ab["tipoPedido"],
             "cliente": ab["cliente"],
-            "codCliente": ab["codCliente"],
             "prioridad": ab["prioridad"],
             "ubicacion": w["ubicacion"],
             "ot": w["ot"],
