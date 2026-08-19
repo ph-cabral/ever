@@ -1,17 +1,8 @@
 "use client";
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
-  Loader2,
-  AlertTriangle,
-  Search,
-  Users,
-  Table2,
-  ChevronDown,
-  ChevronUp,
-  ArrowLeftRight,
-  Trophy,
-  X,
-  ListChevronsUpDown,
+  Loader2, AlertTriangle, Search, Users, Table2, ChevronDown, ChevronUp,
+  ArrowLeftRight, Trophy, X,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 
@@ -661,7 +652,6 @@ export default function VentasVendedorPage() {
             <span className="text-sm tracking-[3px] font-normal">S.A.</span>
           </span>
           <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
-          {/* acaes */}
           <span className="hidden md:inline text-zinc-500 text-sm">
             Ventas · Por vendedor
           </span>
@@ -1475,7 +1465,6 @@ export default function VentasVendedorPage() {
               <Trophy size={18} />
               rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex
               flex-wrap items-end gap-4
-              {topVista === "clientes" ? <Users size={18} /> : <ListChevronsUpDown size={18} />}
               {topVista === "clientes" ? "clientes" : "líneas"}
             </h2>
           </div>
