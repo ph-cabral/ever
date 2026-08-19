@@ -151,51 +151,68 @@ const fmtMoney = (n: number | null | undefined) =>
 // también para detectar "no volver a buscar" en el efecto de abajo.
 const labelCliente = (c: Cliente) => (c.nombre ? `${c.nombre} (${c.numero})` : String(c.numero));
 
-// ── Paginado del lado del cliente (pedido de Pablo 2026-08-19) ─────────────
-// El back ya no recorta los rankings/búsquedas a 10/100 — trae TODOS los
+// ── Agrupado en acordeón (pedido de Pablo 2026-08-19) ───────────────────────
+// El back ya no recorta los rankings/búsquedas — trae TODOS los
 // clientes/líneas que entran en el rango (ver indicadores-api/main.py). Con
-// cientos de filas la tabla se vuelve ilegible, así que acá se pagina de a
-// PAGE_SIZE con un dropdown de página. Se aplica a las 3 tablas que pueden
-// crecer mucho: Top clientes/líneas (ranking del pie), clientes por línea
-// (modal al clickear una línea) y líneas por cliente (modal al buscar un
-// cliente puntual).
-const PAGE_SIZE = 50;
+// cientos de filas la tabla se vuelve ilegible, así que acá se agrupan de a
+// GROUP_SIZE en bloques colapsables (1–50, 51–100, …) dentro de la MISMA
+// tabla (un <tbody> por grupo, con una fila-header que abre/cierra ese
+// grupo) — el <thead>/<tfoot> no se repiten. Se aplica a las 3 tablas que
+// pueden crecer mucho: Top clientes/líneas (ranking del pie), clientes por
+// línea (modal al clickear una línea) y líneas por cliente (modal al buscar
+// un cliente puntual). Acordeón real: solo un grupo abierto a la vez (ver
+// los `set*GrupoAbierto` que se usan como componente controlado, un solo
+// número de estado en vez de un Set de índices).
+const GROUP_SIZE = 50;
 
-function Paginador({
-  pagina,
-  setPagina,
-  totalPaginas,
-  inicio,
+function agrupar<T>(items: T[]): T[][] {
+  const grupos: T[][] = [];
+  for (let i = 0; i < items.length; i += GROUP_SIZE) {
+    grupos.push(items.slice(i, i + GROUP_SIZE));
+  }
+  return grupos;
+}
+
+// Fila-header de un grupo — SIEMPRE la primera fila del <tbody> de ese
+// grupo. `colSpan` tiene que cubrir todas las columnas de la tabla en la que
+// se usa (varía: 3 en las tablas simples, 2 + 2*colSpanAnio en la de
+// línea×año con el desglose mensual).
+function FilaGrupo({
+  idx,
+  desde,
+  hasta,
   total,
+  abierto,
+  onClick,
+  colSpan,
 }: {
-  pagina: number;
-  setPagina: (n: number) => void;
-  totalPaginas: number;
-  inicio: number;
+  idx: number;
+  desde: number;
+  hasta: number;
   total: number;
+  abierto: boolean;
+  onClick: () => void;
+  colSpan: number;
 }) {
-  if (total <= PAGE_SIZE) return null;
-  const hasta = Math.min(inicio + PAGE_SIZE, total);
   return (
-    <div className="px-3 py-2 border-t border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-500 bg-[#1A1A1A]">
-      <span>
-        {inicio + 1}–{hasta} de {total}
-      </span>
-      <div className="flex items-center gap-2">
-        <span className="uppercase tracking-wide">Página</span>
-        <select
-          value={pagina}
-          onChange={(e) => setPagina(Number(e.target.value))}
-          className="bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1 text-zinc-200 text-xs focus:outline-none focus:border-yellow-400"
-        >
-          {Array.from({ length: totalPaginas }, (_, i) => i + 1).map((p) => (
-            <option key={p} value={p}>
-              {p} de {totalPaginas}
-            </option>
-          ))}
-        </select>
-      </div>
-    </div>
+    <tr
+      className={`cursor-pointer border-t border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800/60 transition-colors ${
+        abierto ? "border-b border-yellow-400/30" : ""
+      }`}
+      onClick={onClick}
+    >
+      <td colSpan={colSpan} className="px-3 py-2">
+        <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-zinc-300">
+          {abierto ? (
+            <ChevronUp size={14} className="text-yellow-400" />
+          ) : (
+            <ChevronDown size={14} className="text-zinc-500" />
+          )}
+          {desde + 1}–{hasta}
+          <span className="text-zinc-500 font-normal normal-case">de {total}</span>
+        </span>
+      </td>
+    </tr>
   );
 }
 
@@ -250,9 +267,10 @@ export default function VentasVendedorPage() {
   const [data, setData] = useState<RespVentasVendedor | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Paginado de la tabla línea×año (ver Paginador arriba) — se resetea a la
-  // página 1 en cada fetch (cliente nuevo, o el mismo cliente de nuevo).
-  const [filasPagina, setFilasPagina] = useState(1);
+  // Acordeón de la tabla línea×año (ver agrupar/FilaGrupo arriba) — índice
+  // del grupo de 50 abierto (0 = primero). Se resetea a 0 en cada fetch
+  // (cliente nuevo, o el mismo cliente de nuevo).
+  const [filasGrupoAbierto, setFilasGrupoAbierto] = useState(0);
   // Vista activa del ranking del pie ("Top 10 clientes"/"Top 10 líneas") —
   // la alterna el botón "Mostrar" propio de esa sección (pedido de Pablo
   // 2026-08-18). Independiente del modal (ver `vistaModal` más abajo): el
@@ -297,15 +315,15 @@ export default function VentasVendedorPage() {
   const [clientesLinea, setClientesLinea] = useState<RespClientesPorLinea | null>(null);
   const [clientesLineaLoading, setClientesLineaLoading] = useState(false);
   const [clientesLineaError, setClientesLineaError] = useState<string | null>(null);
-  // Paginado de esta tabla (ver Paginador arriba) — se resetea a la página 1
-  // cada vez que se pide una línea nueva, si no quedaría "colgado" en una
-  // página que puede no existir para el nuevo set de clientes.
-  const [clientesLineaPagina, setClientesLineaPagina] = useState(1);
+  // Acordeón de esta tabla (ver agrupar/FilaGrupo arriba) — se resetea al
+  // grupo 0 cada vez que se pide una línea nueva, si no quedaría "colgado"
+  // en un grupo que puede no existir para el nuevo set de clientes.
+  const [clientesLineaGrupoAbierto, setClientesLineaGrupoAbierto] = useState(0);
 
   const fetchClientesPorLinea = useCallback(async (linea: string) => {
     setClientesLineaLoading(true);
     setClientesLineaError(null);
-    setClientesLineaPagina(1);
+    setClientesLineaGrupoAbierto(0);
     try {
       const res = await fetch(`/api/ventas/vendedor/clientes-por-linea?linea=${encodeURIComponent(linea)}`, {
         cache: "no-store",
@@ -327,7 +345,7 @@ export default function VentasVendedorPage() {
   const fetchVentas = useCallback(async (codigo: number) => {
     setLoading(true);
     setError(null);
-    setFilasPagina(1);
+    setFilasGrupoAbierto(0);
     try {
       const res = await fetch(`/api/ventas/vendedor?cliente=${codigo}`, {
         cache: "no-store",
@@ -412,9 +430,9 @@ export default function VentasVendedorPage() {
   const [topLineas, setTopLineas] = useState<RespTopLineas | null>(null);
   const [topLoading, setTopLoading] = useState(false);
   const [topError, setTopError] = useState<string | null>(null);
-  // Paginado de este ranking (ver Paginador arriba) — se resetea a la
-  // página 1 al alternar Clientes/Líneas (botón "Mostrar" de abajo).
-  const [topPagina, setTopPagina] = useState(1);
+  // Acordeón de este ranking (ver agrupar/FilaGrupo arriba) — se resetea al
+  // grupo 0 al alternar Clientes/Líneas (botón "Mostrar" de abajo).
+  const [topGrupoAbierto, setTopGrupoAbierto] = useState(0);
 
   useEffect(() => {
     let cancelado = false;
@@ -590,26 +608,23 @@ export default function VentasVendedorPage() {
   };
   const iconoTendencia = (t: "sube" | "baja" | "igual") => (t === "sube" ? "▲" : t === "baja" ? "▼" : "—");
 
-  // ── Paginado (ver Paginador/PAGE_SIZE arriba) — un bloque por tabla larga,
-  // calculado acá porque las tres dependen de estado que ya está en scope
-  // (filas, topVista/topClientes/topLineas, clientesLinea). `*PaginaSegura`
-  // evita quedar apuntando a una página que dejó de existir (ej. se filtró
-  // el listado y ahora hay menos páginas que antes).
-  const filasTotalPaginas = Math.max(1, Math.ceil(filas.length / PAGE_SIZE));
-  const filasPaginaSegura = Math.min(filasPagina, filasTotalPaginas);
-  const filasInicio = (filasPaginaSegura - 1) * PAGE_SIZE;
-  const filasPag = filas.slice(filasInicio, filasInicio + PAGE_SIZE);
+  // ── Agrupado en acordeón (ver agrupar/FilaGrupo/GROUP_SIZE arriba) — un
+  // bloque por tabla larga, calculado acá porque las tres dependen de
+  // estado que ya está en scope (filas, topVista/topClientes/topLineas,
+  // clientesLinea). `*GrupoSeguro` evita quedar apuntando a un grupo que
+  // dejó de existir (ej. cambió el listado y ahora hay menos grupos).
+  const filasGrupos = agrupar(filas);
+  const filasGrupoSeguro = Math.min(filasGrupoAbierto, Math.max(0, filasGrupos.length - 1));
+  const totalColsLineaAnio = 2 + 2 * colSpanAnio; // Línea + Año ant. + Año act. + Tend.
 
-  const topItemsTotal =
-    topVista === "clientes" ? topClientes?.porMonto.length ?? 0 : topLineas?.porUnidades.length ?? 0;
-  const topTotalPaginas = Math.max(1, Math.ceil(topItemsTotal / PAGE_SIZE));
-  const topPaginaSegura = Math.min(topPagina, topTotalPaginas);
-  const topInicio = (topPaginaSegura - 1) * PAGE_SIZE;
+  const topItems: (TopCliente | TopLinea)[] =
+    topVista === "clientes" ? topClientes?.porMonto ?? [] : topLineas?.porUnidades ?? [];
+  const topGrupos = agrupar(topItems);
+  const topGrupoSeguro = Math.min(topGrupoAbierto, Math.max(0, topGrupos.length - 1));
 
-  const clientesLineaTotal = clientesLinea?.porMonto.length ?? 0;
-  const clientesLineaTotalPaginas = Math.max(1, Math.ceil(clientesLineaTotal / PAGE_SIZE));
-  const clientesLineaPaginaSegura = Math.min(clientesLineaPagina, clientesLineaTotalPaginas);
-  const clientesLineaInicio = (clientesLineaPaginaSegura - 1) * PAGE_SIZE;
+  const clientesLineaItems = clientesLinea?.porMonto ?? [];
+  const clientesLineaGrupos = agrupar(clientesLineaItems);
+  const clientesLineaGrupoSeguro = Math.min(clientesLineaGrupoAbierto, Math.max(0, clientesLineaGrupos.length - 1));
 
   return (
     <div className="min-h-screen bg-[#111111] text-white">
@@ -641,15 +656,6 @@ export default function VentasVendedorPage() {
 
       <main className="max-w-[1400px] mx-auto px-4 md:px-8 py-8 space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-yellow-400 font-bold text-xl uppercase tracking-wide flex items-center gap-2">
-              <Users size={20} /> Ventas por cliente y línea
-            </h1>
-            <p className="text-zinc-500 text-sm mt-1">
-              Elegí un cliente o una línea del ranking de abajo para ver el detalle, o buscá un
-              cliente puntual.
-            </p>
-          </div>
           <button
             type="button"
             onClick={abrirModalBusqueda}
@@ -785,7 +791,7 @@ export default function VentasVendedorPage() {
                     <button
                       type="button"
                       onClick={() => setVistaModal(vistaModal === "clientes" ? "lineas" : "clientes")}
-                      title={`Ver ${vistaModal === "clientes" ? "líneas (unidades)" : "clientes (pesos)"}`}
+                      title={`Ver ${vistaModal === "clientes" ? "líneas" : "clientes"}`}
                       className="btn-anim inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors"
                     >
                       <ArrowLeftRight size={14} className="text-yellow-400" />
@@ -1039,84 +1045,98 @@ export default function VentasVendedorPage() {
                             </tr>
                           )}
                         </thead>
-                        <tbody>
-                          {filasPag.map((r, rowIdx) => {
-                            const rowCrece = crece(r);
-                            const rowTendencia = tendencia(r);
-                            return (
-                              <tr key={r.linea} className="border-t border-zinc-800/60 transition-colors">
-                                <td
-                                  className={`px-3 py-2 text-zinc-100 whitespace-nowrap cursor-default ${celda(rowIdx, COL_LINEA, rowCrece)}`}
-                                  onMouseEnter={() => {
-                                    setHoverRow(rowIdx);
-                                    setHoverCol(COL_LINEA);
-                                  }}
-                                >
-                                  {r.linea}
-                                </td>
-                                {desglosado &&
-                                  r.anioAnterior.meses
-                                    .filter((m) => mesesActivos.includes(m.mes))
-                                    .map((m) => {
-                                      const colIdx = colAnteriorMes(m.mes);
-                                      return (
-                                        <td
-                                          key={`a-${m.mes}`}
-                                          className={`px-2 py-2 text-right tabular-nums text-zinc-400 border-l border-zinc-800/40 cursor-default ${celda(rowIdx, colIdx, rowCrece)}`}
-                                          onMouseEnter={() => {
-                                            setHoverRow(rowIdx);
-                                            setHoverCol(colIdx);
-                                          }}
-                                        >
-                                          {valorMes(m) === 0 ? "—" : fmt(valorMes(m))}
-                                        </td>
-                                      );
-                                    })}
-                                <td
-                                  className={`px-3 py-2 text-right tabular-nums text-zinc-200 font-medium border-l border-zinc-800 cursor-default ${celda(rowIdx, colAnteriorTotal, rowCrece)}`}
-                                  onMouseEnter={() => {
-                                    setHoverRow(rowIdx);
-                                    setHoverCol(colAnteriorTotal);
-                                  }}
-                                >
-                                  {fmt(valor(sumaPeriodo(r.anioAnterior)))}
-                                </td>
-                                {desglosado &&
-                                  r.anioActual.meses
-                                    .filter((m) => mesesActivos.includes(m.mes))
-                                    .map((m) => {
-                                      const colIdx = colActualMes(m.mes);
-                                      return (
-                                        <td
-                                          key={`c-${m.mes}`}
-                                          className={`px-2 py-2 text-right tabular-nums text-zinc-400 border-l border-zinc-800/40 cursor-default ${celda(rowIdx, colIdx, rowCrece)}`}
-                                          onMouseEnter={() => {
-                                            setHoverRow(rowIdx);
-                                            setHoverCol(colIdx);
-                                          }}
-                                        >
-                                          {valorMes(m) === 0 ? "—" : fmt(valorMes(m))}
-                                        </td>
-                                      );
-                                    })}
-                                <td
-                                  className={`px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 cursor-default ${celda(rowIdx, colActualTotal, rowCrece)}`}
-                                  onMouseEnter={() => {
-                                    setHoverRow(rowIdx);
-                                    setHoverCol(colActualTotal);
-                                  }}
-                                >
-                                  {fmt(valor(sumaPeriodo(r.anioActual)))}
-                                </td>
-                                <td
-                                  className={`px-3 py-2 text-center text-base font-bold border-l border-zinc-800 cursor-default ${celdaTendencia(rowTendencia)}`}
-                                >
-                                  {iconoTendencia(rowTendencia)}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
+                        {filasGrupos.map((grupo, gIdx) => (
+                          <tbody key={`fg-${gIdx}`}>
+                            {filasGrupos.length > 1 && (
+                              <FilaGrupo
+                                idx={gIdx}
+                                desde={gIdx * GROUP_SIZE}
+                                hasta={Math.min((gIdx + 1) * GROUP_SIZE, filas.length)}
+                                total={filas.length}
+                                abierto={filasGrupoSeguro === gIdx}
+                                onClick={() => setFilasGrupoAbierto(filasGrupoSeguro === gIdx ? -1 : gIdx)}
+                                colSpan={totalColsLineaAnio}
+                              />
+                            )}
+                            {(filasGrupos.length <= 1 || filasGrupoSeguro === gIdx) &&
+                              grupo.map((r, rowIdx) => {
+                                const rowCrece = crece(r);
+                                const rowTendencia = tendencia(r);
+                                return (
+                                  <tr key={r.linea} className="border-t border-zinc-800/60 transition-colors">
+                                    <td
+                                      className={`px-3 py-2 text-zinc-100 whitespace-nowrap cursor-default ${celda(rowIdx, COL_LINEA, rowCrece)}`}
+                                      onMouseEnter={() => {
+                                        setHoverRow(rowIdx);
+                                        setHoverCol(COL_LINEA);
+                                      }}
+                                    >
+                                      {r.linea}
+                                    </td>
+                                    {desglosado &&
+                                      r.anioAnterior.meses
+                                        .filter((m) => mesesActivos.includes(m.mes))
+                                        .map((m) => {
+                                          const colIdx = colAnteriorMes(m.mes);
+                                          return (
+                                            <td
+                                              key={`a-${m.mes}`}
+                                              className={`px-2 py-2 text-right tabular-nums text-zinc-400 border-l border-zinc-800/40 cursor-default ${celda(rowIdx, colIdx, rowCrece)}`}
+                                              onMouseEnter={() => {
+                                                setHoverRow(rowIdx);
+                                                setHoverCol(colIdx);
+                                              }}
+                                            >
+                                              {valorMes(m) === 0 ? "—" : fmt(valorMes(m))}
+                                            </td>
+                                          );
+                                        })}
+                                    <td
+                                      className={`px-3 py-2 text-right tabular-nums text-zinc-200 font-medium border-l border-zinc-800 cursor-default ${celda(rowIdx, colAnteriorTotal, rowCrece)}`}
+                                      onMouseEnter={() => {
+                                        setHoverRow(rowIdx);
+                                        setHoverCol(colAnteriorTotal);
+                                      }}
+                                    >
+                                      {fmt(valor(sumaPeriodo(r.anioAnterior)))}
+                                    </td>
+                                    {desglosado &&
+                                      r.anioActual.meses
+                                        .filter((m) => mesesActivos.includes(m.mes))
+                                        .map((m) => {
+                                          const colIdx = colActualMes(m.mes);
+                                          return (
+                                            <td
+                                              key={`c-${m.mes}`}
+                                              className={`px-2 py-2 text-right tabular-nums text-zinc-400 border-l border-zinc-800/40 cursor-default ${celda(rowIdx, colIdx, rowCrece)}`}
+                                              onMouseEnter={() => {
+                                                setHoverRow(rowIdx);
+                                                setHoverCol(colIdx);
+                                              }}
+                                            >
+                                              {valorMes(m) === 0 ? "—" : fmt(valorMes(m))}
+                                            </td>
+                                          );
+                                        })}
+                                    <td
+                                      className={`px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 cursor-default ${celda(rowIdx, colActualTotal, rowCrece)}`}
+                                      onMouseEnter={() => {
+                                        setHoverRow(rowIdx);
+                                        setHoverCol(colActualTotal);
+                                      }}
+                                    >
+                                      {fmt(valor(sumaPeriodo(r.anioActual)))}
+                                    </td>
+                                    <td
+                                      className={`px-3 py-2 text-center text-base font-bold border-l border-zinc-800 cursor-default ${celdaTendencia(rowTendencia)}`}
+                                    >
+                                      {iconoTendencia(rowTendencia)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                          </tbody>
+                        ))}
                         <tfoot>
                           <tr className="border-t-2 border-zinc-700 bg-zinc-900/60">
                             <td
@@ -1201,13 +1221,6 @@ export default function VentasVendedorPage() {
                         </tfoot>
                       </table>
                     </div>
-                    <Paginador
-                      pagina={filasPaginaSegura}
-                      setPagina={setFilasPagina}
-                      totalPaginas={filasTotalPaginas}
-                      inicio={filasInicio}
-                      total={filas.length}
-                    />
                   </div>
                 )}
                   </>
@@ -1268,35 +1281,46 @@ export default function VentasVendedorPage() {
                               </th>
                             </tr>
                           </thead>
-                          <tbody>
-                            {clientesLinea!.porMonto.slice(clientesLineaInicio, clientesLineaInicio + PAGE_SIZE).map((c, i) => (
-                              <tr
-                                key={c.numero}
-                                className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors cursor-pointer"
-                                onClick={() => abrirModalCliente({ numero: c.numero, nombre: c.nombre })}
-                                title="Ver ventas de este cliente"
-                              >
-                                <td className="px-3 py-2 text-zinc-500 tabular-nums">{clientesLineaInicio + i + 1}</td>
-                                <td className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate" title={c.nombre ?? undefined}>
-                                  {c.nombre ?? "(sin nombre)"}{" "}
-                                  <span className="text-zinc-500 font-mono text-xs">({c.numero})</span>
-                                </td>
-                                <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
-                                  {fmtMoney(c.monto)}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
+                          {clientesLineaGrupos.map((grupo, gIdx) => (
+                            <tbody key={`cl-${gIdx}`}>
+                              {clientesLineaGrupos.length > 1 && (
+                                <FilaGrupo
+                                  idx={gIdx}
+                                  desde={gIdx * GROUP_SIZE}
+                                  hasta={Math.min((gIdx + 1) * GROUP_SIZE, clientesLineaItems.length)}
+                                  total={clientesLineaItems.length}
+                                  abierto={clientesLineaGrupoSeguro === gIdx}
+                                  onClick={() =>
+                                    setClientesLineaGrupoAbierto(clientesLineaGrupoSeguro === gIdx ? -1 : gIdx)
+                                  }
+                                  colSpan={3}
+                                />
+                              )}
+                              {(clientesLineaGrupos.length <= 1 || clientesLineaGrupoSeguro === gIdx) &&
+                                grupo.map((c, i) => (
+                                  <tr
+                                    key={c.numero}
+                                    className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors cursor-pointer"
+                                    onClick={() => abrirModalCliente({ numero: c.numero, nombre: c.nombre })}
+                                    title="Ver ventas de este cliente"
+                                  >
+                                    <td className="px-3 py-2 text-zinc-500 tabular-nums">
+                                      {gIdx * GROUP_SIZE + i + 1}
+                                    </td>
+                                    <td className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate" title={c.nombre ?? undefined}>
+                                      {c.nombre ?? "(sin nombre)"}{" "}
+                                      <span className="text-zinc-500 font-mono text-xs">({c.numero})</span>
+                                    </td>
+                                    <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
+                                      {fmtMoney(c.monto)}
+                                    </td>
+                                  </tr>
+                                ))}
+                            </tbody>
+                          ))}
                         </table>
                       </div>
                     )}
-                    <Paginador
-                      pagina={clientesLineaPaginaSegura}
-                      setPagina={setClientesLineaPagina}
-                      totalPaginas={clientesLineaTotalPaginas}
-                      inicio={clientesLineaInicio}
-                      total={clientesLineaTotal}
-                    />
                   </div>
                 )}
               </div>
@@ -1316,13 +1340,8 @@ export default function VentasVendedorPage() {
           <div className="flex flex-col gap-1.5">
             <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
               <Trophy size={18} />
-              {topVista === "clientes" ? "Top clientes" : "Top líneas"}
+              {topVista === "clientes" ? "clientes" : "líneas"}
             </h2>
-            {/* <p className="text-zinc-500 text-sm">
-              {topResp ? `${formatYm(topResp.desde)} – ${formatYm(topResp.hasta)}` : "…"} (últimos{" "}
-              {TOP_MESES} meses cerrados) — según tu acceso (tu cartera de clientes, o todos si sos
-              admin).
-            </p> */}
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -1330,9 +1349,9 @@ export default function VentasVendedorPage() {
               type="button"
               onClick={() => {
                 setTopVista(topVista === "clientes" ? "lineas" : "clientes");
-                setTopPagina(1);
+                setTopGrupoAbierto(0);
               }}
-              title={`Ver ${topVista === "clientes" ? "líneas (unidades)" : "clientes (pesos)"}`}
+              title={`Ver ${topVista === "clientes" ? "líneas" : "clientes"}`}
               className="btn-anim inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors"
             >
               <ArrowLeftRight size={14} className="text-yellow-400" />
@@ -1400,55 +1419,62 @@ export default function VentasVendedorPage() {
                         </th>
                       </tr>
                     </thead>
-                    <tbody>
-                      {topVista === "clientes"
-                        ? (topClientes?.porMonto ?? []).slice(topInicio, topInicio + PAGE_SIZE).map((c, i) => (
-                            <tr key={c.numero} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
-                              <td className="px-3 py-2 text-zinc-500 tabular-nums">{topInicio + i + 1}</td>
-                              <td className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate" title={c.nombre ?? undefined}>
-                                <button
-                                  type="button"
-                                  onClick={() => abrirModalCliente({ numero: c.numero, nombre: c.nombre })}
-                                  className="hover:text-yellow-400 hover:underline transition-colors text-left"
-                                  title="Ver ventas de este cliente"
-                                >
-                                  {c.nombre ?? "(sin nombre)"}
-                                </button>{" "}
-                                <span className="text-zinc-500 font-mono text-xs">({c.numero})</span>
-                              </td>
-                              <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
-                                {fmtTop(c.monto)}
-                              </td>
-                            </tr>
-                          ))
-                        : (topLineas?.porUnidades ?? []).slice(topInicio, topInicio + PAGE_SIZE).map((l, i) => (
-                            <tr key={l.linea} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
-                              <td className="px-3 py-2 text-zinc-500 tabular-nums">{topInicio + i + 1}</td>
-                              <td className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate" title={l.linea}>
-                                <button
-                                  type="button"
-                                  onClick={() => abrirModalLinea(l.linea)}
-                                  className="hover:text-yellow-400 hover:underline transition-colors text-left"
-                                  title="Ver clientes que compraron esta línea"
-                                >
-                                  {l.linea}
-                                </button>
-                              </td>
-                              <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
-                                {fmtTop(l.unidades)}
-                              </td>
-                            </tr>
-                          ))}
-                    </tbody>
+                    {topGrupos.map((grupo, gIdx) => (
+                      <tbody key={`top-${gIdx}`}>
+                        {topGrupos.length > 1 && (
+                          <FilaGrupo
+                            idx={gIdx}
+                            desde={gIdx * GROUP_SIZE}
+                            hasta={Math.min((gIdx + 1) * GROUP_SIZE, topItems.length)}
+                            total={topItems.length}
+                            abierto={topGrupoSeguro === gIdx}
+                            onClick={() => setTopGrupoAbierto(topGrupoSeguro === gIdx ? -1 : gIdx)}
+                            colSpan={3}
+                          />
+                        )}
+                        {(topGrupos.length <= 1 || topGrupoSeguro === gIdx) &&
+                          (topVista === "clientes"
+                            ? (grupo as TopCliente[]).map((c, i) => (
+                                <tr key={c.numero} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
+                                  <td className="px-3 py-2 text-zinc-500 tabular-nums">{gIdx * GROUP_SIZE + i + 1}</td>
+                                  <td className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate" title={c.nombre ?? undefined}>
+                                    <button
+                                      type="button"
+                                      onClick={() => abrirModalCliente({ numero: c.numero, nombre: c.nombre })}
+                                      className="hover:text-yellow-400 hover:underline transition-colors text-left"
+                                      title="Ver ventas de este cliente"
+                                    >
+                                      {c.nombre ?? "(sin nombre)"}
+                                    </button>{" "}
+                                    <span className="text-zinc-500 font-mono text-xs">({c.numero})</span>
+                                  </td>
+                                  <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
+                                    {fmtTop(c.monto)}
+                                  </td>
+                                </tr>
+                              ))
+                            : (grupo as TopLinea[]).map((l, i) => (
+                                <tr key={l.linea} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
+                                  <td className="px-3 py-2 text-zinc-500 tabular-nums">{gIdx * GROUP_SIZE + i + 1}</td>
+                                  <td className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate" title={l.linea}>
+                                    <button
+                                      type="button"
+                                      onClick={() => abrirModalLinea(l.linea)}
+                                      className="hover:text-yellow-400 hover:underline transition-colors text-left"
+                                      title="Ver clientes que compraron esta línea"
+                                    >
+                                      {l.linea}
+                                    </button>
+                                  </td>
+                                  <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
+                                    {fmtTop(l.unidades)}
+                                  </td>
+                                </tr>
+                              )))}
+                      </tbody>
+                    ))}
                   </table>
                 </div>
-                <Paginador
-                  pagina={topPaginaSegura}
-                  setPagina={setTopPagina}
-                  totalPaginas={topTotalPaginas}
-                  inicio={topInicio}
-                  total={topItemsTotal}
-                />
                 </>
               );
             })()}

@@ -723,13 +723,15 @@ def ventas_vendedor(
 @app.get("/ventas/vendedor/top-clientes")
 def ventas_vendedor_top_clientes(
     vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
-    # Antes default=10, le=50: la tabla de /ventas/vendedor mostraba solo
-    # top 10 aunque hubiera cientos de clientes en el rango. Pablo pidió
-    # (2026-08-19) que el ranking traiga TODOS los clientes que entran en
-    # el filtro de 12 meses, no un top recortado — subimos el tope a la
-    # práctica "sin límite" que ya usa fetch_top_clientes por defecto
-    # (limit=10000) cuando se llama sin `limit` explícito.
-    limit: int = Query(default=10000, ge=1, le=10000),
+    # Antes default=10, le=50, y después default=10000, le=10000: seguía
+    # siendo un tope, aunque alto. Pablo aclaró (2026-08-19): "no tiene que
+    # tener límite, todo lo que entre en el rango de fecha debe ser
+    # traído". Sin `le` = sin tope superior; el default alto es solo para
+    # que un caller que no mande `limit` (como el proxy Next) igual reciba
+    # todo. No hay costo extra en SQL: la query ya trae el resultset
+    # completo (sin TOP/LIMIT), `limit` solo recortaba la lista en Python
+    # después de tenerla toda en memoria.
+    limit: int = Query(default=1_000_000, ge=1),
     desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: 11 meses antes de `hasta`)"),
     hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes actual)"),
 ):
@@ -754,8 +756,9 @@ def ventas_vendedor_top_clientes(
 def ventas_vendedor_top_lineas(
     vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
     # Mismo cambio que top-clientes (pedido de Pablo 2026-08-19): traer
-    # TODAS las líneas del rango, no un top-10 recortado.
-    limit: int = Query(default=10000, ge=1, le=10000),
+    # TODAS las líneas del rango, sin tope superior — ver el comentario en
+    # ventas_vendedor_top_clientes.
+    limit: int = Query(default=1_000_000, ge=1),
     desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: 11 meses antes de `hasta`)"),
     hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes actual)"),
 ):
@@ -778,12 +781,13 @@ def ventas_vendedor_top_lineas(
 def ventas_vendedor_clientes_por_linea(
     linea: str = Query(..., min_length=1, description="Nombre de línea (StkFer_ArtParamet.Nivel1), o '(Sin línea)'"),
     vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
-    # Antes default=100, le=500: con líneas grandes (ej. línea 44, 385
-    # clientes) el modal se cortaba en el cliente 100 y no mostraba el
-    # resto. Mismo cambio que top-clientes/top-lineas (pedido de Pablo
-    # 2026-08-19): traer TODOS los clientes que compraron esa línea en el
-    # rango, no un recorte arbitrario — el front pagina de a 50 en pantalla.
-    limit: int = Query(default=10000, ge=1, le=10000),
+    # Antes default=100, le=500, y después default=10000, le=10000: con
+    # líneas grandes (ej. línea 44, 385 clientes) el modal se cortaba.
+    # Mismo cambio que top-clientes/top-lineas (pedido de Pablo 2026-08-19,
+    # aclarado el mismo día: "no tiene que tener límite"): sin tope
+    # superior — traer TODOS los clientes que compraron esa línea en el
+    # rango; el front agrupa de a 50 en acordeones colapsables en pantalla.
+    limit: int = Query(default=1_000_000, ge=1),
     desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: 11 meses antes de `hasta`)"),
     hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes actual)"),
 ):
