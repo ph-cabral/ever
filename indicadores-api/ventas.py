@@ -364,7 +364,7 @@ ORDER BY MontoNeto DESC
 
 def fetch_top_clientes(
     vendedor: int | None = None,
-    limit: int = 10,
+    limit: int = 10000,
     desde: str | None = None,
     hasta: str | None = None,
     forzar: bool = False,
@@ -484,7 +484,7 @@ GROUP BY LTRIM(RTRIM(ap.Nivel1))
 
 def fetch_top_lineas(
     vendedor: int | None = None,
-    limit: int = 10,
+    limit: int = 10000,
     desde: str | None = None,
     hasta: str | None = None,
     forzar: bool = False,
@@ -607,7 +607,7 @@ _LINEA_COND_SIN_LINEA = "(ap.Nivel1 IS NULL OR LTRIM(RTRIM(ap.Nivel1)) = '')"
 def fetch_clientes_por_linea(
     linea: str,
     vendedor: int | None = None,
-    limit: int = 100,
+    limit: int = 10000,
     desde: str | None = None,
     hasta: str | None = None,
     forzar: bool = False,
