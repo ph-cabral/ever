@@ -1221,17 +1221,16 @@ export default function VentasVendedorPage() {
           <div className="flex flex-col gap-1.5">
             <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
               <Trophy size={18} />
-              {topVista === "clientes" ? "Top 10 clientes que más compraron" : "Top 10 líneas más compradas"}
+              {topVista === "clientes" ? "Top clientes" : "Top líneas"}
             </h2>
-            <p className="text-zinc-500 text-sm">
+            {/* <p className="text-zinc-500 text-sm">
               {topResp ? `${formatYm(topResp.desde)} – ${formatYm(topResp.hasta)}` : "…"} (últimos{" "}
               {TOP_MESES} meses cerrados) — según tu acceso (tu cartera de clientes, o todos si sos
               admin).
-            </p>
+            </p> */}
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <span className="text-xs text-zinc-400 uppercase tracking-wide">Mostrar</span>
             <button
               type="button"
               onClick={() => setTopVista(topVista === "clientes" ? "lineas" : "clientes")}
@@ -1251,14 +1250,14 @@ export default function VentasVendedorPage() {
           {/* Total de filas que entran en la filtración (pedido de Pablo
               2026-08-18) — es el universo completo del rango, no las 10
               que se listan abajo. */}
-          <div className="flex flex-col gap-1.5 ml-auto text-right">
+          {/* <div className="flex flex-col gap-1.5 ml-auto text-right">
             <span className="text-xs text-zinc-400 uppercase tracking-wide">
               {topVista === "clientes" ? "Clientes en el período" : "Líneas en el período"}
             </span>
             <span className="text-2xl font-bold text-yellow-400 tabular-nums leading-none py-1">
               {topTotal === null ? "…" : fmtTop(topTotal)}
             </span>
-          </div>
+          </div> */}
         </div>
 
         {topError && (

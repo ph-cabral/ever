@@ -396,7 +396,7 @@ def fetch_top_clientes(
     TTL — no expuesto en la ruta HTTP, pensado para debug)."""
     desde_ym, hasta_ym, dia_desde, dia_hasta = _resolver_rango(desde, hasta)
 
-    limit_i = max(1, min(int(limit or 10), 50))
+    limit_i = max(1, int(limit or 10))
     cache_key = (vendedor, limit_i, desde_ym, hasta_ym)
     ahora = time.monotonic()
     if not forzar:
@@ -498,7 +498,7 @@ def fetch_top_lineas(
     Solo unidades — el $ vive en fetch_top_clientes."""
     desde_ym, hasta_ym, dia_desde, dia_hasta = _resolver_rango(desde, hasta)
 
-    limit_i = max(1, min(int(limit or 10), 50))
+    limit_i = max(1, int(limit or 10))
     cache_key = (vendedor, limit_i, desde_ym, hasta_ym)
     ahora = time.monotonic()
     if not forzar:
@@ -543,7 +543,7 @@ def fetch_top_lineas(
 
 # ──────────────────────────────────────────────────────────────────────────
 # Clientes por línea — /ventas/vendedor/clientes-por-linea (pedido de Pablo
-# 2026-08-18: al hacer click en una línea del ranking "Top 10 líneas", el
+# 2026-08-18: al hacer click en una línea del ranking "Top líneas", el
 # modal de /ventas/vendedor tiene que mostrar los CLIENTES que compraron esa
 # línea, ordenados de mayor a menor por $ gastado). Gemelo de
 # fetch_top_clientes: mismo rango fijo (_resolver_rango), mismo cache 15
@@ -615,8 +615,7 @@ def fetch_clientes_por_linea(
     """Clientes que compraron una línea de artículo, ordenados por MONTO
     (venta neta, $) de mayor a menor, en el mismo rango fijo de 12 meses que
     fetch_top_clientes/fetch_top_lineas — para el modal de
-    /ventas/vendedor cuando se hace click en una línea del ranking "Top 10
-    líneas" (pedido de Pablo 2026-08-18).
+    /ventas/vendedor cuando se hace click en una línea del ranking "Top líneas".
 
     Devuelve `porMonto` (las `limit` primeras, ya ordenadas por SQL) y
     `totalClientes` (cuántos clientes distintos compraron esa línea en el
@@ -634,7 +633,7 @@ def fetch_clientes_por_linea(
     if not linea_norm:
         raise ValueError("Falta 'linea'")
 
-    limit_i = max(1, min(int(limit or 100), 500))
+    limit_i = max(1, int(limit or 100))
     cache_key = (linea_norm, vendedor, limit_i, desde_ym, hasta_ym)
     ahora = time.monotonic()
     if not forzar:
