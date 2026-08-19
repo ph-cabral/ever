@@ -662,41 +662,9 @@ export default function VentasVendedorPage() {
           </span>
           <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
           {/* acaes */}
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4">
-            <div className="flex flex-col gap-1.5">
-              <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
-                <Trophy size={18} />
-                rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex
-                flex-wrap items-end gap-4
-                {topVista === "clientes" ? (
-                  <Users size={18} />
-                ) : (
-                  <ListChevronsUpDown size={18} />
-                )}
-                {topVista === "clientes" ? "clientes" : "líneas"}
-              </h2>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setTopVista(topVista === "clientes" ? "lineas" : "clientes");
-                  setTopGrupoAbierto(0);
-                }}
-                title={`Ver ${topVista === "clientes" ? "líneas" : "clientes"}`}
-                className="btn-anim inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors"
-              >
-                <ArrowLeftRight size={14} className="text-yellow-400" />
-                <span className="font-semibold">
-                  {topVista === "clientes" ? "Clientes" : "Líneas"}
-                </span>
-                <span className="text-zinc-500 text-xs">
-                  {topVista === "clientes" ? "($)" : "(unidades)"}
-                </span>
-              </button>
-            </div>
-          </div>
+          <span className="hidden md:inline text-zinc-500 text-sm">
+            Ventas · Por vendedor
+          </span>
         </div>
       </header>
 
@@ -909,7 +877,6 @@ export default function VentasVendedorPage() {
                     </button>
                   </div>
                 )}
-                {/* acafin */}
 
                 {filtroVisible &&
                   hayTabla &&
@@ -1502,6 +1469,49 @@ export default function VentasVendedorPage() {
             así que acá no hay selector de fechas: el subtítulo solo informa
             qué ventana se está viendo. Clickeando un cliente o una línea de
             la tabla de abajo se abre el modal con el detalle. */}
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4">
+          <div className="flex flex-col gap-1.5">
+            <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
+              <Trophy size={18} />
+              rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex
+              flex-wrap items-end gap-4
+              {topVista === "clientes" ? <Users size={18} /> : <ListChevronsUpDown size={18} />}
+              {topVista === "clientes" ? "clientes" : "líneas"}
+            </h2>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setTopVista(topVista === "clientes" ? "lineas" : "clientes");
+                setTopGrupoAbierto(0);
+              }}
+              title={`Ver ${topVista === "clientes" ? "líneas" : "clientes"}`}
+              className="btn-anim inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors"
+            >
+              <ArrowLeftRight size={14} className="text-yellow-400" />
+              <span className="font-semibold">
+                {topVista === "clientes" ? "Clientes" : "Líneas"}
+              </span>
+              <span className="text-zinc-500 text-xs">
+                {topVista === "clientes" ? "($)" : "(unidades)"}
+              </span>
+            </button>
+          </div>
+
+          {/* Total de filas que entran en la filtración (pedido de Pablo
+              2026-08-18) — es el universo completo del rango, no las 10
+              que se listan abajo. */}
+          {/* <div className="flex flex-col gap-1.5 ml-auto text-right">
+            <span className="text-xs text-zinc-400 uppercase tracking-wide">
+              {topVista === "clientes" ? "Clientes en el período" : "Líneas en el período"}
+            </span>
+            <span className="text-2xl font-bold text-yellow-400 tabular-nums leading-none py-1">
+              {topTotal === null ? "…" : fmtTop(topTotal)}
+            </span>
+          </div> */}
+        </div>
 
         {topError && (
           <div className="rounded-xl border border-red-400/40 bg-zinc-900/40 px-5 py-4 flex items-center gap-3 text-sm text-red-300">
