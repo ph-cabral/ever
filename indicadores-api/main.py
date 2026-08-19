@@ -723,15 +723,23 @@ def ventas_vendedor(
 @app.get("/ventas/vendedor/top-clientes")
 def ventas_vendedor_top_clientes(
     vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
-    limit: int = Query(default=10, ge=1, le=50),
+    # Antes default=10, le=50: la tabla de /ventas/vendedor mostraba solo
+    # top 10 aunque hubiera cientos de clientes en el rango. Pablo pidió
+    # (2026-08-19) que el ranking traiga TODOS los clientes que entran en
+    # el filtro de 12 meses, no un top recortado — subimos el tope a la
+    # práctica "sin límite" que ya usa fetch_top_clientes por defecto
+    # (limit=10000) cuando se llama sin `limit` explícito.
+    limit: int = Query(default=10000, ge=1, le=10000),
     desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: 11 meses antes de `hasta`)"),
     hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes actual)"),
 ):
     """Top clientes por MONTO (venta neta, $) en un rango de meses — para el
     ranking debajo de la tabla de /ventas/vendedor. Por defecto, últimos 12
-    meses (pedido de Pablo 2026-08-18). Devuelve también `totalClientes`:
-    cuántos clientes distintos entran en la filtración, no cuántos se
-    muestran. Ver docstring de fetch_top_clientes (ventas.py) para el
+    meses (pedido de Pablo 2026-08-18) y TODOS los clientes que entran en
+    ese rango (pedido de Pablo 2026-08-19, no un top recortado). Devuelve
+    también `totalClientes`: cuántos clientes distintos entran en la
+    filtración (con el límite alto, coincide con len(porMonto) salvo casos
+    extremos). Ver docstring de fetch_top_clientes (ventas.py) para el
     criterio de acceso por vendedor (mismo que /clientes y
     /ventas/vendedor) y para el formato de `desde`/`hasta`."""
     try:
@@ -745,7 +753,9 @@ def ventas_vendedor_top_clientes(
 @app.get("/ventas/vendedor/top-lineas")
 def ventas_vendedor_top_lineas(
     vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
-    limit: int = Query(default=10, ge=1, le=50),
+    # Mismo cambio que top-clientes (pedido de Pablo 2026-08-19): traer
+    # TODAS las líneas del rango, no un top-10 recortado.
+    limit: int = Query(default=10000, ge=1, le=10000),
     desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: 11 meses antes de `hasta`)"),
     hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes actual)"),
 ):
@@ -753,8 +763,9 @@ def ventas_vendedor_top_lineas(
     /ventas/vendedor/top-clientes (pedido de Pablo 2026-08-18: "agregamos
     vista de líneas, al igual que el top, traemos el total de líneas y acá
     dejamos ver solo unidades compradas"). Mismo rango por defecto (12
-    meses) y mismo criterio de acceso por vendedor. Devuelve `porUnidades`
-    y `totalLineas`. Ver fetch_top_lineas (ventas.py)."""
+    meses) y, desde 2026-08-19, TODAS las líneas que entran en ese rango
+    (no un top recortado). Mismo criterio de acceso por vendedor. Devuelve
+    `porUnidades` y `totalLineas`. Ver fetch_top_lineas (ventas.py)."""
     try:
         return fetch_top_lineas(vendedor=vendedor, limit=limit, desde=desde, hasta=hasta)
     except ValueError as e:
