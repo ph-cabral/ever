@@ -396,7 +396,7 @@ def fetch_top_clientes(
     TTL — no expuesto en la ruta HTTP, pensado para debug)."""
     desde_ym, hasta_ym, dia_desde, dia_hasta = _resolver_rango(desde, hasta)
 
-    limit_i = max(1, int(limit or 10))
+    limit_i = int(limit)
     cache_key = (vendedor, limit_i, desde_ym, hasta_ym)
     ahora = time.monotonic()
     if not forzar:
@@ -498,7 +498,7 @@ def fetch_top_lineas(
     Solo unidades — el $ vive en fetch_top_clientes."""
     desde_ym, hasta_ym, dia_desde, dia_hasta = _resolver_rango(desde, hasta)
 
-    limit_i = max(1, int(limit or 10))
+    limit_i = int(limit)
     cache_key = (vendedor, limit_i, desde_ym, hasta_ym)
     ahora = time.monotonic()
     if not forzar:
@@ -633,7 +633,7 @@ def fetch_clientes_por_linea(
     if not linea_norm:
         raise ValueError("Falta 'linea'")
 
-    limit_i = max(1, int(limit or 100))
+    limit_i = int(limit)
     cache_key = (linea_norm, vendedor, limit_i, desde_ym, hasta_ym)
     ahora = time.monotonic()
     if not forzar:
