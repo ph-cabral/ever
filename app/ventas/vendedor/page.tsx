@@ -1,8 +1,17 @@
 "use client";
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
-  Loader2, AlertTriangle, Search, Users, Table2, ChevronDown, ChevronUp,
-  ArrowLeftRight, Trophy, X,
+  Loader2,
+  AlertTriangle,
+  Search,
+  Users,
+  Table2,
+  ChevronDown,
+  ChevronUp,
+  ArrowLeftRight,
+  Trophy,
+  X,
+  ListChevronsUpDown,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 
@@ -632,7 +641,8 @@ export default function VentasVendedorPage() {
         <div className="fixed bottom-6 right-6 z-[110] flex flex-col gap-2">
           {loading && (
             <div className="flex items-center gap-3 bg-[#1A1A1A] border border-yellow-400/40 rounded-xl px-5 py-3 text-sm text-zinc-200">
-              <Loader2 size={16} className="animate-spin text-yellow-400" /> Consultando la base…
+              <Loader2 size={16} className="animate-spin text-yellow-400" />{" "}
+              Consultando la base…
             </div>
           )}
           {error && (
@@ -647,25 +657,117 @@ export default function VentasVendedorPage() {
         <div className="flex items-center gap-4 min-w-0">
           <InicioButton />
           <span className="font-bold text-yellow-400 text-xl md:text-2xl tracking-wide uppercase whitespace-nowrap">
-            EVER WEAR <span className="text-sm tracking-[3px] font-normal">S.A.</span>
+            EVER WEAR{" "}
+            <span className="text-sm tracking-[3px] font-normal">S.A.</span>
           </span>
           <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
-          <span className="hidden md:inline text-zinc-500 text-sm">Ventas · Por vendedor</span>
+          {/* acaes */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4">
+            <div className="flex flex-col gap-1.5">
+              <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
+                <Trophy size={18} />
+                rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex
+                flex-wrap items-end gap-4
+                {topVista === "clientes" ? (
+                  <Users size={18} />
+                ) : (
+                  <ListChevronsUpDown size={18} />
+                )}
+                {topVista === "clientes" ? "clientes" : "líneas"}
+              </h2>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setTopVista(topVista === "clientes" ? "lineas" : "clientes");
+                  setTopGrupoAbierto(0);
+                }}
+                title={`Ver ${topVista === "clientes" ? "líneas" : "clientes"}`}
+                className="btn-anim inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors"
+              >
+                <ArrowLeftRight size={14} className="text-yellow-400" />
+                <span className="font-semibold">
+                  {topVista === "clientes" ? "Clientes" : "Líneas"}
+                </span>
+                <span className="text-zinc-500 text-xs">
+                  {topVista === "clientes" ? "($)" : "(unidades)"}
+                </span>
+              </button>
+            </div>
+            <div className="relative">
+              <Search
+                size={13}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500"
+              />
+              <input
+                id="filtro-cliente"
+                type="text"
+                value={qCliente}
+                onChange={(e) => {
+                  setQCliente(e.target.value);
+                  setClienteSel(null);
+                }}
+                onFocus={() => sugerencias.length > 0 && setMostrarSug(true)}
+                onBlur={() => {
+                  blurTimeout.current = setTimeout(
+                    () => setMostrarSug(false),
+                    150,
+                  );
+                }}
+                onKeyDown={(e) =>
+                  e.key === "Enter" && clienteSel && handleFiltrar()
+                }
+                placeholder="Ej: 1234 o ACME S.A."
+                autoFocus
+                className="bg-[#1f1f1f] border border-zinc-700 rounded-md pl-7 pr-3 py-2 text-sm text-zinc-100 outline-none w-72 focus:border-yellow-400 placeholder:text-zinc-600"
+              />
+              {buscando && (
+                <Loader2
+                  size={13}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 animate-spin"
+                />
+              )}
+              {mostrarSug && sugerencias.length > 0 && (
+                <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-md border border-zinc-700 bg-[#1A1A1A] shadow-xl">
+                  {sugerencias.map((c) => (
+                    <button
+                      key={c.numero}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        if (blurTimeout.current)
+                          clearTimeout(blurTimeout.current);
+                        elegirCliente(c);
+                      }}
+                      className="w-full text-left px-3 py-2 text-sm text-zinc-200 hover:bg-yellow-400/10 hover:text-yellow-400 transition-colors flex items-center justify-between gap-2"
+                    >
+                      <span className="truncate">
+                        {c.nombre ?? "(sin nombre)"}
+                      </span>
+                      <span className="text-zinc-500 font-mono text-xs shrink-0">
+                        {c.numero}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {mostrarSug &&
+                sugerencias.length === 0 &&
+                sinVendedorAsignado && (
+                  <div className="absolute z-20 mt-1 w-full rounded-md border border-amber-400/40 bg-[#1A1A1A] shadow-xl px-3 py-2.5 text-xs text-amber-300">
+                    Tu usuario todavía no tiene un vendedor de Magnus asignado —
+                    pedile a un administrador que te lo asigne en Administración
+                    → Usuarios.
+                  </div>
+                )}
+            </div>
+          </div>
         </div>
       </header>
 
       <main className="max-w-[1400px] mx-auto px-4 md:px-8 py-8 space-y-6">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <button
-            type="button"
-            onClick={abrirModalBusqueda}
-            className="btn-anim inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors shrink-0"
-          >
-            <Search size={14} className="text-yellow-400" />
-            Buscar cliente
-          </button>
-        </div>
-
         {/* Modal "Ventas por cliente y línea" (pedido de Pablo 2026-08-18):
             se abre al hacer click en un cliente o una línea del ranking de
             abajo, o en "Buscar cliente" arriba. El filtro queda pegado en
@@ -687,19 +789,184 @@ export default function VentasVendedorPage() {
                         está viendo, para no perder el contexto. */}
                     {!filtroVisible && modalMode === "cliente" && data && (
                       <p className="text-sm text-zinc-300 mt-1">
-                        {data.cliente.nombre ?? "—"} <span className="text-zinc-500 font-mono text-xs">({data.cliente.codigo})</span>
+                        {data.cliente.nombre ?? "—"}{" "}
+                        <span className="text-zinc-500 font-mono text-xs">
+                          ({data.cliente.codigo})
+                        </span>
                       </p>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setFiltroVisible((v) => !v)}
-                      className="btn-anim inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 transition-colors"
-                    >
-                      {filtroVisible ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                      {filtroVisible ? "Ocultar filtro" : "Mostrar filtro"}
-                    </button>
+                  <div className="flex items-center gap-2 shrink-0"></div>
+                </div>
+
+                {/* Filtro (pedido de Pablo 2026-08-18: colapsable con el botón
+                  de arriba — antes ocupaba mucho lugar fijo en el header del
+                  modal, que no scrollea, y le dejaba poco espacio a la
+                  tabla). */}
+                {/* inicioaca */}
+                {filtroVisible && (
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4">
+                    <div className="flex flex-col gap-1.5 relative">
+                      <div className="relative">
+                        <Search
+                          size={13}
+                          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500"
+                        />
+                        <input
+                          id="filtro-cliente"
+                          type="text"
+                          value={qCliente}
+                          onChange={(e) => {
+                            setQCliente(e.target.value);
+                            setClienteSel(null);
+                          }}
+                          onFocus={() =>
+                            sugerencias.length > 0 && setMostrarSug(true)
+                          }
+                          onBlur={() => {
+                            blurTimeout.current = setTimeout(
+                              () => setMostrarSug(false),
+                              150,
+                            );
+                          }}
+                          onKeyDown={(e) =>
+                            e.key === "Enter" && clienteSel && handleFiltrar()
+                          }
+                          placeholder="Ej: 1234 o ACME S.A."
+                          autoFocus
+                          className="bg-[#1f1f1f] border border-zinc-700 rounded-md pl-7 pr-3 py-2 text-sm text-zinc-100 outline-none w-72 focus:border-yellow-400 placeholder:text-zinc-600"
+                        />
+                        {buscando && (
+                          <Loader2
+                            size={13}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 animate-spin"
+                          />
+                        )}
+                        {mostrarSug && sugerencias.length > 0 && (
+                          <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-md border border-zinc-700 bg-[#1A1A1A] shadow-xl">
+                            {sugerencias.map((c) => (
+                              <button
+                                key={c.numero}
+                                type="button"
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  if (blurTimeout.current)
+                                    clearTimeout(blurTimeout.current);
+                                  elegirCliente(c);
+                                }}
+                                className="w-full text-left px-3 py-2 text-sm text-zinc-200 hover:bg-yellow-400/10 hover:text-yellow-400 transition-colors flex items-center justify-between gap-2"
+                              >
+                                <span className="truncate">
+                                  {c.nombre ?? "(sin nombre)"}
+                                </span>
+                                <span className="text-zinc-500 font-mono text-xs shrink-0">
+                                  {c.numero}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {mostrarSug &&
+                          sugerencias.length === 0 &&
+                          sinVendedorAsignado && (
+                            <div className="absolute z-20 mt-1 w-full rounded-md border border-amber-400/40 bg-[#1A1A1A] shadow-xl px-3 py-2.5 text-xs text-amber-300">
+                              Tu usuario todavía no tiene un vendedor de Magnus
+                              asignado — pedile a un administrador que te lo
+                              asigne en Administración → Usuarios.
+                            </div>
+                          )}
+                      </div>
+                    </div>
+
+                    {/* Switch pesos/unidades de ESTA tabla (línea×año de un
+                    cliente) — estado propio del modal (`vistaModal`), no el
+                    del ranking del pie. Solo tiene sentido en modo "cliente";
+                    en modo "linea" la tabla de clientes ya es siempre por $
+                    (pedido de Pablo 2026-08-18: "de mayor a menor en
+                    gasto"). */}
+                    {modalMode === "cliente" && (
+                      <>
+                        <div className="flex flex-col gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setVistaModal(
+                                vistaModal === "clientes"
+                                  ? "lineas"
+                                  : "clientes",
+                              )
+                            }
+                            title={`Ver ${vistaModal === "clientes" ? "líneas" : "clientes"}`}
+                            className="btn-anim inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors"
+                          >
+                            <ArrowLeftRight
+                              size={14}
+                              className="text-yellow-400"
+                            />
+                            <span className="font-semibold">
+                              {vistaModal === "clientes"
+                                ? "Clientes"
+                                : "Líneas"}
+                            </span>
+                            <span className="text-zinc-500 text-xs">
+                              {vistaModal === "clientes" ? "($)" : "(unidades)"}
+                            </span>
+                          </button>
+                        </div>
+
+                        {hayTabla && (
+                          <button
+                            type="button"
+                            onClick={() => setDesglosado((v) => !v)}
+                            className="btn-anim flex items-center gap-1.5 border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
+                          >
+                            {desglosado
+                              ? "Agrupar por año"
+                              : "Desglosar por mes"}
+                          </button>
+                        )}
+
+                        {/* Botón dividido: período YTD vs. selección de meses puntuales */}
+                        {hayTabla && !sinDatos && (
+                          <div className="flex flex-col gap-1.5">
+                            <div className="inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700">
+                              <button
+                                type="button"
+                                onClick={() => setPeriodo("ytd")}
+                                title={`Acumulado Enero–${mesesLabel(data!.totales.anioActual)} en ambos años`}
+                                className={`px-3 py-2 transition-colors ${
+                                  periodo === "ytd"
+                                    ? "bg-yellow-400 text-black font-semibold"
+                                    : "text-zinc-300 hover:bg-zinc-800"
+                                }`}
+                              >
+                                YTD
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPeriodo("meses")}
+                                className={`px-3 py-2 transition-colors ${
+                                  periodo === "meses"
+                                    ? "bg-yellow-400 text-black font-semibold"
+                                    : "text-zinc-300 hover:bg-zinc-800"
+                                }`}
+                              >
+                                Meses
+                                {periodo === "meses" && mesesSel.size > 0
+                                  ? ` (${mesesSel.size})`
+                                  : ""}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {data && (
+                          <span className="text-sm text-zinc-500 pb-2">
+                            {filas.length} línea(s)
+                          </span>
+                        )}
+                      </>
+                    )}
                     <button
                       type="button"
                       onClick={cerrarModal}
@@ -709,507 +976,457 @@ export default function VentasVendedorPage() {
                       <X size={20} />
                     </button>
                   </div>
-                </div>
+                )}
+                {/* acafin */}
 
-              {/* Filtro (pedido de Pablo 2026-08-18: colapsable con el botón
-                  de arriba — antes ocupaba mucho lugar fijo en el header del
-                  modal, que no scrollea, y le dejaba poco espacio a la
-                  tabla). */}
-              {filtroVisible && (
-              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4">
-                <div className="flex flex-col gap-1.5 relative">
-                  <div className="relative">
-                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-                    <input
-                      id="filtro-cliente"
-                      type="text"
-                      value={qCliente}
-                      onChange={(e) => {
-                        setQCliente(e.target.value);
-                        setClienteSel(null);
-                      }}
-                      onFocus={() => sugerencias.length > 0 && setMostrarSug(true)}
-                      onBlur={() => {
-                        blurTimeout.current = setTimeout(() => setMostrarSug(false), 150);
-                      }}
-                      onKeyDown={(e) => e.key === "Enter" && clienteSel && handleFiltrar()}
-                      placeholder="Ej: 1234 o ACME S.A."
-                      autoFocus
-                      className="bg-[#1f1f1f] border border-zinc-700 rounded-md pl-7 pr-3 py-2 text-sm text-zinc-100 outline-none w-72 focus:border-yellow-400 placeholder:text-zinc-600"
-                    />
-                    {buscando && (
-                      <Loader2 size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 animate-spin" />
-                    )}
-                    {mostrarSug && sugerencias.length > 0 && (
-                      <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-md border border-zinc-700 bg-[#1A1A1A] shadow-xl">
-                        {sugerencias.map((c) => (
+                {filtroVisible &&
+                  hayTabla &&
+                  !sinDatos &&
+                  periodo === "meses" && (
+                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-3 flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-zinc-400 uppercase tracking-wide mr-1">
+                        Meses:
+                      </span>
+                      {data!.totales.anioActual.meses.map((m) => {
+                        const activo = mesesSel.has(m.mes);
+                        return (
                           <button
-                            key={c.numero}
+                            key={m.mes}
                             type="button"
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              if (blurTimeout.current) clearTimeout(blurTimeout.current);
-                              elegirCliente(c);
-                            }}
-                            className="w-full text-left px-3 py-2 text-sm text-zinc-200 hover:bg-yellow-400/10 hover:text-yellow-400 transition-colors flex items-center justify-between gap-2"
+                            onClick={() => toggleMes(m.mes)}
+                            className={`btn-anim px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+                              activo
+                                ? "bg-yellow-400 text-black border-yellow-400"
+                                : "border-zinc-700 text-zinc-300 hover:border-yellow-400/60"
+                            }`}
                           >
-                            <span className="truncate">{c.nombre ?? "(sin nombre)"}</span>
-                            <span className="text-zinc-500 font-mono text-xs shrink-0">{c.numero}</span>
+                            {m.label}
                           </button>
-                        ))}
-                      </div>
-                    )}
-                    {mostrarSug && sugerencias.length === 0 && sinVendedorAsignado && (
-                      <div className="absolute z-20 mt-1 w-full rounded-md border border-amber-400/40 bg-[#1A1A1A] shadow-xl px-3 py-2.5 text-xs text-amber-300">
-                        Tu usuario todavía no tiene un vendedor de Magnus asignado — pedile a un
-                        administrador que te lo asigne en Administración → Usuarios.
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Switch pesos/unidades de ESTA tabla (línea×año de un
-                    cliente) — estado propio del modal (`vistaModal`), no el
-                    del ranking del pie. Solo tiene sentido en modo "cliente";
-                    en modo "linea" la tabla de clientes ya es siempre por $
-                    (pedido de Pablo 2026-08-18: "de mayor a menor en
-                    gasto"). */}
-                {modalMode === "cliente" && (
-                  <>
-                  <div className="flex flex-col gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setVistaModal(vistaModal === "clientes" ? "lineas" : "clientes")}
-                      title={`Ver ${vistaModal === "clientes" ? "líneas" : "clientes"}`}
-                      className="btn-anim inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors"
-                    >
-                      <ArrowLeftRight size={14} className="text-yellow-400" />
-                      <span className="font-semibold">
-                        {vistaModal === "clientes" ? "Clientes" : "Líneas"}
-                      </span>
-                      <span className="text-zinc-500 text-xs">
-                        {vistaModal === "clientes" ? "($)" : "(unidades)"}
-                      </span>
-                    </button>
-                  </div>
-
-                  {hayTabla && (
-                    <button
-                      type="button"
-                      onClick={() => setDesglosado((v) => !v)}
-                      className="btn-anim flex items-center gap-1.5 border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
-                    >
-                      {desglosado ? "Agrupar por año" : "Desglosar por mes"}
-                    </button>
-                  )}
-
-                  {/* Botón dividido: período YTD vs. selección de meses puntuales */}
-                  {hayTabla && !sinDatos && (
-                    <div className="flex flex-col gap-1.5">
-                      <div className="inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700">
+                        );
+                      })}
+                      {mesesSel.size > 0 ? (
                         <button
                           type="button"
-                          onClick={() => setPeriodo("ytd")}
-                          title={`Acumulado Enero–${mesesLabel(data!.totales.anioActual)} en ambos años`}
-                          className={`px-3 py-2 transition-colors ${
-                            periodo === "ytd" ? "bg-yellow-400 text-black font-semibold" : "text-zinc-300 hover:bg-zinc-800"
-                          }`}
+                          onClick={() => setMesesSel(new Set())}
+                          className="text-xs text-zinc-500 hover:text-zinc-300 ml-2 underline"
                         >
-                          YTD
+                          Limpiar
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setPeriodo("meses")}
-                          className={`px-3 py-2 transition-colors ${
-                            periodo === "meses" ? "bg-yellow-400 text-black font-semibold" : "text-zinc-300 hover:bg-zinc-800"
-                          }`}
-                        >
-                          Meses{periodo === "meses" && mesesSel.size > 0 ? ` (${mesesSel.size})` : ""}
-                        </button>
-                      </div>
+                      ) : (
+                        <span className="text-xs text-amber-400/80 ml-2">
+                          Elegí uno o más meses para ver la comparación.
+                        </span>
+                      )}
                     </div>
                   )}
-
-                  {data && (
-                    <span className="text-sm text-zinc-500 pb-2">
-                      {filas.length} línea(s)
-                    </span>
-                  )}
-                  </>
-                )}
-              </div>
-              )}
-
-              {filtroVisible && hayTabla && !sinDatos && periodo === "meses" && (
-                <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-3 flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-zinc-400 uppercase tracking-wide mr-1">Meses:</span>
-                  {data!.totales.anioActual.meses.map((m) => {
-                    const activo = mesesSel.has(m.mes);
-                    return (
-                      <button
-                        key={m.mes}
-                        type="button"
-                        onClick={() => toggleMes(m.mes)}
-                        className={`btn-anim px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
-                          activo
-                            ? "bg-yellow-400 text-black border-yellow-400"
-                            : "border-zinc-700 text-zinc-300 hover:border-yellow-400/60"
-                        }`}
-                      >
-                        {m.label}
-                      </button>
-                    );
-                  })}
-                  {mesesSel.size > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => setMesesSel(new Set())}
-                      className="text-xs text-zinc-500 hover:text-zinc-300 ml-2 underline"
-                    >
-                      Limpiar
-                    </button>
-                  ) : (
-                    <span className="text-xs text-amber-400/80 ml-2">Elegí uno o más meses para ver la comparación.</span>
-                  )}
-                </div>
-              )}
               </div>
 
               <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
                 {modalMode === "cliente" && (
                   <>
-                {!hayTabla && (
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
-                    <Search size={40} className="text-zinc-700" />
-                    <p className="text-zinc-500 text-sm">
-                      Buscá un cliente por código o nombre y elegilo de la lista.
-                    </p>
-                  </div>
-                )}
+                    {!hayTabla && (
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
+                        <Search size={40} className="text-zinc-700" />
+                        <p className="text-zinc-500 text-sm">
+                          Buscá un cliente por código o nombre y elegilo de la
+                          lista.
+                        </p>
+                      </div>
+                    )}
 
-                {hayTabla && sinDatos && (
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
-                    <Table2 size={40} className="text-zinc-700" />
-                    <p className="text-zinc-500 text-sm">
-                      Sin ventas registradas para {data?.cliente.nombre ?? data?.cliente.codigo} en{" "}
-                      {data?.anioAnterior}–{data?.anioActual}.
-                    </p>
-                  </div>
-                )}
+                    {hayTabla && sinDatos && (
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
+                        <Table2 size={40} className="text-zinc-700" />
+                        <p className="text-zinc-500 text-sm">
+                          Sin ventas registradas para{" "}
+                          {data?.cliente.nombre ?? data?.cliente.codigo} en{" "}
+                          {data?.anioAnterior}–{data?.anioActual}.
+                        </p>
+                      </div>
+                    )}
 
-                {hayTabla && !sinDatos && faltanMeses && (
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
-                    <Table2 size={40} className="text-zinc-700" />
-                    <p className="text-zinc-500 text-sm">Elegí uno o más meses arriba para ver la comparación.</p>
-                  </div>
-                )}
+                    {hayTabla && !sinDatos && faltanMeses && (
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
+                        <Table2 size={40} className="text-zinc-700" />
+                        <p className="text-zinc-500 text-sm">
+                          Elegí uno o más meses arriba para ver la comparación.
+                        </p>
+                      </div>
+                    )}
 
-                {hayTabla && !sinDatos && !faltanMeses && (
-                  <div
-                    className={`rounded-xl border border-zinc-800 overflow-hidden transition-opacity ${
-                      loading ? "opacity-50 pointer-events-none" : ""
-                    }`}
-                    onMouseLeave={limpiarHover}
-                  >
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-max text-sm">
-                        <thead className="bg-[#1A1A1A] text-zinc-400">
-                          <tr>
-                            <th
-                              rowSpan={desglosado ? 2 : 1}
-                              className={`px-3 py-2 font-medium text-left whitespace-nowrap align-bottom cursor-default ${
-                                hoverCol === COL_LINEA ? "bg-yellow-400/10" : ""
-                              }`}
-                              onMouseEnter={() => {
-                                setHoverRow(null);
-                                setHoverCol(COL_LINEA);
-                              }}
-                            >
-                              Línea
-                            </th>
-                            <th
-                              colSpan={colSpanAnio}
-                              className={`px-3 py-2 font-medium text-center whitespace-nowrap border-l border-zinc-800 text-zinc-300 ${
-                                !desglosado && hoverCol === colAnteriorTotal ? "bg-yellow-400/10 cursor-default" : ""
-                              }`}
-                              onMouseEnter={
-                                desglosado
-                                  ? undefined
-                                  : () => {
+                    {hayTabla && !sinDatos && !faltanMeses && (
+                      <div
+                        className={`rounded-xl border border-zinc-800 overflow-hidden transition-opacity ${
+                          loading ? "opacity-50 pointer-events-none" : ""
+                        }`}
+                        onMouseLeave={limpiarHover}
+                      >
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-max text-sm">
+                            <thead className="bg-[#1A1A1A] text-zinc-400">
+                              <tr>
+                                <th
+                                  rowSpan={desglosado ? 2 : 1}
+                                  className={`px-3 py-2 font-medium text-left whitespace-nowrap align-bottom cursor-default ${
+                                    hoverCol === COL_LINEA
+                                      ? "bg-yellow-400/10"
+                                      : ""
+                                  }`}
+                                  onMouseEnter={() => {
+                                    setHoverRow(null);
+                                    setHoverCol(COL_LINEA);
+                                  }}
+                                >
+                                  Línea
+                                </th>
+                                <th
+                                  colSpan={colSpanAnio}
+                                  className={`px-3 py-2 font-medium text-center whitespace-nowrap border-l border-zinc-800 text-zinc-300 ${
+                                    !desglosado && hoverCol === colAnteriorTotal
+                                      ? "bg-yellow-400/10 cursor-default"
+                                      : ""
+                                  }`}
+                                  onMouseEnter={
+                                    desglosado
+                                      ? undefined
+                                      : () => {
+                                          setHoverRow(null);
+                                          setHoverCol(colAnteriorTotal);
+                                        }
+                                  }
+                                >
+                                  Año {data!.anioAnterior}
+                                  {periodo === "ytd" && (
+                                    <span className="text-zinc-500 font-normal">
+                                      {" "}
+                                      (Ene–
+                                      {mesesLabel(data!.totales.anioAnterior)})
+                                    </span>
+                                  )}
+                                </th>
+                                <th
+                                  colSpan={colSpanAnio}
+                                  className={`px-3 py-2 font-medium text-center whitespace-nowrap border-l border-zinc-800 text-yellow-400 ${
+                                    !desglosado && hoverCol === colActualTotal
+                                      ? "bg-yellow-400/10 cursor-default"
+                                      : ""
+                                  }`}
+                                  onMouseEnter={
+                                    desglosado
+                                      ? undefined
+                                      : () => {
+                                          setHoverRow(null);
+                                          setHoverCol(colActualTotal);
+                                        }
+                                  }
+                                >
+                                  Año {data!.anioActual}
+                                  {periodo === "ytd" && (
+                                    <span className="text-yellow-400/60 font-normal">
+                                      {" "}
+                                      (Ene–
+                                      {mesesLabel(data!.totales.anioActual)})
+                                    </span>
+                                  )}
+                                </th>
+                                <th
+                                  rowSpan={desglosado ? 2 : 1}
+                                  className="px-3 py-2 font-medium text-center whitespace-nowrap align-bottom border-l border-zinc-800 cursor-default"
+                                  title="Año actual vs. año anterior"
+                                >
+                                  Tend.
+                                </th>
+                              </tr>
+                              {desglosado && (
+                                <tr className="text-[11px] text-zinc-500">
+                                  {data!.totales.anioAnterior.meses
+                                    .filter((m) => mesesActivos.includes(m.mes))
+                                    .map((m) => (
+                                      <th
+                                        key={`pa-${m.mes}`}
+                                        className={`px-2 py-1.5 font-normal text-right whitespace-nowrap border-l border-zinc-800/60 cursor-default ${
+                                          hoverCol === colAnteriorMes(m.mes)
+                                            ? "bg-yellow-400/10"
+                                            : ""
+                                        }`}
+                                        onMouseEnter={() => {
+                                          setHoverRow(null);
+                                          setHoverCol(colAnteriorMes(m.mes));
+                                        }}
+                                      >
+                                        {m.label}
+                                      </th>
+                                    ))}
+                                  <th
+                                    className={`px-2 py-1.5 font-semibold text-right whitespace-nowrap border-l border-zinc-800 text-zinc-300 cursor-default ${
+                                      hoverCol === colAnteriorTotal
+                                        ? "bg-yellow-400/10"
+                                        : ""
+                                    }`}
+                                    onMouseEnter={() => {
                                       setHoverRow(null);
                                       setHoverCol(colAnteriorTotal);
-                                    }
-                              }
-                            >
-                              Año {data!.anioAnterior}
-                              {periodo === "ytd" && (
-                                <span className="text-zinc-500 font-normal"> (Ene–{mesesLabel(data!.totales.anioAnterior)})</span>
-                              )}
-                            </th>
-                            <th
-                              colSpan={colSpanAnio}
-                              className={`px-3 py-2 font-medium text-center whitespace-nowrap border-l border-zinc-800 text-yellow-400 ${
-                                !desglosado && hoverCol === colActualTotal ? "bg-yellow-400/10 cursor-default" : ""
-                              }`}
-                              onMouseEnter={
-                                desglosado
-                                  ? undefined
-                                  : () => {
+                                    }}
+                                  >
+                                    Total
+                                  </th>
+                                  {data!.totales.anioActual.meses
+                                    .filter((m) => mesesActivos.includes(m.mes))
+                                    .map((m) => (
+                                      <th
+                                        key={`pc-${m.mes}`}
+                                        className={`px-2 py-1.5 font-normal text-right whitespace-nowrap border-l border-zinc-800/60 cursor-default ${
+                                          hoverCol === colActualMes(m.mes)
+                                            ? "bg-yellow-400/10"
+                                            : ""
+                                        }`}
+                                        onMouseEnter={() => {
+                                          setHoverRow(null);
+                                          setHoverCol(colActualMes(m.mes));
+                                        }}
+                                      >
+                                        {m.label}
+                                      </th>
+                                    ))}
+                                  <th
+                                    className={`px-2 py-1.5 font-semibold text-right whitespace-nowrap border-l border-zinc-800 text-yellow-400 cursor-default ${
+                                      hoverCol === colActualTotal
+                                        ? "bg-yellow-400/10"
+                                        : ""
+                                    }`}
+                                    onMouseEnter={() => {
                                       setHoverRow(null);
                                       setHoverCol(colActualTotal);
-                                    }
-                              }
-                            >
-                              Año {data!.anioActual}
-                              {periodo === "ytd" && (
-                                <span className="text-yellow-400/60 font-normal"> (Ene–{mesesLabel(data!.totales.anioActual)})</span>
+                                    }}
+                                  >
+                                    Total
+                                  </th>
+                                </tr>
                               )}
-                            </th>
-                            <th
-                              rowSpan={desglosado ? 2 : 1}
-                              className="px-3 py-2 font-medium text-center whitespace-nowrap align-bottom border-l border-zinc-800 cursor-default"
-                              title="Año actual vs. año anterior"
-                            >
-                              Tend.
-                            </th>
-                          </tr>
-                          {desglosado && (
-                            <tr className="text-[11px] text-zinc-500">
-                              {data!.totales.anioAnterior.meses
-                                .filter((m) => mesesActivos.includes(m.mes))
-                                .map((m) => (
-                                  <th
-                                    key={`pa-${m.mes}`}
-                                    className={`px-2 py-1.5 font-normal text-right whitespace-nowrap border-l border-zinc-800/60 cursor-default ${
-                                      hoverCol === colAnteriorMes(m.mes) ? "bg-yellow-400/10" : ""
-                                    }`}
-                                    onMouseEnter={() => {
-                                      setHoverRow(null);
-                                      setHoverCol(colAnteriorMes(m.mes));
-                                    }}
-                                  >
-                                    {m.label}
-                                  </th>
-                                ))}
-                              <th
-                                className={`px-2 py-1.5 font-semibold text-right whitespace-nowrap border-l border-zinc-800 text-zinc-300 cursor-default ${
-                                  hoverCol === colAnteriorTotal ? "bg-yellow-400/10" : ""
-                                }`}
-                                onMouseEnter={() => {
-                                  setHoverRow(null);
-                                  setHoverCol(colAnteriorTotal);
-                                }}
-                              >
-                                Total
-                              </th>
-                              {data!.totales.anioActual.meses
-                                .filter((m) => mesesActivos.includes(m.mes))
-                                .map((m) => (
-                                  <th
-                                    key={`pc-${m.mes}`}
-                                    className={`px-2 py-1.5 font-normal text-right whitespace-nowrap border-l border-zinc-800/60 cursor-default ${
-                                      hoverCol === colActualMes(m.mes) ? "bg-yellow-400/10" : ""
-                                    }`}
-                                    onMouseEnter={() => {
-                                      setHoverRow(null);
-                                      setHoverCol(colActualMes(m.mes));
-                                    }}
-                                  >
-                                    {m.label}
-                                  </th>
-                                ))}
-                              <th
-                                className={`px-2 py-1.5 font-semibold text-right whitespace-nowrap border-l border-zinc-800 text-yellow-400 cursor-default ${
-                                  hoverCol === colActualTotal ? "bg-yellow-400/10" : ""
-                                }`}
-                                onMouseEnter={() => {
-                                  setHoverRow(null);
-                                  setHoverCol(colActualTotal);
-                                }}
-                              >
-                                Total
-                              </th>
-                            </tr>
-                          )}
-                        </thead>
-                        {filasGrupos.map((grupo, gIdx) => (
-                          <tbody key={`fg-${gIdx}`}>
-                            {filasGrupos.length > 1 && (
-                              <FilaGrupo
-                                idx={gIdx}
-                                desde={gIdx * GROUP_SIZE}
-                                hasta={Math.min((gIdx + 1) * GROUP_SIZE, filas.length)}
-                                total={filas.length}
-                                abierto={filasGrupoSeguro === gIdx}
-                                onClick={() => setFilasGrupoAbierto(filasGrupoSeguro === gIdx ? -1 : gIdx)}
-                                colSpan={totalColsLineaAnio}
-                              />
-                            )}
-                            {(filasGrupos.length <= 1 || filasGrupoSeguro === gIdx) &&
-                              grupo.map((r, rowIdx) => {
-                                const rowCrece = crece(r);
-                                const rowTendencia = tendencia(r);
-                                return (
-                                  <tr key={r.linea} className="border-t border-zinc-800/60 transition-colors">
-                                    <td
-                                      className={`px-3 py-2 text-zinc-100 whitespace-nowrap cursor-default ${celda(rowIdx, COL_LINEA, rowCrece)}`}
-                                      onMouseEnter={() => {
-                                        setHoverRow(rowIdx);
-                                        setHoverCol(COL_LINEA);
-                                      }}
-                                    >
-                                      {r.linea}
-                                    </td>
-                                    {desglosado &&
-                                      r.anioAnterior.meses
-                                        .filter((m) => mesesActivos.includes(m.mes))
-                                        .map((m) => {
-                                          const colIdx = colAnteriorMes(m.mes);
-                                          return (
-                                            <td
-                                              key={`a-${m.mes}`}
-                                              className={`px-2 py-2 text-right tabular-nums text-zinc-400 border-l border-zinc-800/40 cursor-default ${celda(rowIdx, colIdx, rowCrece)}`}
-                                              onMouseEnter={() => {
-                                                setHoverRow(rowIdx);
-                                                setHoverCol(colIdx);
-                                              }}
-                                            >
-                                              {valorMes(m) === 0 ? "—" : fmt(valorMes(m))}
-                                            </td>
-                                          );
-                                        })}
-                                    <td
-                                      className={`px-3 py-2 text-right tabular-nums text-zinc-200 font-medium border-l border-zinc-800 cursor-default ${celda(rowIdx, colAnteriorTotal, rowCrece)}`}
-                                      onMouseEnter={() => {
-                                        setHoverRow(rowIdx);
-                                        setHoverCol(colAnteriorTotal);
-                                      }}
-                                    >
-                                      {fmt(valor(sumaPeriodo(r.anioAnterior)))}
-                                    </td>
-                                    {desglosado &&
-                                      r.anioActual.meses
-                                        .filter((m) => mesesActivos.includes(m.mes))
-                                        .map((m) => {
-                                          const colIdx = colActualMes(m.mes);
-                                          return (
-                                            <td
-                                              key={`c-${m.mes}`}
-                                              className={`px-2 py-2 text-right tabular-nums text-zinc-400 border-l border-zinc-800/40 cursor-default ${celda(rowIdx, colIdx, rowCrece)}`}
-                                              onMouseEnter={() => {
-                                                setHoverRow(rowIdx);
-                                                setHoverCol(colIdx);
-                                              }}
-                                            >
-                                              {valorMes(m) === 0 ? "—" : fmt(valorMes(m))}
-                                            </td>
-                                          );
-                                        })}
-                                    <td
-                                      className={`px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 cursor-default ${celda(rowIdx, colActualTotal, rowCrece)}`}
-                                      onMouseEnter={() => {
-                                        setHoverRow(rowIdx);
-                                        setHoverCol(colActualTotal);
-                                      }}
-                                    >
-                                      {fmt(valor(sumaPeriodo(r.anioActual)))}
-                                    </td>
-                                    <td
-                                      className={`px-3 py-2 text-center text-base font-bold border-l border-zinc-800 cursor-default ${celdaTendencia(rowTendencia)}`}
-                                    >
-                                      {iconoTendencia(rowTendencia)}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                          </tbody>
-                        ))}
-                        <tfoot>
-                          <tr className="border-t-2 border-zinc-700 bg-zinc-900/60">
-                            <td
-                              className={`px-3 py-2 text-zinc-300 font-semibold uppercase text-xs tracking-wide cursor-default ${
-                                hoverCol === COL_LINEA ? "bg-yellow-400/10" : ""
-                              }`}
-                              onMouseEnter={() => {
-                                setHoverRow(null);
-                                setHoverCol(COL_LINEA);
-                              }}
-                            >
-                              Total
-                            </td>
-                            {desglosado &&
-                              data!.totales.anioAnterior.meses
-                                .filter((m) => mesesActivos.includes(m.mes))
-                                .map((m) => {
-                                  const colIdx = colAnteriorMes(m.mes);
-                                  return (
-                                    <td
-                                      key={`ta-${m.mes}`}
-                                      className={`px-2 py-2 text-right tabular-nums text-zinc-300 font-medium border-l border-zinc-800/40 cursor-default ${
-                                        hoverCol === colIdx ? "bg-yellow-400/10" : ""
-                                      }`}
-                                      onMouseEnter={() => {
-                                        setHoverRow(null);
-                                        setHoverCol(colIdx);
-                                      }}
-                                    >
-                                      {fmt(valorMes(m))}
-                                    </td>
-                                  );
-                                })}
-                            <td
-                              className={`px-3 py-2 text-right tabular-nums text-zinc-100 font-bold border-l border-zinc-800 cursor-default ${
-                                hoverCol === colAnteriorTotal ? "bg-yellow-400/10" : ""
-                              }`}
-                              onMouseEnter={() => {
-                                setHoverRow(null);
-                                setHoverCol(colAnteriorTotal);
-                              }}
-                            >
-                              {fmt(valor(sumaPeriodo(data!.totales.anioAnterior)))}
-                            </td>
-                            {desglosado &&
-                              data!.totales.anioActual.meses
-                                .filter((m) => mesesActivos.includes(m.mes))
-                                .map((m) => {
-                                  const colIdx = colActualMes(m.mes);
-                                  return (
-                                    <td
-                                      key={`tc-${m.mes}`}
-                                      className={`px-2 py-2 text-right tabular-nums text-zinc-300 font-medium border-l border-zinc-800/40 cursor-default ${
-                                        hoverCol === colIdx ? "bg-yellow-400/10" : ""
-                                      }`}
-                                      onMouseEnter={() => {
-                                        setHoverRow(null);
-                                        setHoverCol(colIdx);
-                                      }}
-                                    >
-                                      {fmt(valorMes(m))}
-                                    </td>
-                                  );
-                                })}
-                            <td
-                              className={`px-3 py-2 text-right tabular-nums text-yellow-400 font-bold border-l border-zinc-800 cursor-default ${
-                                hoverCol === colActualTotal ? "bg-yellow-400/10" : ""
-                              }`}
-                              onMouseEnter={() => {
-                                setHoverRow(null);
-                                setHoverCol(colActualTotal);
-                              }}
-                            >
-                              {fmt(valor(sumaPeriodo(data!.totales.anioActual)))}
-                            </td>
-                            <td
-                              className={`px-3 py-2 text-center text-base font-bold border-l border-zinc-800 cursor-default ${celdaTendencia(tendencia(data!.totales))}`}
-                            >
-                              {iconoTendencia(tendencia(data!.totales))}
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  </div>
-                )}
+                            </thead>
+                            {filasGrupos.map((grupo, gIdx) => (
+                              <tbody key={`fg-${gIdx}`}>
+                                {filasGrupos.length > 1 && (
+                                  <FilaGrupo
+                                    idx={gIdx}
+                                    desde={gIdx * GROUP_SIZE}
+                                    hasta={Math.min(
+                                      (gIdx + 1) * GROUP_SIZE,
+                                      filas.length,
+                                    )}
+                                    total={filas.length}
+                                    abierto={filasGrupoSeguro === gIdx}
+                                    onClick={() =>
+                                      setFilasGrupoAbierto(
+                                        filasGrupoSeguro === gIdx ? -1 : gIdx,
+                                      )
+                                    }
+                                    colSpan={totalColsLineaAnio}
+                                  />
+                                )}
+                                {(filasGrupos.length <= 1 ||
+                                  filasGrupoSeguro === gIdx) &&
+                                  grupo.map((r, rowIdx) => {
+                                    const rowCrece = crece(r);
+                                    const rowTendencia = tendencia(r);
+                                    return (
+                                      <tr
+                                        key={r.linea}
+                                        className="border-t border-zinc-800/60 transition-colors"
+                                      >
+                                        <td
+                                          className={`px-3 py-2 text-zinc-100 whitespace-nowrap cursor-default ${celda(rowIdx, COL_LINEA, rowCrece)}`}
+                                          onMouseEnter={() => {
+                                            setHoverRow(rowIdx);
+                                            setHoverCol(COL_LINEA);
+                                          }}
+                                        >
+                                          {r.linea}
+                                        </td>
+                                        {desglosado &&
+                                          r.anioAnterior.meses
+                                            .filter((m) =>
+                                              mesesActivos.includes(m.mes),
+                                            )
+                                            .map((m) => {
+                                              const colIdx = colAnteriorMes(
+                                                m.mes,
+                                              );
+                                              return (
+                                                <td
+                                                  key={`a-${m.mes}`}
+                                                  className={`px-2 py-2 text-right tabular-nums text-zinc-400 border-l border-zinc-800/40 cursor-default ${celda(rowIdx, colIdx, rowCrece)}`}
+                                                  onMouseEnter={() => {
+                                                    setHoverRow(rowIdx);
+                                                    setHoverCol(colIdx);
+                                                  }}
+                                                >
+                                                  {valorMes(m) === 0
+                                                    ? "—"
+                                                    : fmt(valorMes(m))}
+                                                </td>
+                                              );
+                                            })}
+                                        <td
+                                          className={`px-3 py-2 text-right tabular-nums text-zinc-200 font-medium border-l border-zinc-800 cursor-default ${celda(rowIdx, colAnteriorTotal, rowCrece)}`}
+                                          onMouseEnter={() => {
+                                            setHoverRow(rowIdx);
+                                            setHoverCol(colAnteriorTotal);
+                                          }}
+                                        >
+                                          {fmt(
+                                            valor(sumaPeriodo(r.anioAnterior)),
+                                          )}
+                                        </td>
+                                        {desglosado &&
+                                          r.anioActual.meses
+                                            .filter((m) =>
+                                              mesesActivos.includes(m.mes),
+                                            )
+                                            .map((m) => {
+                                              const colIdx = colActualMes(
+                                                m.mes,
+                                              );
+                                              return (
+                                                <td
+                                                  key={`c-${m.mes}`}
+                                                  className={`px-2 py-2 text-right tabular-nums text-zinc-400 border-l border-zinc-800/40 cursor-default ${celda(rowIdx, colIdx, rowCrece)}`}
+                                                  onMouseEnter={() => {
+                                                    setHoverRow(rowIdx);
+                                                    setHoverCol(colIdx);
+                                                  }}
+                                                >
+                                                  {valorMes(m) === 0
+                                                    ? "—"
+                                                    : fmt(valorMes(m))}
+                                                </td>
+                                              );
+                                            })}
+                                        <td
+                                          className={`px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 cursor-default ${celda(rowIdx, colActualTotal, rowCrece)}`}
+                                          onMouseEnter={() => {
+                                            setHoverRow(rowIdx);
+                                            setHoverCol(colActualTotal);
+                                          }}
+                                        >
+                                          {fmt(
+                                            valor(sumaPeriodo(r.anioActual)),
+                                          )}
+                                        </td>
+                                        <td
+                                          className={`px-3 py-2 text-center text-base font-bold border-l border-zinc-800 cursor-default ${celdaTendencia(rowTendencia)}`}
+                                        >
+                                          {iconoTendencia(rowTendencia)}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                              </tbody>
+                            ))}
+                            <tfoot>
+                              <tr className="border-t-2 border-zinc-700 bg-zinc-900/60">
+                                <td
+                                  className={`px-3 py-2 text-zinc-300 font-semibold uppercase text-xs tracking-wide cursor-default ${
+                                    hoverCol === COL_LINEA
+                                      ? "bg-yellow-400/10"
+                                      : ""
+                                  }`}
+                                  onMouseEnter={() => {
+                                    setHoverRow(null);
+                                    setHoverCol(COL_LINEA);
+                                  }}
+                                >
+                                  Total
+                                </td>
+                                {desglosado &&
+                                  data!.totales.anioAnterior.meses
+                                    .filter((m) => mesesActivos.includes(m.mes))
+                                    .map((m) => {
+                                      const colIdx = colAnteriorMes(m.mes);
+                                      return (
+                                        <td
+                                          key={`ta-${m.mes}`}
+                                          className={`px-2 py-2 text-right tabular-nums text-zinc-300 font-medium border-l border-zinc-800/40 cursor-default ${
+                                            hoverCol === colIdx
+                                              ? "bg-yellow-400/10"
+                                              : ""
+                                          }`}
+                                          onMouseEnter={() => {
+                                            setHoverRow(null);
+                                            setHoverCol(colIdx);
+                                          }}
+                                        >
+                                          {fmt(valorMes(m))}
+                                        </td>
+                                      );
+                                    })}
+                                <td
+                                  className={`px-3 py-2 text-right tabular-nums text-zinc-100 font-bold border-l border-zinc-800 cursor-default ${
+                                    hoverCol === colAnteriorTotal
+                                      ? "bg-yellow-400/10"
+                                      : ""
+                                  }`}
+                                  onMouseEnter={() => {
+                                    setHoverRow(null);
+                                    setHoverCol(colAnteriorTotal);
+                                  }}
+                                >
+                                  {fmt(
+                                    valor(
+                                      sumaPeriodo(data!.totales.anioAnterior),
+                                    ),
+                                  )}
+                                </td>
+                                {desglosado &&
+                                  data!.totales.anioActual.meses
+                                    .filter((m) => mesesActivos.includes(m.mes))
+                                    .map((m) => {
+                                      const colIdx = colActualMes(m.mes);
+                                      return (
+                                        <td
+                                          key={`tc-${m.mes}`}
+                                          className={`px-2 py-2 text-right tabular-nums text-zinc-300 font-medium border-l border-zinc-800/40 cursor-default ${
+                                            hoverCol === colIdx
+                                              ? "bg-yellow-400/10"
+                                              : ""
+                                          }`}
+                                          onMouseEnter={() => {
+                                            setHoverRow(null);
+                                            setHoverCol(colIdx);
+                                          }}
+                                        >
+                                          {fmt(valorMes(m))}
+                                        </td>
+                                      );
+                                    })}
+                                <td
+                                  className={`px-3 py-2 text-right tabular-nums text-yellow-400 font-bold border-l border-zinc-800 cursor-default ${
+                                    hoverCol === colActualTotal
+                                      ? "bg-yellow-400/10"
+                                      : ""
+                                  }`}
+                                  onMouseEnter={() => {
+                                    setHoverRow(null);
+                                    setHoverCol(colActualTotal);
+                                  }}
+                                >
+                                  {fmt(
+                                    valor(
+                                      sumaPeriodo(data!.totales.anioActual),
+                                    ),
+                                  )}
+                                </td>
+                                <td
+                                  className={`px-3 py-2 text-center text-base font-bold border-l border-zinc-800 cursor-default ${celdaTendencia(tendencia(data!.totales))}`}
+                                >
+                                  {iconoTendencia(tendencia(data!.totales))}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -1231,83 +1448,113 @@ export default function VentasVendedorPage() {
                         </p>
                       </div>
                       <span className="text-sm text-zinc-500">
-                        {clientesLinea ? `${clientesLinea.totalClientes} cliente(s)` : ""}
+                        {clientesLinea
+                          ? `${clientesLinea.totalClientes} cliente(s)`
+                          : ""}
                       </span>
                     </div>
 
                     {clientesLineaError && (
                       <div className="px-5 py-4 flex items-center gap-3 text-sm text-red-300">
-                        <AlertTriangle size={16} className="text-red-400" /> {clientesLineaError}
+                        <AlertTriangle size={16} className="text-red-400" />{" "}
+                        {clientesLineaError}
                       </div>
                     )}
 
-                    {!clientesLineaError && !clientesLineaLoading && (clientesLinea?.porMonto?.length ?? 0) === 0 && (
-                      <div className="px-5 py-12 flex flex-col items-center gap-3 text-center">
-                        <Table2 size={32} className="text-zinc-700" />
-                        <p className="text-zinc-500 text-sm">Sin ventas registradas en el rango elegido.</p>
-                      </div>
-                    )}
+                    {!clientesLineaError &&
+                      !clientesLineaLoading &&
+                      (clientesLinea?.porMonto?.length ?? 0) === 0 && (
+                        <div className="px-5 py-12 flex flex-col items-center gap-3 text-center">
+                          <Table2 size={32} className="text-zinc-700" />
+                          <p className="text-zinc-500 text-sm">
+                            Sin ventas registradas en el rango elegido.
+                          </p>
+                        </div>
+                      )}
 
-                    {!clientesLineaError && (clientesLinea?.porMonto?.length ?? 0) > 0 && (
-                      // overflow-x-auto (pedido de Pablo 2026-08-18: "que la tabla no
-                      // se exceda de la ventana"). Sin min-w-max y con el
-                      // nombre truncado (max-w-0 w-full truncate — pedido de
-                      // Pablo 2026-08-18: "se sigue escondiendo 3ra
-                      // columna"): la tabla ya no necesita scroll horizontal
-                      // para mostrar la columna de $, el nombre largo se
-                      // corta con "…" en vez de empujarla fuera de la
-                      // pantalla.
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <thead className="bg-[#1A1A1A] text-zinc-400">
-                            <tr>
-                              <th className="px-3 py-2 font-medium text-left whitespace-nowrap w-10">#</th>
-                              <th className="px-3 py-2 font-medium text-left">Cliente</th>
-                              <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800">
-                                Gasto
-                              </th>
-                            </tr>
-                          </thead>
-                          {clientesLineaGrupos.map((grupo, gIdx) => (
-                            <tbody key={`cl-${gIdx}`}>
-                              {clientesLineaGrupos.length > 1 && (
-                                <FilaGrupo
-                                  idx={gIdx}
-                                  desde={gIdx * GROUP_SIZE}
-                                  hasta={Math.min((gIdx + 1) * GROUP_SIZE, clientesLineaItems.length)}
-                                  total={clientesLineaItems.length}
-                                  abierto={clientesLineaGrupoSeguro === gIdx}
-                                  onClick={() =>
-                                    setClientesLineaGrupoAbierto(clientesLineaGrupoSeguro === gIdx ? -1 : gIdx)
-                                  }
-                                  colSpan={3}
-                                />
-                              )}
-                              {(clientesLineaGrupos.length <= 1 || clientesLineaGrupoSeguro === gIdx) &&
-                                grupo.map((c, i) => (
-                                  <tr
-                                    key={c.numero}
-                                    className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors cursor-pointer"
-                                    onClick={() => abrirModalCliente({ numero: c.numero, nombre: c.nombre })}
-                                    title="Ver ventas de este cliente"
-                                  >
-                                    <td className="px-3 py-2 text-zinc-500 tabular-nums">
-                                      {gIdx * GROUP_SIZE + i + 1}
-                                    </td>
-                                    <td className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate" title={c.nombre ?? undefined}>
-                                      {c.nombre ?? "(sin nombre)"}{" "}
-                                      <span className="text-zinc-500 font-mono text-xs">({c.numero})</span>
-                                    </td>
-                                    <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
-                                      {fmtMoney(c.monto)}
-                                    </td>
-                                  </tr>
-                                ))}
-                            </tbody>
-                          ))}
-                        </table>
-                      </div>
-                    )}
+                    {!clientesLineaError &&
+                      (clientesLinea?.porMonto?.length ?? 0) > 0 && (
+                        // overflow-x-auto (pedido de Pablo 2026-08-18: "que la tabla no
+                        // se exceda de la ventana"). Sin min-w-max y con el
+                        // nombre truncado (max-w-0 w-full truncate — pedido de
+                        // Pablo 2026-08-18: "se sigue escondiendo 3ra
+                        // columna"): la tabla ya no necesita scroll horizontal
+                        // para mostrar la columna de $, el nombre largo se
+                        // corta con "…" en vez de empujarla fuera de la
+                        // pantalla.
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-[#1A1A1A] text-zinc-400">
+                              <tr>
+                                <th className="px-3 py-2 font-medium text-left whitespace-nowrap w-10">
+                                  #
+                                </th>
+                                <th className="px-3 py-2 font-medium text-left">
+                                  Cliente
+                                </th>
+                                <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800">
+                                  Gasto
+                                </th>
+                              </tr>
+                            </thead>
+                            {clientesLineaGrupos.map((grupo, gIdx) => (
+                              <tbody key={`cl-${gIdx}`}>
+                                {clientesLineaGrupos.length > 1 && (
+                                  <FilaGrupo
+                                    idx={gIdx}
+                                    desde={gIdx * GROUP_SIZE}
+                                    hasta={Math.min(
+                                      (gIdx + 1) * GROUP_SIZE,
+                                      clientesLineaItems.length,
+                                    )}
+                                    total={clientesLineaItems.length}
+                                    abierto={clientesLineaGrupoSeguro === gIdx}
+                                    onClick={() =>
+                                      setClientesLineaGrupoAbierto(
+                                        clientesLineaGrupoSeguro === gIdx
+                                          ? -1
+                                          : gIdx,
+                                      )
+                                    }
+                                    colSpan={3}
+                                  />
+                                )}
+                                {(clientesLineaGrupos.length <= 1 ||
+                                  clientesLineaGrupoSeguro === gIdx) &&
+                                  grupo.map((c, i) => (
+                                    <tr
+                                      key={c.numero}
+                                      className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors cursor-pointer"
+                                      onClick={() =>
+                                        abrirModalCliente({
+                                          numero: c.numero,
+                                          nombre: c.nombre,
+                                        })
+                                      }
+                                      title="Ver ventas de este cliente"
+                                    >
+                                      <td className="px-3 py-2 text-zinc-500 tabular-nums">
+                                        {gIdx * GROUP_SIZE + i + 1}
+                                      </td>
+                                      <td
+                                        className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate"
+                                        title={c.nombre ?? undefined}
+                                      >
+                                        {c.nombre ?? "(sin nombre)"}{" "}
+                                        <span className="text-zinc-500 font-mono text-xs">
+                                          ({c.numero})
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
+                                        {fmtMoney(c.monto)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                              </tbody>
+                            ))}
+                          </table>
+                        </div>
+                      )}
                   </div>
                 )}
               </div>
@@ -1323,46 +1570,6 @@ export default function VentasVendedorPage() {
             así que acá no hay selector de fechas: el subtítulo solo informa
             qué ventana se está viendo. Clickeando un cliente o una línea de
             la tabla de abajo se abre el modal con el detalle. */}
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4">
-          <div className="flex flex-col gap-1.5">
-            <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
-              <Trophy size={18} />
-              {topVista === "clientes" ? "clientes" : "líneas"}
-            </h2>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                setTopVista(topVista === "clientes" ? "lineas" : "clientes");
-                setTopGrupoAbierto(0);
-              }}
-              title={`Ver ${topVista === "clientes" ? "líneas" : "clientes"}`}
-              className="btn-anim inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors"
-            >
-              <ArrowLeftRight size={14} className="text-yellow-400" />
-              <span className="font-semibold">
-                {topVista === "clientes" ? "Clientes" : "Líneas"}
-              </span>
-              <span className="text-zinc-500 text-xs">
-                {topVista === "clientes" ? "($)" : "(unidades)"}
-              </span>
-            </button>
-          </div>
-
-          {/* Total de filas que entran en la filtración (pedido de Pablo
-              2026-08-18) — es el universo completo del rango, no las 10
-              que se listan abajo. */}
-          {/* <div className="flex flex-col gap-1.5 ml-auto text-right">
-            <span className="text-xs text-zinc-400 uppercase tracking-wide">
-              {topVista === "clientes" ? "Clientes en el período" : "Líneas en el período"}
-            </span>
-            <span className="text-2xl font-bold text-yellow-400 tabular-nums leading-none py-1">
-              {topTotal === null ? "…" : fmtTop(topTotal)}
-            </span>
-          </div> */}
-        </div>
 
         {topError && (
           <div className="rounded-xl border border-red-400/40 bg-zinc-900/40 px-5 py-4 flex items-center gap-3 text-sm text-red-300">
@@ -1371,97 +1578,134 @@ export default function VentasVendedorPage() {
         )}
 
         {!topError && (
-          <div className={`rounded-xl border border-zinc-800 overflow-hidden transition-opacity ${topLoading ? "opacity-50" : ""}`}>
+          <div
+            className={`rounded-xl border border-zinc-800 overflow-hidden transition-opacity ${topLoading ? "opacity-50" : ""}`}
+          >
             {(() => {
-              const vacio = topVista === "clientes"
-                ? !topClientes?.porMonto?.length
-                : !topLineas?.porUnidades?.length;
+              const vacio =
+                topVista === "clientes"
+                  ? !topClientes?.porMonto?.length
+                  : !topLineas?.porUnidades?.length;
               if (!topLoading && vacio) {
                 return (
                   <div className="px-5 py-12 flex flex-col items-center gap-3 text-center">
                     <Trophy size={32} className="text-zinc-700" />
-                    <p className="text-zinc-500 text-sm">Sin ventas registradas en el rango elegido.</p>
+                    <p className="text-zinc-500 text-sm">
+                      Sin ventas registradas en el rango elegido.
+                    </p>
                   </div>
                 );
               }
               return (
                 <>
-                {/* overflow-x-auto (pedido de Pablo 2026-08-18: "que la tabla no se
+                  {/* overflow-x-auto (pedido de Pablo 2026-08-18: "que la tabla no se
                 exceda de la ventana"). Sin min-w-max y con la columna de
                 nombre truncada (max-w-0 w-full truncate — pedido de Pablo
                 2026-08-18: "se sigue escondiendo 3ra columna"): la tabla
                 ya no necesita scroll horizontal para mostrar la columna
                 de $/unidades, el nombre largo se corta con "…" en vez de
                 empujarla fuera de la pantalla. */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-[#1A1A1A] text-zinc-400">
-                      <tr>
-                        <th className="px-3 py-2 font-medium text-left whitespace-nowrap w-10">#</th>
-                        <th className="px-3 py-2 font-medium text-left whitespace-nowrap">
-                          {topVista === "clientes" ? "Cliente" : "Línea"}
-                        </th>
-                        <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800">
-                          {topVista === "clientes" ? "Pesos" : "Unidades"}
-                        </th>
-                      </tr>
-                    </thead>
-                    {topGrupos.map((grupo, gIdx) => (
-                      <tbody key={`top-${gIdx}`}>
-                        {topGrupos.length > 1 && (
-                          <FilaGrupo
-                            idx={gIdx}
-                            desde={gIdx * GROUP_SIZE}
-                            hasta={Math.min((gIdx + 1) * GROUP_SIZE, topItems.length)}
-                            total={topItems.length}
-                            abierto={topGrupoSeguro === gIdx}
-                            onClick={() => setTopGrupoAbierto(topGrupoSeguro === gIdx ? -1 : gIdx)}
-                            colSpan={3}
-                          />
-                        )}
-                        {(topGrupos.length <= 1 || topGrupoSeguro === gIdx) &&
-                          (topVista === "clientes"
-                            ? (grupo as TopCliente[]).map((c, i) => (
-                                <tr key={c.numero} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
-                                  <td className="px-3 py-2 text-zinc-500 tabular-nums">{gIdx * GROUP_SIZE + i + 1}</td>
-                                  <td className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate" title={c.nombre ?? undefined}>
-                                    <button
-                                      type="button"
-                                      onClick={() => abrirModalCliente({ numero: c.numero, nombre: c.nombre })}
-                                      className="hover:text-yellow-400 hover:underline transition-colors text-left"
-                                      title="Ver ventas de este cliente"
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-[#1A1A1A] text-zinc-400">
+                        <tr>
+                          <th className="px-3 py-2 font-medium text-left whitespace-nowrap w-10">
+                            #
+                          </th>
+                          <th className="px-3 py-2 font-medium text-left whitespace-nowrap">
+                            {topVista === "clientes" ? "Cliente" : "Línea"}
+                          </th>
+                          <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800">
+                            {topVista === "clientes" ? "Pesos" : "Unidades"}
+                          </th>
+                        </tr>
+                      </thead>
+                      {topGrupos.map((grupo, gIdx) => (
+                        <tbody key={`top-${gIdx}`}>
+                          {topGrupos.length > 1 && (
+                            <FilaGrupo
+                              idx={gIdx}
+                              desde={gIdx * GROUP_SIZE}
+                              hasta={Math.min(
+                                (gIdx + 1) * GROUP_SIZE,
+                                topItems.length,
+                              )}
+                              total={topItems.length}
+                              abierto={topGrupoSeguro === gIdx}
+                              onClick={() =>
+                                setTopGrupoAbierto(
+                                  topGrupoSeguro === gIdx ? -1 : gIdx,
+                                )
+                              }
+                              colSpan={3}
+                            />
+                          )}
+                          {(topGrupos.length <= 1 || topGrupoSeguro === gIdx) &&
+                            (topVista === "clientes"
+                              ? (grupo as TopCliente[]).map((c, i) => (
+                                  <tr
+                                    key={c.numero}
+                                    className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors"
+                                  >
+                                    <td className="px-3 py-2 text-zinc-500 tabular-nums">
+                                      {gIdx * GROUP_SIZE + i + 1}
+                                    </td>
+                                    <td
+                                      className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate"
+                                      title={c.nombre ?? undefined}
                                     >
-                                      {c.nombre ?? "(sin nombre)"}
-                                    </button>{" "}
-                                    <span className="text-zinc-500 font-mono text-xs">({c.numero})</span>
-                                  </td>
-                                  <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
-                                    {fmtTop(c.monto)}
-                                  </td>
-                                </tr>
-                              ))
-                            : (grupo as TopLinea[]).map((l, i) => (
-                                <tr key={l.linea} className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors">
-                                  <td className="px-3 py-2 text-zinc-500 tabular-nums">{gIdx * GROUP_SIZE + i + 1}</td>
-                                  <td className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate" title={l.linea}>
-                                    <button
-                                      type="button"
-                                      onClick={() => abrirModalLinea(l.linea)}
-                                      className="hover:text-yellow-400 hover:underline transition-colors text-left"
-                                      title="Ver clientes que compraron esta línea"
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          abrirModalCliente({
+                                            numero: c.numero,
+                                            nombre: c.nombre,
+                                          })
+                                        }
+                                        className="hover:text-yellow-400 hover:underline transition-colors text-left"
+                                        title="Ver ventas de este cliente"
+                                      >
+                                        {c.nombre ?? "(sin nombre)"}
+                                      </button>{" "}
+                                      <span className="text-zinc-500 font-mono text-xs">
+                                        ({c.numero})
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
+                                      {fmtTop(c.monto)}
+                                    </td>
+                                  </tr>
+                                ))
+                              : (grupo as TopLinea[]).map((l, i) => (
+                                  <tr
+                                    key={l.linea}
+                                    className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors"
+                                  >
+                                    <td className="px-3 py-2 text-zinc-500 tabular-nums">
+                                      {gIdx * GROUP_SIZE + i + 1}
+                                    </td>
+                                    <td
+                                      className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate"
+                                      title={l.linea}
                                     >
-                                      {l.linea}
-                                    </button>
-                                  </td>
-                                  <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
-                                    {fmtTop(l.unidades)}
-                                  </td>
-                                </tr>
-                              )))}
-                      </tbody>
-                    ))}
-                  </table>
-                </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => abrirModalLinea(l.linea)}
+                                        className="hover:text-yellow-400 hover:underline transition-colors text-left"
+                                        title="Ver clientes que compraron esta línea"
+                                      >
+                                        {l.linea}
+                                      </button>
+                                    </td>
+                                    <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
+                                      {fmtTop(l.unidades)}
+                                    </td>
+                                  </tr>
+                                )))}
+                        </tbody>
+                      ))}
+                    </table>
+                  </div>
                 </>
               );
             })()}
