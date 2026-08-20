@@ -14,7 +14,7 @@ import {
   AlertOctagon,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
-import { MonthOrRangeField, lastFullMonthRange } from "@/components/ui/date-range-field";
+import { MonthRangeField, lastFullMonthRange } from "@/components/ui/date-range-field";
 import { useDepositoData } from "@/lib/deposito/store";
 import { filterDepositoByOperario } from "@/lib/deposito/parseDeposito";
 
@@ -104,17 +104,17 @@ export default function DepositoPage() {
         <div className="flex items-center gap-3 text-sm">
           {/* Filtro de fechas: único, en el header, para todas las pestañas
               (incluida Errores de Mesa — antes tenía su propio selector
-              duplicado). Oculto solo en Mesas de Control, que filtra por
-              checkbox de meses propio (ver mesaControl.tsx). */}
+              duplicado). Solo mes a mes, sin calendario de días (a pedido de
+              Pablo, 2026-08-20). Oculto solo en Mesas de Control, que filtra
+              por checkbox de meses propio (ver mesaControl.tsx). */}
           <div className={tab === "mesa-control" ? "invisible pointer-events-none" : ""}>
-            <MonthOrRangeField
+            <MonthRangeField
               desde={desde}
               hasta={hasta}
               onChange={(d, h) => {
                 setDesde(d);
                 setHasta(h);
               }}
-              align="end"
             />
           </div>
           <div

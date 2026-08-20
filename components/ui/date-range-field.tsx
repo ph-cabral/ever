@@ -47,7 +47,7 @@ const MONTHS = [
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 ];
 
-/* ---------------- utils "mes" (yyyy-mm), para MonthOrRangeField ---------------- */
+/* ---------------- utils "mes" (yyyy-mm), para MonthRangeField ---------------- */
 
 const monthKeyOf = (iso: string) => iso.slice(0, 7); // "yyyy-mm-dd" → "yyyy-mm"
 
@@ -79,9 +79,9 @@ const monthLabel = (ym: string): string => {
 
 /**
  * Primer y último día ISO del último mes calendario completo (el anterior al
- * actual) — pensado como default inicial para MonthOrRangeField (a pedido de
- * Pablo, 2026-08-20: el filtro de Depósito arranca en "Mes" con el mes
- * pasado, no con "hoy").
+ * actual) — pensado como default inicial para MonthRangeField (a pedido de
+ * Pablo, 2026-08-20: el filtro de Depósito arranca en el mes pasado, no en
+ * "hoy").
  */
 export function lastFullMonthRange(): [string, string] {
   const hoy = new Date();
@@ -108,11 +108,7 @@ const STYLES: Record<
     dayDisabled: string;
     navBtn: string;
     monthLabel: string;
-    /** Estilos del toggle "Mes"/"Rango" de MonthOrRangeField. */
-    toggleBorder: string;
-    toggleOn: string;
-    toggleOff: string;
-    /** Select nativo de mes de MonthOrRangeField. */
+    /** Select nativo de mes de MonthRangeField. */
     select: string;
   }
 > = {
@@ -131,9 +127,6 @@ const STYLES: Record<
     dayDisabled: "opacity-30 cursor-not-allowed hover:bg-transparent",
     navBtn: "text-zinc-400 hover:bg-zinc-700/60 hover:text-zinc-100",
     monthLabel: "text-zinc-200",
-    toggleBorder: "border-zinc-700",
-    toggleOn: "bg-yellow-400 text-black",
-    toggleOff: "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50",
     select:
       "h-8 px-2.5 rounded-lg border border-zinc-700 bg-[#1f1f1f] text-zinc-100 text-sm cursor-pointer select-none outline-none focus:border-yellow-400 hover:border-zinc-500 transition-colors",
   },
@@ -152,9 +145,6 @@ const STYLES: Record<
     dayDisabled: "opacity-30 cursor-not-allowed hover:bg-transparent",
     navBtn: "hover:bg-accent",
     monthLabel: "",
-    toggleBorder: "border-input",
-    toggleOn: "bg-primary text-primary-foreground",
-    toggleOff: "text-muted-foreground hover:text-foreground hover:bg-accent",
     select:
       "h-8 px-2.5 rounded-lg border border-input bg-transparent text-sm text-foreground cursor-pointer select-none outline-none focus:border-ring dark:bg-input/30 hover:border-ring/60 transition-colors",
   },
@@ -380,100 +370,89 @@ export function DateRangeField({
   );
 }
 
-/* ---------------- MonthOrRangeField (Mes | Rango) ---------------- */
+/* ---------------- MonthRangeField (2 meses: Desde / Hasta) ---------------- */
 
-// Filtro combinado: toggle "Mes" (select simple de mes calendario, últimos N
-// meses) / "Rango" (el DateRangeField de arriba, para desde-hasta libre). A
-// pedido de Pablo, 2026-08-20, para el filtro de Depósito — arranca en "Mes";
-// el default de desde/hasta (típicamente lastFullMonthRange()) lo pone el
-// caller, no este componente.
-export interface MonthOrRangeFieldProps {
-  /** Fecha desde, ISO yyyy-mm-dd. */
+// Filtro de Depósito: 2 selects de mes calendario, uno al lado del otro
+// ("Desde" / "Hasta"), sin calendario de días ni toggle de modo. A pedido de
+// Pablo, 2026-08-20 — primero se probó con toggle "Mes"/"Rango" (día a día),
+// pero se pidió sacar la opción de días: acá SOLO se elige mes, nunca un día
+// suelto dentro del mes. Cada select ofrece los últimos `monthsBack` meses
+// (incluye el actual, más reciente al final para leer de izquierda a
+// derecha). Si se elige un "Desde" posterior al "Hasta" actual (o viceversa),
+// el otro extremo se ajusta solo para que el rango nunca quede invertido.
+export interface MonthRangeFieldProps {
+  /** Primer día ISO del mes "desde". */
   desde: string;
-  /** Fecha hasta, ISO yyyy-mm-dd. */
+  /** Último día ISO del mes "hasta". */
   hasta: string;
-  /** Se llama una sola vez por selección, siempre con desde <= hasta. */
+  /** Se llama con el primer día del mes "desde" y el último día del mes "hasta". */
   onChange: (desde: string, hasta: string) => void;
-  /** Día mínimo seleccionable en modo "Rango" (ISO), opcional. */
-  min?: string;
-  /** Día máximo seleccionable en modo "Rango" (ISO), opcional. */
-  max?: string;
   variant?: Variant;
-  align?: "start" | "end";
   className?: string;
-  /** Cuántos meses atrás ofrecer en el select de "Mes" (incluye el actual). Default 12. */
+  /** Cuántos meses atrás ofrecer en cada select (incluye el actual). Default 24. */
   monthsBack?: number;
 }
 
-export function MonthOrRangeField({
+export function MonthRangeField({
   desde,
   hasta,
   onChange,
-  min,
-  max,
   variant = "dark",
-  align = "start",
   className,
-  monthsBack = 12,
-}: MonthOrRangeFieldProps) {
+  monthsBack = 24,
+}: MonthRangeFieldProps) {
   const s = STYLES[variant];
-  const [mode, setMode] = React.useState<"mes" | "rango">("mes");
-  const meses = React.useMemo(() => lastMonths(monthsBack), [monthsBack]);
-  const mesActual = desde ? monthKeyOf(desde) : "";
+  // lastMonths() da más reciente primero; para leer "Desde → Hasta" de
+  // izquierda a derecha en los <select>, se muestran en orden cronológico.
+  const meses = React.useMemo(() => [...lastMonths(monthsBack)].reverse(), [monthsBack]);
+
+  const desdeYm = desde ? monthKeyOf(desde) : "";
+  const hastaYm = hasta ? monthKeyOf(hasta) : "";
+
+  const elegirDesde = (ym: string) => {
+    if (!ym) return;
+    const hastaFinal = hastaYm && hastaYm >= ym ? hastaYm : ym;
+    const [d] = monthBounds(ym);
+    const [, h] = monthBounds(hastaFinal);
+    onChange(d, h);
+  };
+  const elegirHasta = (ym: string) => {
+    if (!ym) return;
+    const desdeFinal = desdeYm && desdeYm <= ym ? desdeYm : ym;
+    const [d] = monthBounds(desdeFinal);
+    const [, h] = monthBounds(ym);
+    onChange(d, h);
+  };
 
   return (
     <div className={cn("flex items-center gap-1.5", className)}>
-      <div className={cn("flex rounded-lg overflow-hidden text-[11px] font-semibold shrink-0 border", s.toggleBorder)}>
-        <button
-          type="button"
-          onClick={() => setMode("mes")}
-          className={cn("px-2 py-1.5 transition-colors", mode === "mes" ? s.toggleOn : s.toggleOff)}
-        >
-          Mes
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("rango")}
-          className={cn(
-            "px-2 py-1.5 border-l transition-colors",
-            s.toggleBorder,
-            mode === "rango" ? s.toggleOn : s.toggleOff,
-          )}
-        >
-          Rango
-        </button>
-      </div>
-
-      {mode === "mes" ? (
-        <select
-          value={meses.includes(mesActual) ? mesActual : ""}
-          onChange={(e) => {
-            const ym = e.target.value;
-            if (!ym) return;
-            const [d, h] = monthBounds(ym);
-            onChange(d, h);
-          }}
-          className={s.select}
-        >
-          {!meses.includes(mesActual) && <option value="">Elegir mes</option>}
-          {meses.map((ym) => (
-            <option key={ym} value={ym}>
-              {monthLabel(ym)}
-            </option>
-          ))}
-        </select>
-      ) : (
-        <DateRangeField
-          desde={desde}
-          hasta={hasta}
-          onChange={onChange}
-          min={min}
-          max={max}
-          variant={variant}
-          align={align}
-          placeholder="Elegir fechas"
-        />
-      )}
+      <select
+        value={meses.includes(desdeYm) ? desdeYm : ""}
+        onChange={(e) => elegirDesde(e.target.value)}
+        className={s.select}
+        aria-label="Mes desde"
+      >
+        {!meses.includes(desdeYm) && <option value="">Desde</option>}
+        {meses.map((ym) => (
+          <option key={ym} value={ym}>
+            {monthLabel(ym)}
+          </option>
+        ))}
+      </select>
+      <span className="text-zinc-600 text-xs shrink-0">–</span>
+      <select
+        value={meses.includes(hastaYm) ? hastaYm : ""}
+        onChange={(e) => elegirHasta(e.target.value)}
+        className={s.select}
+        aria-label="Mes hasta"
+      >
+        {!meses.includes(hastaYm) && <option value="">Hasta</option>}
+        {meses.map((ym) => (
+          <option key={ym} value={ym}>
+            {monthLabel(ym)}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

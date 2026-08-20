@@ -22,6 +22,7 @@ import calendar
 import re
 import time
 from db import get_connection
+from db_pg import get_pg_connection
 from clientes import fetch_cliente, fetch_vendedor_fijo_cliente
 
 BASE_DATE = date(1800, 12, 28)  # Magnus guarda fechas como días desde esta base
@@ -149,6 +150,48 @@ def fetch_pedidos_mes(desde: str, hasta: str) -> dict:
 # el historial de ESE cliente y se agrupa por año/mes en Python.
 MESES_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 SIN_LINEA = "(Sin línea)"
+
+# ──────────────────────────────────────────────────────────────────────────
+# Catálogo código→nombre de línea (ver ever/sql/ventas_lineas_catalogo.sql,
+# pedido de Pablo 2026-08-20): Nivel1 en Magnus a veces guarda el CÓDIGO
+# numérico en vez del nombre (ej. "3" en vez de "YACO"). Vive en Postgres
+# (ventas.linea, mismo server que usuario/errores_mesa — ver db_pg.py),
+# separado de Magnus, así que el join no se puede hacer en el SQL de
+# SQL Server: se trae una vez, se cachea en memoria (mismo patrón de TTL que
+# los caches de abajo) y se matchea en Python. Códigos sin fila en la tabla
+# quedan sin traducir (se muestra el código crudo tal cual) hasta que se
+# agreguen.
+_LINEAS_CATALOGO_CACHE: tuple[float, dict[str, str]] | None = None
+_LINEAS_CATALOGO_TTL_SEG = 15 * 60  # 15 minutos
+
+
+def _fetch_lineas_catalogo() -> dict[str, str]:
+    """codigo (como string, tal cual aparece en Nivel1) -> nombre, desde
+    Postgres ventas.linea."""
+    global _LINEAS_CATALOGO_CACHE
+    ahora = time.monotonic()
+    if _LINEAS_CATALOGO_CACHE is not None and (ahora - _LINEAS_CATALOGO_CACHE[0]) < _LINEAS_CATALOGO_TTL_SEG:
+        return _LINEAS_CATALOGO_CACHE[1]
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT codigo, nombre FROM ventas.linea")
+        catalogo = {str(cod): nombre for cod, nombre in cur.fetchall()}
+    finally:
+        conn.close()
+    _LINEAS_CATALOGO_CACHE = (ahora, catalogo)
+    return catalogo
+
+
+def _nombre_linea(raw: str) -> str:
+    """Nivel1 crudo (ya trimeado por el SQL) -> nombre para mostrar: si es
+    un código del catálogo lo traduce, si no lo deja tal cual — o SIN_LINEA
+    si viene vacío."""
+    raw_norm = (raw or "").strip()
+    if not raw_norm:
+        return SIN_LINEA
+    return _fetch_lineas_catalogo().get(raw_norm, raw_norm)
+
 
 SQL_VENTAS_CLIENTE = """
 SELECT
@@ -442,8 +485,12 @@ def fetch_top_clientes(
 # igual que el top, traemos el total de líneas y acá dejamos ver solo
 # unidades compradas"). Línea = StkFer_ArtParamet.Nivel1 — el mismo campo
 # que ya usan la tabla principal de esta vista, /compras/consumo y
-# /deposito/faltantes; es texto libre y ES el nombre de la línea (POLEAS,
-# CORREAS, …), no un código a resolver aparte (ver compras.fetch_lineas).
+# /deposito/faltantes; texto libre, la mayoría de las veces ya ES el nombre
+# de la línea (POLEAS, CORREAS, …) pero para algunos artículos guarda solo
+# el código numérico — se traduce acá vía _nombre_linea/catálogo
+# ventas.linea (ver arriba, pedido de Pablo 2026-08-20; ver
+# compras.fetch_lineas para el mismo campo sin traducir, usado en
+# /compras/consumo).
 #
 # El JOIN a artículo/parámetros es LEFT a propósito: un renglón cuyo
 # artículo no está en el catálogo no se pierde, cae en SIN_LINEA. Por eso
@@ -519,7 +566,7 @@ def fetch_top_lineas(
         # acá, así que se consolidan antes de filtrar/ordenar.
         acumulado: dict[str, float] = {}
         for linea, unidades in cur.fetchall():
-            nombre = (str(linea or "")).strip() or SIN_LINEA
+            nombre = _nombre_linea(str(linea or ""))
             acumulado[nombre] = acumulado.get(nombre, 0.0) + float(_safe(unidades) or 0)
 
         lineas = [
@@ -644,19 +691,29 @@ def fetch_clientes_por_linea(
     es_sin_linea = linea_norm == SIN_LINEA
     linea_cond = _LINEA_COND_SIN_LINEA if es_sin_linea else _LINEA_COND_EXACTA
 
+    # `linea_norm` puede venir como el NOMBRE ya traducido por _nombre_linea
+    # (fetch_top_lineas) en vez del código crudo que realmente está en
+    # Nivel1 — acá se traduce de vuelta antes de filtrar, si corresponde
+    # (ver catálogo código→nombre arriba). Si no matchea ningún nombre del
+    # catálogo, se usa tal cual (línea que ya era texto real, sin código).
+    linea_sql = linea_norm
+    if not es_sin_linea:
+        reverso = {nombre: cod for cod, nombre in _fetch_lineas_catalogo().items()}
+        linea_sql = reverso.get(linea_norm, linea_norm)
+
     conn = get_connection("EVERWEAR")
     try:
         cur = conn.cursor()
         cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         if vendedor is None:
             sql = SQL_CLIENTES_LINEA_TODOS_TPL.format(linea_cond=linea_cond)
-            params = (dia_desde, dia_hasta) if es_sin_linea else (dia_desde, dia_hasta, linea_norm)
+            params = (dia_desde, dia_hasta) if es_sin_linea else (dia_desde, dia_hasta, linea_sql)
         else:
             sql = SQL_CLIENTES_LINEA_VENDEDOR_TPL.format(linea_cond=linea_cond)
             params = (
                 (int(vendedor), dia_desde, dia_hasta)
                 if es_sin_linea
-                else (int(vendedor), dia_desde, dia_hasta, linea_norm)
+                else (int(vendedor), dia_desde, dia_hasta, linea_sql)
             )
         cur.execute(sql, params)
 
@@ -738,7 +795,7 @@ def fetch_ventas_por_linea(cod_cliente: int, vendedor: int | None = None) -> dic
             if anio not in (anio_actual, anio_anterior):
                 continue
             mes = fecha.month
-            linea = (str(d.get("Linea") or "")).strip() or SIN_LINEA
+            linea = _nombre_linea(str(d.get("Linea") or ""))
             cant = float(_safe(d.get("CantidadNeta")) or 0)
             monto = float(_safe(d.get("MontoNeto")) or 0)
             tiene_datos = True

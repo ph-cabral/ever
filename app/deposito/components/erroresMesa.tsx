@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Loader2, AlertTriangle, RefreshCw, FileSpreadsheet } from "lucide-react";
-import { PageTitle, Panel, KPI, Grid, Table, ChartBar, ChartLine, C, fmtNum, fmtDate } from "./ui";
+import { PageTitle, Panel, KPI, Grid, Table, ChartBar, ChartLine, C, fmtNum, fmtDate, fmtMes } from "./ui";
 import { exportarErroresMesa } from "@/lib/deposito/exportErroresMesa";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -305,16 +305,16 @@ export function ErroresMesaTab({ desde, hasta }: { desde: string; hasta: string 
       <Panel title="Filtros" className="mb-5">
         <div className="flex flex-wrap gap-3 items-end">
           <label className="flex flex-col gap-1 text-[11px] text-zinc-500">
-            Rango de fechas
+            Rango de meses
             <div
               className="h-8 flex items-center px-2.5 rounded-lg border border-zinc-800 bg-[#1a1a1a] text-zinc-300 text-sm min-w-[180px]"
-              title="Se cambia desde el selector de fecha del header"
+              title="Se cambia desde el selector de mes del header"
             >
               {desde && hasta
-                ? desde === hasta
-                  ? fmtDate(desde)
-                  : `${fmtDate(desde)} – ${fmtDate(hasta)}`
-                : "Todas las fechas"}
+                ? desde.slice(0, 7) === hasta.slice(0, 7)
+                  ? fmtMes(desde.slice(0, 7))
+                  : `${fmtMes(desde.slice(0, 7))} – ${fmtMes(hasta.slice(0, 7))}`
+                : "Todos los meses"}
             </div>
           </label>
           <label className="flex flex-col gap-1 text-[11px] text-zinc-500">
