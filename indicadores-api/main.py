@@ -1039,14 +1039,20 @@ class ErrorCalidadIn(BaseModel):
 # Alta en lote para Calidad (REDISEÑO 2026-08-20): 1 error por artículo,
 # mismo patrón que ErrorMesaItem/ErrorMesaItemsIn arriba — ver
 # insert_error_calidad_items en errores_mesa.py.
+#
+# CAMBIO 2026-08-20, 2da vuelta (a pedido de Pablo): se sacó el input único
+# de Observaciones del widget — `observacion` ya NO va a nivel de
+# ErrorCalidadItemsIn (compartido para todo el lote), ahora es un campo
+# opcional POR ÍTEM (nota distinta por artículo, tipeada justo después de
+# elegir su error).
 class ErrorCalidadItem(BaseModel):
     codArticulo: str
     detalleError: str
+    observacion: str | None = None
 
 class ErrorCalidadItemsIn(BaseModel):
     nroPedido: int
     nroOperario: int
-    observacion: str | None = None
     items: list[ErrorCalidadItem]
 
 class ObservacionIn(BaseModel):
@@ -1169,14 +1175,14 @@ def deposito_errores_mesa_calidad_crear(body: ErrorCalidadIn):
 def deposito_errores_mesa_calidad_crear_items(body: ErrorCalidadItemsIn):
     """Botón "Finalizar" del widget de Calidad (REDISEÑO 2026-08-20, a pedido
     de Pablo — mismo patrón que /errores-mesa/items para Mesa de Control):
-    alta en lote, 1 fila en deposito.errores_mesa por artículo (cada uno con
-    su propio detalleError, elegido artículo por artículo en el widget) — ver
+    alta en lote, 1 fila en deposito.errores_mesa por artículo, cada uno con
+    su propio detalleError Y su propia observación (elegidos artículo por
+    artículo en el widget, sin input de Observaciones único) — ver
     insert_error_calidad_items."""
     try:
         return insert_error_calidad_items(
             body.nroPedido, body.nroOperario,
             [i.model_dump() for i in body.items],
-            body.observacion,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

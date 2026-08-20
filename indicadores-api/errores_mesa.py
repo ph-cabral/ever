@@ -94,12 +94,19 @@ DETALLE_ERROR_OPCIONES_CALIDAD = [
 # "TipoPedido" = nombre del comprobante (ej. "Factura A"), no el código
 # numérico — mismo join (CompCodigo -> Ven_CodComprobante.DetalleCorto) que
 # Comprobante_Desc en main.py/SQL_QUERY.
+# `Cliente`/`CodCliente` agregados 2026-08-20 (a pedido de Pablo: el widget
+# de Calidad muestra el nombre del cliente en vez de "Pedido N" arriba) —
+# mismo join (CodCliente -> MAGNUS_SITD.dbo.Clientes.Cliente_Nombre) que ya
+# usa SQL_MAGNUS_ABIERTOS_TODOS en control_asignacion.py.
 SQL_PEDIDO_FECHA_TIPO = """
 SELECT
     p.FechaPedido,
-    cc.DetalleCorto AS TipoPedido
+    cc.DetalleCorto AS TipoPedido,
+    cli.Cliente_Nombre AS Cliente,
+    p.CodCliente AS CodCliente
 FROM EVERWEAR.dbo.VenFer_PedidoCabecera p
 LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc ON p.CompCodigo = cc.CompCodigo
+LEFT JOIN MAGNUS_SITD.dbo.Clientes cli ON p.CodCliente = cli.CodCliente
 WHERE p.NroMovVenta = ?
 """
 
@@ -173,7 +180,7 @@ def fetch_pedido_lookup(nro_pedido: int) -> dict | None:
 
     if not row:
         return None
-    fecha_int, tipo_pedido = row
+    fecha_int, tipo_pedido, cliente, cod_cliente = row
     fecha = (BASE_DATE + timedelta(days=int(fecha_int))).isoformat() if fecha_int else None
 
     ot, fecha_armado, nro_armador, nombre_armador, ubicacion = (None, None, None, None, None)
@@ -210,6 +217,8 @@ def fetch_pedido_lookup(nro_pedido: int) -> dict | None:
         "fechaArmado": fecha_armado.isoformat() if fecha_armado is not None else None,
         "fechaControl": fecha_control.isoformat() if fecha_control is not None else None,
         "tipoPedido": (tipo_pedido or "").strip() or None,
+        "cliente": (cliente or "").strip() or None,
+        "codCliente": int(cod_cliente) if cod_cliente is not None else None,
         "ot": int(ot) if ot is not None else None,
         "nroArmador": int(nro_armador) if nro_armador is not None else None,
         "nombreArmador": nombre_armador,
@@ -797,17 +806,26 @@ def insert_error_calidad(
 # para todo el pedido (insert_error_calidad, arriba, sigue viva para el
 # endpoint viejo — no se tocó). Mantiene el mismo bloqueo por Controlador
 # real que insert_error_calidad (fetch_controlador_pedido): si el pedido no
-# tiene control registrado en Magnus, no se guarda nada. `observacion` es
-# opcional y se repite igual en cada fila del lote (1 sola nota para todo el
-# pedido, no una por artículo — mismo criterio que ya tenía el widget viejo).
+# tiene control registrado en Magnus, no se guarda nada.
+#
+# CAMBIO 2026-08-20, 2da vuelta (a pedido de Pablo: "eliminar el input de
+# Observaciones [único, para todo el pedido] y que aparezca un input para
+# rellenar por ítem luego de seleccionar el error"): `observacion` dejó de
+# ser un parámetro compartido para TODO el lote — ahora viaje DENTRO de cada
+# ítem (`items: [{"codArticulo", "detalleError", "observacion"}, ...]`), una
+# nota distinta por artículo, tipeada en el widget justo después de elegir
+# el error de ESE artículo (ver open_detalle_popup en errores_calidad.py).
+# Cada fila de deposito.errores_mesa (ya era 1 por artículo) guarda SU PROPIA
+# observación en vez de repetir la misma para todo el pedido.
 def insert_error_calidad_items(
-    nro_pedido: int, nro_operario: int, items: list[dict], observacion: str | None = None
+    nro_pedido: int, nro_operario: int, items: list[dict]
 ) -> dict:
-    """`items`: [{"codArticulo": "...", "detalleError": "..."}, ...] — ya
-    validado por Pydantic (ErrorCalidadItemsIn) en main.py, acá se re-limpia
-    y se descartan silenciosamente los que vengan sin código o sin error
-    (mismo criterio "no confiar en el cliente" del resto del archivo)."""
-    observacion = (observacion or "").strip() or None
+    """`items`: [{"codArticulo": "...", "detalleError": "...", "observacion":
+    "..."}, ...] — ya validado por Pydantic (ErrorCalidadItemsIn) en main.py,
+    acá se re-limpia y se descartan silenciosamente los que vengan sin código
+    o sin error (mismo criterio "no confiar en el cliente" del resto del
+    archivo). `observacion` es opcional por ítem (nota libre para ESE
+    artículo, puede venir vacía/ausente)."""
     if not nro_operario:
         raise ValueError("Falta 'nroOperario'")
     if not items:
@@ -826,15 +844,16 @@ def insert_error_calidad_items(
     }
     disponibles = {a["codArticulo"]: a["descripcion"] for a in fetch_articulos_pedido(nro_pedido)}
 
-    filas: list[tuple[str, list[str]]] = []
+    filas: list[tuple[str, str | None, list[str]]] = []
     for it in items:
         cod = (it.get("codArticulo") or "").strip()
         detalle_error = (it.get("detalleError") or "").strip()
         if not cod or not detalle_error:
             continue
+        observacion_item = (it.get("observacion") or "").strip() or None
         desc = disponibles.get(cod)
         articulo_str = f"{cod} - {desc}" if desc else cod
-        filas.append((detalle_error, [articulo_str]))
+        filas.append((detalle_error, observacion_item, [articulo_str]))
 
     if not filas:
         raise ValueError("Ningún artículo válido con error para guardar")
@@ -843,7 +862,7 @@ def insert_error_calidad_items(
     resultados = []
     try:
         cur = conn.cursor()
-        for detalle_error, articulos_resueltos in filas:
+        for detalle_error, observacion_item, articulos_resueltos in filas:
             cur.execute(
                 """
                 INSERT INTO deposito.errores_mesa
@@ -857,12 +876,12 @@ def insert_error_calidad_items(
                     nro_pedido, info["tipoPedido"], info["ot"], ctrl["nombreControlador"],
                     info.get("nroArmador"), info.get("nombreArmador"),
                     info["ubicacion"], detalle_error, registrado_por,
-                    ctrl["nroControlador"], ctrl["nombreControlador"], observacion, articulos_resueltos,
+                    ctrl["nroControlador"], ctrl["nombreControlador"], observacion_item, articulos_resueltos,
                 ),
             )
             new_id, created_at = cur.fetchone()
             resultados.append({
-                "id": new_id, "detalleError": detalle_error,
+                "id": new_id, "detalleError": detalle_error, "observacion": observacion_item,
                 "articulos": articulos_resueltos, "createdAt": created_at.isoformat(),
             })
         conn.commit()
@@ -876,7 +895,6 @@ def insert_error_calidad_items(
         "registradoPor": registrado_por,
         "nroControladorReal": ctrl["nroControlador"],
         "nombreControladorReal": ctrl["nombreControlador"],
-        "observacion": observacion,
         "cantidad": len(resultados),
         "items": resultados,
     }

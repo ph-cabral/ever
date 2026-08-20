@@ -717,7 +717,7 @@ export default function VentasVendedorPage() {
           <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2 whitespace-nowrap">
             {/* <Trophy size={18} /> */}
             {topVista === "clientes" ? <Users size={18} /> : <ListChevronsUpDown size={18} />}
-            {topVista === "clientes" ? "clientes 1" : "líneas 1"}
+            {topVista === "clientes" ? "clientes" : "líneas"}
           </h2>
 
           <button
