@@ -1,8 +1,17 @@
 "use client";
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
-  Loader2, AlertTriangle, Search, Users, Table2, ChevronDown, ChevronUp,
-  ArrowLeftRight, Trophy, X,
+  Loader2,
+  AlertTriangle,
+  Search,
+  Users,
+  Table2,
+  ChevronDown,
+  ChevronUp,
+  ArrowLeftRight,
+  Trophy,
+  X,
+  ListChevronsUpDown,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 
@@ -667,7 +676,7 @@ export default function VentasVendedorPage() {
           <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2 whitespace-nowrap">
             {/* <Trophy size={18} /> */}
             {topVista === "clientes" ? <Users size={18} /> : <ListChevronsUpDown size={18} />}
-            {topVista === "clientes" ? "clientes cambio3" : "líneas"}
+            {topVista === "clientes" ? "clientes 1" : "líneas 1"}
           </h2>
 
           <button
@@ -681,7 +690,7 @@ export default function VentasVendedorPage() {
           >
             <ArrowLeftRight size={14} className="text-yellow-400" />
             <span className="font-semibold">
-              {topVista === "clientes" ? "Clientes cambio1" : "Líneas"}
+              {topVista === "clientes" ? "Clientes" : "Líneas"}
             </span>
             {/* <span className="text-zinc-500 text-xs">
               {topVista === "clientes" ? "($)" : "(unidades)"}
@@ -827,8 +836,8 @@ export default function VentasVendedorPage() {
                             />
                             <span className="font-semibold">
                               {vistaModal === "clientes"
-                                ? "Clientes cambio2"
-                                : "Líneas"}
+                                ? "$"
+                                : "Unidades"}
                             </span>
                             {/* <span className="text-zinc-500 text-xs">
                               {vistaModal === "clientes" ? "($)" : "(unidades)"}
@@ -843,8 +852,8 @@ export default function VentasVendedorPage() {
                             className="btn-anim flex items-center gap-1.5 border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
                           >
                             {desglosado
-                              ? "Agrupar por año"
-                              : "Desglosar por mes"}
+                              ? "por año"
+                              : "por mes"}
                           </button>
                         )}
 
