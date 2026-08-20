@@ -91,6 +91,11 @@ function esRutaPublica(pathname: string, method: string): boolean {
   if (method === "POST" && pathname === "/api/deposito/errores-mesa/calidad") return true;
   // Botón "Asignar" del widget Mesa de Control (2026-07-29): mismo caso.
   if (method === "POST" && pathname === "/api/deposito/errores-mesa/asignar") return true;
+  // Lista de errores propia de Calidad + botón "Finalizar" del widget
+  // portado a Python (REDISEÑO 2026-08-20): mismo caso que las rutas de
+  // Mesa de arriba (opciones GET / alta en lote POST).
+  if (method === "GET" && pathname === "/api/deposito/errores-mesa/calidad/opciones") return true;
+  if (method === "POST" && pathname === "/api/deposito/errores-mesa/calidad/items") return true;
   return false;
 }
 

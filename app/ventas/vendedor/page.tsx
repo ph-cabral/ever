@@ -130,12 +130,6 @@ interface RespClientesPorLinea {
 
 type TopVista = "clientes" | "lineas";
 
-// Largo de la ventana de los rankings, solo para el texto del subtítulo —
-// quién la calcula de verdad es el back (TOP_MESES en ventas.py), que
-// además la cierra en el MES ANTERIOR al actual. Acá no se derivan fechas:
-// las que se muestran vienen en la respuesta.
-const TOP_MESES = 12;
-
 const MESES_CORTOS_ES = [
   "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
 ];
@@ -329,24 +323,40 @@ export default function VentasVendedorPage() {
   // en un grupo que puede no existir para el nuevo set de clientes.
   const [clientesLineaGrupoAbierto, setClientesLineaGrupoAbierto] = useState(0);
 
-  const fetchClientesPorLinea = useCallback(async (linea: string) => {
-    setClientesLineaLoading(true);
-    setClientesLineaError(null);
-    setClientesLineaGrupoAbierto(0);
-    try {
-      const res = await fetch(`/api/ventas/vendedor/clientes-por-linea?linea=${encodeURIComponent(linea)}`, {
-        cache: "no-store",
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-      setClientesLinea(j);
-    } catch (e) {
-      setClientesLineaError(e instanceof Error ? e.message : "Error al cargar");
-      setClientesLinea(null);
-    } finally {
-      setClientesLineaLoading(false);
-    }
-  }, []);
+  // `rango` (pedido de Pablo 2026-08-20): antes siempre pegaba sin
+  // desde/hasta y el back resolvía la ventana fija de 12 meses
+  // (últimos 12 meses cerrados). Ahora manda el rango YTD/Meses actual
+  // (ver `rangoPeriodo` más abajo) — la ruta y fetch_clientes_por_linea ya
+  // aceptaban desde/hasta de antes (quedó la plomería, solo no se usaba).
+  // `rango === null` es el caso borde de YTD en enero (sin mes anterior
+  // este año): no pega al back, deja la tabla vacía directamente.
+  const fetchClientesPorLinea = useCallback(
+    async (linea: string, rango: { desde: string; hasta: string } | null) => {
+      setClientesLineaLoading(true);
+      setClientesLineaError(null);
+      setClientesLineaGrupoAbierto(0);
+      if (!rango) {
+        setClientesLinea(null);
+        setClientesLineaLoading(false);
+        return;
+      }
+      try {
+        const qs = new URLSearchParams({ linea, desde: rango.desde, hasta: rango.hasta });
+        const res = await fetch(`/api/ventas/vendedor/clientes-por-linea?${qs.toString()}`, {
+          cache: "no-store",
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+        setClientesLinea(j);
+      } catch (e) {
+        setClientesLineaError(e instanceof Error ? e.message : "Error al cargar");
+        setClientesLinea(null);
+      } finally {
+        setClientesLineaLoading(false);
+      }
+    },
+    [],
+  );
 
   // Recibe el código directamente (en vez de leer clienteSel) porque
   // setClienteSel es asíncrono — si dependiéramos del estado, elegirCliente
@@ -398,18 +408,8 @@ export default function VentasVendedorPage() {
     [elegirCliente],
   );
 
-  // Dispara el modal en modo "linea" — al hacer click en una línea del
-  // ranking "Top 10 líneas" (pedido de Pablo 2026-08-18).
-  const abrirModalLinea = useCallback(
-    (linea: string) => {
-      setModalMode("linea");
-      setModalLinea(linea);
-      setModalOpen(true);
-      setFiltroVisible(true);
-      fetchClientesPorLinea(linea);
-    },
-    [fetchClientesPorLinea],
-  );
+  // abrirModalLinea se define más abajo (necesita `rangoPeriodo`, que
+  // depende del estado `periodo` — ver esa sección).
 
   // Abre el modal vacío en modo "cliente", listo para buscar — para no
   // perder la posibilidad de buscar CUALQUIER cliente (no solo los del Top
@@ -481,25 +481,66 @@ export default function VentasVendedorPage() {
       ? topClientes?.totalClientes ?? null
       : topLineas?.totalLineas ?? null;
 
-  // ── Período: botón dividido "YTD" / "Seleccionar meses" (pedido de Pablo
-  // 2026-08-14). No pega al back — la respuesta ya trae el desglose mensual
-  // completo de ambos años (ver fetch_ventas_por_linea), así que el período
-  // se resuelve sumando los meses correspondientes en el cliente. "YTD"
-  // suma Enero..mes actual en AMBOS años (año actual y anterior), para que
-  // la comparación sea pareja. "Meses" deja elegir uno o más meses del año
-  // (multi-select) y suma esos mismos meses en los dos años.
+  // ── Período: botón dividido "YTD" / "Meses" (pedido de Pablo 2026-08-14,
+  // ajustado 2026-08-20). Un solo estado para TODO el modal (modo "cliente"
+  // y modo "linea" comparten el mismo toggle — pedido de Pablo 2026-08-20:
+  // "cliente por línea y línea por cliente, ambos casos deben tener filtro
+  // ytd y mes"). "YTD" es Enero..mes ANTERIOR al actual (el mes en curso
+  // queda afuera por estar incompleto). "Meses" es el mes actual completo,
+  // sin recortar por día.
+  //
+  // En modo "cliente" NO pega al back: la respuesta ya trae el desglose
+  // mensual completo de ambos años (ver fetch_ventas_por_linea) y el
+  // período se resuelve sumando los meses correspondientes (ver
+  // mesesActivos/sumaPeriodo más abajo). En modo "linea" SÍ pega al back
+  // con `desde`/`hasta` (ver rangoPeriodo/fetchClientesPorLinea) porque
+  // fetch_clientes_por_linea agrega en SQL, no manda desglose mensual.
   const [periodo, setPeriodo] = useState<Periodo>("ytd");
-  const [mesesSel, setMesesSel] = useState<Set<number>>(new Set());
   const mesActualNum = new Date().getMonth() + 1;
+  const anioActualNum = new Date().getFullYear();
+  // Último mes que entra en el YTD (0 en enero: todavía no hay mes anterior
+  // en el año en curso).
+  const mesAnteriorNum = mesActualNum - 1;
 
-  const toggleMes = useCallback((m: number) => {
-    setMesesSel((prev) => {
-      const next = new Set(prev);
-      if (next.has(m)) next.delete(m);
-      else next.add(m);
-      return next;
-    });
-  }, []);
+  const ym = (anio: number, mes: number) => `${anio}-${String(mes).padStart(2, "0")}`;
+
+  // Rango "YYYY-MM" para mandarle a /api/ventas/vendedor/clientes-por-linea
+  // (modo "linea"), equivalente en fechas absolutas a lo que mesesActivos
+  // resuelve localmente para la tabla línea×año del modo "cliente". `null`
+  // en el caso borde de YTD en enero: a propósito NO hace roll-over a
+  // diciembre del año anterior — "Enero..mes anterior" simplemente no
+  // tiene ningún mes que mostrar todavía ese año.
+  const rangoPeriodo: { desde: string; hasta: string } | null =
+    periodo === "meses"
+      ? { desde: ym(anioActualNum, mesActualNum), hasta: ym(anioActualNum, mesActualNum) }
+      : mesAnteriorNum >= 1
+        ? { desde: ym(anioActualNum, 1), hasta: ym(anioActualNum, mesAnteriorNum) }
+        : null;
+
+  // Dispara el modal en modo "linea" — al hacer click en una línea del
+  // ranking "Top 10 líneas" (pedido de Pablo 2026-08-18). Va con el
+  // `rangoPeriodo` YTD/Meses vigente (pedido de Pablo 2026-08-20).
+  const abrirModalLinea = useCallback(
+    (linea: string) => {
+      setModalMode("linea");
+      setModalLinea(linea);
+      setModalOpen(true);
+      setFiltroVisible(true);
+      fetchClientesPorLinea(linea, rangoPeriodo);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fetchClientesPorLinea, periodo],
+  );
+
+  // Si el modal ya está abierto en modo "linea" y el usuario togglea
+  // YTD/Meses, vuelve a pedir con el rango nuevo (pedido de Pablo
+  // 2026-08-20: "ambos casos deben tener filtro ytd y mes").
+  useEffect(() => {
+    if (modalMode === "linea" && modalOpen && modalLinea) {
+      fetchClientesPorLinea(modalLinea, rangoPeriodo);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodo]);
 
   const handleFiltrar = useCallback(() => {
     if (!clienteSel) return;
@@ -509,8 +550,8 @@ export default function VentasVendedorPage() {
   // Meses que entran en el "Total" mostrado, según el modo de período.
   const mesesActivos =
     periodo === "ytd"
-      ? Array.from({ length: mesActualNum }, (_, i) => i + 1)
-      : Array.from(mesesSel).sort((a, b) => a - b);
+      ? Array.from({ length: mesAnteriorNum }, (_, i) => i + 1)
+      : [mesActualNum];
 
   const sumaPeriodo = useCallback(
     (a: AnioVal) =>
@@ -522,7 +563,7 @@ export default function VentasVendedorPage() {
         { cantidad: 0, monto: 0 },
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [periodo, mesesSel, mesActualNum],
+    [periodo, mesActualNum],
   );
 
   // Nota: usan `modoModal` (estado propio del modal, ver `vistaModal` más
@@ -544,16 +585,16 @@ export default function VentasVendedorPage() {
   const filas = data?.lineas ?? [];
   const hayTabla = !!data;
   const sinDatos = !!data && !data.tieneDatos;
-  const faltanMeses = periodo === "meses" && mesesSel.size === 0;
+  // Único caso sin meses: YTD en enero (todavía no hay mes anterior).
+  const sinMesesPeriodo = periodo === "ytd" && mesesActivos.length === 0;
 
-  // Desglosado: pedido de Pablo 2026-08-14 — al elegir meses puntuales
-  // (periodo "meses") solo se muestran esas columnas, no las 12 (antes se
-  // mostraban todas, dimeadas las no elegidas). En "ytd" equivale a
-  // Enero..mes actual, mismo criterio que ya usa sumaPeriodo/mesesActivos.
+  // Desglosado: en "meses" mostrás solo el mes actual (1 columna); en "ytd"
+  // Enero..mes anterior, mismo criterio que ya usa sumaPeriodo/mesesActivos.
   const mesesMostrados = mesesActivos;
   const nMesesMostrados = mesesMostrados.length;
   const colSpanAnio = desglosado ? nMesesMostrados + 1 : 1;
-  const mesesLabel = (a: AnioVal) => a.meses.find((m) => m.mes === mesActualNum)?.label ?? "";
+  const labelDeMes = (a: AnioVal, mes: number) =>
+    a.meses.find((m) => m.mes === mes)?.label ?? "";
 
   // ── Fila verde si creció + fila/columna iluminada según el mouse (pedido
   // de Pablo 2026-08-14) ──────────────────────────────────────────────────
@@ -856,47 +897,57 @@ export default function VentasVendedorPage() {
                               : "por mes"}
                           </button>
                         )}
-
-                        {/* Botón dividido: período YTD vs. selección de meses puntuales */}
-                        {hayTabla && !sinDatos && (
-                          <div className="flex flex-col gap-1.5">
-                            <div className="inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700">
-                              <button
-                                type="button"
-                                onClick={() => setPeriodo("ytd")}
-                                title={`Acumulado Enero–${mesesLabel(data!.totales.anioActual)} en ambos años`}
-                                className={`px-3 py-2 transition-colors ${
-                                  periodo === "ytd"
-                                    ? "bg-yellow-400 text-black font-semibold"
-                                    : "text-zinc-300 hover:bg-zinc-800"
-                                }`}
-                              >
-                                YTD
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setPeriodo("meses")}
-                                className={`px-3 py-2 transition-colors ${
-                                  periodo === "meses"
-                                    ? "bg-yellow-400 text-black font-semibold"
-                                    : "text-zinc-300 hover:bg-zinc-800"
-                                }`}
-                              >
-                                Meses
-                                {periodo === "meses" && mesesSel.size > 0
-                                  ? ` (${mesesSel.size})`
-                                  : ""}
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {data && (
-                          <span className="text-sm text-zinc-500 pb-2">
-                            {filas.length} línea(s)
-                          </span>
-                        )}
                       </>
+                    )}
+
+                    {/* Botón dividido: YTD (Ene–mes anterior) vs. Meses (mes
+                    actual completo) — pedido de Pablo 2026-08-20: comparte
+                    estado (`periodo`) entre modo "cliente" (año actual vs.
+                    anterior, filtra el desglose mensual ya traído) y modo
+                    "linea" (pega de nuevo al back con desde/hasta, ver
+                    rangoPeriodo/fetchClientesPorLinea). Los títulos usan
+                    MESES_CORTOS_ES directo (no `labelDeMes`/`data`) porque
+                    en modo "linea" no hay tabla línea×año cargada. */}
+                    {((modalMode === "cliente" && hayTabla && !sinDatos) ||
+                      modalMode === "linea") && (
+                      <div className="flex flex-col gap-1.5">
+                        <div className="inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700">
+                          <button
+                            type="button"
+                            onClick={() => setPeriodo("ytd")}
+                            title={
+                              mesAnteriorNum >= 1
+                                ? `Acumulado Enero–${MESES_CORTOS_ES[mesAnteriorNum - 1]}`
+                                : "Todavía no hay mes anterior este año"
+                            }
+                            className={`px-3 py-2 transition-colors ${
+                              periodo === "ytd"
+                                ? "bg-yellow-400 text-black font-semibold"
+                                : "text-zinc-300 hover:bg-zinc-800"
+                            }`}
+                          >
+                            YTD
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPeriodo("meses")}
+                            title={`${MESES_CORTOS_ES[mesActualNum - 1]} completo`}
+                            className={`px-3 py-2 transition-colors ${
+                              periodo === "meses"
+                                ? "bg-yellow-400 text-black font-semibold"
+                                : "text-zinc-300 hover:bg-zinc-800"
+                            }`}
+                          >
+                            Meses
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {modalMode === "cliente" && data && (
+                      <span className="text-sm text-zinc-500 pb-2">
+                        {filas.length} línea(s)
+                      </span>
                     )}
                     <button
                       type="button"
@@ -909,46 +960,6 @@ export default function VentasVendedorPage() {
                   </div>
                 )}
 
-                {filtroVisible &&
-                  hayTabla &&
-                  !sinDatos &&
-                  periodo === "meses" && (
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-3 flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-zinc-400 uppercase tracking-wide mr-1">
-                        Meses:
-                      </span>
-                      {data!.totales.anioActual.meses.map((m) => {
-                        const activo = mesesSel.has(m.mes);
-                        return (
-                          <button
-                            key={m.mes}
-                            type="button"
-                            onClick={() => toggleMes(m.mes)}
-                            className={`btn-anim px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
-                              activo
-                                ? "bg-yellow-400 text-black border-yellow-400"
-                                : "border-zinc-700 text-zinc-300 hover:border-yellow-400/60"
-                            }`}
-                          >
-                            {m.label}
-                          </button>
-                        );
-                      })}
-                      {mesesSel.size > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => setMesesSel(new Set())}
-                          className="text-xs text-zinc-500 hover:text-zinc-300 ml-2 underline"
-                        >
-                          Limpiar
-                        </button>
-                      ) : (
-                        <span className="text-xs text-amber-400/80 ml-2">
-                          Elegí uno o más meses para ver la comparación.
-                        </span>
-                      )}
-                    </div>
-                  )}
               </div>
 
               <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
@@ -975,16 +986,17 @@ export default function VentasVendedorPage() {
                       </div>
                     )}
 
-                    {hayTabla && !sinDatos && faltanMeses && (
+                    {hayTabla && !sinDatos && sinMesesPeriodo && (
                       <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
                         <Table2 size={40} className="text-zinc-700" />
                         <p className="text-zinc-500 text-sm">
-                          Elegí uno o más meses arriba para ver la comparación.
+                          Todavía no hay mes anterior este año — probá con
+                          &quot;Meses&quot; para ver Enero.
                         </p>
                       </div>
                     )}
 
-                    {hayTabla && !sinDatos && !faltanMeses && (
+                    {hayTabla && !sinDatos && !sinMesesPeriodo && (
                       <div
                         className={`rounded-xl border border-zinc-800 overflow-hidden transition-opacity ${
                           loading ? "opacity-50 pointer-events-none" : ""
@@ -1026,11 +1038,17 @@ export default function VentasVendedorPage() {
                                   }
                                 >
                                   Año {data!.anioAnterior}
-                                  {periodo === "ytd" && (
+                                  {periodo === "ytd" && mesAnteriorNum >= 1 && (
                                     <span className="text-zinc-500 font-normal">
                                       {" "}
                                       (Ene–
-                                      {mesesLabel(data!.totales.anioAnterior)})
+                                      {labelDeMes(data!.totales.anioAnterior, mesAnteriorNum)})
+                                    </span>
+                                  )}
+                                  {periodo === "meses" && (
+                                    <span className="text-zinc-500 font-normal">
+                                      {" "}
+                                      ({labelDeMes(data!.totales.anioAnterior, mesActualNum)})
                                     </span>
                                   )}
                                 </th>
@@ -1051,11 +1069,17 @@ export default function VentasVendedorPage() {
                                   }
                                 >
                                   Año {data!.anioActual}
-                                  {periodo === "ytd" && (
+                                  {periodo === "ytd" && mesAnteriorNum >= 1 && (
                                     <span className="text-yellow-400/60 font-normal">
                                       {" "}
                                       (Ene–
-                                      {mesesLabel(data!.totales.anioActual)})
+                                      {labelDeMes(data!.totales.anioActual, mesAnteriorNum)})
+                                    </span>
+                                  )}
+                                  {periodo === "meses" && (
+                                    <span className="text-yellow-400/60 font-normal">
+                                      {" "}
+                                      ({labelDeMes(data!.totales.anioActual, mesActualNum)})
                                     </span>
                                   )}
                                 </th>
@@ -1373,7 +1397,9 @@ export default function VentasVendedorPage() {
                         </h3>
                         <p className="text-zinc-500 text-xs mt-0.5">
                           {clientesLinea
-                            ? `${formatYm(clientesLinea.desde)} – ${formatYm(clientesLinea.hasta)} (últimos ${TOP_MESES} meses cerrados)`
+                            ? clientesLinea.desde === clientesLinea.hasta
+                              ? `${formatYm(clientesLinea.desde)} (mes actual)`
+                              : `${formatYm(clientesLinea.desde)} – ${formatYm(clientesLinea.hasta)} (año en curso)`
                             : "…"}
                         </p>
                       </div>
@@ -1397,7 +1423,9 @@ export default function VentasVendedorPage() {
                         <div className="px-5 py-12 flex flex-col items-center gap-3 text-center">
                           <Table2 size={32} className="text-zinc-700" />
                           <p className="text-zinc-500 text-sm">
-                            Sin ventas registradas en el rango elegido.
+                            {periodo === "ytd" && mesAnteriorNum < 1
+                              ? "Todavía no hay mes anterior este año — probá con \"Meses\" para ver Enero."
+                              : "Sin ventas registradas en el rango elegido."}
                           </p>
                         </div>
                       )}

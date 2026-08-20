@@ -142,7 +142,6 @@ export function ErroresMesaTab() {
   const [hasta, setHasta] = useState("");
   const [controlador, setControlador] = useState(ALL);
   const [preparador, setPreparador] = useState(ALL);
-  const [agruparPor, setAgruparPor] = useState<"operario" | "controlador">("operario");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -223,38 +222,62 @@ export function ErroresMesaTab() {
   }, [filtered]);
 
   // ── Errores por persona — top 20, respeta desde/hasta + los filtros
-  // activos. "Operario" = getOperario (nombreArmador, preparador sobre el
-  // que es el error, siempre poblado). "Controlador" = nombreControladorReal
-  // (Magnus, ver fetch_controlador_pedido en errores_mesa.py) — SOLO se
-  // resuelve para origen='calidad' (insert_error_mesa lo deja NULL a
-  // propósito, ver docstring "3ra vuelta, REVERTIDA"), así que acá se
-  // descartan las filas sin controlador (Mesa de Control) en vez de
-  // contarlas como "sin dato".
-  const porPersona = useMemo(() => {
-    const getter =
-      agruparPor === "operario" ? getOperario : (r: ErrorMesaRow) => r.nombreControladorReal;
+  // activos. Antes era un solo gráfico con toggle "Ver por: Operario/
+  // Controlador"; a pedido de Pablo (2026-08-20) se separó en 2 tarjetas
+  // fijas, una al lado de la otra, para ver ambos a la vez.
+  // "Operario" = getOperario (nombreArmador, preparador sobre el que es el
+  // error, siempre poblado). "Controlador" = nombreControladorReal (Magnus,
+  // ver fetch_controlador_pedido en errores_mesa.py) — SOLO se resuelve para
+  // origen='calidad' (insert_error_mesa lo deja NULL a propósito, ver
+  // docstring "3ra vuelta, REVERTIDA"), así que acá se descartan las filas
+  // sin controlador (Mesa de Control) en vez de contarlas como "sin dato".
+  const porOperario = useMemo(() => {
     const m = new Map<string, number>();
     filtered.forEach((r) => {
-      const p = getter(r);
+      const p = getOperario(r);
       if (p) m.set(p, (m.get(p) ?? 0) + 1);
     });
     return [...m.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 20)
       .map(([persona, cantidad]) => ({ persona, cantidad }));
-  }, [filtered, agruparPor]);
+  }, [filtered]);
 
-  // ── Tendencia de errores en el tiempo (por día, fecha del pedido) — mismo
-  // rango/filtros que el resto de la vista.
-  const tendencia = useMemo(() => {
+  const porControlador = useMemo(() => {
     const m = new Map<string, number>();
     filtered.forEach((r) => {
-      if (!r.fecha) return;
-      m.set(r.fecha, (m.get(r.fecha) ?? 0) + 1);
+      const p = r.nombreControladorReal;
+      if (p) m.set(p, (m.get(p) ?? 0) + 1);
     });
     return [...m.entries()]
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([fecha, cantidad]) => ({ fecha: fmtDate(fecha), cantidad }));
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([persona, cantidad]) => ({ persona, cantidad }));
+  }, [filtered]);
+
+  // ── Tendencia de errores en el tiempo (por día, fecha del pedido) — mismo
+  // rango/filtros que el resto de la vista. 2 líneas (2026-08-20, a pedido
+  // de Pablo): "Operarios" cuenta todas las filas con fecha (mismo criterio
+  // que porOperario, que siempre tiene dato); "Controladores" cuenta solo
+  // las filas con nombreControladorReal (mismo criterio que porControlador).
+  const tendencia = useMemo(() => {
+    const opMap = new Map<string, number>();
+    const ctrlMap = new Map<string, number>();
+    filtered.forEach((r) => {
+      if (!r.fecha) return;
+      opMap.set(r.fecha, (opMap.get(r.fecha) ?? 0) + 1);
+      if (r.nombreControladorReal) {
+        ctrlMap.set(r.fecha, (ctrlMap.get(r.fecha) ?? 0) + 1);
+      }
+    });
+    const fechas = [...new Set([...opMap.keys(), ...ctrlMap.keys()])].sort((a, b) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    );
+    return fechas.map((fecha) => ({
+      fecha: fmtDate(fecha),
+      operarios: opMap.get(fecha) ?? 0,
+      controladores: ctrlMap.get(fecha) ?? 0,
+    }));
   }, [filtered]);
 
   return (
@@ -346,22 +369,10 @@ export function ErroresMesaTab() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
-            <Panel
-              title="Errores por persona"
-              accent={
-                <button
-                  onClick={() =>
-                    setAgruparPor((v) => (v === "operario" ? "controlador" : "operario"))
-                  }
-                  className="text-[11px] font-semibold px-2 py-1 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 transition-colors normal-case"
-                >
-                  Ver por: {agruparPor === "operario" ? "Operario" : "Controlador"}
-                </button>
-              }
-            >
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
+            <Panel title="Errores por operario">
               <ChartBar
-                data={porPersona}
+                data={porOperario}
                 xKey="persona"
                 height={260}
                 series={[{ key: "cantidad", name: "Errores", color: C.brand }]}
@@ -369,29 +380,51 @@ export function ErroresMesaTab() {
                 angle={-35}
                 showValues
               />
-              {porPersona.length === 20 && (
+              {porOperario.length === 20 && (
                 <p className="text-[11px] text-zinc-600 mt-2">
                   Mostrando las 20 personas con más errores.
                 </p>
               )}
-              {agruparPor === "controlador" && (
-                <p className="text-[11px] text-zinc-600 mt-2">
-                  Solo pedidos con Controlador real registrado en Magnus (origen Calidad) —
-                  descarta los que no tienen controlador.
-                </p>
-              )}
             </Panel>
 
-            <Panel title="Tendencia de errores" accent={`(${fmtNum(filtered.length)} en el rango)`}>
-              <ChartLine
-                data={tendencia}
-                xKey="fecha"
+            <Panel title="Errores por controlador">
+              <ChartBar
+                data={porControlador}
+                xKey="persona"
                 height={260}
                 series={[{ key: "cantidad", name: "Errores", color: C.red }]}
                 fmt={(n) => fmtNum(n)}
+                angle={-35}
+                showValues
               />
+              {porControlador.length === 20 && (
+                <p className="text-[11px] text-zinc-600 mt-2">
+                  Mostrando las 20 personas con más errores.
+                </p>
+              )}
+              <p className="text-[11px] text-zinc-600 mt-2">
+                Solo pedidos con Controlador real registrado en Magnus (origen Calidad) —
+                descarta los que no tienen controlador.
+              </p>
             </Panel>
           </div>
+
+          <Panel
+            title="Tendencia de errores"
+            accent={`(${fmtNum(filtered.length)} en el rango)`}
+            className="mb-5"
+          >
+            <ChartLine
+              data={tendencia}
+              xKey="fecha"
+              height={260}
+              series={[
+                { key: "operarios", name: "Operarios", color: C.brand },
+                { key: "controladores", name: "Controladores", color: C.red },
+              ]}
+              fmt={(n) => fmtNum(n)}
+            />
+          </Panel>
 
           <Grid cols={4}>
             <KPI
