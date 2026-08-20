@@ -586,10 +586,12 @@ LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloP
 WHERE LTRIM(RTRIM(s.CodArticulo)) IN ({ph})
 """
 
-# Línea = StkFer_ArtParamet.Nivel1 (mismo campo que ya usa /deposito/faltantes,
-# ver deposito.py ap.Nivel1 AS Linea). Filtro por substring (LIKE), NO exacto:
-# no se conoce de antemano si Nivel1 son pocos valores fijos o texto libre, así
-# que se resuelve como búsqueda parcial — mismo criterio que el filtro `q` de
+# Línea = NOMBRE en EVERWEAR.dbo.Stk_Nivel1.Detalle, resuelto desde el CÓDIGO
+# StkFer_ArtParamet.Nivel1 (int) — ver el bloque de catálogo en ventas.py.
+# Antes esto filtraba y mostraba el Nivel1 crudo, o sea el número.
+#
+# Filtro por substring (LIKE) sobre el NOMBRE, NO exacto: el input de
+# /compras/consumo es texto libre — mismo criterio que el filtro `q` de
 # código. Se consulta directo contra el catálogo (sin IN de miles de códigos,
 # a diferencia de SQL_NOMBRES_CHUNK) y se intersecta en Python contra los
 # `codigos` candidatos (con venta o stock) ya calculados.
@@ -597,7 +599,8 @@ SQL_CODIGOS_POR_LINEA = """
 SELECT LTRIM(RTRIM(s.CodArticulo)) AS CodArticulo
 FROM EVERWEAR.dbo.[StkFer_Articulos] s
 LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloPatron
-WHERE ap.Nivel1 LIKE ?
+LEFT JOIN EVERWEAR.dbo.[Stk_Nivel1]        n1 ON n1.Nivel1         = ap.Nivel1
+WHERE LTRIM(RTRIM(n1.Detalle)) LIKE ?
 """
 
 # Líneas del catálogo con cantidad de artículos en cada una — para el
@@ -605,16 +608,17 @@ WHERE ap.Nivel1 LIKE ?
 # 2026-08-12): así se ve en la propia vista cuántos artículos hay por línea,
 # sin tener que adivinar de antemano si conviene dropdown o texto libre.
 SQL_LINEAS_COUNT = """
-SELECT ap.Nivel1 AS Linea, COUNT(DISTINCT s.CodArticulo) AS Cantidad
+SELECT LTRIM(RTRIM(n1.Detalle)) AS Linea, COUNT(DISTINCT s.CodArticulo) AS Cantidad
 FROM EVERWEAR.dbo.[StkFer_Articulos] s
 LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloPatron
-GROUP BY ap.Nivel1
+LEFT JOIN EVERWEAR.dbo.[Stk_Nivel1]        n1 ON n1.Nivel1         = ap.Nivel1
+GROUP BY LTRIM(RTRIM(n1.Detalle))
 """
 
 
 def fetch_lineas():
-    """Líneas (Nivel1) con cantidad de artículos del catálogo en cada una,
-    ordenadas de mayor a menor. Ver SQL_LINEAS_COUNT."""
+    """Líneas (nombre de Stk_Nivel1) con cantidad de artículos del catálogo en
+    cada una, ordenadas de mayor a menor. Ver SQL_LINEAS_COUNT."""
     conn = get_connection("EVERWEAR")
     try:
         cur = conn.cursor()
@@ -766,7 +770,7 @@ def fetch_consumo_articulos(
         if ql:
             codigos = [c for c in codigos if ql in c.lower()]
 
-        # Filtro por línea (Nivel1, substring) — se combina con `q` por AND.
+        # Filtro por línea (NOMBRE de Stk_Nivel1, substring) — AND con `q`.
         # Se resuelve el universo de códigos que matchean la línea en una
         # sola consulta al catálogo (NO con un IN de los `codigos` candidatos,
         # que puede ser una lista larga) y se intersecta acá en Python.

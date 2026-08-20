@@ -500,7 +500,7 @@ def compras_consumo_articulos(
     linea: str | None = Query(None),
 ):
     """Vendido/promedio/máximo/mínimo>0 y stock por artículo, para los
-    artículos que matchean `q` (código) y/o `linea` (Nivel1) — al menos uno
+    artículos que matchean `q` (código) y/o `linea` (nombre de Stk_Nivel1) — al menos uno
     de los dos es obligatorio (pedido de Pablo 2026-08-12, ver NOTA en
     fetch_consumo_articulos): sin filtro se agregaría TODO el catálogo."""
     try:
@@ -780,7 +780,7 @@ def ventas_vendedor_top_lineas(
 
 @app.get("/ventas/vendedor/clientes-por-linea")
 def ventas_vendedor_clientes_por_linea(
-    linea: str = Query(..., min_length=1, description="Nombre de línea (StkFer_ArtParamet.Nivel1), o '(Sin línea)'"),
+    linea: str = Query(..., min_length=1, description="Nombre de línea (Stk_Nivel1.Detalle), o '(Sin línea)'"),
     vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
     # Antes default=100, le=500, y después default=10000, le=10000: con
     # líneas grandes (ej. línea 44, 385 clientes) el modal se cortaba.

@@ -881,7 +881,7 @@ SELECT
     p.CodCliente,
     cli.Cliente_Nombre AS ClienteNombre,
     p.PrecioVenta,
-    ap.Nivel1       AS Linea,
+    LTRIM(RTRIM(n1.Detalle)) AS Linea,   -- nombre real (Stk_Nivel1), no el codigo
     t.Descripcion   AS TipoArticulo,
     gp.Nombre       AS Preparador,
     pr.RazonSocial  AS Proveedor,
@@ -899,6 +899,7 @@ OUTER APPLY (
 ) u
 LEFT JOIN EVERWEAR.dbo.[StkFer_Articulos]      s  ON s.CodArticulo    = p.CodArticu
 LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet]     ap ON ap.ArticuloPatron = s.ArticuloPatron
+LEFT JOIN EVERWEAR.dbo.[Stk_Nivel1]            n1 ON n1.Nivel1         = ap.Nivel1
 LEFT JOIN EVERWEAR.dbo.[Stk_TiposArticulos]    t  ON t.CodigoTipo     = s.NacionalImportado
 LEFT JOIN EVERWEAR.dbo.[Com_Proveedores]       pr ON pr.CodProveed    = s.CodProveedHabitual
 LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoRengPreparacion] prep ON prep.NroMovVenta = p.NroPedOrigen AND prep.NroRenglon = p.NroRengOrigen
@@ -954,7 +955,7 @@ SELECT
     b.CodCliente,
     cli.Cliente_Nombre AS ClienteNombre,
     b.PrecioVenta,
-    ap.Nivel1       AS Linea,
+    LTRIM(RTRIM(n1.Detalle)) AS Linea,   -- nombre real (Stk_Nivel1), no el codigo
     t.Descripcion   AS TipoArticulo,
     gp.Nombre       AS Preparador,
     pr.RazonSocial  AS Proveedor,
@@ -972,6 +973,7 @@ OUTER APPLY (
 ) u
 LEFT JOIN EVERWEAR.dbo.[StkFer_Articulos]      s  ON s.CodArticulo    = b.CodArticu
 LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet]     ap ON ap.ArticuloPatron = s.ArticuloPatron
+LEFT JOIN EVERWEAR.dbo.[Stk_Nivel1]            n1 ON n1.Nivel1         = ap.Nivel1
 LEFT JOIN EVERWEAR.dbo.[Stk_TiposArticulos]    t  ON t.CodigoTipo     = s.NacionalImportado
 LEFT JOIN EVERWEAR.dbo.[Com_Proveedores]       pr ON pr.CodProveed    = s.CodProveedHabitual
 LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoRengPreparacion] prep ON prep.NroMovVenta = b.NroPedOrigen AND prep.NroRenglon = b.NroRengOrigen
@@ -1034,7 +1036,7 @@ SELECT
     b.CodCliente,
     cli.Cliente_Nombre AS ClienteNombre,
     b.PrecioVenta,
-    ap.Nivel1       AS Linea,
+    LTRIM(RTRIM(n1.Detalle)) AS Linea,   -- nombre real (Stk_Nivel1), no el codigo
     t.Descripcion   AS TipoArticulo,
     gp.Nombre       AS Preparador,
     pr.RazonSocial  AS Proveedor,
@@ -1052,6 +1054,7 @@ OUTER APPLY (
 ) u
 LEFT JOIN EVERWEAR.dbo.[StkFer_Articulos]      s  ON s.CodArticulo    = b.CodArticu
 LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet]     ap ON ap.ArticuloPatron = s.ArticuloPatron
+LEFT JOIN EVERWEAR.dbo.[Stk_Nivel1]            n1 ON n1.Nivel1         = ap.Nivel1
 LEFT JOIN EVERWEAR.dbo.[Stk_TiposArticulos]    t  ON t.CodigoTipo     = s.NacionalImportado
 LEFT JOIN EVERWEAR.dbo.[Com_Proveedores]       pr ON pr.CodProveed    = s.CodProveedHabitual
 LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoRengPreparacion] prep ON prep.NroMovVenta = b.NroPedOrigen AND prep.NroRenglon = b.NroRengOrigen

@@ -22,7 +22,6 @@ import calendar
 import re
 import time
 from db import get_connection
-from db_pg import get_pg_connection
 from clientes import fetch_cliente, fetch_vendedor_fijo_cliente
 
 BASE_DATE = date(1800, 12, 28)  # Magnus guarda fechas como días desde esta base
@@ -140,8 +139,9 @@ def fetch_pedidos_mes(desde: str, hasta: str) -> dict:
 # por qué esto importa: un pedido de un mes facturado al siguiente cae en el
 # mes de la factura).
 #
-# Línea = StkFer_ArtParamet.Nivel1 (mismo campo que ya usa /compras/consumo y
-# /deposito/faltantes), vía StkFer_Articulos.ArticuloPatron.
+# Línea = nombre de dbo.Stk_Nivel1.Detalle, resuelto desde el CÓDIGO
+# StkFer_ArtParamet.Nivel1 (int) vía StkFer_Articulos.ArticuloPatron — mismo
+# campo que ya usan /compras/consumo y /deposito/faltantes.
 #
 # Gotcha fecha (ver HANDOFF): NO se filtra por fecha en el SQL (comparar una
 # fecha calculada con dbo.fecha_cla2sql() contra un parámetro de fecha no
@@ -152,50 +152,30 @@ MESES_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct"
 SIN_LINEA = "(Sin línea)"
 
 # ──────────────────────────────────────────────────────────────────────────
-# Catálogo código→nombre de línea (ver ever/sql/ventas_lineas_catalogo.sql,
-# pedido de Pablo 2026-08-20): Nivel1 en Magnus a veces guarda el CÓDIGO
-# numérico en vez del nombre (ej. "3" en vez de "YACO"). Vive en Postgres
-# (ventas.linea, mismo server que usuario/errores_mesa — ver db_pg.py),
-# separado de Magnus, así que el join no se puede hacer en el SQL de
-# SQL Server: se trae una vez, se cachea en memoria (mismo patrón de TTL que
-# los caches de abajo) y se matchea en Python. Códigos sin fila en la tabla
-# quedan sin traducir (se muestra el código crudo tal cual) hasta que se
-# agreguen.
-_LINEAS_CATALOGO_CACHE: tuple[float, dict[str, str]] | None = None
-_LINEAS_CATALOGO_TTL_SEG = 15 * 60  # 15 minutos
-
-
-def _fetch_lineas_catalogo() -> dict[str, str]:
-    """codigo (como string, tal cual aparece en Nivel1) -> nombre, desde
-    Postgres ventas.linea."""
-    global _LINEAS_CATALOGO_CACHE
-    ahora = time.monotonic()
-    if _LINEAS_CATALOGO_CACHE is not None and (ahora - _LINEAS_CATALOGO_CACHE[0]) < _LINEAS_CATALOGO_TTL_SEG:
-        return _LINEAS_CATALOGO_CACHE[1]
-    conn = get_pg_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT codigo, nombre FROM ventas.linea")
-        catalogo = {str(cod): nombre for cod, nombre in cur.fetchall()}
-    finally:
-        conn.close()
-    _LINEAS_CATALOGO_CACHE = (ahora, catalogo)
-    return catalogo
+# Catálogo de líneas: dbo.Stk_Nivel1 (2026-08-20). StkFer_ArtParamet.Nivel1
+# es un INT — el CÓDIGO de la línea, no su nombre. El nombre que muestra el
+# ERP en "Artículos > Línea, Rubro, Sub Rubro" vive en Stk_Nivel1
+# (Nivel1 int PK, Detalle char(30)); Stk_Nivel2/3/4 son Rubro/SubRubro/4º
+# nivel, mismo patrón. Ojo: las tablas PRU_* son copias de prueba, no usar.
+#
+# Antes esto se resolvía con una tabla hardcodeada en Postgres (ventas.linea
+# + cache TTL + match en Python, ver ever/sql/ventas_lineas_catalogo.sql):
+# quedó DEPRECADO — el join sale directo en SQL Server, sin cache, sin
+# segunda conexión y sin códigos faltantes. Detalle es CHAR(30): siempre
+# LTRIM(RTRIM(...)).
 
 
 def _nombre_linea(raw: str) -> str:
-    """Nivel1 crudo (ya trimeado por el SQL) -> nombre para mostrar: si es
-    un código del catálogo lo traduce, si no lo deja tal cual — o SIN_LINEA
-    si viene vacío."""
+    """Detalle de Stk_Nivel1 (ya trimeado por el SQL) -> nombre para mostrar,
+    o SIN_LINEA si el artículo no tiene línea / su código no está en el
+    catálogo (el LEFT JOIN devuelve NULL)."""
     raw_norm = (raw or "").strip()
-    if not raw_norm:
-        return SIN_LINEA
-    return _fetch_lineas_catalogo().get(raw_norm, raw_norm)
+    return raw_norm or SIN_LINEA
 
 
 SQL_VENTAS_CLIENTE = """
 SELECT
-    LTRIM(RTRIM(ap.Nivel1)) AS Linea,
+    LTRIM(RTRIM(n1.Detalle)) AS Linea,
     dbo.fecha_cla2sql(c.FecMovim) AS Fecha,
     cc.EvitaInformesYListados AS Evita,
     CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END AS CantidadNeta,
@@ -205,6 +185,7 @@ JOIN Ven_CompRenglon r ON r.NroMovVenta = c.NroMovVenta
 JOIN Ven_CodCom cc      ON c.CompCodigo = cc.CompCodigo
 LEFT JOIN StkFer_Articulos  s  ON s.CodArticulo     = r.CodArticu
 LEFT JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
+LEFT JOIN Stk_Nivel1        n1 ON n1.Nivel1         = ap.Nivel1
 WHERE c.CodCliente = ?
 """
 
@@ -483,22 +464,19 @@ def fetch_top_clientes(
 # ──────────────────────────────────────────────────────────────────────────
 # Top líneas (pedido de Pablo 2026-08-18: "agregamos vista de líneas, al
 # igual que el top, traemos el total de líneas y acá dejamos ver solo
-# unidades compradas"). Línea = StkFer_ArtParamet.Nivel1 — el mismo campo
+# unidades compradas"). Línea = nombre de Stk_Nivel1.Detalle resuelto desde
+# el código StkFer_ArtParamet.Nivel1 (ver catálogo arriba) — el mismo campo
 # que ya usan la tabla principal de esta vista, /compras/consumo y
-# /deposito/faltantes; texto libre, la mayoría de las veces ya ES el nombre
-# de la línea (POLEAS, CORREAS, …) pero para algunos artículos guarda solo
-# el código numérico — se traduce acá vía _nombre_linea/catálogo
-# ventas.linea (ver arriba, pedido de Pablo 2026-08-20; ver
-# compras.fetch_lineas para el mismo campo sin traducir, usado en
-# /compras/consumo).
+# /deposito/faltantes.
 #
-# El JOIN a artículo/parámetros es LEFT a propósito: un renglón cuyo
-# artículo no está en el catálogo no se pierde, cae en SIN_LINEA. Por eso
-# el "> 0" va en Python y no en un HAVING — hay que consolidar el grupo
-# NULL con el grupo '' antes de decidir si la línea entra.
+# Los JOIN a artículo/parámetros/catálogo son LEFT a propósito: un renglón
+# cuyo artículo no está en el catálogo (o cuyo código de línea no existe en
+# Stk_Nivel1, ej. Nivel1 = 0) no se pierde, cae en SIN_LINEA. Por eso el
+# "> 0" va en Python y no en un HAVING — hay que consolidar el grupo NULL
+# con el grupo '' antes de decidir si la línea entra.
 SQL_TOP_LINEAS_VENDEDOR = """
 SELECT
-    LTRIM(RTRIM(ap.Nivel1)) AS Linea,
+    LTRIM(RTRIM(n1.Detalle)) AS Linea,
     SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS UnidadesNetas
 FROM MAGNUS_SITD.dbo.Clientes c
 JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
@@ -508,24 +486,26 @@ JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
 JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
 LEFT JOIN StkFer_Articulos  s  ON s.CodArticulo    = r.CodArticu
 LEFT JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
+LEFT JOIN Stk_Nivel1        n1 ON n1.Nivel1         = ap.Nivel1
 WHERE pu.Usu_Arma_Codigo = ?
   AND cc.EvitaInformesYListados <> 1
   AND vc.FecMovim BETWEEN ? AND ?
-GROUP BY LTRIM(RTRIM(ap.Nivel1))
+GROUP BY LTRIM(RTRIM(n1.Detalle))
 """
 
 SQL_TOP_LINEAS_TODOS = """
 SELECT
-    LTRIM(RTRIM(ap.Nivel1)) AS Linea,
+    LTRIM(RTRIM(n1.Detalle)) AS Linea,
     SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS UnidadesNetas
 FROM Ven_CompCabecera vc
 JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
 JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
 LEFT JOIN StkFer_Articulos  s  ON s.CodArticulo    = r.CodArticu
 LEFT JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
+LEFT JOIN Stk_Nivel1        n1 ON n1.Nivel1         = ap.Nivel1
 WHERE cc.EvitaInformesYListados <> 1
   AND vc.FecMovim BETWEEN ? AND ?
-GROUP BY LTRIM(RTRIM(ap.Nivel1))
+GROUP BY LTRIM(RTRIM(n1.Detalle))
 """
 
 
@@ -595,14 +575,20 @@ def fetch_top_lineas(
 # línea, ordenados de mayor a menor por $ gastado). Gemelo de
 # fetch_top_clientes: mismo rango fijo (_resolver_rango), mismo cache 15
 # min, mismo criterio de acceso por vendedor — lo único que cambia es que
-# acá se agrega un filtro por línea de artículo (ap.Nivel1) al WHERE/JOIN
-# que ya usa fetch_top_clientes.
+# acá se agrega un filtro por línea de artículo al WHERE/JOIN que ya usa
+# fetch_top_clientes.
 #
-# `linea == SIN_LINEA` es un caso especial: no hay ningún valor de
-# ap.Nivel1 literal "(Sin línea)" en la base, ese texto lo arma
-# fetch_top_lineas en Python para consolidar NULL y '' — así que acá, para
-# ese caso, el filtro es "sin línea" (IS NULL o vacío) en vez de una
-# comparación exacta de string.
+# El front manda el NOMBRE de la línea (es lo que muestra el ranking), pero
+# ap.Nivel1 guarda el CÓDIGO (int) — la traducción se hace dentro del SQL
+# contra Stk_Nivel1, no en Python: `ap.Nivel1 IN (SELECT ...)` mantiene el
+# filtro sargable sobre la columna entera y resuelve el nombre en una tabla
+# de 82 filas.
+#
+# `linea == SIN_LINEA` es un caso especial: no hay ninguna fila con ese
+# texto en la base, lo arma fetch_top_lineas en Python para consolidar los
+# artículos sin línea con los que tienen un código que no existe en
+# Stk_Nivel1 — así que el filtro es "no matchea el catálogo" (NOT EXISTS) en
+# vez de una comparación de nombre.
 _TOP_CLIENTES_LINEA_CACHE: dict[tuple, tuple[float, dict]] = {}
 _TOP_CLIENTES_LINEA_TTL_SEG = 15 * 60  # 15 minutos
 
@@ -647,8 +633,14 @@ HAVING SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (
 ORDER BY MontoNeto DESC
 """
 
-_LINEA_COND_EXACTA = "LTRIM(RTRIM(ap.Nivel1)) = ?"
-_LINEA_COND_SIN_LINEA = "(ap.Nivel1 IS NULL OR LTRIM(RTRIM(ap.Nivel1)) = '')"
+_LINEA_COND_EXACTA = (
+    "ap.Nivel1 IN (SELECT n.Nivel1 FROM Stk_Nivel1 n "
+    "WHERE LTRIM(RTRIM(n.Detalle)) = ?)"
+)
+_LINEA_COND_SIN_LINEA = (
+    "(ap.Nivel1 IS NULL OR NOT EXISTS (SELECT 1 FROM Stk_Nivel1 n "
+    "WHERE n.Nivel1 = ap.Nivel1 AND LTRIM(RTRIM(n.Detalle)) <> ''))"
+)
 
 
 def fetch_clientes_por_linea(
@@ -669,8 +661,8 @@ def fetch_clientes_por_linea(
     rango, no cuántos se muestran).
 
     `linea`: nombre de línea tal cual lo devuelve fetch_top_lineas
-    (ap.Nivel1 trimeado) — o SIN_LINEA, caso especial que no compara texto
-    sino que filtra Nivel1 NULL/''.
+    (Stk_Nivel1.Detalle trimeado) — o SIN_LINEA, caso especial que no compara
+    nombre sino que filtra los artículos sin match en el catálogo.
 
     `vendedor`: mismo criterio de acceso que fetch_top_clientes — si se
     pasa, solo clientes de la cartera de ese vendedor."""
@@ -691,15 +683,9 @@ def fetch_clientes_por_linea(
     es_sin_linea = linea_norm == SIN_LINEA
     linea_cond = _LINEA_COND_SIN_LINEA if es_sin_linea else _LINEA_COND_EXACTA
 
-    # `linea_norm` puede venir como el NOMBRE ya traducido por _nombre_linea
-    # (fetch_top_lineas) en vez del código crudo que realmente está en
-    # Nivel1 — acá se traduce de vuelta antes de filtrar, si corresponde
-    # (ver catálogo código→nombre arriba). Si no matchea ningún nombre del
-    # catálogo, se usa tal cual (línea que ya era texto real, sin código).
+    # El nombre va directo como parámetro: la traducción nombre→código la
+    # hace el subquery contra Stk_Nivel1 dentro del SQL (ver _LINEA_COND_*).
     linea_sql = linea_norm
-    if not es_sin_linea:
-        reverso = {nombre: cod for cod, nombre in _fetch_lineas_catalogo().items()}
-        linea_sql = reverso.get(linea_norm, linea_norm)
 
     conn = get_connection("EVERWEAR")
     try:
