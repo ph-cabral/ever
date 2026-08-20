@@ -1,5 +1,5 @@
 "use client";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import {
   Loader2,
   AlertTriangle,
@@ -61,6 +61,17 @@ interface LineaRow {
   anioActual: AnioVal;
 }
 
+// Fila normalizada de la tabla del modal — ver `filas`/`fuenteTabla` en el
+// componente: unifica "una línea de un cliente" con "un cliente de una
+// línea" para que ambas usen la misma tabla.
+interface FilaTabla {
+  key: string;
+  etiqueta: string;
+  cliente: Cliente | null;
+  anioAnterior: AnioVal;
+  anioActual: AnioVal;
+}
+
 interface RespVentasVendedor {
   cliente: { codigo: number; nombre: string | null };
   anioAnterior: number;
@@ -114,18 +125,27 @@ interface RespTopLineas {
 // Clientes que compraron una línea puntual, de mayor a menor gasto — para
 // el modal cuando se hace click en una línea del ranking de abajo (pedido
 // de Pablo 2026-08-18).
+//
+// Desde 2026-08-20 la forma es el ESPEJO de RespVentasVendedor: mismos dos
+// años con desglose mensual y las dos métricas, para que el modal de línea
+// use LA MISMA tabla (y por lo tanto los mismos toggles $/Unidades y por
+// mes/por año) que el modo "cliente". Lo único que cambia es qué identifica
+// la fila: allá `linea: string`, acá `numero`/`nombre` del cliente.
 interface ClientePorLinea {
   numero: number;
   nombre: string | null;
-  monto: number;
+  anioAnterior: AnioVal;
+  anioActual: AnioVal;
 }
 
 interface RespClientesPorLinea {
   linea: string;
-  desde: string; // "YYYY-MM"
-  hasta: string; // "YYYY-MM"
+  anioAnterior: number;
+  anioActual: number;
+  tieneDatos: boolean;
   totalClientes: number;
-  porMonto: ClientePorLinea[];
+  clientes: ClientePorLinea[];
+  totales: { anioAnterior: AnioVal; anioActual: AnioVal };
 }
 
 type TopVista = "clientes" | "lineas";
@@ -133,10 +153,6 @@ type TopVista = "clientes" | "lineas";
 const MESES_CORTOS_ES = [
   "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
 ];
-const formatYm = (ym: string): string => {
-  const [a, m] = ym.split("-").map(Number);
-  return `${MESES_CORTOS_ES[m - 1] ?? ym} ${a}`;
-};
 
 type Modo = "unidades" | "pesos";
 type Periodo = "ytd" | "meses";
@@ -318,30 +334,21 @@ export default function VentasVendedorPage() {
   const [clientesLinea, setClientesLinea] = useState<RespClientesPorLinea | null>(null);
   const [clientesLineaLoading, setClientesLineaLoading] = useState(false);
   const [clientesLineaError, setClientesLineaError] = useState<string | null>(null);
-  // Acordeón de esta tabla (ver agrupar/FilaGrupo arriba) — se resetea al
-  // grupo 0 cada vez que se pide una línea nueva, si no quedaría "colgado"
-  // en un grupo que puede no existir para el nuevo set de clientes.
-  const [clientesLineaGrupoAbierto, setClientesLineaGrupoAbierto] = useState(0);
 
-  // `rango` (pedido de Pablo 2026-08-20): antes siempre pegaba sin
-  // desde/hasta y el back resolvía la ventana fija de 12 meses
-  // (últimos 12 meses cerrados). Ahora manda el rango YTD/Meses actual
-  // (ver `rangoPeriodo` más abajo) — la ruta y fetch_clientes_por_linea ya
-  // aceptaban desde/hasta de antes (quedó la plomería, solo no se usaba).
-  // `rango === null` es el caso borde de YTD en enero (sin mes anterior
-  // este año): no pega al back, deja la tabla vacía directamente.
+  // Trae los 2 años completos con desglose mensual (pedido de Pablo
+  // 2026-08-20) — el filtro YTD/Meses lo hace después el front sobre los
+  // meses ya cargados, igual que en modo "cliente". O sea: togglear
+  // YTD/Meses NO vuelve a pegarle al back (antes sí, mandando desde/hasta).
   const fetchClientesPorLinea = useCallback(
-    async (linea: string, rango: { desde: string; hasta: string } | null) => {
+    async (linea: string) => {
       setClientesLineaLoading(true);
       setClientesLineaError(null);
-      setClientesLineaGrupoAbierto(0);
-      if (!rango) {
-        setClientesLinea(null);
-        setClientesLineaLoading(false);
-        return;
-      }
+      // El acordeón de la tabla es compartido con el modo "cliente"
+      // (`filasGrupoAbierto`): se resetea al grupo 0 con cada línea nueva,
+      // si no queda "colgado" en un grupo que puede no existir.
+      setFilasGrupoAbierto(0);
       try {
-        const qs = new URLSearchParams({ linea, desde: rango.desde, hasta: rango.hasta });
+        const qs = new URLSearchParams({ linea });
         const res = await fetch(`/api/ventas/vendedor/clientes-por-linea?${qs.toString()}`, {
           cache: "no-store",
         });
@@ -408,8 +415,7 @@ export default function VentasVendedorPage() {
     [elegirCliente],
   );
 
-  // abrirModalLinea se define más abajo (necesita `rangoPeriodo`, que
-  // depende del estado `periodo` — ver esa sección).
+  // abrirModalLinea se define más abajo (necesita `fetchClientesPorLinea`).
 
   // Abre el modal vacío en modo "cliente", listo para buscar — para no
   // perder la posibilidad de buscar CUALQUIER cliente (no solo los del Top
@@ -489,12 +495,12 @@ export default function VentasVendedorPage() {
   // queda afuera por estar incompleto). "Meses" es el mes actual completo,
   // sin recortar por día.
   //
-  // En modo "cliente" NO pega al back: la respuesta ya trae el desglose
-  // mensual completo de ambos años (ver fetch_ventas_por_linea) y el
-  // período se resuelve sumando los meses correspondientes (ver
-  // mesesActivos/sumaPeriodo más abajo). En modo "linea" SÍ pega al back
-  // con `desde`/`hasta` (ver rangoPeriodo/fetchClientesPorLinea) porque
-  // fetch_clientes_por_linea agrega en SQL, no manda desglose mensual.
+  // NINGUNO de los dos modos pega al back al togglear: ambas respuestas
+  // traen el desglose mensual completo de los 2 años (ver
+  // fetch_ventas_por_linea / fetch_clientes_por_linea) y el período se
+  // resuelve sumando los meses correspondientes (ver mesesActivos/
+  // sumaPeriodo más abajo). Antes el modo "linea" refetcheaba con
+  // desde/hasta; desde 2026-08-20 ya no hace falta.
   const [periodo, setPeriodo] = useState<Periodo>("ytd");
   const mesActualNum = new Date().getMonth() + 1;
   const anioActualNum = new Date().getFullYear();
@@ -502,45 +508,27 @@ export default function VentasVendedorPage() {
   // en el año en curso).
   const mesAnteriorNum = mesActualNum - 1;
 
-  const ym = (anio: number, mes: number) => `${anio}-${String(mes).padStart(2, "0")}`;
-
-  // Rango "YYYY-MM" para mandarle a /api/ventas/vendedor/clientes-por-linea
-  // (modo "linea"), equivalente en fechas absolutas a lo que mesesActivos
-  // resuelve localmente para la tabla línea×año del modo "cliente". `null`
-  // en el caso borde de YTD en enero: a propósito NO hace roll-over a
-  // diciembre del año anterior — "Enero..mes anterior" simplemente no
-  // tiene ningún mes que mostrar todavía ese año.
-  const rangoPeriodo: { desde: string; hasta: string } | null =
-    periodo === "meses"
-      ? { desde: ym(anioActualNum, mesActualNum), hasta: ym(anioActualNum, mesActualNum) }
-      : mesAnteriorNum >= 1
-        ? { desde: ym(anioActualNum, 1), hasta: ym(anioActualNum, mesAnteriorNum) }
-        : null;
-
   // Dispara el modal en modo "linea" — al hacer click en una línea del
-  // ranking "Top 10 líneas" (pedido de Pablo 2026-08-18). Va con el
-  // `rangoPeriodo` YTD/Meses vigente (pedido de Pablo 2026-08-20).
+  // ranking "Top 10 líneas" (pedido de Pablo 2026-08-18).
   const abrirModalLinea = useCallback(
     (linea: string) => {
       setModalMode("linea");
       setModalLinea(linea);
+      // El buscador de cliente del header sigue visible en modo "linea",
+      // pero acá no filtra nada — si quedaba con el texto/selección de una
+      // búsqueda anterior confunde (parece que la lista de clientes de la
+      // línea está acotada a ese cliente). Se limpia al entrar por línea
+      // (pedido de Pablo 2026-08-20).
+      setQCliente("");
+      setClienteSel(null);
+      setSugerencias([]);
+      setMostrarSug(false);
       setModalOpen(true);
       setFiltroVisible(true);
-      fetchClientesPorLinea(linea, rangoPeriodo);
+      fetchClientesPorLinea(linea);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [fetchClientesPorLinea, periodo],
+    [fetchClientesPorLinea],
   );
-
-  // Si el modal ya está abierto en modo "linea" y el usuario togglea
-  // YTD/Meses, vuelve a pedir con el rango nuevo (pedido de Pablo
-  // 2026-08-20: "ambos casos deben tener filtro ytd y mes").
-  useEffect(() => {
-    if (modalMode === "linea" && modalOpen && modalLinea) {
-      fetchClientesPorLinea(modalLinea, rangoPeriodo);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodo]);
 
   const handleFiltrar = useCallback(() => {
     if (!clienteSel) return;
@@ -582,9 +570,39 @@ export default function VentasVendedorPage() {
   // atado a `modo`/`topVista`.
   const fmtTop = modo === "unidades" ? fmtNum : fmtMoney;
 
-  const filas = data?.lineas ?? [];
-  const hayTabla = !!data;
-  const sinDatos = !!data && !data.tieneDatos;
+  // ── Tabla año-anterior vs. año-actual del modal ────────────────────────
+  // MISMA tabla para los dos modos (pedido de Pablo 2026-08-20: "que
+  // también aparezca el cambio entre unidad y $ y desglose mes y año en la
+  // vista de línea"). Lo único que cambia es qué identifica a la fila:
+  //   · modo "cliente" → una fila por LÍNEA    (data.lineas)
+  //   · modo "linea"   → una fila por CLIENTE  (clientesLinea.clientes)
+  // Ambas respuestas traen la misma forma {anioAnterior, anioActual} con
+  // cantidad/monto/meses, así que todo lo de abajo (valor/valorMes,
+  // sumaPeriodo, hover, tendencia, acordeón) sirve igual para las dos.
+  const esModoLinea = modalMode === "linea";
+  const fuenteTabla = esModoLinea ? clientesLinea : data;
+  const filas: FilaTabla[] = useMemo(() => {
+    if (esModoLinea) {
+      return (clientesLinea?.clientes ?? []).map((c) => ({
+        key: `cli-${c.numero}`,
+        etiqueta: c.nombre ? `${c.nombre} (${c.numero})` : String(c.numero),
+        cliente: { numero: c.numero, nombre: c.nombre },
+        anioAnterior: c.anioAnterior,
+        anioActual: c.anioActual,
+      }));
+    }
+    return (data?.lineas ?? []).map((l) => ({
+      key: `lin-${l.linea}`,
+      etiqueta: l.linea,
+      cliente: null,
+      anioAnterior: l.anioAnterior,
+      anioActual: l.anioActual,
+    }));
+  }, [esModoLinea, clientesLinea, data]);
+  const hayTabla = !!fuenteTabla;
+  const sinDatos = !!fuenteTabla && !fuenteTabla.tieneDatos;
+  // Encabezado de la primera columna y de la etiqueta de conteo del header.
+  const colEtiqueta = esModoLinea ? "Cliente" : "Línea";
   // Único caso sin meses: YTD en enero (todavía no hay mes anterior).
   const sinMesesPeriodo = periodo === "ytd" && mesesActivos.length === 0;
 
@@ -672,9 +690,6 @@ export default function VentasVendedorPage() {
   const topGrupos = agrupar(topItems);
   const topGrupoSeguro = Math.min(topGrupoAbierto, Math.max(0, topGrupos.length - 1));
 
-  const clientesLineaItems = clientesLinea?.porMonto ?? [];
-  const clientesLineaGrupos = agrupar(clientesLineaItems);
-  const clientesLineaGrupoSeguro = Math.min(clientesLineaGrupoAbierto, Math.max(0, clientesLineaGrupos.length - 1));
 
   return (
     <div className="min-h-screen bg-[#111111] text-white">
@@ -768,6 +783,20 @@ export default function VentasVendedorPage() {
                         </span>
                       </p>
                     )}
+                    {/* En modo "linea" el título es la línea — antes vivía en
+                        el header de su propia tabla, que ahora es la misma
+                        que la del modo "cliente" (pedido de Pablo
+                        2026-08-20). */}
+                    {esModoLinea && modalLinea && (
+                      <>
+                        <h3 className="text-yellow-400 font-bold text-base uppercase tracking-wide">
+                          {modalLinea}
+                        </h3>
+                        <p className="text-zinc-500 text-xs mt-0.5">
+                          Clientes que compraron esta línea
+                        </p>
+                      </>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0"></div>
                 </div>
@@ -850,13 +879,13 @@ export default function VentasVendedorPage() {
                       </div>
                     </div>
 
-                    {/* Switch pesos/unidades de ESTA tabla (línea×año de un
-                    cliente) — estado propio del modal (`vistaModal`), no el
-                    del ranking del pie. Solo tiene sentido en modo "cliente";
-                    en modo "linea" la tabla de clientes ya es siempre por $
-                    (pedido de Pablo 2026-08-18: "de mayor a menor en
-                    gasto"). */}
-                    {modalMode === "cliente" && (
+                    {/* Switch $/unidades y desglose por mes de ESTA tabla —
+                    estado propio del modal (`vistaModal`/`desglosado`), no el
+                    del ranking del pie. Desde 2026-08-20 valen para los DOS
+                    modos (pedido de Pablo): la tabla de clientes de una línea
+                    tiene el mismo desglose año/mes que la de líneas de un
+                    cliente. */}
+                    {hayTabla && (
                       <>
                         <div className="flex flex-col gap-1.5">
                           <button
@@ -901,15 +930,12 @@ export default function VentasVendedorPage() {
                     )}
 
                     {/* Botón dividido: YTD (Ene–mes anterior) vs. Meses (mes
-                    actual completo) — pedido de Pablo 2026-08-20: comparte
-                    estado (`periodo`) entre modo "cliente" (año actual vs.
-                    anterior, filtra el desglose mensual ya traído) y modo
-                    "linea" (pega de nuevo al back con desde/hasta, ver
-                    rangoPeriodo/fetchClientesPorLinea). Los títulos usan
-                    MESES_CORTOS_ES directo (no `labelDeMes`/`data`) porque
-                    en modo "linea" no hay tabla línea×año cargada. */}
-                    {((modalMode === "cliente" && hayTabla && !sinDatos) ||
-                      modalMode === "linea") && (
+                    actual completo) — pedido de Pablo 2026-08-20: un solo
+                    estado (`periodo`) para los dos modos. En ninguno pega al
+                    back: filtra el desglose mensual ya traído (ver
+                    mesesActivos/sumaPeriodo). Los títulos usan
+                    MESES_CORTOS_ES directo, no `labelDeMes`/`data`. */}
+                    {hayTabla && !sinDatos && (
                       <div className="flex flex-col gap-1.5">
                         <div className="inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700">
                           <button
@@ -944,9 +970,9 @@ export default function VentasVendedorPage() {
                       </div>
                     )}
 
-                    {modalMode === "cliente" && data && (
+                    {hayTabla && (
                       <span className="text-sm text-zinc-500 pb-2">
-                        {filas.length} línea(s)
+                        {filas.length} {esModoLinea ? "cliente(s)" : "línea(s)"}
                       </span>
                     )}
                     <button
@@ -963,9 +989,8 @@ export default function VentasVendedorPage() {
               </div>
 
               <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-                {modalMode === "cliente" && (
-                  <>
-                    {!hayTabla && (
+                <>
+                    {modalMode === "cliente" && !hayTabla && (
                       <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
                         <Search size={40} className="text-zinc-700" />
                         <p className="text-zinc-500 text-sm">
@@ -975,13 +1000,40 @@ export default function VentasVendedorPage() {
                       </div>
                     )}
 
+                    {esModoLinea && clientesLineaError && (
+                      <div className="rounded-xl border border-red-900/60 bg-red-950/30 px-5 py-4 text-sm text-red-300">
+                        {clientesLineaError}
+                      </div>
+                    )}
+
+                    {esModoLinea && !hayTabla && !clientesLineaError && (
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
+                        <Table2 size={40} className="text-zinc-700" />
+                        <p className="text-zinc-500 text-sm">
+                          {clientesLineaLoading
+                            ? "Cargando clientes de la línea…"
+                            : "Sin datos para esta línea."}
+                        </p>
+                      </div>
+                    )}
+
                     {hayTabla && sinDatos && (
                       <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-16 flex flex-col items-center gap-3 text-center">
                         <Table2 size={40} className="text-zinc-700" />
                         <p className="text-zinc-500 text-sm">
-                          Sin ventas registradas para{" "}
-                          {data?.cliente.nombre ?? data?.cliente.codigo} en{" "}
-                          {data?.anioAnterior}–{data?.anioActual}.
+                          {esModoLinea ? (
+                            <>
+                              Ningún cliente compró {modalLinea} en{" "}
+                              {clientesLinea?.anioAnterior}–
+                              {clientesLinea?.anioActual}.
+                            </>
+                          ) : (
+                            <>
+                              Sin ventas registradas para{" "}
+                              {data?.cliente.nombre ?? data?.cliente.codigo} en{" "}
+                              {data?.anioAnterior}–{data?.anioActual}.
+                            </>
+                          )}
                         </p>
                       </div>
                     )}
@@ -999,7 +1051,9 @@ export default function VentasVendedorPage() {
                     {hayTabla && !sinDatos && !sinMesesPeriodo && (
                       <div
                         className={`rounded-xl border border-zinc-800 overflow-hidden transition-opacity ${
-                          loading ? "opacity-50 pointer-events-none" : ""
+                          loading || clientesLineaLoading
+                            ? "opacity-50 pointer-events-none"
+                            : ""
                         }`}
                         onMouseLeave={limpiarHover}
                       >
@@ -1019,7 +1073,7 @@ export default function VentasVendedorPage() {
                                     setHoverCol(COL_LINEA);
                                   }}
                                 >
-                                  Línea
+                                  {colEtiqueta}
                                 </th>
                                 <th
                                   colSpan={colSpanAnio}
@@ -1037,18 +1091,18 @@ export default function VentasVendedorPage() {
                                         }
                                   }
                                 >
-                                  Año {data!.anioAnterior}
+                                  Año {fuenteTabla!.anioAnterior}
                                   {periodo === "ytd" && mesAnteriorNum >= 1 && (
                                     <span className="text-zinc-500 font-normal">
                                       {" "}
                                       (Ene–
-                                      {labelDeMes(data!.totales.anioAnterior, mesAnteriorNum)})
+                                      {labelDeMes(fuenteTabla!.totales.anioAnterior, mesAnteriorNum)})
                                     </span>
                                   )}
                                   {periodo === "meses" && (
                                     <span className="text-zinc-500 font-normal">
                                       {" "}
-                                      ({labelDeMes(data!.totales.anioAnterior, mesActualNum)})
+                                      ({labelDeMes(fuenteTabla!.totales.anioAnterior, mesActualNum)})
                                     </span>
                                   )}
                                 </th>
@@ -1068,18 +1122,18 @@ export default function VentasVendedorPage() {
                                         }
                                   }
                                 >
-                                  Año {data!.anioActual}
+                                  Año {fuenteTabla!.anioActual}
                                   {periodo === "ytd" && mesAnteriorNum >= 1 && (
                                     <span className="text-yellow-400/60 font-normal">
                                       {" "}
                                       (Ene–
-                                      {labelDeMes(data!.totales.anioActual, mesAnteriorNum)})
+                                      {labelDeMes(fuenteTabla!.totales.anioActual, mesAnteriorNum)})
                                     </span>
                                   )}
                                   {periodo === "meses" && (
                                     <span className="text-yellow-400/60 font-normal">
                                       {" "}
-                                      ({labelDeMes(data!.totales.anioActual, mesActualNum)})
+                                      ({labelDeMes(fuenteTabla!.totales.anioActual, mesActualNum)})
                                     </span>
                                   )}
                                 </th>
@@ -1093,7 +1147,7 @@ export default function VentasVendedorPage() {
                               </tr>
                               {desglosado && (
                                 <tr className="text-[11px] text-zinc-500">
-                                  {data!.totales.anioAnterior.meses
+                                  {fuenteTabla!.totales.anioAnterior.meses
                                     .filter((m) => mesesActivos.includes(m.mes))
                                     .map((m) => (
                                       <th
@@ -1124,7 +1178,7 @@ export default function VentasVendedorPage() {
                                   >
                                     Total
                                   </th>
-                                  {data!.totales.anioActual.meses
+                                  {fuenteTabla!.totales.anioActual.meses
                                     .filter((m) => mesesActivos.includes(m.mes))
                                     .map((m) => (
                                       <th
@@ -1185,17 +1239,37 @@ export default function VentasVendedorPage() {
                                     const rowTendencia = tendencia(r);
                                     return (
                                       <tr
-                                        key={r.linea}
+                                        key={r.key}
                                         className="border-t border-zinc-800/60 transition-colors"
                                       >
+                                        {/* En modo "linea" la fila ES un
+                                        cliente: se puede clickear para
+                                        pivotear al modo "cliente" con su
+                                        tabla línea×año (mismo drill-down que
+                                        tenía la tabla vieja de clientes por
+                                        línea). En modo "cliente" la etiqueta
+                                        es la línea y no es clickeable. */}
                                         <td
-                                          className={`px-3 py-2 text-zinc-100 whitespace-nowrap cursor-default ${celda(rowIdx, COL_LINEA, rowCrece)}`}
+                                          className={`px-3 py-2 text-zinc-100 whitespace-nowrap ${r.cliente ? "" : "cursor-default"} ${celda(rowIdx, COL_LINEA, rowCrece)}`}
                                           onMouseEnter={() => {
                                             setHoverRow(rowIdx);
                                             setHoverCol(COL_LINEA);
                                           }}
                                         >
-                                          {r.linea}
+                                          {r.cliente ? (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                abrirModalCliente(r.cliente!)
+                                              }
+                                              title="Ver las líneas que compró este cliente"
+                                              className="hover:text-yellow-400 hover:underline transition-colors text-left"
+                                            >
+                                              {r.etiqueta}
+                                            </button>
+                                          ) : (
+                                            r.etiqueta
+                                          )}
                                         </td>
                                         {desglosado &&
                                           r.anioAnterior.meses
@@ -1293,7 +1367,7 @@ export default function VentasVendedorPage() {
                                   Total
                                 </td>
                                 {desglosado &&
-                                  data!.totales.anioAnterior.meses
+                                  fuenteTabla!.totales.anioAnterior.meses
                                     .filter((m) => mesesActivos.includes(m.mes))
                                     .map((m) => {
                                       const colIdx = colAnteriorMes(m.mes);
@@ -1327,12 +1401,12 @@ export default function VentasVendedorPage() {
                                 >
                                   {fmt(
                                     valor(
-                                      sumaPeriodo(data!.totales.anioAnterior),
+                                      sumaPeriodo(fuenteTabla!.totales.anioAnterior),
                                     ),
                                   )}
                                 </td>
                                 {desglosado &&
-                                  data!.totales.anioActual.meses
+                                  fuenteTabla!.totales.anioActual.meses
                                     .filter((m) => mesesActivos.includes(m.mes))
                                     .map((m) => {
                                       const colIdx = colActualMes(m.mes);
@@ -1366,14 +1440,14 @@ export default function VentasVendedorPage() {
                                 >
                                   {fmt(
                                     valor(
-                                      sumaPeriodo(data!.totales.anioActual),
+                                      sumaPeriodo(fuenteTabla!.totales.anioActual),
                                     ),
                                   )}
                                 </td>
                                 <td
-                                  className={`px-3 py-2 text-center text-base font-bold border-l border-zinc-800 cursor-default ${celdaTendencia(tendencia(data!.totales))}`}
+                                  className={`px-3 py-2 text-center text-base font-bold border-l border-zinc-800 cursor-default ${celdaTendencia(tendencia(fuenteTabla!.totales))}`}
                                 >
-                                  {iconoTendencia(tendencia(data!.totales))}
+                                  {iconoTendencia(tendencia(fuenteTabla!.totales))}
                                 </td>
                               </tr>
                             </tfoot>
@@ -1382,139 +1456,6 @@ export default function VentasVendedorPage() {
                       </div>
                     )}
                   </>
-                )}
-
-                {modalMode === "linea" && (
-                  <div
-                    className={`rounded-xl border border-zinc-800 overflow-hidden transition-opacity ${
-                      clientesLineaLoading ? "opacity-50" : ""
-                    }`}
-                  >
-                    <div className="px-5 py-3 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-4">
-                      <div>
-                        <h3 className="text-yellow-400 font-bold text-base uppercase tracking-wide">
-                          {modalLinea}
-                        </h3>
-                        <p className="text-zinc-500 text-xs mt-0.5">
-                          {clientesLinea
-                            ? clientesLinea.desde === clientesLinea.hasta
-                              ? `${formatYm(clientesLinea.desde)} (mes actual)`
-                              : `${formatYm(clientesLinea.desde)} – ${formatYm(clientesLinea.hasta)} (año en curso)`
-                            : "…"}
-                        </p>
-                      </div>
-                      <span className="text-sm text-zinc-500">
-                        {clientesLinea
-                          ? `${clientesLinea.totalClientes} cliente(s)`
-                          : ""}
-                      </span>
-                    </div>
-
-                    {clientesLineaError && (
-                      <div className="px-5 py-4 flex items-center gap-3 text-sm text-red-300">
-                        <AlertTriangle size={16} className="text-red-400" />{" "}
-                        {clientesLineaError}
-                      </div>
-                    )}
-
-                    {!clientesLineaError &&
-                      !clientesLineaLoading &&
-                      (clientesLinea?.porMonto?.length ?? 0) === 0 && (
-                        <div className="px-5 py-12 flex flex-col items-center gap-3 text-center">
-                          <Table2 size={32} className="text-zinc-700" />
-                          <p className="text-zinc-500 text-sm">
-                            {periodo === "ytd" && mesAnteriorNum < 1
-                              ? "Todavía no hay mes anterior este año — probá con \"Meses\" para ver Enero."
-                              : "Sin ventas registradas en el rango elegido."}
-                          </p>
-                        </div>
-                      )}
-
-                    {!clientesLineaError &&
-                      (clientesLinea?.porMonto?.length ?? 0) > 0 && (
-                        // overflow-x-auto (pedido de Pablo 2026-08-18: "que la tabla no
-                        // se exceda de la ventana"). Sin min-w-max y con el
-                        // nombre truncado (max-w-0 w-full truncate — pedido de
-                        // Pablo 2026-08-18: "se sigue escondiendo 3ra
-                        // columna"): la tabla ya no necesita scroll horizontal
-                        // para mostrar la columna de $, el nombre largo se
-                        // corta con "…" en vez de empujarla fuera de la
-                        // pantalla.
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-sm">
-                            <thead className="bg-[#1A1A1A] text-zinc-400">
-                              <tr>
-                                <th className="px-3 py-2 font-medium text-left whitespace-nowrap w-10">
-                                  #
-                                </th>
-                                <th className="px-3 py-2 font-medium text-left">
-                                  Cliente
-                                </th>
-                                <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800">
-                                  Gasto
-                                </th>
-                              </tr>
-                            </thead>
-                            {clientesLineaGrupos.map((grupo, gIdx) => (
-                              <tbody key={`cl-${gIdx}`}>
-                                {clientesLineaGrupos.length > 1 && (
-                                  <FilaGrupo
-                                    idx={gIdx}
-                                    desde={gIdx * GROUP_SIZE}
-                                    hasta={Math.min(
-                                      (gIdx + 1) * GROUP_SIZE,
-                                      clientesLineaItems.length,
-                                    )}
-                                    total={clientesLineaItems.length}
-                                    abierto={clientesLineaGrupoSeguro === gIdx}
-                                    onClick={() =>
-                                      setClientesLineaGrupoAbierto(
-                                        clientesLineaGrupoSeguro === gIdx
-                                          ? -1
-                                          : gIdx,
-                                      )
-                                    }
-                                    colSpan={3}
-                                  />
-                                )}
-                                {(clientesLineaGrupos.length <= 1 ||
-                                  clientesLineaGrupoSeguro === gIdx) &&
-                                  grupo.map((c, i) => (
-                                    <tr
-                                      key={c.numero}
-                                      className="border-t border-zinc-800/60 hover:bg-zinc-800/30 transition-colors cursor-pointer"
-                                      onClick={() =>
-                                        abrirModalCliente({
-                                          numero: c.numero,
-                                          nombre: c.nombre,
-                                        })
-                                      }
-                                      title="Ver ventas de este cliente"
-                                    >
-                                      <td className="px-3 py-2 text-zinc-500 tabular-nums">
-                                        {gIdx * GROUP_SIZE + i + 1}
-                                      </td>
-                                      <td
-                                        className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate"
-                                        title={c.nombre ?? undefined}
-                                      >
-                                        {c.nombre ?? "(sin nombre)"}{" "}
-                                        <span className="text-zinc-500 font-mono text-xs">
-                                          ({c.numero})
-                                        </span>
-                                      </td>
-                                      <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
-                                        {fmtMoney(c.monto)}
-                                      </td>
-                                    </tr>
-                                  ))}
-                              </tbody>
-                            ))}
-                          </table>
-                        </div>
-                      )}
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -1648,10 +1589,6 @@ export default function VentasVendedorPage() {
                                         onClick={() => abrirModalLinea(l.linea)}
                                         className="hover:text-yellow-400 hover:underline transition-colors text-left"
                                         title="Ver clientes que compraron esta línea"
-                                        onChange={(e) => {
-                                          setQCliente("");
-                                          setClienteSel(null);
-                                        }}
                                       >
                                         {l.linea}
                                       </button>

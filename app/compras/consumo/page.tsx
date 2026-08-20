@@ -611,8 +611,9 @@ export default function ComprasConsumoPage() {
 
         {vista === "tabla" && (
           <>
-            {/* Filtros: rango de meses (compartido) + búsqueda rápida por código */}
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 flex flex-wrap items-end gap-4">
+            {/* Filtros: rango de meses (compartido) + búsqueda rápida por código.
+                sticky top-16: queda fijo debajo del header al scrollear la tabla. */}
+            <div className="sticky top-16 z-40 rounded-xl border border-zinc-800 bg-[#141414]/95 backdrop-blur px-5 py-4 flex flex-wrap items-end gap-4">
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="mes-desde-t" className="text-xs text-zinc-400 uppercase tracking-wide">
                   Desde (mes)

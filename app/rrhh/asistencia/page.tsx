@@ -916,7 +916,7 @@ export default function AsistenciaPage() {
         />
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-4">
+      <div className="sticky top-0 z-40 -mx-6 px-6 py-3 mb-4 bg-background/95 backdrop-blur border-b grid grid-cols-1 md:grid-cols-6 gap-3">
         <Input
           placeholder="Empleado…"
           value={empleado}

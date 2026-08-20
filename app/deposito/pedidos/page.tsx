@@ -339,6 +339,10 @@ export default function PedidosPreparadosPage() {
 
       <main className="max-w-7xl mx-auto px-4 py-6">
         <InicioButton label="Inicio" iconSize={14} className="text-xs text-zinc-500 hover:text-yellow-400 transition-colors mb-3" />
+        {/* Bloque pegajoso: título + rango de fechas + segmentadores.
+            Esta vista no tiene <header> propio, asi que se ancla en top-0
+            para que los filtros queden siempre visibles al scrollear. */}
+        <div className="sticky top-0 z-40 -mx-4 px-4 pt-3 pb-2 mb-4 bg-[#111111]/95 backdrop-blur border-b border-zinc-800">
         <div className="flex items-start justify-between gap-4 flex-wrap mb-1">
           <PageTitle title="Pedidos preparados"
             sub="Ingresados vs preparados (Picking) y productividad por preparador · Depósito Central" />
@@ -359,7 +363,7 @@ export default function PedidosPreparadosPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap mb-4">
+        <div className="flex items-center gap-2 flex-wrap">
           <Seg<Vista> val={vista} onChange={setVista}
             opts={[
               { v: "comp", label: "Comparativa", icon: Users },
@@ -378,6 +382,7 @@ export default function PedidosPreparadosPage() {
               {ranking.map((r) => <option key={r.op} value={r.op}>{r.op}</option>)}
             </select>
           )}
+        </div>
         </div>
 
         {!hayDatos ? (

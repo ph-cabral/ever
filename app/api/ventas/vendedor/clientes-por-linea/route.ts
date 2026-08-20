@@ -8,26 +8,39 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // Proxy → FastAPI indicadores-api: clientes que compraron una línea de
-// artículo, ordenados por MONTO ($) de mayor a menor, en el mismo rango de
-// 12 meses que /api/ventas/vendedor/top-clientes y
-// /api/ventas/vendedor/top-lineas — para el modal de /ventas/vendedor al
-// hacer click en una línea del ranking "Top 10 líneas" (pedido de Pablo
-// 2026-08-18: "en caso de línea debe verse en la tabla los clientes, de
-// mayor a menor en gasto"). Ver fetch_clientes_por_linea en ventas.py.
+// artículo, con el mismo desglose año/mes y las mismas dos métricas
+// ($/unidades) que la tabla línea×año del modo "cliente" — para el modal de
+// /ventas/vendedor al hacer click en una línea del ranking "Top 10 líneas"
+// (pedido de Pablo 2026-08-18: "en caso de línea debe verse en la tabla los
+// clientes, de mayor a menor en gasto"; ampliado 2026-08-20 con los toggles
+// $/Unidades y por mes/por año). Ver fetch_clientes_por_linea en ventas.py.
+//
+// Ya NO se pasan desde/hasta: el back devuelve los 2 años completos y el
+// filtro YTD/Meses lo hace el front sobre el desglose ya traído.
 //
 // Acceso por vendedor: mismo criterio que el resto de /api/ventas/vendedor/*
 // — se resuelve server-side si quien pide es admin (todos los clientes que
 // compraron esa línea) o no-admin (solo los de su cartera).
-function mesActual(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+function aniosPorDefecto(): { anioAnterior: number; anioActual: number } {
+  const y = new Date().getFullYear();
+  return { anioAnterior: y - 1, anioActual: y };
+}
+
+function anioVacio() {
+  return {
+    cantidad: 0,
+    monto: 0,
+    meses: Array.from({ length: 12 }, (_, i) => ({
+      mes: i + 1,
+      cantidad: 0,
+      monto: 0,
+    })),
+  };
 }
 
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const linea = sp.get("linea")?.trim();
-  const desde = sp.get("desde")?.trim() || undefined;
-  const hasta = sp.get("hasta")?.trim() || undefined;
 
   if (!linea) {
     return NextResponse.json({ error: "Falta 'linea'" }, { status: 400 });
@@ -41,20 +54,21 @@ export async function GET(req: NextRequest) {
     // Mismo tratamiento que el resto de las rutas de /ventas/vendedor: sin
     // vendedor asignado todavía = cero clientes visibles, no "sin
     // restricción".
+    const { anioAnterior, anioActual } = aniosPorDefecto();
     return NextResponse.json({
       linea,
-      desde: desde ?? mesActual(),
-      hasta: hasta ?? mesActual(),
+      anioAnterior,
+      anioActual,
+      tieneDatos: false,
       totalClientes: 0,
-      porMonto: [],
+      clientes: [],
+      totales: { anioAnterior: anioVacio(), anioActual: anioVacio() },
     });
   }
 
   try {
     const qs = new URLSearchParams({ linea });
     if (!acceso.isAdmin) qs.set("vendedor", String(acceso.vendedorCodigo));
-    if (desde) qs.set("desde", desde);
-    if (hasta) qs.set("hasta", hasta);
     const res = await fetch(`${API_URL}/ventas/vendedor/clientes-por-linea?${qs.toString()}`, {
       cache: "no-store",
       signal: AbortSignal.timeout(55000),

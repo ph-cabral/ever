@@ -572,11 +572,20 @@ def fetch_top_lineas(
 # Clientes por línea — /ventas/vendedor/clientes-por-linea (pedido de Pablo
 # 2026-08-18: al hacer click en una línea del ranking "Top líneas", el
 # modal de /ventas/vendedor tiene que mostrar los CLIENTES que compraron esa
-# línea, ordenados de mayor a menor por $ gastado). Gemelo de
-# fetch_top_clientes: mismo rango fijo (_resolver_rango), mismo cache 15
-# min, mismo criterio de acceso por vendedor — lo único que cambia es que
-# acá se agrega un filtro por línea de artículo al WHERE/JOIN que ya usa
-# fetch_top_clientes.
+# línea).
+#
+# Desde 2026-08-20 (pedido de Pablo) esta vista es el ESPEJO EXACTO de la
+# tabla línea×año del modo "cliente" (fetch_ventas_por_linea): mismos dos
+# años (anterior/actual), mismo desglose mensual y mismas dos métricas
+# ($/unidades), para que el modal pueda ofrecer los mismos toggles
+# "$/Unidades" y "por mes/por año". Cambia únicamente qué identifica a la
+# fila: allá una línea, acá un cliente.
+#
+# Eso reemplaza la versión anterior, que traía un único total en $ por
+# cliente dentro de una ventana desde/hasta y volvía a pegarle al back en
+# cada toggle YTD/Meses. Ahora se traen los 2 años completos de una y el
+# filtro YTD/Meses lo hace el front sobre el desglose mensual ya cargado —
+# igual que en modo "cliente", y sin refetch por toggle.
 #
 # El front manda el NOMBRE de la línea (es lo que muestra el ranking), pero
 # ap.Nivel1 guarda el CÓDIGO (int) — la traducción se hace dentro del SQL
@@ -589,6 +598,14 @@ def fetch_top_lineas(
 # artículos sin línea con los que tienen un código que no existe en
 # Stk_Nivel1 — así que el filtro es "no matchea el catálogo" (NOT EXISTS) en
 # vez de una comparación de nombre.
+#
+# Agregación en SQL (GROUP BY cliente/año/mes) y no en Python — el
+# resultset que viaja es a lo sumo clientes × 24 filas, no un renglón por
+# comprobante. El rango de fechas va como enteros Magnus sobre la columna
+# vc.FecMovim (ver _resolver_rango / gotcha del HANDOFF: nunca comparar
+# dbo.fecha_cla2sql(...) contra un parámetro de fecha). Año/mes se derivan
+# con DATEADD sobre el entero (built-in, como deposito.py) y NO con la UDF
+# escalar dbo.fecha_cla2sql, que se evaluaría una vez por renglón.
 _TOP_CLIENTES_LINEA_CACHE: dict[tuple, tuple[float, dict]] = {}
 _TOP_CLIENTES_LINEA_TTL_SEG = 15 * 60  # 15 minutos
 
@@ -596,6 +613,9 @@ SQL_CLIENTES_LINEA_VENDEDOR_TPL = """
 SELECT
     c.CodCliente AS CodCliente,
     LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
+    YEAR(DATEADD(day, vc.FecMovim, '1800-12-28'))  AS Anio,
+    MONTH(DATEADD(day, vc.FecMovim, '1800-12-28')) AS Mes,
+    SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS CantidadNeta,
     SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
 FROM MAGNUS_SITD.dbo.Clientes c
 JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
@@ -609,15 +629,17 @@ WHERE pu.Usu_Arma_Codigo = ?
   AND cc.EvitaInformesYListados <> 1
   AND vc.FecMovim BETWEEN ? AND ?
   AND {linea_cond}
-GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre))
-HAVING SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) > 0
-ORDER BY MontoNeto DESC
+GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre)),
+         YEAR(DATEADD(day, vc.FecMovim, '1800-12-28')), MONTH(DATEADD(day, vc.FecMovim, '1800-12-28'))
 """
 
 SQL_CLIENTES_LINEA_TODOS_TPL = """
 SELECT
     c.CodCliente AS CodCliente,
     LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
+    YEAR(DATEADD(day, vc.FecMovim, '1800-12-28'))  AS Anio,
+    MONTH(DATEADD(day, vc.FecMovim, '1800-12-28')) AS Mes,
+    SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS CantidadNeta,
     SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
 FROM MAGNUS_SITD.dbo.Clientes c
 JOIN Ven_CompCabecera vc ON vc.CodCliente = c.CodCliente
@@ -628,9 +650,8 @@ LEFT JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
 WHERE cc.EvitaInformesYListados <> 1
   AND vc.FecMovim BETWEEN ? AND ?
   AND {linea_cond}
-GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre))
-HAVING SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) > 0
-ORDER BY MontoNeto DESC
+GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre)),
+         YEAR(DATEADD(day, vc.FecMovim, '1800-12-28')), MONTH(DATEADD(day, vc.FecMovim, '1800-12-28'))
 """
 
 _LINEA_COND_EXACTA = (
@@ -647,33 +668,38 @@ def fetch_clientes_por_linea(
     linea: str,
     vendedor: int | None = None,
     limit: int = 1_000_000,  # "sin límite" (pedido de Pablo 2026-08-19) — ver main.py
-    desde: str | None = None,
-    hasta: str | None = None,
     forzar: bool = False,
 ) -> dict:
-    """Clientes que compraron una línea de artículo, ordenados por MONTO
-    (venta neta, $) de mayor a menor, en el mismo rango fijo de 12 meses que
-    fetch_top_clientes/fetch_top_lineas — para el modal de
-    /ventas/vendedor cuando se hace click en una línea del ranking "Top líneas".
+    """Clientes que compraron una línea de artículo, con el MISMO desglose
+    que la tabla línea×año del modo "cliente": año anterior y año actual,
+    cada uno con total y los 12 meses, en cantidad y en monto.
 
-    Devuelve `porMonto` (las `limit` primeras, ya ordenadas por SQL) y
-    `totalClientes` (cuántos clientes distintos compraron esa línea en el
-    rango, no cuántos se muestran).
+    El front elige qué métrica mostrar ($/unidades) y si desglosar por mes,
+    y filtra YTD/Meses sobre los meses ya traídos — acá no se recorta nada
+    por período (a diferencia de la versión anterior de este endpoint, que
+    recibía desde/hasta).
 
     `linea`: nombre de línea tal cual lo devuelve fetch_top_lineas
-    (Stk_Nivel1.Detalle trimeado) — o SIN_LINEA, caso especial que no compara
-    nombre sino que filtra los artículos sin match en el catálogo.
+    (Stk_Nivel1.Detalle trimeado) — o SIN_LINEA, caso especial que no
+    compara nombre sino que filtra los artículos sin match en el catálogo.
 
     `vendedor`: mismo criterio de acceso que fetch_top_clientes — si se
-    pasa, solo clientes de la cartera de ese vendedor."""
-    desde_ym, hasta_ym, dia_desde, dia_hasta = _resolver_rango(desde, hasta)
+    pasa, solo clientes de la cartera de ese vendedor.
 
+    Orden: por monto total de los 2 años, de mayor a menor (mismo criterio
+    de "los que más gastaron" que tenía la versión anterior)."""
     linea_norm = (linea or "").strip()
     if not linea_norm:
         raise ValueError("Falta 'linea'")
 
+    hoy = date.today()
+    anio_actual = hoy.year
+    anio_anterior = anio_actual - 1
+    dia_desde = (date(anio_anterior, 1, 1) - BASE_DATE).days
+    dia_hasta = (date(anio_actual, 12, 31) - BASE_DATE).days
+
     limit_i = int(limit)
-    cache_key = (linea_norm, vendedor, limit_i, desde_ym, hasta_ym)
+    cache_key = (linea_norm, vendedor, limit_i, anio_anterior, anio_actual)
     ahora = time.monotonic()
     if not forzar:
         cacheado = _TOP_CLIENTES_LINEA_CACHE.get(cache_key)
@@ -683,44 +709,80 @@ def fetch_clientes_por_linea(
     es_sin_linea = linea_norm == SIN_LINEA
     linea_cond = _LINEA_COND_SIN_LINEA if es_sin_linea else _LINEA_COND_EXACTA
 
-    # El nombre va directo como parámetro: la traducción nombre→código la
-    # hace el subquery contra Stk_Nivel1 dentro del SQL (ver _LINEA_COND_*).
-    linea_sql = linea_norm
-
     conn = get_connection("EVERWEAR")
     try:
         cur = conn.cursor()
         cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         if vendedor is None:
             sql = SQL_CLIENTES_LINEA_TODOS_TPL.format(linea_cond=linea_cond)
-            params = (dia_desde, dia_hasta) if es_sin_linea else (dia_desde, dia_hasta, linea_sql)
+            params = (dia_desde, dia_hasta) if es_sin_linea else (dia_desde, dia_hasta, linea_norm)
         else:
             sql = SQL_CLIENTES_LINEA_VENDEDOR_TPL.format(linea_cond=linea_cond)
             params = (
                 (int(vendedor), dia_desde, dia_hasta)
                 if es_sin_linea
-                else (int(vendedor), dia_desde, dia_hasta, linea_sql)
+                else (int(vendedor), dia_desde, dia_hasta, linea_norm)
             )
         cur.execute(sql, params)
 
-        clientes: list[dict] = []
-        for cod, nombre, monto in cur.fetchall():
-            if cod is None:
+        clientes: dict[int, dict] = {}
+        tot_anterior = _anio_vacio()
+        tot_actual = _anio_vacio()
+
+        for cod, nombre, anio, mes, cant, monto in cur.fetchall():
+            if cod is None or anio is None or mes is None:
                 continue
-            clientes.append(
-                {
-                    "numero": int(cod),
+            anio = int(anio)
+            mes = int(mes)
+            if anio not in (anio_actual, anio_anterior) or not 1 <= mes <= 12:
+                continue
+            cod = int(cod)
+            cant = float(_safe(cant) or 0)
+            monto = float(_safe(monto) or 0)
+
+            bucket = clientes.get(cod)
+            if bucket is None:
+                bucket = {
+                    "numero": cod,
                     "nombre": (str(nombre).strip() if nombre else None),
-                    "monto": round(float(_safe(monto) or 0), 2),
+                    "anioAnterior": _anio_vacio(),
+                    "anioActual": _anio_vacio(),
                 }
-            )
+                clientes[cod] = bucket
+
+            destino = bucket["anioActual"] if anio == anio_actual else bucket["anioAnterior"]
+            destino["cantidad"] += cant
+            destino["monto"] += monto
+            destino["meses"][mes - 1]["cantidad"] += cant
+            destino["meses"][mes - 1]["monto"] += monto
+
+            tot_destino = tot_actual if anio == anio_actual else tot_anterior
+            tot_destino["cantidad"] += cant
+            tot_destino["monto"] += monto
+            tot_destino["meses"][mes - 1]["cantidad"] += cant
+            tot_destino["meses"][mes - 1]["monto"] += monto
+
+        clientes_out = []
+        for b in clientes.values():
+            b["anioAnterior"] = _round_anio(b["anioAnterior"])
+            b["anioActual"] = _round_anio(b["anioActual"])
+            clientes_out.append(b)
+        clientes_out.sort(
+            key=lambda b: b["anioAnterior"]["monto"] + b["anioActual"]["monto"],
+            reverse=True,
+        )
 
         resultado = {
             "linea": linea_norm,
-            "desde": f"{desde_ym[0]:04d}-{desde_ym[1]:02d}",
-            "hasta": f"{hasta_ym[0]:04d}-{hasta_ym[1]:02d}",
-            "totalClientes": len(clientes),
-            "porMonto": clientes[:limit_i],
+            "anioAnterior": anio_anterior,
+            "anioActual": anio_actual,
+            "tieneDatos": bool(clientes_out),
+            "totalClientes": len(clientes_out),
+            "clientes": clientes_out[:limit_i],
+            "totales": {
+                "anioAnterior": _round_anio(tot_anterior),
+                "anioActual": _round_anio(tot_actual),
+            },
         }
         _TOP_CLIENTES_LINEA_CACHE[cache_key] = (ahora, resultado)
         return resultado

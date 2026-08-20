@@ -194,7 +194,7 @@ export function PedidosAsignadosTab() {
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div className="sticky top-16 z-40 -mx-8 px-8 py-3 bg-[#111111]/95 backdrop-blur border-b border-zinc-800 flex items-start justify-between gap-4 flex-wrap">
         <PageTitle
           title="Pedidos asignados"
           sub="Quién controló cada pedido y cuándo — deposito.control_asignacion"

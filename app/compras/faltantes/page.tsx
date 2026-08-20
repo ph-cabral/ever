@@ -934,8 +934,10 @@ export default function ComprasFaltantesPage() {
       </header>
 
       <main className="max-w-[1900px] mx-auto px-3 md:px-8 py-6">
-        {/* Selector de rango + filtros por estado */}
-        <div className="flex flex-wrap items-center gap-2 mb-4">
+        {/* Selector de rango + filtros por estado.
+            sticky top-16: queda fijo debajo del header (h-16) al scrollear,
+            para no tener que subir toda la vista para cambiar el rango. */}
+        <div className="sticky top-16 z-40 -mx-3 md:-mx-8 px-3 md:px-8 py-3 mb-4 bg-[#111111]/95 backdrop-blur border-b border-zinc-800 flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2 mr-2">
             <CalendarRange size={15} className="text-zinc-500" />
             <DateRangeField

@@ -58,7 +58,7 @@ export default function RankingCortes() {
 
   return (
     <div>
-      <div className="flex flex-wrap gap-3 mb-4 items-end">
+      <div className="sticky top-0 z-10 -mx-6 px-6 -mt-4 pt-4 pb-3 mb-4 bg-white border-b flex flex-wrap gap-3 items-end">
         <div className="flex flex-col gap-1">
           <label className="text-xs text-gray-500 font-medium">Desde</label>
           <DateField value={desde} onChange={handleDesde} />

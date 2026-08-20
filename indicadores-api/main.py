@@ -789,18 +789,20 @@ def ventas_vendedor_clientes_por_linea(
     # superior — traer TODOS los clientes que compraron esa línea en el
     # rango; el front agrupa de a 50 en acordeones colapsables en pantalla.
     limit: int = Query(default=1_000_000, ge=1),
-    desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: 11 meses antes de `hasta`)"),
-    hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes actual)"),
 ):
-    """Clientes que compraron una línea de artículo, ordenados por MONTO ($)
-    de mayor a menor, en el mismo rango de 12 meses que
-    /ventas/vendedor/top-clientes y /ventas/vendedor/top-lineas — para el
-    modal de /ventas/vendedor al hacer click en una línea del ranking de
-    líneas. Trae TODOS los clientes de esa línea en el rango (pedido de
-    Pablo 2026-08-19), no un recorte a 100. Ver fetch_clientes_por_linea
-    (ventas.py)."""
+    """Clientes que compraron una línea de artículo, con el MISMO desglose
+    que la tabla línea×año del modo "cliente": año anterior y año actual,
+    cada uno con total y los 12 meses, en cantidad y monto (pedido de Pablo
+    2026-08-20, para que el modal de línea tenga los mismos toggles
+    $/Unidades y por mes/por año). Ordenados por monto total de mayor a
+    menor. Trae TODOS los clientes de esa línea (pedido de Pablo
+    2026-08-19), no un recorte a 100.
+
+    Ya NO recibe desde/hasta: el filtro YTD/Meses lo hace el front sobre el
+    desglose mensual ya traído, igual que en modo "cliente" — así el toggle
+    no vuelve a pegarle al back. Ver fetch_clientes_por_linea (ventas.py)."""
     try:
-        return fetch_clientes_por_linea(linea, vendedor=vendedor, limit=limit, desde=desde, hasta=hasta)
+        return fetch_clientes_por_linea(linea, vendedor=vendedor, limit=limit)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
