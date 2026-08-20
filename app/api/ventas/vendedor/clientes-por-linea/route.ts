@@ -75,8 +75,18 @@ export async function GET(req: NextRequest) {
     });
     if (!res.ok) {
       const detail = await res.json().catch(() => null);
+      // El detail de FastAPI trae el error real de SQL — sin esto el front
+      // sólo mostraba "Error en API de clientes por línea" y había que ir a
+      // la pestaña Network para saber qué pasó.
+      const motivo =
+        typeof detail?.detail === "string" ? detail.detail : null;
       return NextResponse.json(
-        { error: "Error en API de clientes por línea", detail },
+        {
+          error: motivo
+            ? `Error en API de clientes por línea: ${motivo}`
+            : "Error en API de clientes por línea",
+          detail,
+        },
         { status: res.status },
       );
     }

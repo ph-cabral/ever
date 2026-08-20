@@ -603,20 +603,28 @@ def fetch_top_lineas(
 # resultset que viaja es a lo sumo clientes × 24 filas, no un renglón por
 # comprobante. El rango de fechas va como enteros Magnus sobre la columna
 # vc.FecMovim (ver _resolver_rango / gotcha del HANDOFF: nunca comparar
-# dbo.fecha_cla2sql(...) contra un parámetro de fecha). Año/mes se derivan
-# con DATEADD sobre el entero (built-in, como deposito.py) y NO con la UDF
-# escalar dbo.fecha_cla2sql, que se evaluaría una vez por renglón.
+# dbo.fecha_cla2sql(...) contra un parámetro de fecha). El año/mes también
+# sale de comparar enteros — ver _case_anio_mes acá abajo.
 _TOP_CLIENTES_LINEA_CACHE: dict[tuple, tuple[float, dict]] = {}
 _TOP_CLIENTES_LINEA_TTL_SEG = 15 * 60  # 15 minutos
 
-SQL_CLIENTES_LINEA_VENDEDOR_TPL = """
+# El año/mes de cada comprobante NO se calcula con fechas: se mapea el entero
+# Magnus `vc.FecMovim` a un YYYYMM con un CASE de rangos enteros, generado en
+# Python con los límites de cada mes (_case_anio_mes). Sin DATEADD/YEAR/MONTH
+# ni dbo.fecha_cla2sql: cualquiera de esos evalúa una función por renglón y,
+# peor, DATEADD revienta la query entera con "Adding a value to a datetime
+# column caused an overflow" si UNA sola fila tiene FecMovim basura (0,
+# negativo, sentinela) — y el optimizador puede evaluar el SELECT antes del
+# WHERE que las filtraría. Comparar enteros no puede fallar así.
+#
+# El CASE va en una subconsulta y el GROUP BY afuera, para no repetirlo.
+_SUB_CLIENTES_LINEA_VENDEDOR_TPL = """
 SELECT
     c.CodCliente AS CodCliente,
     LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
-    YEAR(DATEADD(day, vc.FecMovim, '1800-12-28'))  AS Anio,
-    MONTH(DATEADD(day, vc.FecMovim, '1800-12-28')) AS Mes,
-    SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS CantidadNeta,
-    SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
+    {case_anio_mes} AS AnioMes,
+    CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END AS Cant,
+    CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END AS Monto
 FROM MAGNUS_SITD.dbo.Clientes c
 JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
 JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma pu  ON LTRIM(RTRIM(pu.Usu_Arma_Nombre)) = LTRIM(RTRIM(vz.Vendedor))
@@ -629,18 +637,15 @@ WHERE pu.Usu_Arma_Codigo = ?
   AND cc.EvitaInformesYListados <> 1
   AND vc.FecMovim BETWEEN ? AND ?
   AND {linea_cond}
-GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre)),
-         YEAR(DATEADD(day, vc.FecMovim, '1800-12-28')), MONTH(DATEADD(day, vc.FecMovim, '1800-12-28'))
 """
 
-SQL_CLIENTES_LINEA_TODOS_TPL = """
+_SUB_CLIENTES_LINEA_TODOS_TPL = """
 SELECT
     c.CodCliente AS CodCliente,
     LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
-    YEAR(DATEADD(day, vc.FecMovim, '1800-12-28'))  AS Anio,
-    MONTH(DATEADD(day, vc.FecMovim, '1800-12-28')) AS Mes,
-    SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS CantidadNeta,
-    SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
+    {case_anio_mes} AS AnioMes,
+    CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END AS Cant,
+    CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END AS Monto
 FROM MAGNUS_SITD.dbo.Clientes c
 JOIN Ven_CompCabecera vc ON vc.CodCliente = c.CodCliente
 JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
@@ -650,9 +655,29 @@ LEFT JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
 WHERE cc.EvitaInformesYListados <> 1
   AND vc.FecMovim BETWEEN ? AND ?
   AND {linea_cond}
-GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre)),
-         YEAR(DATEADD(day, vc.FecMovim, '1800-12-28')), MONTH(DATEADD(day, vc.FecMovim, '1800-12-28'))
 """
+
+SQL_CLIENTES_LINEA_WRAP = """
+SELECT CodCliente, Nombre, AnioMes,
+       SUM(Cant)  AS CantidadNeta,
+       SUM(Monto) AS MontoNeto
+FROM ({sub}) t
+WHERE AnioMes IS NOT NULL
+GROUP BY CodCliente, Nombre, AnioMes
+"""
+
+
+def _case_anio_mes(anios: tuple[int, ...], columna: str = "vc.FecMovim") -> str:
+    """CASE que mapea el entero Magnus de `columna` al YYYYMM del mes al que
+    pertenece, con un WHEN por mes de cada año de `anios`. Todo comparación
+    de enteros — ver la nota de arriba de por qué no se usa DATEADD."""
+    ramas = []
+    for anio in anios:
+        for mes in range(1, 13):
+            d1 = (date(anio, mes, 1) - BASE_DATE).days
+            d2 = (date(anio, mes, calendar.monthrange(anio, mes)[1]) - BASE_DATE).days
+            ramas.append(f"WHEN {columna} BETWEEN {d1} AND {d2} THEN {anio * 100 + mes}")
+    return "CASE " + " ".join(ramas) + " ELSE NULL END"
 
 _LINEA_COND_EXACTA = (
     "ap.Nivel1 IN (SELECT n.Nivel1 FROM Stk_Nivel1 n "
@@ -713,27 +738,31 @@ def fetch_clientes_por_linea(
     try:
         cur = conn.cursor()
         cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        case_am = _case_anio_mes((anio_anterior, anio_actual))
         if vendedor is None:
-            sql = SQL_CLIENTES_LINEA_TODOS_TPL.format(linea_cond=linea_cond)
+            sub = _SUB_CLIENTES_LINEA_TODOS_TPL.format(
+                case_anio_mes=case_am, linea_cond=linea_cond
+            )
             params = (dia_desde, dia_hasta) if es_sin_linea else (dia_desde, dia_hasta, linea_norm)
         else:
-            sql = SQL_CLIENTES_LINEA_VENDEDOR_TPL.format(linea_cond=linea_cond)
+            sub = _SUB_CLIENTES_LINEA_VENDEDOR_TPL.format(
+                case_anio_mes=case_am, linea_cond=linea_cond
+            )
             params = (
                 (int(vendedor), dia_desde, dia_hasta)
                 if es_sin_linea
                 else (int(vendedor), dia_desde, dia_hasta, linea_norm)
             )
-        cur.execute(sql, params)
+        cur.execute(SQL_CLIENTES_LINEA_WRAP.format(sub=sub), params)
 
         clientes: dict[int, dict] = {}
         tot_anterior = _anio_vacio()
         tot_actual = _anio_vacio()
 
-        for cod, nombre, anio, mes, cant, monto in cur.fetchall():
-            if cod is None or anio is None or mes is None:
+        for cod, nombre, anio_mes, cant, monto in cur.fetchall():
+            if cod is None or anio_mes is None:
                 continue
-            anio = int(anio)
-            mes = int(mes)
+            anio, mes = divmod(int(anio_mes), 100)
             if anio not in (anio_actual, anio_anterior) or not 1 <= mes <= 12:
                 continue
             cod = int(cod)
