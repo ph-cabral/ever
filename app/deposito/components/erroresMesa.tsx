@@ -4,12 +4,6 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Loader2, AlertTriangle, RefreshCw, FileSpreadsheet } from "lucide-react";
 import { PageTitle, Panel, KPI, Grid, Table, ChartBar, ChartLine, C, fmtNum, fmtDate } from "./ui";
 import { exportarErroresMesa } from "@/lib/deposito/exportErroresMesa";
-import { DateRangeField } from "@/components/ui/date-range-field";
-
-// Fecha local ISO (yyyy-mm-dd) — mismo patrón que wmsTab.tsx (isoLocal), evita
-// el shift de toISOString() (que es UTC) para "hoy" como tope del rango.
-const isoLocal = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Registro de Errores — Mesa de Control + Calidad (deposito.errores_mesa,
@@ -134,12 +128,13 @@ function ObservacionCell({
   );
 }
 
-export function ErroresMesaTab() {
+// desde/hasta ahora vienen del filtro único del header (MonthOrRangeField en
+// page.tsx) — a pedido de Pablo, 2026-08-20. Antes esta pestaña tenía su
+// propio DateRangeField acá adentro, separado del de arriba.
+export function ErroresMesaTab({ desde, hasta }: { desde: string; hasta: string }) {
   const [rows, setRows] = useState<ErrorMesaRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [desde, setDesde] = useState("");
-  const [hasta, setHasta] = useState("");
   const [controlador, setControlador] = useState(ALL);
   const [preparador, setPreparador] = useState(ALL);
 
@@ -311,17 +306,16 @@ export function ErroresMesaTab() {
         <div className="flex flex-wrap gap-3 items-end">
           <label className="flex flex-col gap-1 text-[11px] text-zinc-500">
             Rango de fechas
-            <DateRangeField
-              desde={desde}
-              hasta={hasta}
-              max={isoLocal(new Date())}
-              onChange={(d, h) => {
-                setDesde(d);
-                setHasta(h);
-              }}
-              variant="dark"
-              placeholder="Todas las fechas"
-            />
+            <div
+              className="h-8 flex items-center px-2.5 rounded-lg border border-zinc-800 bg-[#1a1a1a] text-zinc-300 text-sm min-w-[180px]"
+              title="Se cambia desde el selector de fecha del header"
+            >
+              {desde && hasta
+                ? desde === hasta
+                  ? fmtDate(desde)
+                  : `${fmtDate(desde)} – ${fmtDate(hasta)}`
+                : "Todas las fechas"}
+            </div>
           </label>
           <label className="flex flex-col gap-1 text-[11px] text-zinc-500">
             Registrada

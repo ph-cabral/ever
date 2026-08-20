@@ -1648,6 +1648,10 @@ export default function VentasVendedorPage() {
                                         onClick={() => abrirModalLinea(l.linea)}
                                         className="hover:text-yellow-400 hover:underline transition-colors text-left"
                                         title="Ver clientes que compraron esta línea"
+                                        onChange={(e) => {
+                                          setQCliente("");
+                                          setClienteSel(null);
+                                        }}
                                       >
                                         {l.linea}
                                       </button>

@@ -14,7 +14,7 @@ import {
   AlertOctagon,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
-import { DateRangeField } from "@/components/ui/date-range-field";
+import { MonthOrRangeField, lastFullMonthRange } from "@/components/ui/date-range-field";
 import { useDepositoData } from "@/lib/deposito/store";
 import { filterDepositoByOperario } from "@/lib/deposito/parseDeposito";
 
@@ -30,20 +30,18 @@ const TABS = [
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
-const iso = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
 export default function DepositoPage() {
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
   const [operario, setOperario] = useState("__all__");
   const [tab, setTab] = useState<TabId>("picking");
 
-  // Por defecto: hoy en ambos (cliente, evita mismatch SSR).
+  // Por defecto: el último mes calendario completo (cliente, evita mismatch
+  // SSR). A pedido de Pablo, 2026-08-20 — antes arrancaba en "hoy".
   useEffect(() => {
-    const hoy = iso(new Date());
-    setDesde(hoy);
-    setHasta(hoy);
+    const [d, h] = lastFullMonthRange();
+    setDesde(d);
+    setHasta(h);
   }, []);
 
   const { prod, tiempo, loading, error, reload } = useDepositoData(desde, hasta);
@@ -103,39 +101,49 @@ export default function DepositoPage() {
           </span>
         </div>
 
-        <div className={`flex items-center gap-3 text-sm ${tab === "mesa-control" || tab === "errores-mesa" ? "invisible pointer-events-none" : ""}`}>
-          <DateRangeField
-            desde={desde}
-            hasta={hasta}
-            onChange={(d, h) => {
-              setDesde(d);
-              setHasta(h);
-            }}
-            align="end"
-          />
-          <label className="flex items-center gap-1.5 text-zinc-400">
-            Operario
-            <select
-              value={operario}
-              onChange={(e) => setOperario(e.target.value)}
-              className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer max-w-[180px]"
-            >
-              <option value="__all__">Todos</option>
-              {(prod?.operarios ?? []).map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            onClick={reload}
-            title="Refrescar"
-            disabled={loading}
-            className="text-zinc-400 hover:text-yellow-400 transition-colors p-2 disabled:opacity-40"
+        <div className="flex items-center gap-3 text-sm">
+          {/* Filtro de fechas: único, en el header, para todas las pestañas
+              (incluida Errores de Mesa — antes tenía su propio selector
+              duplicado). Oculto solo en Mesas de Control, que filtra por
+              checkbox de meses propio (ver mesaControl.tsx). */}
+          <div className={tab === "mesa-control" ? "invisible pointer-events-none" : ""}>
+            <MonthOrRangeField
+              desde={desde}
+              hasta={hasta}
+              onChange={(d, h) => {
+                setDesde(d);
+                setHasta(h);
+              }}
+              align="end"
+            />
+          </div>
+          <div
+            className={`flex items-center gap-3 ${tab === "mesa-control" || tab === "errores-mesa" ? "invisible pointer-events-none" : ""}`}
           >
-            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-          </button>
+            <label className="flex items-center gap-1.5 text-zinc-400">
+              Operario
+              <select
+                value={operario}
+                onChange={(e) => setOperario(e.target.value)}
+                className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer max-w-[180px]"
+              >
+                <option value="__all__">Todos</option>
+                {(prod?.operarios ?? []).map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              onClick={reload}
+              title="Refrescar"
+              disabled={loading}
+              className="text-zinc-400 hover:text-yellow-400 transition-colors p-2 disabled:opacity-40"
+            >
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -196,7 +204,7 @@ export default function DepositoPage() {
             {tab === "operarios" && viewProd && <OperariosTab d={viewProd} />}
             {tab === "tiempo" && tiempo && <TiempoTab d={tiempo} mes="__all__" />}
             {tab === "mesa-control" && <MesaControlTab />}
-            {tab === "errores-mesa" && <ErroresMesaTab />}
+            {tab === "errores-mesa" && <ErroresMesaTab desde={desde} hasta={hasta} />}
           </>
         )}
       </main>
