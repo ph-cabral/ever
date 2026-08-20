@@ -665,8 +665,9 @@ export default function VentasVendedorPage() {
           <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
 
           <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2 whitespace-nowrap">
-            <Trophy size={18} />
-            {topVista === "clientes" ? "clientes" : "líneas"}
+            {/* <Trophy size={18} /> */}
+            {topVista === "clientes" ? <Users size={18} /> : <ListChevronsUpDown size={18} />}
+            {topVista === "clientes" ? "clientes cambio3" : "líneas"}
           </h2>
 
           <button
@@ -680,11 +681,11 @@ export default function VentasVendedorPage() {
           >
             <ArrowLeftRight size={14} className="text-yellow-400" />
             <span className="font-semibold">
-              {topVista === "clientes" ? "Clientes" : "Líneas"}
+              {topVista === "clientes" ? "Clientes cambio1" : "Líneas"}
             </span>
-            <span className="text-zinc-500 text-xs">
+            {/* <span className="text-zinc-500 text-xs">
               {topVista === "clientes" ? "($)" : "(unidades)"}
-            </span>
+            </span> */}
           </button>
         </div>
       </header>
@@ -826,12 +827,12 @@ export default function VentasVendedorPage() {
                             />
                             <span className="font-semibold">
                               {vistaModal === "clientes"
-                                ? "Clientes"
+                                ? "Clientes cambio2"
                                 : "Líneas"}
                             </span>
-                            <span className="text-zinc-500 text-xs">
+                            {/* <span className="text-zinc-500 text-xs">
                               {vistaModal === "clientes" ? "($)" : "(unidades)"}
-                            </span>
+                            </span> */}
                           </button>
                         </div>
 

@@ -45,6 +45,7 @@ from errores_mesa import (
     fetch_ubicacion_diag, fetch_errores_mesa_list, fetch_operario_nombre,
     insert_error_calidad, update_observacion, fetch_controlador_diag,
     fetch_articulos_pedido, insert_error_mesa_items,
+    opciones_calidad as errores_mesa_opciones_calidad, insert_error_calidad_items,
 )
 from control_asignacion import asignar_siguiente, fetch_cola_diag, fetch_pedidos_asignados
 from rrhh import fetch_cvs_por_mes
@@ -1035,6 +1036,19 @@ class ErrorCalidadIn(BaseModel):
     observacion: str | None = None
     articulos: list[str] | None = None
 
+# Alta en lote para Calidad (REDISEÑO 2026-08-20): 1 error por artículo,
+# mismo patrón que ErrorMesaItem/ErrorMesaItemsIn arriba — ver
+# insert_error_calidad_items en errores_mesa.py.
+class ErrorCalidadItem(BaseModel):
+    codArticulo: str
+    detalleError: str
+
+class ErrorCalidadItemsIn(BaseModel):
+    nroPedido: int
+    nroOperario: int
+    observacion: str | None = None
+    items: list[ErrorCalidadItem]
+
 class ObservacionIn(BaseModel):
     observacion: str
 
@@ -1080,9 +1094,16 @@ def deposito_errores_mesa_listar(
 
 @app.get("/deposito/errores-mesa/opciones")
 def deposito_errores_mesa_opciones():
-    """Opciones fijas del select de Detalle Error. Ver errores_mesa.py —
-    DETALLE_ERROR_OPCIONES."""
+    """Opciones fijas del select de Detalle Error (widget de Mesa de
+    Control). Ver errores_mesa.py — DETALLE_ERROR_OPCIONES."""
     return errores_mesa_opciones()
+
+@app.get("/deposito/errores-mesa/calidad/opciones")
+def deposito_errores_mesa_calidad_opciones():
+    """Opciones fijas del select de Detalle Error PARA CALIDAD (REDISEÑO
+    2026-08-20, a pedido de Pablo) — lista propia, distinta de Mesa. Ver
+    errores_mesa.py — DETALLE_ERROR_OPCIONES_CALIDAD."""
+    return errores_mesa_opciones_calidad()
 
 @app.get("/deposito/errores-mesa/operario")
 def deposito_errores_mesa_operario(nro: int = Query(...)):
@@ -1128,12 +1149,34 @@ def deposito_errores_mesa_crear_items(body: ErrorMesaItemsIn):
 
 @app.post("/deposito/errores-mesa/calidad")
 def deposito_errores_mesa_calidad_crear(body: ErrorCalidadIn):
-    """Alta desde el widget de Calidad: controlador se resuelve solo (Magnus,
+    """Alta desde el widget de Calidad (endpoint viejo, 1 solo detalleError
+    para todo el pedido): controlador se resuelve solo (Magnus,
     Ven_PedImpresoCP), no lo pide el widget. `observacion` es opcional (nota
-    libre tipeada en el widget). Ver insert_error_calidad."""
+    libre tipeada en el widget). Ver insert_error_calidad. Sigue vivo por
+    compatibilidad (mismo criterio que /errores-mesa sin /items para Mesa),
+    pero el widget de Calidad (REDISEÑO 2026-08-20) ya usa
+    /errores-mesa/calidad/items en su lugar."""
     try:
         return insert_error_calidad(
             body.nroPedido, body.nroOperario, body.detalleError, body.observacion, body.articulos
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Error: {str(e)}")
+
+@app.post("/deposito/errores-mesa/calidad/items")
+def deposito_errores_mesa_calidad_crear_items(body: ErrorCalidadItemsIn):
+    """Botón "Finalizar" del widget de Calidad (REDISEÑO 2026-08-20, a pedido
+    de Pablo — mismo patrón que /errores-mesa/items para Mesa de Control):
+    alta en lote, 1 fila en deposito.errores_mesa por artículo (cada uno con
+    su propio detalleError, elegido artículo por artículo en el widget) — ver
+    insert_error_calidad_items."""
+    try:
+        return insert_error_calidad_items(
+            body.nroPedido, body.nroOperario,
+            [i.model_dump() for i in body.items],
+            body.observacion,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
