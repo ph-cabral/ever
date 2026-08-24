@@ -80,6 +80,13 @@ export function getRegistrador(r: ErrorMesaRow): string | null {
 export function getOperario(r: ErrorMesaRow): string | null {
   return r.nombreArmador;
 }
+// Controlador real del pedido según Magnus (Ven_PedImpresoCP.CodControlador1/2)
+// — solo viene poblado para origen='calidad'; en Mesa de Control queda NULL a
+// propósito (ver docstring de arriba, "3ra vuelta, REVERTIDA"), así que el
+// filtro por Controlador solo lista/afecta a las filas de Calidad.
+export function getControladorReal(r: ErrorMesaRow): string | null {
+  return r.nombreControladorReal;
+}
 
 const ALL = "__all__";
 
@@ -137,6 +144,9 @@ export function ErroresMesaTab({ desde, hasta }: { desde: string; hasta: string 
   const [error, setError] = useState<string | null>(null);
   const [controlador, setControlador] = useState(ALL);
   const [preparador, setPreparador] = useState(ALL);
+  // Filtro por Controlador real de Magnus (a pedido de Pablo, 2026-08-24) —
+  // distinto de `controlador`/"Registrada", que es quién cargó el widget.
+  const [controladorReal, setControladorReal] = useState(ALL);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -175,6 +185,11 @@ export function ErroresMesaTab({ desde, hasta }: { desde: string; hasta: string 
     () => [...new Set(rows.map(getOperario).filter(Boolean) as string[])].sort(),
     [rows],
   );
+  const controladoresReales = useMemo(
+    () =>
+      [...new Set(rows.map(getControladorReal).filter(Boolean) as string[])].sort(),
+    [rows],
+  );
 
   // Si el filtro elegido ya no está en el set recién traído (ej. cambió el
   // rango de fechas), volver a "Todos" — mismo patrón que Operario en page.tsx.
@@ -184,15 +199,20 @@ export function ErroresMesaTab({ desde, hasta }: { desde: string; hasta: string 
   useEffect(() => {
     if (preparador !== ALL && !preparadores.includes(preparador)) setPreparador(ALL);
   }, [preparadores, preparador]);
+  useEffect(() => {
+    if (controladorReal !== ALL && !controladoresReales.includes(controladorReal))
+      setControladorReal(ALL);
+  }, [controladoresReales, controladorReal]);
 
   const filtered = useMemo(
     () =>
       rows.filter(
         (r) =>
           (controlador === ALL || getRegistrador(r) === controlador) &&
-          (preparador === ALL || getOperario(r) === preparador),
+          (preparador === ALL || getOperario(r) === preparador) &&
+          (controladorReal === ALL || getControladorReal(r) === controladorReal),
       ),
-    [rows, controlador, preparador],
+    [rows, controlador, preparador, controladorReal],
   );
 
   const saveObservacion = useCallback(async (id: number, observacion: string) => {
@@ -241,7 +261,7 @@ export function ErroresMesaTab({ desde, hasta }: { desde: string; hasta: string 
   const porControlador = useMemo(() => {
     const m = new Map<string, number>();
     filtered.forEach((r) => {
-      const p = r.nombreControladorReal;
+      const p = getControladorReal(r);
       if (p) m.set(p, (m.get(p) ?? 0) + 1);
     });
     return [...m.entries()]
@@ -326,6 +346,22 @@ export function ErroresMesaTab({ desde, hasta }: { desde: string; hasta: string 
             >
               <option value={ALL}>Todos</option>
               {controladores.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] text-zinc-500">
+            Controlador
+            <select
+              value={controladorReal}
+              onChange={(e) => setControladorReal(e.target.value)}
+              title="Controlador real del pedido según Magnus — solo hay dato en los registros de Calidad"
+              className="bg-[#1f1f1f] border border-zinc-700 rounded-lg px-2.5 py-1.5 text-zinc-100 focus:border-yellow-400 outline-none cursor-pointer min-w-[180px]"
+            >
+              <option value={ALL}>Todos</option>
+              {controladoresReales.map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>

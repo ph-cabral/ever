@@ -95,6 +95,20 @@ que también existe pero es un ID compuesto interno de WMS (ej.
 "MAGEW-738058-0-0-334695"), no el NroMovVenta de Magnus. Sin verificar en
 vivo — falta rebuild indicadores-api.
 
+FIX 2026-08-24 (reportado en vivo por Pablo: la cola asignó el pedido 757536
+con su OT 144356 todavía "En Proceso"): PLAYA_PEDIDOS solo NO alcanza. El
+armador va dejando renglones en playa MIENTRAS pickea, así que el pedido
+aparecía en la cola con el picking a medio hacer. El lado WMS pasa a exigir
+las dos cosas: la OT de Picking MÁS RECIENTE del pedido tiene que estar
+Cumplida (OTEstado = 2) Y tener algún renglón en PLAYA_PEDIDOS. No revierte
+el FIX 2026-08-05, lo suma. Detalle importante del cómo (es la trampa del FIX
+2026-08-03): ninguno de los dos filtros va en el WHERE — SQL_WMS_PLAYA_PEDIDOS
+trae TODAS las OT de Picking del pedido con un flag EnPlaya y la decisión se
+toma en Python sobre max(OTId), para que un repick nuevo En Proceso gane
+siempre sobre una OT vieja Cumplida. Solo afecta a los pedidos NO acopio; el
+camino de acopio (70/75) no toca WMS. Sin verificar en vivo — falta rebuild
+indicadores-api.
+
 ACOPIO 70/75 — LA UNIDAD DE CONTROL ES LA VUELTA, NO EL PEDIDO
 (2026-08-21, a pedido de Pablo; cierra el problema que venía dando vueltas
 desde el FIX 2026-08-04 y el FIX 2026-08-18 de más arriba).
@@ -307,20 +321,39 @@ WHERE Codot.CodotProcesoNegocio = 4          -- Picking
 # ir de OT a VenFer_PedidoCabecera.NroMovVenta; OT.OTPedidoId es OTRA columna,
 # con un ID compuesto tipo "MAGEW-738058-0-0-334695", no sirve para este
 # cruce).
+# FIX 2026-08-24 (reportado en vivo por Pablo: la cola asignó el pedido 757536
+# con su OT 144356 en "En Proceso" y Fin Picking 00:00:00). Estar parado en
+# PLAYA_PEDIDOS NO alcanza: el armador deja renglones en playa MIENTRAS sigue
+# pickeando, así que hay renglones en playa con la OT todavía En Proceso. El
+# criterio vuelve a exigir CUMPLIDA (OTEstado = 2) **además** de estar en
+# playa: es un AND con el FIX 2026-08-05, no un reemplazo.
+#
+# Ojo con el CÓMO, que es la trampa del FIX 2026-08-03: el filtro NO va en el
+# WHERE. Si acá filtráramos OTEstado = 2, un pedido con una OT vieja Cumplida
+# + un repick MÁS NUEVO En Proceso volvería a colarse (la vieja sobrevive al
+# filtro y pasa a ser "la más reciente"). Por eso la query trae TODAS las OT de
+# Picking del pedido —con y sin renglones en playa— marcando cuáles están en
+# playa (EnPlaya), y la decisión ("la más reciente tiene que estar Cumplida Y
+# en playa") se toma en Python sobre max(OTId). Por lo mismo se saca el INNER
+# JOIN a OTItem: filtraba las OT sin playa, y la OT nueva En Proceso ni
+# siquiera aparecía para ganar el max(OTId).
 SQL_WMS_PLAYA_PEDIDOS = """
-SELECT DISTINCT
+SELECT
     OT.{col_pedido}            AS NroPedido,
     OT.OTId                    AS Ot,
     OT.OTEstado                AS OTEstado,
     OT.OTFechaHoraEjecucion    AS Cumplido,
     P_Repositor.PersonalId     AS NroArmador,
-    P_Repositor.PersonalNombre AS NombreArmador
+    P_Repositor.PersonalNombre AS NombreArmador,
+    CASE WHEN EXISTS (
+        SELECT 1 FROM OTItem i
+        WHERE i.OTId = OT.OTId
+          AND LTRIM(RTRIM(i.OTItemUbicacionCodigo)) = 'PLAYA_PEDIDOS'
+    ) THEN 1 ELSE 0 END        AS EnPlaya
 FROM OT
 INNER JOIN Codot ON OT.CodotCodigo = Codot.CodotCodigo
-INNER JOIN OTItem i ON i.OTId = OT.OTId
 LEFT JOIN Personal P_Repositor ON OT.OTUsuarioGUID_Repositor = P_Repositor.PersonalId
 WHERE Codot.CodotProcesoNegocio = 4          -- Picking
-  AND LTRIM(RTRIM(i.OTItemUbicacionCodigo)) = 'PLAYA_PEDIDOS'
   AND OT.{col_pedido} IN ({ph})
 """
 
@@ -489,13 +522,17 @@ def fetch_pedidos_en_playa_pedidos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[d
                     continue
                 n = int(nro)
                 prev = wms.get(n)
-                # Nos quedamos con la OT de mayor OTId (más reciente) entre
-                # las que tienen algún renglón en PLAYA_PEDIDOS — mismo
-                # criterio "más reciente manda" que la función legacy.
+                # Nos quedamos con la OT de mayor OTId (más reciente) de TODAS
+                # las de Picking del pedido — no solo de las que están en playa
+                # (FIX 2026-08-24): si la más nueva es un repick En Proceso
+                # tiene que ganar ella y frenar al pedido, aunque todavía no
+                # haya dejado nada en playa. Mismo criterio "más reciente
+                # manda" que la función legacy.
                 if prev is None or int(ot_id) > prev["ot"]:
                     wms[n] = {
                         "ot": int(ot_id),
                         "otEstado": int(d["OTEstado"]) if d.get("OTEstado") is not None else None,
+                        "enPlaya": bool(d.get("EnPlaya")),
                         "nroArmador": int(d["NroArmador"]) if d.get("NroArmador") is not None else None,
                         "nombreArmador": (d.get("NombreArmador") or "").strip() or None,
                         "ubicacion": "PLAYA_PEDIDOS",
@@ -507,8 +544,16 @@ def fetch_pedidos_en_playa_pedidos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[d
     for nro, ab in abiertos.items():
         w = wms.get(nro)
         if w is None:
-            # Ningún renglón de su OT de Picking está en PLAYA_PEDIDOS —
-            # todavía no está listo para Mesa de Control.
+            # Sin OT de Picking en WMS.
+            continue
+        if not w.get("enPlaya"):
+            # Ningún renglón de su OT de Picking más reciente está en
+            # PLAYA_PEDIDOS — todavía no está listo para Mesa de Control.
+            continue
+        if w.get("otEstado") != 2:
+            # FIX 2026-08-24: está en playa pero la OT sigue En Proceso (el
+            # armador todavía está pickeando, o hay un repick abierto). No se
+            # controla hasta que WMS la marque Cumplida.
             continue
         out.append({
             "nroPedido": nro,
