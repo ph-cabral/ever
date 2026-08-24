@@ -1250,8 +1250,11 @@ function ModalTarjeta({
           {schema.fields.map((f) => {
             if (f.auto) return null;
             // Opciones fijas del schema (curadas) + las extensibles persistidas
-            // (opcionesExtra, ej. ubicación) + el valor actual (para no vaciarlo al editar).
-            const valorActual = campos[f.k];
+            // (opcionesExtra, ej. ubicación) + el valor con el que abrió la tarjeta
+            // (para no vaciarlo al editar si ya no está en la lista curada).
+            // Ojo: NO usar campos[f.k] (el valor en edición) — hacía que lo tipeado
+            // apareciera como opción propia: "vick" listado además de "vicki".
+            const valorOriginal = modal.tarjeta?.campos?.[f.k];
             const combinedOptions =
               f.t === "select"
                 ? (() => {
@@ -1259,7 +1262,7 @@ function ModalTarjeta({
                       new Set([
                         ...(f.opciones ?? []),
                         ...(f.extensible ? opcionesExtra[f.k] ?? [] : []),
-                        ...(valorActual ? [String(valorActual)] : []),
+                        ...(valorOriginal ? [String(valorOriginal)] : []),
                       ])
                     );
                     // Extensibles (ubicación, categoría) se muestran alfabéticas; las de
