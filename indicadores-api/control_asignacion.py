@@ -94,6 +94,58 @@ deposito.py) — en el diagnóstico se probó por error OT.OTPedidoId primero,
 que también existe pero es un ID compuesto interno de WMS (ej.
 "MAGEW-738058-0-0-334695"), no el NroMovVenta de Magnus. Sin verificar en
 vivo — falta rebuild indicadores-api.
+
+ACOPIO 70/75 — LA UNIDAD DE CONTROL ES LA VUELTA, NO EL PEDIDO
+(2026-08-21, a pedido de Pablo; cierra el problema que venía dando vueltas
+desde el FIX 2026-08-04 y el FIX 2026-08-18 de más arriba).
+
+El bug de diseño: un acopio queda `EstadoPedido = 2` (Abierto) DURANTE MESES
+—no cierra hasta que se entregó el 100% o se anuló— y este módulo libera al
+operario cuando el PEDIDO cierra en Magnus (`_fetch_pedido_cerrado`). Con un
+acopio asignado, ese gate no se cumplía nunca: el operario quedaba trabado y
+"Asignar" le devolvía siempre el mismo pedido. Los parches anteriores
+(excluir 70/75 de la cola; después dejar entrar 70 solo con Prioridad 1/3)
+esquivaban el síntoma sin tocar la causa.
+
+La causa es la unidad. Cada vuelta del acopio es 1 OT1PIC de WMS = 1 REMITO
+de Magnus (`VenFer_RmtoCabecera`, `CompCodigo = 71`, `NroMovPedido` = el
+pedido; son 1 a 1). Las tres fechas del remito SON el circuito:
+
+    FechaArmado  + UsuarioArmado -> terminó de preparar (armador real)
+    FechaCierre  + UsuarioCierre -> PASÓ POR MESA DE CONTROL
+    FechaEnvio                   -> salió al cliente
+
+`Gen_Usuarios` 174 = "MESA CONTROL 1", 175 = "MESA CONTROL 2", 214 =
+"MESA CONTROL 3" — son PUESTOS, no personas, y aparecen SOLO en
+`UsuarioCierre`. O sea: el control de acopio SIEMPRE estuvo registrado, en el
+remito. En acopio la mesa NO escribe en `Ven_PedImpresoCP` (por eso
+consulta_tandas_control_cod70.py daba 0 filas ahí y se concluyó, mal, que
+"no hay señal de control"; en cod.10 es al revés — el remito nunca trae
+FechaArmado).
+
+Entonces:
+  · La cola guarda una fila POR VUELTA para acopio (columna "nroRemito" > 0)
+    y una fila POR PEDIDO para todo lo demás ("nroRemito" = 0). Unicidad
+    ("nroPedido", "nroRemito") — ver ever/sql/deposito_control_asignacion.sql,
+    CORRER ESE ALTER ANTES DE REBUILDEAR.
+  · El lado WMS NO se usa para acopio: `FechaArmado > 0` en el remito ya es
+    "terminó de preparar", que es lo mismo que buscaba el cruce contra
+    PLAYA_PEDIDOS, y evita el bug de `CodotProcesoNegocio` (esa columna vive
+    en `Codot`, no en `OT`).
+  · El gate de liberación se elige por fila (`_fetch_asignacion_cerrada`):
+    remito -> `VenFer_RmtoCabecera.FechaCierre > 0` (lo que escribe mesa);
+    pedido -> `_fetch_pedido_cerrado` de siempre, sin cambios.
+  · Se descarta el criterio "solo Prioridad 1/3" del FIX 2026-08-18: era un
+    workaround de esto mismo. Ahora entran TODOS los acopios, por vuelta.
+
+QUEDAN AFUERA (si no, vuelven a trabar el puesto): remitos sin renglones y
+`EstadoRemito = 3` (borrador sin emitir = vuelta que fue a buscar y no había
+nada) — no van a pasar por mesa nunca. Y `EstadoRemito = 4` = anulado.
+
+FIX 2026-08-21 (aparte, latente): `SQL_MAGNUS_ABIERTOS_TODOS` no traía
+`CodCliente` pero `refrescar_cola` insertaba `c["codCliente"]` — KeyError en
+cada refresco. Se agrega la columna al SELECT y al dict de salida de las dos
+funciones que la usan. Venía roto desde el alta de codCliente (2026-07-31).
 """
 from datetime import datetime, timedelta
 
@@ -131,6 +183,7 @@ SELECT TOP ({limit})
     cab.FechaPedido,
     cc.DetalleCorto     AS TipoPedido,
     cli.Cliente_Nombre  AS Cliente,
+    cab.CodCliente      AS CodCliente,
     cab.Prioridad       AS Prioridad
 FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
 INNER JOIN EVERWEAR.dbo.TMP_TiempoDePedidos   t   ON t.NroMovVenta   = cab.NroMovVenta
@@ -138,7 +191,12 @@ LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo   = cc.CompCo
 LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente   = cli.CodCliente
 WHERE LTRIM(RTRIM(t.Estado)) = 'Abierto'
   AND (
-        cab.CompCodigo IN (10, 75, 100, 210, 310)  -- FIX 2026-08-04 (a pedido
+        cab.CompCodigo IN (10, 100, 210, 310)  -- ACOPIO: 70 y 75 NO entran
+        -- por acá. Desde 2026-08-21 tienen su propia query, por vuelta:
+        -- SQL_MAGNUS_ACOPIO_ESPERA_CONTROL. El criterio "70 solo Prioridad
+        -- 1/3" del FIX 2026-08-18 queda DESCARTADO (era un workaround de que
+        -- el pedido de acopio no cierra nunca) — ver docstring del módulo.
+        -- FIX 2026-08-04 (a pedido
         -- de Pablo): antes era NOT IN (70) — dejaba pasar Factura Directa
         -- (107/1107/1207/170/207/47/7) a la cola del widget de errores-mesa.
         -- Whitelist explícita, solo para esta cola: Pedido Mayorista (10),
@@ -146,7 +204,6 @@ WHERE LTRIM(RTRIM(t.Estado)) = 'Abierto'
         -- (310). Acota mucho más que antes (ya no solo excluye acopios) —
         -- este criterio es EXCLUSIVO de esta cola, no tocar las demás
         -- queries de "Abiertos" del proyecto (deposito.py, etc.).
-        OR (cab.CompCodigo = 70 AND cab.Prioridad IN (1, 3))
         -- FIX 2026-08-18 (a pedido de Pablo, dato confirmado por él): acopio
         -- (CompCodigo=70) vuelve a esta cola, pero SOLO Prioridad 1 y 3. El
         -- resto de las prioridades de acopio se entregan de a poco durante
@@ -166,6 +223,45 @@ ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
 -- prioridad 1 hasta ponerse al día antes de pasar a prioridad 2. Antes era
 -- NroMovVenta ASC. Sin Prioridad cargada -> 999, al final de la cola.
 """
+# SELECT TOP ({limit})
+#     cab.NroMovVenta,
+#     cab.FechaPedido,
+#     cc.DetalleCorto     AS TipoPedido,
+#     cli.Cliente_Nombre  AS Cliente,
+#     cab.Prioridad       AS Prioridad
+# FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
+# INNER JOIN EVERWEAR.dbo.TMP_TiempoDePedidos   t   ON t.NroMovVenta   = cab.NroMovVenta
+# LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo   = cc.CompCodigo
+# LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente   = cli.CodCliente
+# WHERE LTRIM(RTRIM(t.Estado)) = 'Abierto'
+#   AND (
+#         cab.CompCodigo IN (10, 75, 100, 210, 310)  -- FIX 2026-08-04 (a pedido
+#         -- de Pablo): antes era NOT IN (70) — dejaba pasar Factura Directa
+#         -- (107/1107/1207/170/207/47/7) a la cola del widget de errores-mesa.
+#         -- Whitelist explícita, solo para esta cola: Pedido Mayorista (10),
+#         -- Pedido Mayorista Mostradores (100), Pedido Móvil (210), Pedido Web
+#         -- (310). Acota mucho más que antes (ya no solo excluye acopios) —
+#         -- este criterio es EXCLUSIVO de esta cola, no tocar las demás
+#         -- queries de "Abiertos" del proyecto (deposito.py, etc.).
+#         OR (cab.CompCodigo = 70 AND cab.Prioridad IN (1, 3))
+#         -- FIX 2026-08-18 (a pedido de Pablo, dato confirmado por él): acopio
+#         -- (CompCodigo=70) vuelve a esta cola, pero SOLO Prioridad 1 y 3. El
+#         -- resto de las prioridades de acopio se entregan de a poco durante
+#         -- varios meses (una OT de Picking nueva por cada tanda que llega) y
+#         -- NO tienen ninguna señal en Magnus/WMS de "esta tanda ya se
+#         -- controló" — confirmado corriendo consulta_tandas_control_cod70.py
+#         -- contra 8 pedidos cod.70 con 4 a 10 OT de Picking cada uno a lo
+#         -- largo de varios meses: Ven_PedImpresoCP (Mesa de Control) da 0
+#         -- filas en los 8, o sea el control de Magnus no se usa para esas
+#         -- prioridades. Prioridad 1/3 quedan afuera de ese patrón (dato de
+#         -- Pablo) y sí pueden entrar a la cola con el mismo criterio
+#         -- Abierto+Cumplido que el resto de los tipos de pedido.
+#       )
+# ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
+# -- 2026-08-03 (a pedido de Pablo): prioridad ASC (1 = más urgente) y, dentro
+# -- de cada prioridad, fecha ASC (más viejo primero) — vaciar los atrasados de
+# -- prioridad 1 hasta ponerse al día antes de pasar a prioridad 2. Antes era
+# -- NroMovVenta ASC. Sin Prioridad cargada -> 999, al final de la cola.
 
 # ── WMS: de esos pedidos puntuales, TODAS sus OT de Picking (no solo las ────
 # Cumplidas) — para poder quedarnos con la MÁS RECIENTE y recién ahí decidir
@@ -245,7 +341,7 @@ def fetch_pedidos_cumplidos_abiertos_legacy(limit: int = MAGNUS_ABIERTOS_LIMIT) 
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cur.execute(SQL_MAGNUS_ABIERTOS_TODOS.format(limit=limit))
-        for nro, fecha_int, tipo_pedido, cliente, prioridad in cur.fetchall():
+        for nro, fecha_int, tipo_pedido, cliente, cod_cliente, prioridad in cur.fetchall():
             if nro is None:
                 continue
             # BASE_DATE ya es un datetime.date (ver errores_mesa.py) — sumarle
@@ -258,6 +354,8 @@ def fetch_pedidos_cumplidos_abiertos_legacy(limit: int = MAGNUS_ABIERTOS_LIMIT) 
                 "fecha": fecha,
                 "tipoPedido": (tipo_pedido or "").strip() or None,
                 "cliente": (cliente or "").strip() or None,
+                # FIX 2026-08-21: faltaba y refrescar_cola lo insertaba igual.
+                "codCliente": int(cod_cliente) if cod_cliente is not None else None,
                 # Orden de la cola (a pedido de Pablo, 2026-08-03) — ver
                 # SQL_MAGNUS_ABIERTOS_TODOS. None = sin prioridad cargada.
                 "prioridad": int(prioridad) if prioridad is not None else None,
@@ -323,7 +421,9 @@ def fetch_pedidos_cumplidos_abiertos_legacy(limit: int = MAGNUS_ABIERTOS_LIMIT) 
             "fecha": ab["fecha"],
             "tipoPedido": ab["tipoPedido"],
             "cliente": ab["cliente"],
+            "codCliente": ab["codCliente"],
             "prioridad": ab["prioridad"],
+            "nroRemito": 0,          # fila "por pedido" (ver docstring: acopio va por vuelta)
             "ubicacion": w["ubicacion"],
             "ot": w["ot"],
             "nroArmador": w["nroArmador"],
@@ -348,7 +448,7 @@ def fetch_pedidos_en_playa_pedidos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[d
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cur.execute(SQL_MAGNUS_ABIERTOS_TODOS.format(limit=limit))
-        for nro, fecha_int, tipo_pedido, cliente, prioridad in cur.fetchall():
+        for nro, fecha_int, tipo_pedido, cliente, cod_cliente, prioridad in cur.fetchall():
             if nro is None:
                 continue
             fecha = (BASE_DATE + timedelta(days=int(fecha_int))) if fecha_int else None
@@ -356,6 +456,8 @@ def fetch_pedidos_en_playa_pedidos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[d
                 "fecha": fecha,
                 "tipoPedido": (tipo_pedido or "").strip() or None,
                 "cliente": (cliente or "").strip() or None,
+                # FIX 2026-08-21: faltaba y refrescar_cola lo insertaba igual.
+                "codCliente": int(cod_cliente) if cod_cliente is not None else None,
                 "prioridad": int(prioridad) if prioridad is not None else None,
             }
     finally:
@@ -413,12 +515,112 @@ def fetch_pedidos_en_playa_pedidos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[d
             "fecha": ab["fecha"],
             "tipoPedido": ab["tipoPedido"],
             "cliente": ab["cliente"],
+            "codCliente": ab["codCliente"],
             "prioridad": ab["prioridad"],
+            "nroRemito": 0,          # fila "por pedido" (ver docstring: acopio va por vuelta)
             "ubicacion": w["ubicacion"],
             "ot": w["ot"],
             "nroArmador": w["nroArmador"],
             "nombreArmador": w["nombreArmador"],
         })
+    return out
+
+
+# ── ACOPIO 70/75: vueltas esperando mesa de control ─────────────────────────
+# (2026-08-21) Una fila por VUELTA, no por pedido — ver docstring del módulo.
+# Solo Magnus: no hace falta cruzar a WMS porque cada vuelta ya es un remito
+# (OT1PIC <-> remito es 1 a 1) y `FechaArmado > 0` es el "terminó de
+# preparar" que del otro lado se buscaba con PLAYA_PEDIDOS.
+#
+# El filtro es, literalmente, "armado y todavía sin pasar por mesa":
+#     FechaArmado > 0   AND   FechaCierre = 0
+# más las dos exclusiones que si no vuelven a trabar el puesto:
+#     EstadoRemito 3 (borrador sin emitir = la vuelta fue a buscar y no había
+#                     nada) y 4 (anulado)  -> no pasan por mesa nunca
+#     remito sin renglones                 -> idem
+#
+# `fecha` sale de FechaArmado (no de FechaPedido): dentro de cada prioridad la
+# cola es FIFO por "desde cuándo está esperando mesa", que para una vuelta es
+# el momento en que se terminó de armar. FechaPedido acá no sirve — es la
+# misma para todas las vueltas del acopio, que pueden ser 10 a lo largo de un
+# año.
+#
+# BASE DE FECHAS: las fechas de Magnus son "días desde 1800-12-28" (BASE_DATE
+# en errores_mesa.py). Se devuelven como int y se convierten en Python, igual
+# que FechaPedido — no se toca SQL para eso.
+SQL_MAGNUS_ACOPIO_ESPERA_CONTROL = """
+SELECT TOP ({limit})
+    rmt.NroMovVenta     AS NroRemito,
+    cab.NroMovVenta     AS NroPedido,
+    rmt.FechaArmado     AS FechaArmado,
+    cc.DetalleCorto     AS TipoPedido,
+    cli.Cliente_Nombre  AS Cliente,
+    cab.CodCliente      AS CodCliente,
+    cab.Prioridad       AS Prioridad,
+    pca.ObsArmadorMovil AS Ubicacion,
+    rmt.OTId            AS Ot,
+    rmt.UsuarioArmado   AS NroArmador,
+    usr.Nombre          AS NombreArmador
+FROM EVERWEAR.dbo.VenFer_RmtoCabecera rmt
+INNER JOIN EVERWEAR.dbo.VenFer_PedidoCabecera cab ON cab.NroMovVenta = rmt.NroMovPedido
+LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo  = cc.CompCodigo
+LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente  = cli.CodCliente
+LEFT JOIN EVERWEAR.dbo.Ven_PedImpresoCA      pca ON pca.NroMovVenta = cab.NroMovVenta
+LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]        usr ON usr.Numero      = rmt.UsuarioArmado
+WHERE rmt.CompCodigo = 71                 -- remito de acopio
+  AND cab.CompCodigo IN (70, 75)          -- el pedido es un acopio
+  AND rmt.FechaArmado > 0                 -- la vuelta terminó de armarse
+  AND ISNULL(rmt.FechaCierre, 0) = 0      -- y todavía no pasó por mesa
+  AND rmt.EstadoRemito NOT IN (3, 4)      -- 3 borrador (vuelta vacía) / 4 anulado
+  AND EXISTS (
+        SELECT 1 FROM EVERWEAR.dbo.VenFer_RmtoReng rr
+        WHERE rr.NroMovVenta = rmt.NroMovVenta
+      )
+ORDER BY COALESCE(cab.Prioridad, 999) ASC, rmt.FechaArmado ASC
+"""
+
+
+def fetch_acopio_vueltas_espera_control(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[dict]:
+    """Vueltas de acopio (70/75) armadas y todavía sin pasar por mesa de
+    control. Una fila por REMITO (`nroRemito`), no por pedido — ver docstring
+    del módulo. Misma forma de salida que
+    fetch_pedidos_en_playa_pedidos (nroPedido/fecha/tipoPedido/cliente/
+    codCliente/prioridad/ubicacion/ot/nroArmador/nombreArmador) más
+    `nroRemito`, así refrescar_cola las inserta con el mismo código.
+
+    Solo Magnus: no se consulta WMS (ver comentario junto a la query)."""
+    conn = get_connection("EVERWEAR")
+    out: list[dict] = []
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_MAGNUS_ACOPIO_ESPERA_CONTROL.format(limit=limit))
+        cols = [c[0] for c in cur.description]
+        for row in cur.fetchall():
+            d = dict(zip(cols, row))
+            nro_remito, nro_pedido = d.get("NroRemito"), d.get("NroPedido")
+            if nro_remito is None or nro_pedido is None:
+                continue
+            armado = d.get("FechaArmado")
+            fecha = (BASE_DATE + timedelta(days=int(armado))) if armado else None
+            ubic = d.get("Ubicacion")
+            out.append({
+                "nroPedido": int(nro_pedido),
+                "nroRemito": int(nro_remito),
+                "fecha": fecha,
+                "tipoPedido": (d.get("TipoPedido") or "").strip() or None,
+                "cliente": (d.get("Cliente") or "").strip() or None,
+                "codCliente": int(d["CodCliente"]) if d.get("CodCliente") is not None else None,
+                "prioridad": int(d["Prioridad"]) if d.get("Prioridad") is not None else None,
+                # En acopio la "ubicación" es la física del acopio en playa,
+                # que el armador deja escrita en Ven_PedImpresoCA.
+                "ubicacion": (str(ubic).strip() or None) if ubic is not None else None,
+                "ot": int(d["Ot"]) if d.get("Ot") is not None else None,
+                "nroArmador": int(d["NroArmador"]) if d.get("NroArmador") is not None else None,
+                "nombreArmador": (d.get("NombreArmador") or "").strip() or None,
+            })
+    finally:
+        conn.close()
     return out
 
 
@@ -432,8 +634,15 @@ def refrescar_cola(limit: int = MAGNUS_ABIERTOS_LIMIT) -> int:
     FIX 2026-08-05 (a pedido de Pablo): pasó a usar
     fetch_pedidos_en_playa_pedidos en vez de fetch_pedidos_cumplidos_abiertos
     (criterio "Cumplido" en WMS) — ver esa función y
-    fetch_pedidos_cumplidos_abiertos_legacy (se deja sin usar, sin borrar)."""
-    candidatos = fetch_pedidos_en_playa_pedidos(limit)
+    fetch_pedidos_cumplidos_abiertos_legacy (se deja sin usar, sin borrar).
+
+    2026-08-21: se le suman las VUELTAS de acopio 70/75
+    (fetch_acopio_vueltas_espera_control), que son filas por remito
+    ("nroRemito" > 0) y no por pedido. El ON CONFLICT ahora es por
+    ("nroPedido", "nroRemito"), así que un mismo acopio puede entrar muchas
+    veces —una por vuelta, a lo largo de meses— sin pisarse. Las filas
+    no-acopio siguen con "nroRemito" = 0 y se comportan igual que siempre."""
+    candidatos = fetch_pedidos_en_playa_pedidos(limit) + fetch_acopio_vueltas_espera_control(limit)
     if not candidatos:
         return 0
     conn = get_pg_connection()
@@ -444,14 +653,15 @@ def refrescar_cola(limit: int = MAGNUS_ABIERTOS_LIMIT) -> int:
             cur.execute(
                 """
                 INSERT INTO deposito.control_asignacion
-                    ("nroPedido", fecha, "tipoPedido", cliente, "codCliente", "prioridad",
-                     ubicacion, ot, "nroArmador", "nombreArmador")
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT ("nroPedido") DO NOTHING
+                    ("nroPedido", "nroRemito", fecha, "tipoPedido", cliente, "codCliente",
+                     "prioridad", ubicacion, ot, "nroArmador", "nombreArmador")
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT ("nroPedido", "nroRemito") DO NOTHING
                 """,
                 (
-                    c["nroPedido"], c["fecha"], c["tipoPedido"], c["cliente"], c["codCliente"],
-                    c["prioridad"], c["ubicacion"], c["ot"], c["nroArmador"], c["nombreArmador"],
+                    c["nroPedido"], c.get("nroRemito", 0), c["fecha"], c["tipoPedido"],
+                    c["cliente"], c["codCliente"], c["prioridad"], c["ubicacion"], c["ot"],
+                    c["nroArmador"], c["nombreArmador"],
                 ),
             )
             nuevos += cur.rowcount
@@ -491,6 +701,58 @@ def _fetch_pedido_cerrado(nro_pedido: int) -> bool:
         return False
 
 
+def _fetch_remito_controlado(nro_remito: int) -> bool:
+    """True si esa VUELTA de acopio ya pasó por mesa de control, o sea si el
+    remito tiene `FechaCierre > 0` (fecha nativa de Magnus, días desde
+    1800-12-28; 0/NULL = todavía no). `UsuarioCierre` en acopio es el PUESTO
+    de mesa (174 = MESA CONTROL 1, 175 = MESA 2, 214 = MESA 3), no una
+    persona — no se usa acá, pero es la prueba de que este campo ES el
+    control (ver docstring del módulo).
+
+    Este es el gate que reemplaza a `_fetch_pedido_cerrado` para las filas de
+    acopio: el PEDIDO de acopio no cierra hasta dentro de meses, la VUELTA
+    cierra el mismo día.
+
+    Si el remito no aparece (anulado y purgado, caso raro), se considera
+    controlado para no dejar al operario trabado — mismo criterio que
+    _fetch_pedido_cerrado."""
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT FechaCierre FROM EVERWEAR.dbo.VenFer_RmtoCabecera WHERE NroMovVenta = ?",
+            (nro_remito,),
+        )
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return True
+    fecha_cierre = row[0]
+    try:
+        return fecha_cierre is not None and int(fecha_cierre) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _fetch_asignacion_cerrada(activa: dict) -> bool:
+    """¿La asignación activa del operario ya terminó? Elige el gate según el
+    tipo de fila (2026-08-21):
+
+      · "nroRemito" > 0  -> fila de acopio, unidad = la VUELTA. Termina
+        cuando ESE remito pasó por mesa (FechaCierre > 0).
+      · "nroRemito" = 0  -> fila normal, unidad = el PEDIDO. Termina cuando el
+        pedido cierra en Magnus, igual que siempre.
+
+    Este selector es todo el arreglo del problema que trababa el puesto: con
+    un acopio asignado, el gate viejo (pedido cerrado) no se cumplía nunca
+    porque un acopio queda Abierto durante meses."""
+    nro_remito = activa.get("nroRemito") or 0
+    if nro_remito:
+        return _fetch_remito_controlado(int(nro_remito))
+    return _fetch_pedido_cerrado(activa["nroPedido"])
+
+
 def _fetch_asignacion_activa(nro_operario: int) -> dict | None:
     """Última fila que este operario reclamó (deposito.control_asignacion,
     la más reciente por "asignadoEn"). None si nunca reclamó nada. Se usa
@@ -501,8 +763,9 @@ def _fetch_asignacion_activa(nro_operario: int) -> dict | None:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT id, "nroPedido", fecha, "tipoPedido", cliente, "codCliente", "prioridad",
-                   ubicacion, ot, "nroArmador", "nombreArmador", "asignadoA", "asignadoEn"
+            SELECT id, "nroPedido", "nroRemito", fecha, "tipoPedido", cliente, "codCliente",
+                   "prioridad", ubicacion, ot, "nroArmador", "nombreArmador",
+                   "asignadoA", "asignadoEn"
             FROM deposito.control_asignacion
             WHERE "nroOperarioAsignado" = %s AND "asignadoEn" IS NOT NULL
             ORDER BY "asignadoEn" DESC
@@ -516,8 +779,9 @@ def _fetch_asignacion_activa(nro_operario: int) -> dict | None:
     if not row:
         return None
     cols = [
-        "id", "nroPedido", "fecha", "tipoPedido", "cliente", "codCliente", "prioridad",
-        "ubicacion", "ot", "nroArmador", "nombreArmador", "asignadoA", "asignadoEn",
+        "id", "nroPedido", "nroRemito", "fecha", "tipoPedido", "cliente", "codCliente",
+        "prioridad", "ubicacion", "ot", "nroArmador", "nombreArmador",
+        "asignadoA", "asignadoEn",
     ]
     out = dict(zip(cols, row))
     if out.get("fecha") is not None:
@@ -537,10 +801,16 @@ def asignar_siguiente(nro_operario: int) -> dict:
     siguiente (ver nota de ORDEN en el docstring del módulo).
 
     UN PEDIDO POR OPERARIO A LA VEZ (2026-07-31): antes de tocar la cola, se
-    fija si `nro_operario` ya tiene una asignación activa cuyo pedido sigue
-    Abierto en Magnus — si es así, se le devuelve ESA MISMA fila (no cuenta
-    como un reclamo nuevo). Solo si no tiene ninguna o la que tiene ya Cerró
-    se sigue con el flujo normal de reclamar la próxima libre.
+    fija si `nro_operario` ya tiene una asignación activa todavía sin
+    terminar — si es así, se le devuelve ESA MISMA fila (no cuenta como un
+    reclamo nuevo). Solo si no tiene ninguna o la que tiene ya terminó se
+    sigue con el flujo normal de reclamar la próxima libre.
+
+    "Terminó" depende del tipo de fila (2026-08-21, ver
+    _fetch_asignacion_cerrada): para acopio 70/75 la unidad es la VUELTA y
+    termina cuando el remito pasó por mesa (FechaCierre > 0); para el resto
+    es el pedido cerrado en Magnus, como siempre. Antes se usaba el gate del
+    pedido para todo y un acopio dejaba al operario trabado para siempre.
 
     Concurrencia: el UPDATE con "SELECT ... FOR UPDATE SKIP LOCKED" hace que,
     si 2 operarios llaman a esto al mismo tiempo, cada uno se lleve una fila
@@ -554,7 +824,10 @@ def asignar_siguiente(nro_operario: int) -> dict:
         raise ValueError(f"Operario {nro_operario} no encontrado")
 
     activa = _fetch_asignacion_activa(nro_operario)
-    if activa is not None and not _fetch_pedido_cerrado(activa["nroPedido"]):
+    if activa is not None and not _fetch_asignacion_cerrada(activa):
+        # Sigue con lo suyo: se le devuelve LA MISMA fila. Para acopio "lo
+        # suyo" es la vuelta (remito), no el pedido — ver
+        # _fetch_asignacion_cerrada.
         return activa
 
     refrescar_cola()
@@ -573,8 +846,9 @@ def asignar_siguiente(nro_operario: int) -> dict:
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
             )
-            RETURNING id, "nroPedido", fecha, "tipoPedido", cliente, "codCliente", "prioridad",
-                      ubicacion, ot, "nroArmador", "nombreArmador", "asignadoA", "asignadoEn"
+            RETURNING id, "nroPedido", "nroRemito", fecha, "tipoPedido", cliente, "codCliente",
+                      "prioridad", ubicacion, ot, "nroArmador", "nombreArmador",
+                      "asignadoA", "asignadoEn"
             """,
             (nombre, nro_operario),
         )
@@ -587,8 +861,9 @@ def asignar_siguiente(nro_operario: int) -> dict:
         raise ValueError("No hay pedidos disponibles para asignar")
 
     cols = [
-        "id", "nroPedido", "fecha", "tipoPedido", "cliente", "codCliente", "prioridad",
-        "ubicacion", "ot", "nroArmador", "nombreArmador", "asignadoA", "asignadoEn",
+        "id", "nroPedido", "nroRemito", "fecha", "tipoPedido", "cliente", "codCliente",
+        "prioridad", "ubicacion", "ot", "nroArmador", "nombreArmador",
+        "asignadoA", "asignadoEn",
     ]
     out = dict(zip(cols, row))
     if out.get("fecha") is not None:
@@ -648,7 +923,7 @@ def fetch_pedidos_asignados(desde: str | None = None, hasta: str | None = None) 
             cond = '"asignadoEn"::date = CURRENT_DATE'
         cur.execute(
             f"""
-            SELECT "nroPedido", "codCliente", cliente,
+            SELECT "nroPedido", "nroRemito", "codCliente", cliente,
                    "nroOperarioAsignado", "asignadoA", "asignadoEn",
                    LEAD("asignadoEn") OVER (
                        PARTITION BY "nroOperarioAsignado" ORDER BY "asignadoEn"
@@ -708,17 +983,21 @@ def fetch_pedidos_asignados(desde: str | None = None, hasta: str | None = None) 
                         int(prioridad) if prioridad is not None else None,
                     )
 
-            def _es_acopio_excluido(comp: int | None, prioridad: int | None) -> bool:
-                if comp == 75:
-                    return True
-                if comp == 70:
-                    return prioridad not in (1, 3)
-                return False
+            # 2026-08-21: una fila de acopio con "nroRemito" > 0 es una VUELTA
+            # controlada de verdad (el operario la trabajó y la mesa la cerró)
+            # — tiene que contar en el historial. Lo que se sigue excluyendo
+            # es la basura vieja: filas de acopio SIN remito, que son las que
+            # entraron por error antes del FIX 2026-08-04 y trababan el
+            # puesto (ej. pedido 748595, CompCodigo 70, Flores Marcos). El
+            # criterio "Prioridad 1/3" del FIX 2026-08-18 se descarta: era un
+            # workaround de que el pedido de acopio no cierra nunca.
+            def _es_acopio_sin_vuelta(r: dict) -> bool:
+                comp, _prioridad = meta_pedido.get(r["nroPedido"], (None, None))
+                if comp not in (70, 75):
+                    return False
+                return not (r.get("nroRemito") or 0)
 
-            rows = [
-                r for r in rows
-                if not _es_acopio_excluido(*meta_pedido.get(r["nroPedido"], (None, None)))
-            ]
+            rows = [r for r in rows if not _es_acopio_sin_vuelta(r)]
             nros = sorted({r["nroPedido"] for r in rows if r.get("nroPedido") is not None})
 
             for i in range(0, len(nros), CH):
@@ -754,7 +1033,7 @@ def fetch_cola_diag(limit: int = 20) -> dict:
         )
         libres, asignados = cur.fetchone()
         cur.execute(
-            'SELECT "nroPedido", fecha, "prioridad", cliente, ubicacion, "asignadoA", "asignadoEn" '
+            'SELECT "nroPedido", "nroRemito", fecha, "prioridad", cliente, ubicacion, "asignadoA", "asignadoEn" '
             'FROM deposito.control_asignacion '
             'ORDER BY "createdAt" DESC LIMIT %s',
             (limit,),

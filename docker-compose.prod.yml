@@ -17,6 +17,10 @@ services:
     volumes:
       - ./employees:/app/employees:ro
       - ./img_sorteo:/app/img_sorteo:ro
+      # adjuntos de rrhh/puestos (documentos/procedimientos) — sin esto se
+      # escriben dentro del contenedor y se pierden en cada rebuild, y con
+      # USER node (no root) probablemente ni siquiera se pueden crear.
+      - ./documentos:/app/documentos
     ports:
       - "3001:3000"
     networks:

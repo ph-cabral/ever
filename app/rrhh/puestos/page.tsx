@@ -135,7 +135,10 @@ export default function PuestosPage() {
         const fd = new FormData();
         fd.append("file", editDoc.file);
         const ra = await fetch(`/api/rrhh/documentos/${j.id ?? editDoc.id}/archivo`, { method: "POST", body: fd });
-        if (!ra.ok) avisar("⚠️ Documento guardado pero falló la subida del adjunto.");
+        if (!ra.ok) {
+          const ja = await ra.json().catch(() => null);
+          avisar(`⚠️ Documento guardado pero falló la subida del adjunto${ja?.error ? `: ${ja.error}` : "."}`);
+        }
       }
       chequearRag(j);
       setEditDoc(null);

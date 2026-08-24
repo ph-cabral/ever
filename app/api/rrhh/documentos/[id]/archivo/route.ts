@@ -43,15 +43,27 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (file.size > MAX_BYTES) return NextResponse.json({ error: "Máximo 20MB" }, { status: 400 });
 
   const nombre = safeName(file.name || `documento-${id}`);
-  await fs.mkdir(DIR, { recursive: true });
 
-  // borrar adjunto anterior si tenía otro nombre
-  if (doc.archivoNombre && doc.archivoNombre !== nombre) {
-    await fs.unlink(path.join(DIR, `${id}_${doc.archivoNombre}`)).catch(() => {});
+  try {
+    await fs.mkdir(DIR, { recursive: true });
+
+    // borrar adjunto anterior si tenía otro nombre
+    if (doc.archivoNombre && doc.archivoNombre !== nombre) {
+      await fs.unlink(path.join(DIR, `${id}_${doc.archivoNombre}`)).catch(() => {});
+    }
+
+    const buf = Buffer.from(await file.arrayBuffer());
+    await fs.writeFile(path.join(DIR, `${id}_${nombre}`), buf);
+  } catch (e: unknown) {
+    // ej. EACCES si DOCUMENTOS_DIR no está montado como volumen escribible
+    // (ver docker-compose.prod.yml) — que el error real llegue al frontend
+    // en vez de un 500 genérico.
+    return NextResponse.json(
+      { error: `No se pudo guardar el archivo en el servidor: ${e instanceof Error ? e.message : String(e)}` },
+      { status: 500 },
+    );
   }
 
-  const buf = Buffer.from(await file.arrayBuffer());
-  await fs.writeFile(path.join(DIR, `${id}_${nombre}`), buf);
   await prisma.documento.update({ where: { id }, data: { archivoNombre: nombre } });
   return NextResponse.json({ ok: true, archivoNombre: nombre });
 }
