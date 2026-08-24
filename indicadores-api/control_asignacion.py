@@ -127,6 +127,23 @@ El arreglo son DOS PIEZAS, porque el bug tiene dos mitades:
      limpia nada de lo que ya está en la cola.
 Sin verificar en vivo — falta rebuild indicadores-api.
 
+FIX 2026-08-24, 3ra vuelta — EL CAMBIO GRANDE, y el que cierra el tema.
+Con el filtro de arriba puesto, la cola quedó VACÍA mientras Magnus mostraba
+22 pedidos "Armado finalizado listo para control". O sea: el problema nunca
+fue solo que sobraran, también faltaban, y por la misma razón de fondo — el
+universo estaba armado sobre dos señales que no significan lo que se creía:
+
+  · 'PLAYA_PEDIDOS' en WMS: de los pedidos listos, UNO tenía un ítem ahí.
+  · TMP_TiempoDePedidos: ni siquiera contiene los pedidos del día.
+
+La señal real vive en Magnus y siempre estuvo: `Ven_PedImpresoCA` con
+`ObsArmadorMovil` cargada = el armador terminó y anotó dónde dejó el pedido.
+Verificado 22/22 contra la pantalla de Magnus y la base al mismo tiempo, sin
+falsos positivos. Ver SQL_MAGNUS_LISTOS_PARA_CONTROL /
+fetch_pedidos_listos_para_control para el detalle y las reglas descartadas.
+WMS pasa a ser opcional: solo resuelve el NOMBRE del armador.
+Sin verificar en vivo — falta rebuild indicadores-api.
+
 ACOPIO 70/75 — LA UNIDAD DE CONTROL ES LA VUELTA, NO EL PEDIDO
 (2026-08-21, a pedido de Pablo; cierra el problema que venía dando vueltas
 desde el FIX 2026-08-04 y el FIX 2026-08-18 de más arriba).
@@ -511,8 +528,189 @@ def fetch_pedidos_cumplidos_abiertos_legacy(limit: int = MAGNUS_ABIERTOS_LIMIT) 
     return out
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# EL GATE BUENO — "listo para control" = el armador dejó escrita la UBICACIÓN
+# ══════════════════════════════════════════════════════════════════════════
+# FIX 2026-08-24, 3ra vuelta del día. Reemplaza TODO el cruce contra WMS
+# (SQL_MAGNUS_ABIERTOS_TODOS + SQL_WMS_PLAYA_PEDIDOS) como criterio de entrada
+# a la cola. Las dos señales que se usaban quedan DESCARTADAS con datos:
+#
+#   1. `OTItem.OTItemUbicacionCodigo = 'PLAYA_PEDIDOS'` (FIX 2026-08-05).
+#      De los pedidos que Magnus daba por listos, UNO SOLO tenía un ítem ahí.
+#      El resto estaba en '0003' o en el hueco concreto ('01-16-10-C',
+#      '01-16-07-M', 'Est 1 14'). La playa física existe, pero WMS guarda el
+#      hueco, no el literal — el gate miraba un string que casi nunca aparece.
+#      Este es el filtro que dejó la cola VACÍA con 22 pedidos esperando mesa.
+#
+#   2. `INNER JOIN TMP_TiempoDePedidos` (FIX 2026-07-31). Peor que estar
+#      atrasada: NO TIENE los pedidos del día. Con el INNER JOIN, un pedido
+#      armado hoy no puede entrar a la cola nunca. Ver docstring del módulo.
+#
+# La señal real: **`Ven_PedImpresoCA.ObsArmadorMovil`**. El armador escribe
+# ahí la ubicación física donde dejó el pedido CUANDO TERMINA DE ARMARLO. Ese
+# campo ES "armado finalizado listo para control" (el círculo gris de la
+# pantalla "Armar Pedidos" de Magnus).
+#
+# Verificado 2026-08-24 contra la pantalla de Magnus y la base al mismo
+# tiempo: **22 de 22**, sin un solo falso positivo ni falso negativo. Lo único
+# que Magnus lista y esta query no es el pedido 757707, CompCodigo 410
+# (PED.NF.CEN) — queda afuera por la whitelist de comprobantes, no por el gate.
+#
+# Reglas que se probaron y NO sirven (mismo run):
+#   · `cab.FechaArmado > 0`      -> deja entrar 37 de más, incluida la basura
+#     vieja de Prioridad 9 (METALFOR y cía, pedidos de 2024 todavía abiertos).
+#   · `Ven_PedImpresoCA.Estado = 1` / `FechaFin > 0` -> casi siempre en 0, no
+#     se usan en la práctica.
+#   · `cab.Impreso = 1`          -> 2 de 22.
+#
+# "ALGUNA fila con ubicación", no "todas": un pedido puede tener más de un
+# centro de preparación (`CodCentroPrep` 1 y 2) y es normal que el segundo
+# esté sin arrancar mientras el pedido ya está listo para mesa (casos reales:
+# 757574, 757615, 753015). Exigir "todas" perdía esos 3.
+#
+# De regalo, Ven_PedImpresoCA es el puente Magnus<->WMS que ya existía:
+#   ObsArmadorMovil  -> la ubicación que el widget muestra (antes salía de
+#                       OTItem, con el problema de arriba)
+#   WMS_NroOTPicking -> el OTId de WMS, sin cruzar por OTNroMovVenta
+#   CodArmador       -> el armador según Magnus
+# Misma lección que el acopio 70/75: el circuito YA estaba registrado en
+# Magnus; el cruce contra WMS era el rodeo.
+SQL_MAGNUS_LISTOS_PARA_CONTROL = """
+SELECT TOP ({limit})
+    cab.NroMovVenta,
+    cab.FechaPedido,
+    cc.DetalleCorto     AS TipoPedido,
+    cli.Cliente_Nombre  AS Cliente,
+    cab.CodCliente      AS CodCliente,
+    cab.Prioridad       AS Prioridad,
+    ca.ObsArmadorMovil  AS Ubicacion,
+    ca.WMS_NroOTPicking AS Ot,
+    ca.CodArmador       AS CodArmador
+FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
+INNER JOIN (
+    -- 1 fila por pedido: la asignación de armado MÁS RECIENTE que tenga
+    -- ubicación cargada. Con 2 centros de preparación hay 2 filas y solo una
+    -- suele tener la ubicación escrita.
+    SELECT
+        NroMovVenta,
+        ObsArmadorMovil,
+        WMS_NroOTPicking,
+        CodArmador,
+        ROW_NUMBER() OVER (
+            PARTITION BY NroMovVenta
+            ORDER BY FechaAsignacion DESC, HoraAsignacion DESC, NroInterno DESC
+        ) AS rn
+    FROM EVERWEAR.dbo.Ven_PedImpresoCA
+    WHERE LTRIM(RTRIM(ISNULL(ObsArmadorMovil, ''))) <> ''
+) ca ON ca.NroMovVenta = cab.NroMovVenta AND ca.rn = 1
+LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo = cc.CompCodigo
+LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente = cli.CodCliente
+WHERE cab.EstadoPedido = 2
+  AND cab.CompCodigo IN (10, 100, 210, 310)
+  -- Misma whitelist de siempre (ver SQL_MAGNUS_ABIERTOS_TODOS para el porqué
+  -- de cada código). CompCodigo 410 (PED.NF.CEN, "pedido no facturable de
+  -- centro") aparece en la pantalla Armar Pedidos de Magnus y tiene ubicación
+  -- cargada, pero se DEJA AFUERA a propósito: decisión de Pablo, 2026-08-24 —
+  -- mesa de control no lo controla. Es la única diferencia entre esta query y
+  -- lo que muestra esa pantalla, así que si algún día "falta un pedido" y es
+  -- 410, es por acá.
+  -- Acopio 70/75 NO entra por acá: va por vuelta/remito,
+  -- SQL_MAGNUS_ACOPIO_ESPERA_CONTROL — y encima no usa Ven_PedImpresoCA (los
+  -- 59 acopios abiertos al 2026-08-24 tienen 0 filas con ubicación y 0 con
+  -- OT de WMS ahí, confirmado).
+ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
+"""
+
+# Nombre del armador: se sigue tomando de WMS (Personal), igual que antes, para
+# no cambiar lo que ve el operario en el widget. La diferencia es que ahora se
+# entra por OTId directo (Ven_PedImpresoCA.WMS_NroOTPicking) en vez de buscar
+# la OT por NroMovVenta y adivinar cuál es la buena.
+SQL_WMS_ARMADOR_POR_OT = """
+SELECT
+    OT.OTId,
+    P.PersonalId     AS NroArmador,
+    P.PersonalNombre AS NombreArmador
+FROM OT
+LEFT JOIN Personal P ON OT.OTUsuarioGUID_Repositor = P.PersonalId
+WHERE OT.OTId IN ({ph})
+"""
+
+
+def fetch_pedidos_listos_para_control(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[dict]:
+    """Pedidos (no acopio) listos para mesa de control, 100% desde Magnus.
+    Misma forma de salida que fetch_pedidos_en_playa_pedidos —
+    nroPedido/fecha/tipoPedido/cliente/codCliente/prioridad/nroRemito/
+    ubicacion/ot/nroArmador/nombreArmador— así refrescar_cola no cambia.
+
+    WMS ya no decide nada: solo se usa para resolver el NOMBRE del armador a
+    partir del OTId que Magnus guarda en Ven_PedImpresoCA.WMS_NroOTPicking. Si
+    WMS no contesta o la OT no está, el pedido igual entra a la cola sin nombre
+    de armador — antes eso lo dejaba afuera."""
+    conn = get_connection("EVERWEAR")
+    filas: list[dict] = []
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_MAGNUS_LISTOS_PARA_CONTROL.format(limit=limit))
+        for (nro, fecha_int, tipo_pedido, cliente, cod_cliente,
+             prioridad, ubicacion, ot, _cod_armador) in cur.fetchall():
+            if nro is None:
+                continue
+            filas.append({
+                "nroPedido": int(nro),
+                "fecha": (BASE_DATE + timedelta(days=int(fecha_int))) if fecha_int else None,
+                "tipoPedido": (tipo_pedido or "").strip() or None,
+                "cliente": (cliente or "").strip() or None,
+                "codCliente": int(cod_cliente) if cod_cliente is not None else None,
+                "prioridad": int(prioridad) if prioridad is not None else None,
+                "nroRemito": 0,   # fila "por pedido"; acopio va por vuelta
+                "ubicacion": (ubicacion or "").strip() or None,
+                "ot": int(ot) if ot else None,
+                "nroArmador": None,
+                "nombreArmador": None,
+            })
+    finally:
+        conn.close()
+
+    ots = sorted({f["ot"] for f in filas if f["ot"]})
+    if not ots:
+        return filas
+
+    armadores: dict[int, tuple[int | None, str | None]] = {}
+    try:
+        conn = get_connection("WMS")
+        try:
+            cur = conn.cursor()
+            cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+            CH = 1000
+            for i in range(0, len(ots), CH):
+                chunk = ots[i:i + CH]
+                ph = ",".join("?" for _ in chunk)
+                cur.execute(SQL_WMS_ARMADOR_POR_OT.format(ph=ph), chunk)
+                for ot_id, nro_arm, nombre_arm in cur.fetchall():
+                    armadores[int(ot_id)] = (
+                        int(nro_arm) if nro_arm is not None else None,
+                        (nombre_arm or "").strip() or None,
+                    )
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — WMS caído: la cola no se cae con él
+        return filas
+
+    for f in filas:
+        if f["ot"] in armadores:
+            f["nroArmador"], f["nombreArmador"] = armadores[f["ot"]]
+    return filas
+
+
 def fetch_pedidos_en_playa_pedidos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[dict]:
-    """Cruce Abierto(Magnus) ∩ "está en la ubicación PLAYA_PEDIDOS" (WMS,
+    """LEGACY desde 2026-08-24 (3ra vuelta) — ya NO la llama refrescar_cola.
+    La reemplaza fetch_pedidos_listos_para_control: su filtro de
+    'PLAYA_PEDIDOS' dejaba afuera casi todo (ver el comentario largo arriba).
+    Se deja intacta, sin usar, igual que fetch_pedidos_cumplidos_abiertos_legacy
+    — pedido explícito de Pablo de no perder los criterios viejos.
+
+    Cruce Abierto(Magnus) ∩ "está en la ubicación PLAYA_PEDIDOS" (WMS,
     OTItem.OTItemUbicacionCodigo) por NroMovVenta. Reemplaza el criterio
     "Cumplido" (ver fetch_pedidos_cumplidos_abiertos_legacy) — a pedido de
     Pablo, 2026-08-05: la señal de "listo para Mesa de Control" pasa a ser
@@ -842,6 +1040,11 @@ def refrescar_cola(limit: int = MAGNUS_ABIERTOS_LIMIT) -> int:
     (criterio "Cumplido" en WMS) — ver esa función y
     fetch_pedidos_cumplidos_abiertos_legacy (se deja sin usar, sin borrar).
 
+    FIX 2026-08-24, 3ra vuelta: pasó a usar fetch_pedidos_listos_para_control
+    (100% Magnus, gate = Ven_PedImpresoCA.ObsArmadorMovil). Los dos criterios
+    de WMS quedan legacy — ver el comentario largo sobre
+    SQL_MAGNUS_LISTOS_PARA_CONTROL.
+
     2026-08-21: se le suman las VUELTAS de acopio 70/75
     (fetch_acopio_vueltas_espera_control), que son filas por remito
     ("nroRemito" > 0) y no por pedido. El ON CONFLICT ahora es por
@@ -854,7 +1057,7 @@ def refrescar_cola(limit: int = MAGNUS_ABIERTOS_LIMIT) -> int:
     viejas de pedidos ya cerrados se quedaban en la cola y se seguían
     entregando."""
     purgar_cola_obsoleta()
-    candidatos = fetch_pedidos_en_playa_pedidos(limit) + fetch_acopio_vueltas_espera_control(limit)
+    candidatos = fetch_pedidos_listos_para_control(limit) + fetch_acopio_vueltas_espera_control(limit)
     if not candidatos:
         return 0
     conn = get_pg_connection()

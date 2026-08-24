@@ -1,0 +1,1 @@
+C:\Users\cabralp\Desktop\projects\venv\Scripts\python.exe: can't open file 'C:\\Users\\cabralp\\Desktop\\projects\\vicki\\ever\\investigar_sufijo_01.py': [Errno 2] No such file or directory
