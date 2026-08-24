@@ -109,6 +109,24 @@ siempre sobre una OT vieja Cumplida. Solo afecta a los pedidos NO acopio; el
 camino de acopio (70/75) no toca WMS. Sin verificar en vivo — falta rebuild
 indicadores-api.
 
+FIX 2026-08-24, 2da vuelta del día (reportado en vivo por Pablo: la cola le
+asignó el 757555, ya FACTURADO). La causa NO era Facturado: era que
+`TMP_TiempoDePedidos` —el universo entero de esta cola— es una FOTO que llena
+SP_TiempoPedidos_Cargar, no el estado en vivo. El 757555 estaba EstadoPedido=4
+(Cerrado), cerrado y controlado ese mismo día, y TMP seguía diciendo
+'Abierto'. Medido sobre los 55 candidatos del día: 25 ya cerrados (los 25
+facturados y controlados) + 6 anulados = 31 de 55 no tenían que estar.
+El arreglo son DOS PIEZAS, porque el bug tiene dos mitades:
+  1. Qué ENTRA: `cab.EstadoPedido = 2` en SQL_MAGNUS_ABIERTOS_TODOS (en vivo,
+     contra Cabecera). Ver el comentario largo en esa query.
+  2. Qué SE QUEDA: purgar_cola_obsoleta(), llamada desde refrescar_cola. Las
+     filas entran con ON CONFLICT DO NOTHING y asignar_siguiente reparte con
+     un `WHERE "asignadoEn" IS NULL` sin chequear nada contra Magnus, así que
+     una fila que entró legítimamente y cuyo pedido cerró 3 días después se
+     seguía entregando. Sin esta segunda mitad, el filtro de la pieza 1 no
+     limpia nada de lo que ya está en la cola.
+Sin verificar en vivo — falta rebuild indicadores-api.
+
 ACOPIO 70/75 — LA UNIDAD DE CONTROL ES LA VUELTA, NO EL PEDIDO
 (2026-08-21, a pedido de Pablo; cierra el problema que venía dando vueltas
 desde el FIX 2026-08-04 y el FIX 2026-08-18 de más arriba).
@@ -204,6 +222,34 @@ INNER JOIN EVERWEAR.dbo.TMP_TiempoDePedidos   t   ON t.NroMovVenta   = cab.NroMo
 LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo   = cc.CompCodigo
 LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente   = cli.CodCliente
 WHERE LTRIM(RTRIM(t.Estado)) = 'Abierto'
+  AND cab.EstadoPedido = 2
+  -- FIX 2026-08-24, 2da vuelta del día (reportado en vivo por Pablo: la cola
+  -- le asignó el pedido 757555, que en Magnus ya estaba FACTURADO). Causa
+  -- real: `TMP_TiempoDePedidos` NO es el estado en vivo, es una foto que
+  -- llena SP_TiempoPedidos_Cargar cada tanto. El 757555 tenía
+  -- EstadoPedido = 4 (Cerrado), FechaCierre = 82419 (24/08, ese mismo día) y
+  -- control de Rios Ivan en Ven_PedImpresoCP, pero TMP seguía diciendo
+  -- 'Abierto' -> volvía a la cola. Los 2 gates de WMS no lo frenan porque el
+  -- pedido efectivamente se pickeó y quedó en playa.
+  --   Medido el 2026-08-24 (vicki/diag_asignacion_estado.py), sobre los 55
+  --   que TMP daba por Abiertos:
+  --       EstadoPedido = 2 (Abierto)  -> 24 |  0 facturados |  3 con control
+  --       EstadoPedido = 4 (Cerrado)  -> 25 | 25 facturados | 25 con control
+  --       EstadoPedido = 7 (Anulado)  ->  6 |  0 facturados |  1 con control
+  --   O sea: 31 de 55 no tenían que estar, y los 25 cerrados YA habían pasado
+  --   por mesa (100%). `VenFer_PedidoCabecera.EstadoPedido` sí es en vivo
+  --   (2 Abierto · 4 Cerrado · 7 Anulado) — el JOIN roto que motivó el
+  --   FIX 2026-07-31 era contra `Pedido_Estados`, NO esta columna.
+  -- Se DEJA el INNER JOIN a TMP a propósito: es el conjunto de trabajo que ya
+  -- mantiene el ERP y acota el universo. Sacarlo abriría todo el histórico de
+  -- pedidos que nunca cerraron.
+  -- NO se filtra por control registrado (Ven_PedImpresoCP): de los 24
+  -- Abiertos de verdad solo 2 ya tenían control y los 2 quedaban afuera igual
+  -- por el gate de WMS. Y filtrar por control rompería el REPICK (pedido que
+  -- vuelve a pickearse tras un error de mesa y necesita control de nuevo):
+  -- FechaControl es DATE, no datetime, así que un repick del mismo día es
+  -- indistinguible de un control ya hecho. Ver docstring de
+  -- purgar_cola_obsoleta para el otro lado del mismo bug.
   AND (
         cab.CompCodigo IN (10, 100, 210, 310)  -- ACOPIO: 70 y 75 NO entran
         -- por acá. Desde 2026-08-21 tienen su propia query, por vuelta:
@@ -669,6 +715,121 @@ def fetch_acopio_vueltas_espera_control(limit: int = MAGNUS_ABIERTOS_LIMIT) -> l
     return out
 
 
+# ── Purga de la cola: filas que quedaron viejas DESPUÉS de haber entrado ────
+# FIX 2026-08-24, 2da vuelta del día. El filtro nuevo de
+# SQL_MAGNUS_ABIERTOS_TODOS (EstadoPedido = 2) evita que entren pedidos ya
+# cerrados/anulados, pero NO limpia los que ya están en la cola: refrescar_cola
+# inserta con ON CONFLICT DO NOTHING y asignar_siguiente reparte con un
+# `WHERE "asignadoEn" IS NULL` sin ningún chequeo contra Magnus. O sea: una
+# fila que entró cuando el pedido estaba abierto se queda ahí para siempre y
+# se entrega igual aunque el pedido haya cerrado 3 días después. Ese es el
+# camino por el que salió el 757555 aun con el filtro puesto.
+#
+# Solo se tocan filas SIN asignar ("asignadoEn" IS NULL): las ya asignadas son
+# historial (las lee fetch_pedidos_asignados) y no se borran nunca.
+SQL_PEDIDOS_YA_NO_VAN = """
+SELECT NroMovVenta
+FROM EVERWEAR.dbo.VenFer_PedidoCabecera
+WHERE NroMovVenta IN ({ph})
+  AND (EstadoPedido <> 2 OR ISNULL(FechaCierre, 0) > 0)
+"""
+
+# Equivalente para las filas de acopio (unidad = la vuelta/remito, ver
+# docstring del módulo): la vuelta ya no va si pasó por mesa (FechaCierre > 0)
+# o si el remito quedó en borrador sin emitir (3) o anulado (4) — mismas
+# exclusiones que SQL_MAGNUS_ACOPIO_ESPERA_CONTROL, pero aplicadas después.
+SQL_REMITOS_YA_NO_VAN = """
+SELECT NroMovVenta
+FROM EVERWEAR.dbo.VenFer_RmtoCabecera
+WHERE NroMovVenta IN ({ph})
+  AND (ISNULL(FechaCierre, 0) > 0 OR EstadoRemito IN (3, 4))
+"""
+
+_PURGA_CHUNK = 500   # tope de parámetros por IN, para no reventar el driver
+
+
+def _magnus_ya_no_van(sql: str, nros: list[int]) -> set[int]:
+    """De la lista que se le pasa, cuáles ya no corresponden. Vacío si la
+    lista viene vacía (no se abre conexión al pedo)."""
+    if not nros:
+        return set()
+    fuera: set[int] = set()
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        for i in range(0, len(nros), _PURGA_CHUNK):
+            lote = nros[i:i + _PURGA_CHUNK]
+            ph = ",".join("?" * len(lote))
+            cur.execute(sql.format(ph=ph), lote)
+            fuera.update(int(r[0]) for r in cur.fetchall())
+    finally:
+        conn.close()
+    return fuera
+
+
+def purgar_cola_obsoleta() -> int:
+    """Saca de la cola las filas SIN asignar cuyo pedido (o vuelta de acopio)
+    ya no corresponde controlar. Devuelve cuántas se borraron.
+
+    Por qué hace falta además del filtro de SQL_MAGNUS_ABIERTOS_TODOS: ese
+    filtro decide qué ENTRA. Esta función decide qué SE QUEDA. Entre que un
+    pedido entra a la cola y que alguien lo reclama pueden pasar días, y en el
+    medio el pedido se controla y se cierra — la cola no se enteraba.
+
+    Gate por tipo de fila, mismo criterio que _fetch_asignacion_cerrada:
+      · "nroRemito" = 0  -> pedido: EstadoPedido <> 2 (cerrado/anulado) o
+        FechaCierre > 0.
+      · "nroRemito" > 0  -> acopio: el remito cerró (pasó por mesa) o quedó
+        en borrador/anulado.
+
+    Si Magnus no contesta, no borra nada y sigue: la cola sucia es un mal
+    menor frente a dejar el widget sin poder asignar."""
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT id, "nroPedido", "nroRemito" FROM deposito.control_asignacion '
+            'WHERE "asignadoEn" IS NULL'
+        )
+        pendientes = cur.fetchall()
+    finally:
+        conn.close()
+
+    if not pendientes:
+        return 0
+
+    pedidos = [int(p[1]) for p in pendientes if not (p[2] or 0)]
+    remitos = [int(p[2]) for p in pendientes if (p[2] or 0)]
+
+    try:
+        fuera_ped = _magnus_ya_no_van(SQL_PEDIDOS_YA_NO_VAN, pedidos)
+        fuera_rmt = _magnus_ya_no_van(SQL_REMITOS_YA_NO_VAN, remitos)
+    except Exception:  # noqa: BLE001 — Magnus caído / timeout: no purgar
+        return 0
+
+    ids = [
+        int(p[0]) for p in pendientes
+        if (int(p[2]) in fuera_rmt if (p[2] or 0) else int(p[1]) in fuera_ped)
+    ]
+    if not ids:
+        return 0
+
+    conn = get_pg_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            'DELETE FROM deposito.control_asignacion '
+            'WHERE id = ANY(%s) AND "asignadoEn" IS NULL',
+            (ids,),
+        )
+        borradas = cur.rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return borradas
+
+
 def refrescar_cola(limit: int = MAGNUS_ABIERTOS_LIMIT) -> int:
     """Agrega a deposito.control_asignacion los pedidos Abiertos(Magnus) ∩ en
     PLAYA_PEDIDOS(WMS) que todavía no estén en la cola (ON CONFLICT DO
@@ -686,7 +847,13 @@ def refrescar_cola(limit: int = MAGNUS_ABIERTOS_LIMIT) -> int:
     ("nroRemito" > 0) y no por pedido. El ON CONFLICT ahora es por
     ("nroPedido", "nroRemito"), así que un mismo acopio puede entrar muchas
     veces —una por vuelta, a lo largo de meses— sin pisarse. Las filas
-    no-acopio siguen con "nroRemito" = 0 y se comportan igual que siempre."""
+    no-acopio siguen con "nroRemito" = 0 y se comportan igual que siempre.
+
+    FIX 2026-08-24, 2da vuelta: antes de agregar, PURGA (ver
+    purgar_cola_obsoleta). Agregar solo lo nuevo no alcanzaba — las filas
+    viejas de pedidos ya cerrados se quedaban en la cola y se seguían
+    entregando."""
+    purgar_cola_obsoleta()
     candidatos = fetch_pedidos_en_playa_pedidos(limit) + fetch_acopio_vueltas_espera_control(limit)
     if not candidatos:
         return 0
