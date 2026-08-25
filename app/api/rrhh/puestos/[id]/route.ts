@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { ragSyncDocumentos } from "@/lib/rrhh/vickiRag";
+import { chequearUnicaDescripcionEnPuesto } from "@/lib/rrhh/documentosTipos";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     data.sectorId = Number(body.sectorId);
   }
   if (body.activo !== undefined) data.activo = Boolean(body.activo);
+
+  // No se pueden asignar dos descripciones de puesto al mismo puesto.
+  if (Array.isArray(body.documentoIds)) {
+    const choque = await chequearUnicaDescripcionEnPuesto(
+      id,
+      body.documentoIds.map(Number).filter(Number.isInteger),
+    );
+    if (choque) return NextResponse.json({ error: choque }, { status: 409 });
+  }
 
   try {
     let afectados: number[] = [];

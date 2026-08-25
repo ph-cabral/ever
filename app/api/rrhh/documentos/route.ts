@@ -1,12 +1,12 @@
-// CRUD de procedimientos/instructivos. Al crear se indexa en Qdrant vía
-// vicki_chat (best-effort: ragOk=false si vicki_chat no respondió).
+// CRUD de documentos por puesto (procedimientos, instructivos y descripciones
+// de puesto). Al crear se indexa en Qdrant vía vicki_chat (best-effort:
+// ragOk=false si vicki_chat no respondió).
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { ragSyncDocumento } from "@/lib/rrhh/vickiRag";
+import { TIPOS, chequearUnicaDescripcion } from "@/lib/rrhh/documentosTipos";
 
 export const dynamic = "force-dynamic";
-
-const TIPOS = new Set(["procedimiento", "instructivo"]);
 
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
@@ -41,6 +41,10 @@ export async function POST(req: NextRequest) {
   const puestoIds: number[] = Array.isArray(body?.puestoIds)
     ? body.puestoIds.map(Number).filter(Number.isInteger)
     : [];
+
+  // una sola descripción de puesto por puesto
+  const choque = await chequearUnicaDescripcion(tipo, puestoIds);
+  if (choque) return NextResponse.json({ error: choque }, { status: 409 });
 
   try {
     const doc = await prisma.documento.create({

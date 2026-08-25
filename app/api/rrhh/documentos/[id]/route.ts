@@ -4,10 +4,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { ragDeleteDocumento, ragSyncDocumento } from "@/lib/rrhh/vickiRag";
+import { TIPOS, chequearUnicaDescripcion } from "@/lib/rrhh/documentosTipos";
 
 export const dynamic = "force-dynamic";
 
-const TIPOS = new Set(["procedimiento", "instructivo"]);
 type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_req: NextRequest, { params }: Params) {
@@ -41,6 +41,17 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     data.contenido = contenido;
     if (contenido !== actual.contenido) data.version = actual.version + 1;
   }
+
+  // Una sola descripción de puesto por puesto. Se evalúa con el estado FINAL
+  // (el tipo que queda después del PATCH y los puestos que queda asignados),
+  // excluyendo este mismo documento — si no, editarlo chocaría consigo mismo.
+  const tipoFinal = (data.tipo as string) ?? actual.tipo;
+  const puestoIdsFinal: number[] = Array.isArray(body.puestoIds)
+    ? body.puestoIds.map(Number).filter(Number.isInteger)
+    : (await prisma.puesto_documento.findMany({ where: { documentoId: id }, select: { puestoId: true } }))
+        .map((l) => l.puestoId);
+  const choque = await chequearUnicaDescripcion(tipoFinal, puestoIdsFinal, id);
+  if (choque) return NextResponse.json({ error: choque }, { status: 409 });
 
   try {
     await prisma.$transaction(async (tx) => {

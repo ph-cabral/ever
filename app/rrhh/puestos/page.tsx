@@ -1,12 +1,17 @@
 "use client";
 
-// /rrhh/puestos — ABM de puestos + procedimientos/instructivos.
-// Cada documento se asigna a uno o más puestos; al guardar se indexa en Qdrant
-// (vía vicki_chat) para que Vicki responda "¿cuál es el procedimiento para X?".
+// /rrhh/puestos — ABM de puestos + documentos por puesto.
+// Tres tipos de documento:
+//  - procedimiento / instructivo: N por puesto. Vicki los usa cuando preguntan
+//    "¿cuál es el procedimiento para X?" (intent=procedimiento).
+//  - descripcion_puesto: UNA sola por puesto (la API devuelve 409 si ya hay
+//    otra). Es el perfil del puesto y Vicki la usa cuando se BUSCA a alguien
+//    para ese puesto (intent=search/ranking) — ver vicki_chat/app/nodes.py.
+// Todo se indexa en Qdrant al guardar (vía vicki_chat).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  BookOpen, Briefcase, Check, Download, FileText, Loader2, Paperclip,
-  Pencil, Plus, RefreshCw, Trash2, X,
+  BookOpen, Briefcase, Check, ClipboardList, Download, FileText, Loader2,
+  Paperclip, Pencil, Plus, RefreshCw, Trash2, X,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 
@@ -23,7 +28,49 @@ type Documento = {
   puestos: { puestoId: number; puesto: { nombre: string } }[];
 };
 
-const TIPO_LABEL: Record<string, string> = { procedimiento: "Procedimiento", instructivo: "Instructivo" };
+const TIPO_DESCRIPCION = "descripcion_puesto";
+const TIPO_LABEL: Record<string, string> = {
+  procedimiento: "Procedimiento",
+  instructivo: "Instructivo",
+  descripcion_puesto: "Descripción de puesto",
+};
+
+// Estructura sugerida para una descripción de puesto. El orden importa: lo que
+// más pesa para el matching de candidatos va arriba, porque rag_ingest.py corta
+// en chunks de ~1200 chars y Vicki recupera solo los mejores.
+// IMPORTANTE: dejar una línea en blanco entre secciones — el chunking corta por
+// "\n\n"; sin eso una sección entera queda como un párrafo gigante y se parte
+// a la mitad de una frase.
+const PLANTILLA_DESCRIPCION = `Puesto: 
+Área / Sector: 
+Reporta a: 
+Estado de la búsqueda: abierta
+Modalidad: presencial — San Francisco, Córdoba
+Tipo de contratación: 
+Banda salarial / pretensión: 
+
+REQUISITOS EXCLUYENTES
+- 
+- 
+
+REQUISITOS DESEABLES
+- 
+- 
+
+HERRAMIENTAS Y TECNOLOGÍAS
+(nombres concretos, como aparecerían en un CV: Excel, Power BI, HubSpot, Meta Ads…)
+- 
+
+MISIÓN DEL PUESTO
+(2 o 3 renglones)
+
+RESPONSABILIDADES PRINCIPALES
+- 
+- 
+
+COMPETENCIAS
+- 
+- `;
 
 export default function PuestosPage() {
   const [areas, setAreas] = useState<Area[]>([]);
@@ -78,6 +125,15 @@ export default function PuestosPage() {
     [docs, sel],
   );
 
+  // puestos que ya tienen su descripción de puesto cargada y vigente
+  const conDescripcion = useMemo(() => {
+    const s = new Set<number>();
+    for (const d of docs) {
+      if (d.tipo === TIPO_DESCRIPCION && d.vigente) d.puestos.forEach((p) => s.add(p.puestoId));
+    }
+    return s;
+  }, [docs]);
+
   // ── acciones puesto ──
   async function guardarPuesto() {
     if (!editPuesto?.nombre?.trim()) return;
@@ -110,12 +166,28 @@ export default function PuestosPage() {
   function nuevoDoc() {
     setEditDoc({ tipo: "procedimiento", titulo: "", contenido: "", puestoIds: sel != null ? [sel] : [], file: null });
   }
+  // Atajo desde la columna de puestos: crea la descripción de ESE puesto, con
+  // el título ya igual al nombre del puesto (el título va dentro del texto que
+  // se embebe — ver rag_ingest.py — así que que coincida mejora el recall).
+  function nuevaDescripcion(p: Puesto) {
+    setEditDoc({
+      tipo: TIPO_DESCRIPCION,
+      titulo: p.nombre,
+      contenido: PLANTILLA_DESCRIPCION.replace("Puesto: ", `Puesto: ${p.nombre}`),
+      puestoIds: [p.id],
+      file: null,
+    });
+  }
   function abrirDoc(d: Documento) {
     setEditDoc({ ...d, puestoIds: d.puestos.map((p) => p.puestoId), file: null });
   }
 
   async function guardarDoc() {
     if (!editDoc?.titulo?.trim() || !editDoc?.contenido?.trim()) { avisar("❌ Falta título o contenido"); return; }
+    if (editDoc.tipo === TIPO_DESCRIPCION && (editDoc.puestoIds ?? []).length !== 1) {
+      avisar("❌ Una descripción de puesto va asignada a exactamente un puesto.");
+      return;
+    }
     setSaving(true);
     try {
       const body = {
@@ -163,7 +235,7 @@ export default function PuestosPage() {
       <div className="border-b border-zinc-800 bg-zinc-900/60 px-4 py-3 flex items-center gap-3">
         <InicioButton />
         <Briefcase size={18} className="text-yellow-400" />
-        <h1 className="text-sm font-semibold uppercase tracking-wider">Puestos · Procedimientos e instructivos</h1>
+        <h1 className="text-sm font-semibold uppercase tracking-wider">Puestos · Descripciones, procedimientos e instructivos</h1>
         <button onClick={cargar} className="ml-auto text-zinc-400 hover:text-yellow-400 p-2" title="Refrescar">
           {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
         </button>
@@ -198,10 +270,18 @@ export default function PuestosPage() {
             >
               <div className="min-w-0 flex-1">
                 <div className={`text-sm truncate ${sel === p.id ? "text-yellow-400" : "text-zinc-200"} ${!p.activo ? "line-through opacity-50" : ""}`}>{p.nombre}</div>
-                <div className="text-[11px] text-zinc-600 truncate">
-                  {p.sector ? `${p.sector.area.nombre} › ${p.sector.nombre}` : "Sin sector"} · {p.documentos.length} doc.
+                <div className="text-[11px] truncate">
+                  <span className="text-zinc-600">
+                    {p.sector ? `${p.sector.area.nombre} › ${p.sector.nombre}` : "Sin sector"} · {p.documentos.length} doc.
+                  </span>
+                  {conDescripcion.has(p.id)
+                    ? <span className="ml-1 text-emerald-500/80">· con descripción</span>
+                    : <span className="ml-1 text-amber-500/80">· sin descripción</span>}
                 </div>
               </div>
+              {!conDescripcion.has(p.id) && (
+                <button onClick={(e) => { e.stopPropagation(); nuevaDescripcion(p); }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-emerald-400 p-1" title="Cargar la descripción de este puesto"><ClipboardList size={13} /></button>
+              )}
               <button onClick={(e) => { e.stopPropagation(); setEditPuesto(p); }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-yellow-400 p-1" title="Editar"><Pencil size={13} /></button>
               <button onClick={(e) => { e.stopPropagation(); borrarPuesto(p); }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 p-1" title="Borrar"><Trash2 size={13} /></button>
             </div>
@@ -221,9 +301,11 @@ export default function PuestosPage() {
           </div>
           {docsVisibles.map((d) => (
             <div key={d.id} className="group flex items-start gap-3 px-4 py-3 border-b border-zinc-800/50 hover:bg-zinc-900">
-              {d.tipo === "procedimiento"
-                ? <BookOpen size={16} className="mt-0.5 text-yellow-400 shrink-0" />
-                : <FileText size={16} className="mt-0.5 text-sky-400 shrink-0" />}
+              {d.tipo === TIPO_DESCRIPCION
+                ? <ClipboardList size={16} className="mt-0.5 text-emerald-400 shrink-0" />
+                : d.tipo === "procedimiento"
+                  ? <BookOpen size={16} className="mt-0.5 text-yellow-400 shrink-0" />
+                  : <FileText size={16} className="mt-0.5 text-sky-400 shrink-0" />}
               <div className="min-w-0 flex-1 cursor-pointer" onClick={() => abrirDoc(d)}>
                 <div className={`text-sm ${d.vigente ? "text-zinc-200" : "text-zinc-500 line-through"}`}>
                   {d.titulo} <span className="text-[11px] text-zinc-600">v{d.version}</span>
@@ -279,29 +361,97 @@ export default function PuestosPage() {
           <div className="grid grid-cols-1 sm:grid-cols-[160px_1fr] gap-3">
             <div>
               <label className="block text-xs text-zinc-500 mb-1">Tipo</label>
-              <select className={inputCls} value={editDoc.tipo ?? "procedimiento"} onChange={(e) => setEditDoc({ ...editDoc, tipo: e.target.value })}>
+              <select
+                className={inputCls}
+                value={editDoc.tipo ?? "procedimiento"}
+                onChange={(e) => {
+                  const tipo = e.target.value;
+                  // la descripción va a UN solo puesto: si venían varios, queda el primero
+                  const ids = editDoc.puestoIds ?? [];
+                  setEditDoc({
+                    ...editDoc,
+                    tipo,
+                    puestoIds: tipo === TIPO_DESCRIPCION ? ids.slice(0, 1) : ids,
+                  });
+                }}
+              >
                 <option value="procedimiento">Procedimiento</option>
                 <option value="instructivo">Instructivo</option>
+                <option value={TIPO_DESCRIPCION}>Descripción de puesto</option>
               </select>
             </div>
             <div>
               <label className="block text-xs text-zinc-500 mb-1">Título *</label>
               <input className={inputCls} value={editDoc.titulo ?? ""} onChange={(e) => setEditDoc({ ...editDoc, titulo: e.target.value })} autoFocus />
+              {/* el título se embebe junto al texto (rag_ingest.py): que sea igual
+                  al nombre del puesto es lo que hace que "buscá alguien para X"
+                  recupere esta descripción. */}
+              {editDoc.tipo === TIPO_DESCRIPCION && (editDoc.puestoIds ?? []).length === 1 && (() => {
+                const nom = puestos.find((p) => p.id === (editDoc.puestoIds ?? [])[0])?.nombre;
+                if (!nom || nom === editDoc.titulo) return null;
+                return (
+                  <button onClick={() => setEditDoc({ ...editDoc, titulo: nom })} className="mt-1 text-[11px] text-amber-400/90 hover:text-amber-300">
+                    ⚠️ El título no coincide con el puesto — usar «{nom}»
+                  </button>
+                );
+              })()}
             </div>
           </div>
 
-          <label className="block text-xs text-zinc-500 mb-1 mt-3">Contenido * <span className="text-zinc-600">(este texto es lo que Vicki busca — pegá acá el procedimiento completo)</span></label>
+          <div className="flex items-end justify-between mt-3 mb-1 gap-3">
+            <label className="block text-xs text-zinc-500">
+              Contenido *{" "}
+              <span className="text-zinc-600">
+                {editDoc.tipo === TIPO_DESCRIPCION
+                  ? "(este texto es lo que Vicki lee al buscar candidatos — el adjunto NO se indexa, pegá el texto acá. Dejá una línea en blanco entre secciones.)"
+                  : "(este texto es lo que Vicki busca — pegá acá el procedimiento completo)"}
+              </span>
+            </label>
+            {editDoc.tipo === TIPO_DESCRIPCION && (
+              <button
+                onClick={() => {
+                  if (editDoc.contenido?.trim() && !confirm("Se reemplaza el contenido actual por la plantilla. ¿Seguir?")) return;
+                  const nom = puestos.find((p) => p.id === (editDoc.puestoIds ?? [])[0])?.nombre ?? "";
+                  setEditDoc({ ...editDoc, contenido: PLANTILLA_DESCRIPCION.replace("Puesto: ", `Puesto: ${nom}`) });
+                }}
+                className="shrink-0 text-[11px] text-yellow-400 hover:text-yellow-300"
+              >
+                Usar plantilla
+              </button>
+            )}
+          </div>
           <textarea className={`${inputCls} min-h-[220px] font-mono text-[13px]`} value={editDoc.contenido ?? ""} onChange={(e) => setEditDoc({ ...editDoc, contenido: e.target.value })} />
 
-          <label className="block text-xs text-zinc-500 mb-1 mt-3">Puestos asignados</label>
+          <label className="block text-xs text-zinc-500 mb-1 mt-3">
+            {editDoc.tipo === TIPO_DESCRIPCION ? "Puesto * (uno solo)" : "Puestos asignados"}
+          </label>
           <div className="flex flex-wrap gap-1.5">
             {puestos.map((p) => {
-              const on = (editDoc.puestoIds ?? []).includes(p.id);
+              const ids = editDoc.puestoIds ?? [];
+              const on = ids.includes(p.id);
+              const esDesc = editDoc.tipo === TIPO_DESCRIPCION;
+              // un puesto que ya tiene descripción no se puede elegir para otra
+              // (la API devuelve 409 igual — esto solo evita el viaje).
+              const ocupado = esDesc && !on && conDescripcion.has(p.id) &&
+                !docs.find((d) => d.id === editDoc.id)?.puestos.some((x) => x.puestoId === p.id);
               return (
                 <button
                   key={p.id}
-                  onClick={() => setEditDoc({ ...editDoc, puestoIds: on ? (editDoc.puestoIds ?? []).filter((x) => x !== p.id) : [...(editDoc.puestoIds ?? []), p.id] })}
-                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors ${on ? "border-yellow-400/60 bg-yellow-400/10 text-yellow-300" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"}`}
+                  disabled={ocupado}
+                  title={ocupado ? "Este puesto ya tiene una descripción cargada" : undefined}
+                  onClick={() => setEditDoc({
+                    ...editDoc,
+                    puestoIds: esDesc
+                      ? (on ? [] : [p.id])                                  // radio
+                      : (on ? ids.filter((x) => x !== p.id) : [...ids, p.id]), // checkbox
+                  })}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                    on
+                      ? "border-yellow-400/60 bg-yellow-400/10 text-yellow-300"
+                      : ocupado
+                        ? "border-zinc-800 text-zinc-700 cursor-not-allowed"
+                        : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+                  }`}
                 >
                   {on && <Check size={11} />}{p.nombre}
                 </button>

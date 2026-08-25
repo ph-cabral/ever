@@ -639,8 +639,14 @@ model puesto {
   @@schema("everwear")
 }
 
-// tipo: "procedimiento" | "instructivo". `contenido` es el texto que se indexa;
-// `archivoNombre` guarda el adjunto original opcional (en DOCS_DIR, fuera de git).
+// tipo: "procedimiento" | "instructivo" | "descripcion_puesto" (ver
+// lib/rrhh/documentosTipos.ts). `contenido` es el texto que se indexa en Qdrant;
+// `archivoNombre` guarda el adjunto original opcional (en DOCS_DIR, fuera de
+// git) y NO se indexa.
+// Regla: un puesto puede tener N procedimientos/instructivos pero UNA sola
+// descripcion_puesto. Se valida a nivel API (chequearUnicaDescripcion) para no
+// requerir migración; si algún día se quiere en la base, va como índice único
+// parcial sobre puesto_documento ⨝ documento.tipo='descripcion_puesto'.
 model documento {
   id            Int                @id @default(autoincrement())
   tipo          String             @db.VarChar(20)
