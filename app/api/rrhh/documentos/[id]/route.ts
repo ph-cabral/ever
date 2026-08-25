@@ -1,10 +1,16 @@
 // GET/PATCH/DELETE de un documento. PATCH re-indexa en Qdrant (y sube version
 // si cambió el contenido); vigente=false lo saca del índice sin borrarlo de
-// Postgres. DELETE borra de ambos lados.
+// Postgres. DELETE borra de ambos lados (y del disco).
+//
+// Desde que la carga es por archivo, la UI solo usa PATCH para `vigente`: el
+// contenido se actualiza reemplazando el archivo (ver [id]/archivo/route.ts).
+// El resto del PATCH queda para la API.
 import { NextRequest, NextResponse } from "next/server";
+import { promises as fs } from "fs";
 import { prisma } from "@/lib/prisma";
 import { ragDeleteDocumento, ragSyncDocumento } from "@/lib/rrhh/vickiRag";
 import { TIPOS, chequearUnicaDescripcion } from "@/lib/rrhh/documentosTipos";
+import { rutaAdjunto } from "@/lib/rrhh/documentosArchivo";
 
 export const dynamic = "force-dynamic";
 
@@ -82,7 +88,11 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   const id = Number((await params).id);
   if (!Number.isInteger(id)) return NextResponse.json({ error: "id inválido" }, { status: 400 });
   try {
+    const doc = await prisma.documento.findUnique({ where: { id } });
     await prisma.documento.delete({ where: { id } }); // cascade borra los links
+    // el binario también: ahora todo documento nuevo tiene uno y quedarían
+    // huérfanos en documentos/ para siempre. Best-effort.
+    if (doc?.archivoNombre) await fs.unlink(rutaAdjunto(id, doc.archivoNombre)).catch(() => {});
     const rag = await ragDeleteDocumento(id);
     return NextResponse.json({ ok: true, ...rag });
   } catch (e: unknown) {

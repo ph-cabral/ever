@@ -928,9 +928,9 @@ export default function VentasVendedorPage() {
                                 <span className="truncate">
                                   {c.nombre ?? "(sin nombre)"}
                                 </span>
-                                <span className="text-zinc-500 font-mono text-xs shrink-0">
+                                {/* <span className="text-zinc-500 font-mono text-xs shrink-0">
                                   {c.numero}
-                                </span>
+                                </span> */}
                               </button>
                             ))}
                           </div>
@@ -979,17 +979,6 @@ export default function VentasVendedorPage() {
                           </div>
                         </div>
 
-                        {hayTabla && (
-                          <button
-                            type="button"
-                            onClick={() => setDesglosado((v) => !v)}
-                            className="btn-anim flex items-center gap-1.5 border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
-                          >
-                            {desglosado
-                              ? "por año"
-                              : "por mes"}
-                          </button>
-                        )}
                       </>
                     )}
 
@@ -1007,8 +996,8 @@ export default function VentasVendedorPage() {
                             onClick={() => setPeriodo("ytd")}
                             title={
                               mesAnteriorNum >= 1
-                                ? `Acumulado Enero–${MESES_CORTOS_ES[mesAnteriorNum - 1]}`
-                                : "Todavía no hay mes anterior este año"
+                              ? `Acumulado Enero–${MESES_CORTOS_ES[mesAnteriorNum - 1]}`
+                              : "Todavía no hay mes anterior este año"
                             }
                             className={`px-3 py-2 transition-colors ${
                               periodo === "ytd"
@@ -1026,13 +1015,14 @@ export default function VentasVendedorPage() {
                               periodo === "meses"
                                 ? "bg-yellow-400 text-black font-semibold"
                                 : "text-zinc-300 hover:bg-zinc-800"
-                            }`}
-                          >
+                              }`}
+                              >
                             Meses
                           </button>
                         </div>
                       </div>
                     )}
+
 
                     {hayTabla && (
                       <span className="text-sm text-zinc-500 pb-2">
@@ -1042,6 +1032,17 @@ export default function VentasVendedorPage() {
                   </div>
                 )}
 
+                {hayTabla && (
+                  <button
+                    type="button"
+                    onClick={() => setDesglosado((v) => !v)}
+                    className="btn-anim flex items-center gap-1.5 border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
+                  >
+                    {desglosado
+                      ? "por año"
+                      : "por mes"}
+                  </button>
+                )}
               </div>
 
               <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
