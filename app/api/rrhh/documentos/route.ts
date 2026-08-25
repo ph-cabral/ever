@@ -10,6 +10,9 @@
 //  - application/json (legacy/API): titulo + contenido + tipo + puestoIds.
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+// /api/rrhh/documentos está EXCLUIDA del matcher del middleware (bug de Next 15.5
+// con multipart, ver middleware.ts): el permiso se chequea acá.
+import { bloqueoPorAcceso } from "@/lib/auth/guard";
 import { ragSyncDocumento } from "@/lib/rrhh/vickiRag";
 import { TIPOS, chequearUnicaDescripcion } from "@/lib/rrhh/documentosTipos";
 import { extraerTexto, SinTextoError } from "@/lib/rrhh/extraerTexto";
@@ -18,6 +21,8 @@ import { MAX_BYTES, guardarArchivo, tituloDesdeArchivo } from "@/lib/rrhh/docume
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  const bloqueo = await bloqueoPorAcceso("/api/rrhh/documentos");
+  if (bloqueo) return bloqueo;
   const sp = req.nextUrl.searchParams;
   const tipo = sp.get("tipo") ?? undefined;
   const puestoId = sp.get("puestoId") ? Number(sp.get("puestoId")) : undefined;
@@ -39,6 +44,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const bloqueo = await bloqueoPorAcceso("/api/rrhh/documentos");
+  if (bloqueo) return bloqueo;
   const ct = req.headers.get("content-type") ?? "";
   return ct.includes("multipart/form-data") ? crearDesdeArchivo(req) : crearDesdeJson(req);
 }

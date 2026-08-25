@@ -10,6 +10,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import { prisma } from "@/lib/prisma";
+// /api/rrhh/documentos está EXCLUIDA del matcher del middleware (bug de Next 15.5
+// con multipart, ver middleware.ts): el permiso se chequea acá.
+import { bloqueoPorAcceso } from "@/lib/auth/guard";
 import { ragSyncDocumento } from "@/lib/rrhh/vickiRag";
 import { extraerTexto, SinTextoError } from "@/lib/rrhh/extraerTexto";
 import { MAX_BYTES, MIME, guardarArchivo, rutaAdjunto, tituloDesdeArchivo } from "@/lib/rrhh/documentosArchivo";
@@ -19,6 +22,8 @@ export const dynamic = "force-dynamic";
 type Params = { params: Promise<{ id: string }> };
 
 export async function POST(req: NextRequest, { params }: Params) {
+  const bloqueo = await bloqueoPorAcceso("/api/rrhh/documentos");
+  if (bloqueo) return bloqueo;
   const id = Number((await params).id);
   if (!Number.isInteger(id)) return NextResponse.json({ error: "id inválido" }, { status: 400 });
   const doc = await prisma.documento.findUnique({ where: { id } });
@@ -72,6 +77,8 @@ export async function POST(req: NextRequest, { params }: Params) {
 }
 
 export async function GET(_req: NextRequest, { params }: Params) {
+  const bloqueo = await bloqueoPorAcceso("/api/rrhh/documentos");
+  if (bloqueo) return bloqueo;
   const id = Number((await params).id);
   const doc = await prisma.documento.findUnique({ where: { id } });
   if (!doc?.archivoNombre) return new NextResponse(null, { status: 404 });
@@ -90,6 +97,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(_req: NextRequest, { params }: Params) {
+  const bloqueo = await bloqueoPorAcceso("/api/rrhh/documentos");
+  if (bloqueo) return bloqueo;
   const id = Number((await params).id);
   const doc = await prisma.documento.findUnique({ where: { id } });
   if (!doc) return NextResponse.json({ error: "no existe" }, { status: 404 });

@@ -170,7 +170,14 @@ export const config = {
   // base64) — "TypeError: Response body object should not be disturbed or
   // locked" en el route handler. Al excluirla, el middleware ni corre y el
   // body llega intacto. El endpoint igual exige un draft activo en vicki_chat.
+  //
+  // api/rrhh/documentos: MISMO BUG, ahora con multipart (subir el .docx/.pdf en
+  // /rrhh/puestos). El `req.formData()` del handler explotaba con ese mismo
+  // TypeError y el frontend solo veía "HTTP 500". Como acá sí hay datos que
+  // proteger, las 3 rutas de documentos llaman a `bloqueoPorAcceso()`
+  // (lib/auth/guard.ts) al entrar: reemplaza el chequeo que hacía el middleware.
+  // REGLA: excluir del matcher SIN agregar ese guard = ruta abierta a cualquiera.
   matcher: [
-    "/((?!login|api/auth|api/vicki/asignar_foto|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|css|js|map|txt|json|woff|woff2|ttf)$).*)",
+    "/((?!login|api/auth|api/vicki/asignar_foto|api/rrhh/documentos|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|css|js|map|txt|json|woff|woff2|ttf)$).*)",
   ],
 };
