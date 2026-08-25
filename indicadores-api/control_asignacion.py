@@ -195,6 +195,27 @@ FIX 2026-08-21 (aparte, latente): `SQL_MAGNUS_ABIERTOS_TODOS` no traía
 `CodCliente` pero `refrescar_cola` insertaba `c["codCliente"]` — KeyError en
 cada refresco. Se agrega la columna al SELECT y al dict de salida de las dos
 funciones que la usan. Venía roto desde el alta de codCliente (2026-07-31).
+
+CompCodigo 410 (2026-08-25, a pedido de Pablo: "agregá los 410, que no se
+retiren y ponelos primero que todo sin importar prioridad"): el 410
+(PED.NF.CEN, "pedido no facturable de centro") vuelve a la whitelist de
+`SQL_MAGNUS_LISTOS_PARA_CONTROL` — revierte la decisión del 2026-08-24 de
+dejarlo afuera — y encabeza la cola por encima de la afinidad y de la
+prioridad. Para poder ordenar por eso se guarda `CompCodigo` en la cola:
+columna nueva "compCodigo" (ALTER idempotente en
+ever/sql/deposito_control_asignacion.sql, CORRER ANTES DE DEPLOYAR — sin ella
+el INSERT de refrescar_cola falla). Filas viejas: "compCodigo" NULL, se
+comportan como no-410. Sin verificar en vivo.
+
+AFINIDAD POR CLIENTE (2026-08-25, a pedido de Pablo: "los 2 pedidos de MAGAL
+que se los pase a la misma persona, uno detrás del otro"): `asignar_siguiente`
+ordena AHORA primero por "es del mismo cliente que el último pedido que
+reclamó ESE operario" y recién después por prioridad/fecha. La ventana está en
+AFINIDAD_CLIENTE_HORAS (12 h): si el último reclamo es más viejo, no aplica.
+Es preferencia, no filtro — si no hay otro pedido libre de ese cliente, sigue
+el orden de siempre. Consecuencia buscada y aceptada: la afinidad pesa más que
+la prioridad, así que un prioridad 1 puede esperar un turno. Sin verificar en
+vivo — falta rebuild indicadores-api.
 """
 from datetime import datetime, timedelta
 
@@ -209,6 +230,12 @@ from errores_mesa import fetch_operario_nombre, _col_observaciones_ot, BASE_DATE
 # acá nunca deja afuera al que le tocaría el turno).
 # Ajustable sin tocar el resto de la lógica.
 MAGNUS_ABIERTOS_LIMIT = 3000
+
+# AFINIDAD POR CLIENTE (2026-08-25, a pedido de Pablo): ventana hacia atrás en
+# la que se mira el ÚLTIMO pedido que reclamó el operario para tratar de darle
+# otro del MISMO cliente. Fuera de esta ventana (arrancó otro turno, volvió al
+# otro día) la afinidad no aplica y el orden es el de siempre.
+AFINIDAD_CLIENTE_HORAS = 12
 
 
 # ── Magnus: TODOS los pedidos Abiertos (fecha/tipo/cliente) — universo base ──
@@ -553,8 +580,10 @@ def fetch_pedidos_cumplidos_abiertos_legacy(limit: int = MAGNUS_ABIERTOS_LIMIT) 
 #
 # Verificado 2026-08-24 contra la pantalla de Magnus y la base al mismo
 # tiempo: **22 de 22**, sin un solo falso positivo ni falso negativo. Lo único
-# que Magnus lista y esta query no es el pedido 757707, CompCodigo 410
-# (PED.NF.CEN) — queda afuera por la whitelist de comprobantes, no por el gate.
+# que Magnus lista y esta query no era el pedido 757707, CompCodigo 410
+# (PED.NF.CEN) — quedaba afuera por la whitelist de comprobantes, no por el
+# gate. DESDE 2026-08-25 el 410 también entra (y va primero de todo), así que
+# la query y esa pantalla muestran exactamente lo mismo.
 #
 # Reglas que se probaron y NO sirven (mismo run):
 #   · `cab.FechaArmado > 0`      -> deja entrar 37 de más, incluida la basura
@@ -585,7 +614,8 @@ SELECT TOP ({limit})
     cab.Prioridad       AS Prioridad,
     ca.ObsArmadorMovil  AS Ubicacion,
     ca.WMS_NroOTPicking AS Ot,
-    ca.CodArmador       AS CodArmador
+    ca.CodArmador       AS CodArmador,
+    cab.CompCodigo      AS CompCodigo
 FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
 INNER JOIN (
     -- 1 fila por pedido: la asignación de armado MÁS RECIENTE que tenga
@@ -606,19 +636,24 @@ INNER JOIN (
 LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo = cc.CompCodigo
 LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente = cli.CodCliente
 WHERE cab.EstadoPedido = 2
-  AND cab.CompCodigo IN (10, 100, 210, 310)
+  AND cab.CompCodigo IN (10, 100, 210, 310, 410)
   -- Misma whitelist de siempre (ver SQL_MAGNUS_ABIERTOS_TODOS para el porqué
-  -- de cada código). CompCodigo 410 (PED.NF.CEN, "pedido no facturable de
-  -- centro") aparece en la pantalla Armar Pedidos de Magnus y tiene ubicación
-  -- cargada, pero se DEJA AFUERA a propósito: decisión de Pablo, 2026-08-24 —
-  -- mesa de control no lo controla. Es la única diferencia entre esta query y
-  -- lo que muestra esa pantalla, así que si algún día "falta un pedido" y es
-  -- 410, es por acá.
+  -- de cada código) MÁS el 410.
+  --
+  -- CAMBIO 2026-08-25 (Pablo, revierte la decisión del 2026-08-24): CompCodigo
+  -- 410 (PED.NF.CEN, "pedido no facturable de centro") ENTRA a la cola —
+  -- "agregá los 410, que no se retiren". Antes quedaba afuera de la whitelist
+  -- y era la única diferencia entre esta query y la pantalla Armar Pedidos de
+  -- Magnus; ahora las dos muestran lo mismo. Además va PRIMERO en la cola,
+  -- por encima de cualquier prioridad — ver el ORDER BY de acá abajo y el de
+  -- asignar_siguiente (los dos tienen que decir lo mismo).
+  --
   -- Acopio 70/75 NO entra por acá: va por vuelta/remito,
   -- SQL_MAGNUS_ACOPIO_ESPERA_CONTROL — y encima no usa Ven_PedImpresoCA (los
   -- 59 acopios abiertos al 2026-08-24 tienen 0 filas con ubicación y 0 con
   -- OT de WMS ahí, confirmado).
-ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
+ORDER BY CASE WHEN cab.CompCodigo = 410 THEN 0 ELSE 1 END ASC,
+         COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
 """
 
 # Nombre del armador: se sigue tomando de WMS (Personal), igual que antes, para
@@ -653,7 +688,7 @@ def fetch_pedidos_listos_para_control(limit: int = MAGNUS_ABIERTOS_LIMIT) -> lis
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cur.execute(SQL_MAGNUS_LISTOS_PARA_CONTROL.format(limit=limit))
         for (nro, fecha_int, tipo_pedido, cliente, cod_cliente,
-             prioridad, ubicacion, ot, _cod_armador) in cur.fetchall():
+             prioridad, ubicacion, ot, _cod_armador, comp_codigo) in cur.fetchall():
             if nro is None:
                 continue
             filas.append({
@@ -662,6 +697,7 @@ def fetch_pedidos_listos_para_control(limit: int = MAGNUS_ABIERTOS_LIMIT) -> lis
                 "tipoPedido": (tipo_pedido or "").strip() or None,
                 "cliente": (cliente or "").strip() or None,
                 "codCliente": int(cod_cliente) if cod_cliente is not None else None,
+                "compCodigo": int(comp_codigo) if comp_codigo is not None else None,
                 "prioridad": int(prioridad) if prioridad is not None else None,
                 "nroRemito": 0,   # fila "por pedido"; acopio va por vuelta
                 "ubicacion": (ubicacion or "").strip() or None,
@@ -849,7 +885,8 @@ SELECT TOP ({limit})
     pca.ObsArmadorMovil AS Ubicacion,
     rmt.OTId            AS Ot,
     rmt.UsuarioArmado   AS NroArmador,
-    usr.Nombre          AS NombreArmador
+    usr.Nombre          AS NombreArmador,
+    cab.CompCodigo      AS CompCodigo
 FROM EVERWEAR.dbo.VenFer_RmtoCabecera rmt
 INNER JOIN EVERWEAR.dbo.VenFer_PedidoCabecera cab ON cab.NroMovVenta = rmt.NroMovPedido
 LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo  = cc.CompCodigo
@@ -900,6 +937,7 @@ def fetch_acopio_vueltas_espera_control(limit: int = MAGNUS_ABIERTOS_LIMIT) -> l
                 "tipoPedido": (d.get("TipoPedido") or "").strip() or None,
                 "cliente": (d.get("Cliente") or "").strip() or None,
                 "codCliente": int(d["CodCliente"]) if d.get("CodCliente") is not None else None,
+                "compCodigo": int(d["CompCodigo"]) if d.get("CompCodigo") is not None else None,
                 "prioridad": int(d["Prioridad"]) if d.get("Prioridad") is not None else None,
                 # En acopio la "ubicación" es la física del acopio en playa,
                 # que el armador deja escrita en Ven_PedImpresoCA.
@@ -1069,13 +1107,14 @@ def refrescar_cola(limit: int = MAGNUS_ABIERTOS_LIMIT) -> int:
                 """
                 INSERT INTO deposito.control_asignacion
                     ("nroPedido", "nroRemito", fecha, "tipoPedido", cliente, "codCliente",
-                     "prioridad", ubicacion, ot, "nroArmador", "nombreArmador")
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     "compCodigo", "prioridad", ubicacion, ot, "nroArmador", "nombreArmador")
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT ("nroPedido", "nroRemito") DO NOTHING
                 """,
                 (
                     c["nroPedido"], c.get("nroRemito", 0), c["fecha"], c["tipoPedido"],
-                    c["cliente"], c["codCliente"], c["prioridad"], c["ubicacion"], c["ot"],
+                    c["cliente"], c["codCliente"], c.get("compCodigo"),
+                    c["prioridad"], c["ubicacion"], c["ot"],
                     c["nroArmador"], c["nombreArmador"],
                 ),
             )
@@ -1215,6 +1254,26 @@ def asignar_siguiente(nro_operario: int) -> dict:
     ascendente — vacía los atrasados de cada prioridad antes de pasar a la
     siguiente (ver nota de ORDEN en el docstring del módulo).
 
+    410 PRIMERO DE TODO (2026-08-25, a pedido de Pablo): antes que la afinidad
+    y antes que la prioridad, la cola entrega los CompCodigo 410 (PED.NF.CEN,
+    "pedido no facturable de centro"). Son los que no tienen que irse sin
+    pasar por mesa, así que van al frente sin importar prioridad ni fecha.
+    Entre varios 410 se desempata con el orden normal (afinidad, prioridad,
+    fecha). El "410" sale de la columna "compCodigo" de la cola (ALTER en
+    ever/sql/deposito_control_asignacion.sql) — en las filas viejas, cargadas
+    antes de ese ALTER, viene NULL y se comportan como no-410.
+
+    AFINIDAD POR CLIENTE (2026-08-25, a pedido de Pablo): después de eso,
+    la cola prefiere un pedido del MISMO cliente que el último que reclamó
+    ESE operario (`cod_cliente_afin`, dentro de AFINIDAD_CLIENTE_HORAS). Los 2
+    pedidos de un mismo cliente le caen a la misma persona uno detrás del
+    otro, en vez de repartirse entre 2 controladores. Es una preferencia, no
+    un filtro: si no queda ningún pedido libre de ese cliente, sigue el orden
+    normal de prioridad/fecha. Ojo: la afinidad pesa MÁS que la prioridad, así
+    que un pedido prioridad 1 puede quedar un turno atrás del hermano del
+    cliente anterior. Se eligió así a propósito — agrupar por cliente es lo
+    que evita re-controlar el mismo mostrador dos veces.
+
     UN PEDIDO POR OPERARIO A LA VEZ (2026-07-31): antes de tocar la cola, se
     fija si `nro_operario` ya tiene una asignación activa todavía sin
     terminar — si es así, se le devuelve ESA MISMA fila (no cuenta como un
@@ -1250,6 +1309,26 @@ def asignar_siguiente(nro_operario: int) -> dict:
     conn = get_pg_connection()
     try:
         cur = conn.cursor()
+        # Cliente del ÚLTIMO pedido que reclamó este operario dentro de la
+        # ventana de afinidad (None si no reclamó nada hace poco). Va aparte
+        # y no dentro del UPDATE a propósito: mezclar un CTE con el
+        # "FOR UPDATE SKIP LOCKED" del subquery es terreno resbaladizo en
+        # Postgres, y que la afinidad quede un turno vieja no rompe nada.
+        cur.execute(
+            """
+            SELECT "codCliente"
+            FROM deposito.control_asignacion
+            WHERE "nroOperarioAsignado" = %s
+              AND "asignadoEn" IS NOT NULL
+              AND "asignadoEn" > now() - (%s * interval '1 hour')
+            ORDER BY "asignadoEn" DESC
+            LIMIT 1
+            """,
+            (nro_operario, AFINIDAD_CLIENTE_HORAS),
+        )
+        _ult = cur.fetchone()
+        cod_cliente_afin = _ult[0] if _ult else None
+
         cur.execute(
             """
             UPDATE deposito.control_asignacion
@@ -1257,7 +1336,9 @@ def asignar_siguiente(nro_operario: int) -> dict:
             WHERE id = (
                 SELECT id FROM deposito.control_asignacion
                 WHERE "asignadoEn" IS NULL
-                ORDER BY COALESCE("prioridad", 999) ASC, fecha ASC
+                ORDER BY CASE WHEN "compCodigo" = 410 THEN 0 ELSE 1 END ASC,
+                         COALESCE("codCliente" = %s, FALSE) DESC,
+                         COALESCE("prioridad", 999) ASC, fecha ASC
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
             )
@@ -1265,7 +1346,7 @@ def asignar_siguiente(nro_operario: int) -> dict:
                       "prioridad", ubicacion, ot, "nroArmador", "nombreArmador",
                       "asignadoA", "asignadoEn"
             """,
-            (nombre, nro_operario),
+            (nombre, nro_operario, cod_cliente_afin),
         )
         row = cur.fetchone()
         conn.commit()

@@ -8,7 +8,6 @@ import {
   Table2,
   ChevronDown,
   ChevronUp,
-  ArrowLeftRight,
   Trophy,
   X,
   ListChevronsUpDown,
@@ -157,8 +156,11 @@ const MESES_CORTOS_ES = [
 type Modo = "unidades" | "pesos";
 type Periodo = "ytd" | "meses";
 
+// Sin decimales en ninguna de las dos métricas (pedido de Pablo 2026-08-25:
+// "quitá de las sumas los decimales") — las unidades se redondean igual que
+// los pesos.
 const fmtNum = (n: number | null | undefined) =>
-  new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(n || 0);
+  new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(n || 0);
 const fmtMoney = (n: number | null | undefined) =>
   new Intl.NumberFormat("es-AR", {
     style: "currency",
@@ -582,23 +584,34 @@ export default function VentasVendedorPage() {
   const esModoLinea = modalMode === "linea";
   const fuenteTabla = esModoLinea ? clientesLinea : data;
   const filas: FilaTabla[] = useMemo(() => {
-    if (esModoLinea) {
-      return (clientesLinea?.clientes ?? []).map((c) => ({
-        key: `cli-${c.numero}`,
-        etiqueta: c.nombre ? `${c.nombre} (${c.numero})` : String(c.numero),
-        cliente: { numero: c.numero, nombre: c.nombre },
-        anioAnterior: c.anioAnterior,
-        anioActual: c.anioActual,
-      }));
-    }
-    return (data?.lineas ?? []).map((l) => ({
-      key: `lin-${l.linea}`,
-      etiqueta: l.linea,
-      cliente: null,
-      anioAnterior: l.anioAnterior,
-      anioActual: l.anioActual,
-    }));
-  }, [esModoLinea, clientesLinea, data]);
+    const base: FilaTabla[] = esModoLinea
+      ? (clientesLinea?.clientes ?? []).map((c) => ({
+          key: `cli-${c.numero}`,
+          etiqueta: c.nombre ? `${c.nombre} (${c.numero})` : String(c.numero),
+          cliente: { numero: c.numero, nombre: c.nombre },
+          anioAnterior: c.anioAnterior,
+          anioActual: c.anioActual,
+        }))
+      : (data?.lineas ?? []).map((l) => ({
+          key: `lin-${l.linea}`,
+          etiqueta: l.linea,
+          cliente: null,
+          anioAnterior: l.anioAnterior,
+          anioActual: l.anioActual,
+        }));
+    // Orden de mayor a menor por el TOTAL DEL AÑO ANTERIOR (pedido de Pablo
+    // 2026-08-25). Se ordena sobre el mismo valor/período que muestra la
+    // tabla (sumaPeriodo + valor: respeta YTD/Meses y $/Unidades), así que
+    // togglear cualquiera de esos reordena la tabla. Desempate por el año
+    // actual y después alfabético, para que el orden sea estable.
+    return [...base].sort((a, b) => {
+      const ant = valor(sumaPeriodo(b.anioAnterior)) - valor(sumaPeriodo(a.anioAnterior));
+      if (ant !== 0) return ant;
+      const act = valor(sumaPeriodo(b.anioActual)) - valor(sumaPeriodo(a.anioActual));
+      if (act !== 0) return act;
+      return a.etiqueta.localeCompare(b.etiqueta, "es");
+    });
+  }, [esModoLinea, clientesLinea, data, valor, sumaPeriodo]);
   const hayTabla = !!fuenteTabla;
   const sinDatos = !!fuenteTabla && !fuenteTabla.tieneDatos;
   // Encabezado de la primera columna y de la etiqueta de conteo del header.
@@ -610,7 +623,21 @@ export default function VentasVendedorPage() {
   // Enero..mes anterior, mismo criterio que ya usa sumaPeriodo/mesesActivos.
   const mesesMostrados = mesesActivos;
   const nMesesMostrados = mesesMostrados.length;
-  const colSpanAnio = desglosado ? nMesesMostrados + 1 : 1;
+  // Con el desglose mensual en un solo mes (período "Meses") la columna
+  // "Total" de cada año repite exactamente el único mes que se muestra —
+  // se oculta (pedido de Pablo 2026-08-25). Sin desglose el "total" ES la
+  // única columna de datos del año, así que ahí siempre va.
+  const mostrarTotalAnio = !desglosado || nMesesMostrados > 1;
+  // Separación visual entre bloques (pedido de Pablo 2026-08-25: "una línea
+  // gruesa entre años"). El borde grueso amarillo marca dónde ARRANCA cada
+  // bloque — año anterior, año actual y Tendencia — y adentro de cada bloque
+  // los meses siguen separados con el borde fino de siempre. Con el desglose
+  // mensual el bloque arranca en el primer mes; sin desglose arranca en la
+  // columna de total (que es la única del año).
+  const SEP_BLOQUE = "border-l-2 border-yellow-400/40";
+  const SEP_FINO = "border-l border-zinc-800";
+  const sepTotalAnio = desglosado ? SEP_FINO : SEP_BLOQUE;
+  const colSpanAnio = desglosado ? nMesesMostrados + (mostrarTotalAnio ? 1 : 0) : 1;
   const labelDeMes = (a: AnioVal, mes: number) =>
     a.meses.find((m) => m.mes === mes)?.label ?? "";
 
@@ -622,8 +649,8 @@ export default function VentasVendedorPage() {
   const COL_LINEA = 0;
   const colAnteriorMes = (mes: number) => 1 + mesesMostrados.indexOf(mes);
   const colAnteriorTotal = desglosado ? 1 + nMesesMostrados : 1;
-  const colActualMes = (mes: number) => colAnteriorTotal + 1 + mesesMostrados.indexOf(mes);
-  const colActualTotal = desglosado ? colAnteriorTotal + 1 + nMesesMostrados : 2;
+  const colActualMes = (mes: number) => 1 + colSpanAnio + mesesMostrados.indexOf(mes);
+  const colActualTotal = desglosado ? 1 + colSpanAnio + nMesesMostrados : 2;
 
   const [hoverRow, setHoverRow] = useState<number | null>(null);
   const [hoverCol, setHoverCol] = useState<number | null>(null);
@@ -666,15 +693,33 @@ export default function VentasVendedorPage() {
     },
     [valor, sumaPeriodo],
   );
-  // Celda de la columna "Tendencia": fondo sólido verde/rojo solo cuando hay
-  // una dirección real (pedido de Pablo: "si no hay ventas o es 0 no hay
-  // que tocarle el fondo").
+  // Celda de la columna "Tendencia": el color va en el TEXTO, no en el fondo
+  // (pedido de Pablo 2026-08-25: "no pintes toda la fila de rojo cuando la
+  // tendencia es baja" — antes la celda del ▼ tenía fondo rojo sólido). El
+  // verde de la fila que crece (ver `celda`) se mantiene.
   const celdaTendencia = (t: "sube" | "baja" | "igual") => {
-    if (t === "sube") return "bg-green-500/20 text-green-400";
-    if (t === "baja") return "bg-red-500/20 text-red-400";
+    if (t === "sube") return "text-green-400";
+    if (t === "baja") return "text-red-400";
     return "text-zinc-600";
   };
   const iconoTendencia = (t: "sube" | "baja" | "igual") => (t === "sube" ? "▲" : t === "baja" ? "▼" : "—");
+
+  // Variación porcentual año actual vs. año anterior, al lado del triángulo
+  // (pedido de Pablo 2026-08-25). Mismo valor/período que `tendencia`.
+  // Devuelve null cuando el año anterior es 0: no hay base contra la cual
+  // calcular un % (sería infinito), así que en ese caso se muestra solo el
+  // triángulo.
+  const pctTendencia = useCallback(
+    (r: { anioAnterior: AnioVal; anioActual: AnioVal }): number | null => {
+      const ant = valor(sumaPeriodo(r.anioAnterior));
+      const act = valor(sumaPeriodo(r.anioActual));
+      if (!ant) return null;
+      return ((act - ant) / Math.abs(ant)) * 100;
+    },
+    [valor, sumaPeriodo],
+  );
+  const fmtPct = (p: number | null) =>
+    p === null ? "" : `${p > 0 ? "+" : ""}${new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(p)}%`;
 
   // ── Agrupado en acordeón (ver agrupar/FilaGrupo/GROUP_SIZE arriba) — un
   // bloque por tabla larga, calculado acá porque las tres dependen de
@@ -735,23 +780,33 @@ export default function VentasVendedorPage() {
             {topVista === "clientes" ? "clientes" : "líneas"}
           </h2>
 
-          <button
-            type="button"
-            onClick={() => {
-              setTopVista(topVista === "clientes" ? "lineas" : "clientes");
-              setTopGrupoAbierto(0);
-            }}
-            title={`Ver ${topVista === "clientes" ? "líneas" : "clientes"}`}
-            className="btn-anim inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors"
-          >
-            <ArrowLeftRight size={14} className="text-yellow-400" />
-            <span className="font-semibold">
-              {topVista === "clientes" ? "Clientes" : "Líneas"}
-            </span>
-            {/* <span className="text-zinc-500 text-xs">
-              {topVista === "clientes" ? "($)" : "(unidades)"}
-            </span> */}
-          </button>
+          {/* Botón dividido Clientes | Líneas (pedido de Pablo 2026-08-25:
+              "que sean 2 botones y la marca se mueva de lado a lado según el
+              lugar activo") — antes era UN botón que alternaba y mostraba la
+              vista actual, confuso porque no se sabía si el texto era el
+              estado o la acción. Mismo patrón visual que el YTD/Meses del
+              modal: el activo va en amarillo sólido. */}
+          <div className="inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700">
+            {(["clientes", "lineas"] as TopVista[]).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => {
+                  if (topVista === v) return;
+                  setTopVista(v);
+                  setTopGrupoAbierto(0);
+                }}
+                title={v === "clientes" ? "Ranking de clientes ($)" : "Ranking de líneas (unidades)"}
+                className={`px-3 py-2 font-semibold transition-colors ${
+                  topVista === v
+                    ? "bg-yellow-400 text-black"
+                    : "text-zinc-300 hover:bg-zinc-800"
+                }`}
+              >
+                {v === "clientes" ? "Clientes" : "Líneas"}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -798,7 +853,20 @@ export default function VentasVendedorPage() {
                       </>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 shrink-0"></div>
+                  {/* La X vive en el header del modal, arriba a la derecha
+                      (pedido de Pablo 2026-08-25). Antes estaba adentro del
+                      bloque de filtro colapsable — con el filtro plegado
+                      desaparecía y solo quedaba cerrar clickeando afuera. */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={cerrarModal}
+                      className="text-zinc-500 hover:text-zinc-200 transition-colors"
+                      aria-label="Cerrar"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Filtro (pedido de Pablo 2026-08-18: colapsable con el botón
@@ -887,32 +955,28 @@ export default function VentasVendedorPage() {
                     cliente. */}
                     {hayTabla && (
                       <>
+                        {/* Botón dividido $ | Unidades — mismo cambio que el
+                            Clientes/Líneas del header (pedido de Pablo
+                            2026-08-25). "clientes" = pesos, "lineas" =
+                            unidades (ver modoModal). */}
                         <div className="flex flex-col gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setVistaModal(
-                                vistaModal === "clientes"
-                                  ? "lineas"
-                                  : "clientes",
-                              )
-                            }
-                            title={`Ver ${vistaModal === "clientes" ? "líneas" : "clientes"}`}
-                            className="btn-anim inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors"
-                          >
-                            <ArrowLeftRight
-                              size={14}
-                              className="text-yellow-400"
-                            />
-                            <span className="font-semibold">
-                              {vistaModal === "clientes"
-                                ? "$"
-                                : "Unidades"}
-                            </span>
-                            {/* <span className="text-zinc-500 text-xs">
-                              {vistaModal === "clientes" ? "($)" : "(unidades)"}
-                            </span> */}
-                          </button>
+                          <div className="inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700">
+                            {(["clientes", "lineas"] as TopVista[]).map((v) => (
+                              <button
+                                key={v}
+                                type="button"
+                                onClick={() => setVistaModal(v)}
+                                title={v === "clientes" ? "Ver montos en $" : "Ver unidades"}
+                                className={`px-3 py-2 font-semibold transition-colors ${
+                                  vistaModal === v
+                                    ? "bg-yellow-400 text-black"
+                                    : "text-zinc-300 hover:bg-zinc-800"
+                                }`}
+                              >
+                                {v === "clientes" ? "$" : "Unidades"}
+                              </button>
+                            ))}
+                          </div>
                         </div>
 
                         {hayTabla && (
@@ -975,14 +1039,6 @@ export default function VentasVendedorPage() {
                         {filas.length} {esModoLinea ? "cliente(s)" : "línea(s)"}
                       </span>
                     )}
-                    <button
-                      type="button"
-                      onClick={cerrarModal}
-                      className="text-zinc-500 hover:text-zinc-200 transition-colors"
-                      aria-label="Cerrar"
-                    >
-                      <X size={20} />
-                    </button>
                   </div>
                 )}
 
@@ -1077,7 +1133,7 @@ export default function VentasVendedorPage() {
                                 </th>
                                 <th
                                   colSpan={colSpanAnio}
-                                  className={`px-3 py-2 font-medium text-center whitespace-nowrap border-l border-zinc-800 text-zinc-300 ${
+                                  className={`px-3 py-2 font-medium text-center whitespace-nowrap ${SEP_BLOQUE} text-zinc-300 ${
                                     !desglosado && hoverCol === colAnteriorTotal
                                       ? "bg-yellow-400/10 cursor-default"
                                       : ""
@@ -1108,7 +1164,7 @@ export default function VentasVendedorPage() {
                                 </th>
                                 <th
                                   colSpan={colSpanAnio}
-                                  className={`px-3 py-2 font-medium text-center whitespace-nowrap border-l border-zinc-800 text-yellow-400 ${
+                                  className={`px-3 py-2 font-medium text-center whitespace-nowrap ${SEP_BLOQUE} text-yellow-400 ${
                                     !desglosado && hoverCol === colActualTotal
                                       ? "bg-yellow-400/10 cursor-default"
                                       : ""
@@ -1139,7 +1195,7 @@ export default function VentasVendedorPage() {
                                 </th>
                                 <th
                                   rowSpan={desglosado ? 2 : 1}
-                                  className="px-3 py-2 font-medium text-center whitespace-nowrap align-bottom border-l border-zinc-800 cursor-default"
+                                  className={`px-3 py-2 font-medium text-center whitespace-nowrap align-bottom ${SEP_BLOQUE} cursor-default`}
                                   title="Año actual vs. año anterior"
                                 >
                                   Tend.
@@ -1149,10 +1205,10 @@ export default function VentasVendedorPage() {
                                 <tr className="text-[11px] text-zinc-500">
                                   {fuenteTabla!.totales.anioAnterior.meses
                                     .filter((m) => mesesActivos.includes(m.mes))
-                                    .map((m) => (
+                                    .map((m, i) => (
                                       <th
                                         key={`pa-${m.mes}`}
-                                        className={`px-2 py-1.5 font-normal text-right whitespace-nowrap border-l border-zinc-800/60 cursor-default ${
+                                        className={`px-2 py-1.5 font-normal text-right whitespace-nowrap ${i === 0 ? SEP_BLOQUE : "border-l border-zinc-800/60"} cursor-default ${
                                           hoverCol === colAnteriorMes(m.mes)
                                             ? "bg-yellow-400/10"
                                             : ""
@@ -1165,6 +1221,7 @@ export default function VentasVendedorPage() {
                                         {m.label}
                                       </th>
                                     ))}
+                                  {mostrarTotalAnio && (
                                   <th
                                     className={`px-2 py-1.5 font-semibold text-right whitespace-nowrap border-l border-zinc-800 text-zinc-300 cursor-default ${
                                       hoverCol === colAnteriorTotal
@@ -1178,12 +1235,13 @@ export default function VentasVendedorPage() {
                                   >
                                     Total
                                   </th>
+                                  )}
                                   {fuenteTabla!.totales.anioActual.meses
                                     .filter((m) => mesesActivos.includes(m.mes))
-                                    .map((m) => (
+                                    .map((m, i) => (
                                       <th
                                         key={`pc-${m.mes}`}
-                                        className={`px-2 py-1.5 font-normal text-right whitespace-nowrap border-l border-zinc-800/60 cursor-default ${
+                                        className={`px-2 py-1.5 font-normal text-right whitespace-nowrap ${i === 0 ? SEP_BLOQUE : "border-l border-zinc-800/60"} cursor-default ${
                                           hoverCol === colActualMes(m.mes)
                                             ? "bg-yellow-400/10"
                                             : ""
@@ -1196,6 +1254,7 @@ export default function VentasVendedorPage() {
                                         {m.label}
                                       </th>
                                     ))}
+                                  {mostrarTotalAnio && (
                                   <th
                                     className={`px-2 py-1.5 font-semibold text-right whitespace-nowrap border-l border-zinc-800 text-yellow-400 cursor-default ${
                                       hoverCol === colActualTotal
@@ -1209,6 +1268,7 @@ export default function VentasVendedorPage() {
                                   >
                                     Total
                                   </th>
+                                  )}
                                 </tr>
                               )}
                             </thead>
@@ -1276,14 +1336,14 @@ export default function VentasVendedorPage() {
                                             .filter((m) =>
                                               mesesActivos.includes(m.mes),
                                             )
-                                            .map((m) => {
+                                            .map((m, i) => {
                                               const colIdx = colAnteriorMes(
                                                 m.mes,
                                               );
                                               return (
                                                 <td
                                                   key={`a-${m.mes}`}
-                                                  className={`px-2 py-2 text-right tabular-nums text-zinc-400 border-l border-zinc-800/40 cursor-default ${celda(rowIdx, colIdx, rowCrece)}`}
+                                                  className={`px-2 py-2 text-right tabular-nums text-zinc-400 ${i === 0 ? SEP_BLOQUE : "border-l border-zinc-800/40"} cursor-default ${celda(rowIdx, colIdx, rowCrece)}`}
                                                   onMouseEnter={() => {
                                                     setHoverRow(rowIdx);
                                                     setHoverCol(colIdx);
@@ -1295,8 +1355,9 @@ export default function VentasVendedorPage() {
                                                 </td>
                                               );
                                             })}
+                                        {mostrarTotalAnio && (
                                         <td
-                                          className={`px-3 py-2 text-right tabular-nums text-zinc-200 font-medium border-l border-zinc-800 cursor-default ${celda(rowIdx, colAnteriorTotal, rowCrece)}`}
+                                          className={`px-3 py-2 text-right tabular-nums text-zinc-200 font-medium ${sepTotalAnio} cursor-default ${celda(rowIdx, colAnteriorTotal, rowCrece)}`}
                                           onMouseEnter={() => {
                                             setHoverRow(rowIdx);
                                             setHoverCol(colAnteriorTotal);
@@ -1306,19 +1367,20 @@ export default function VentasVendedorPage() {
                                             valor(sumaPeriodo(r.anioAnterior)),
                                           )}
                                         </td>
+                                        )}
                                         {desglosado &&
                                           r.anioActual.meses
                                             .filter((m) =>
                                               mesesActivos.includes(m.mes),
                                             )
-                                            .map((m) => {
+                                            .map((m, i) => {
                                               const colIdx = colActualMes(
                                                 m.mes,
                                               );
                                               return (
                                                 <td
                                                   key={`c-${m.mes}`}
-                                                  className={`px-2 py-2 text-right tabular-nums text-zinc-400 border-l border-zinc-800/40 cursor-default ${celda(rowIdx, colIdx, rowCrece)}`}
+                                                  className={`px-2 py-2 text-right tabular-nums text-zinc-400 ${i === 0 ? SEP_BLOQUE : "border-l border-zinc-800/40"} cursor-default ${celda(rowIdx, colIdx, rowCrece)}`}
                                                   onMouseEnter={() => {
                                                     setHoverRow(rowIdx);
                                                     setHoverCol(colIdx);
@@ -1330,8 +1392,9 @@ export default function VentasVendedorPage() {
                                                 </td>
                                               );
                                             })}
+                                        {mostrarTotalAnio && (
                                         <td
-                                          className={`px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 cursor-default ${celda(rowIdx, colActualTotal, rowCrece)}`}
+                                          className={`px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold ${sepTotalAnio} cursor-default ${celda(rowIdx, colActualTotal, rowCrece)}`}
                                           onMouseEnter={() => {
                                             setHoverRow(rowIdx);
                                             setHoverCol(colActualTotal);
@@ -1341,10 +1404,16 @@ export default function VentasVendedorPage() {
                                             valor(sumaPeriodo(r.anioActual)),
                                           )}
                                         </td>
+                                        )}
                                         <td
-                                          className={`px-3 py-2 text-center text-base font-bold border-l border-zinc-800 cursor-default ${celdaTendencia(rowTendencia)}`}
+                                          className={`px-3 py-2 text-center font-bold whitespace-nowrap ${SEP_BLOQUE} cursor-default ${celdaTendencia(rowTendencia)}`}
                                         >
-                                          {iconoTendencia(rowTendencia)}
+                                          <span className="text-base">
+                                            {iconoTendencia(rowTendencia)}
+                                          </span>
+                                          <span className="ml-1 text-xs tabular-nums">
+                                            {fmtPct(pctTendencia(r))}
+                                          </span>
                                         </td>
                                       </tr>
                                     );
@@ -1369,12 +1438,12 @@ export default function VentasVendedorPage() {
                                 {desglosado &&
                                   fuenteTabla!.totales.anioAnterior.meses
                                     .filter((m) => mesesActivos.includes(m.mes))
-                                    .map((m) => {
+                                    .map((m, i) => {
                                       const colIdx = colAnteriorMes(m.mes);
                                       return (
                                         <td
                                           key={`ta-${m.mes}`}
-                                          className={`px-2 py-2 text-right tabular-nums text-zinc-300 font-medium border-l border-zinc-800/40 cursor-default ${
+                                          className={`px-2 py-2 text-right tabular-nums text-zinc-300 font-medium ${i === 0 ? SEP_BLOQUE : "border-l border-zinc-800/40"} cursor-default ${
                                             hoverCol === colIdx
                                               ? "bg-yellow-400/10"
                                               : ""
@@ -1388,8 +1457,9 @@ export default function VentasVendedorPage() {
                                         </td>
                                       );
                                     })}
+                                {mostrarTotalAnio && (
                                 <td
-                                  className={`px-3 py-2 text-right tabular-nums text-zinc-100 font-bold border-l border-zinc-800 cursor-default ${
+                                  className={`px-3 py-2 text-right tabular-nums text-zinc-100 font-bold ${sepTotalAnio} cursor-default ${
                                     hoverCol === colAnteriorTotal
                                       ? "bg-yellow-400/10"
                                       : ""
@@ -1405,15 +1475,16 @@ export default function VentasVendedorPage() {
                                     ),
                                   )}
                                 </td>
+                                )}
                                 {desglosado &&
                                   fuenteTabla!.totales.anioActual.meses
                                     .filter((m) => mesesActivos.includes(m.mes))
-                                    .map((m) => {
+                                    .map((m, i) => {
                                       const colIdx = colActualMes(m.mes);
                                       return (
                                         <td
                                           key={`tc-${m.mes}`}
-                                          className={`px-2 py-2 text-right tabular-nums text-zinc-300 font-medium border-l border-zinc-800/40 cursor-default ${
+                                          className={`px-2 py-2 text-right tabular-nums text-zinc-300 font-medium ${i === 0 ? SEP_BLOQUE : "border-l border-zinc-800/40"} cursor-default ${
                                             hoverCol === colIdx
                                               ? "bg-yellow-400/10"
                                               : ""
@@ -1427,8 +1498,9 @@ export default function VentasVendedorPage() {
                                         </td>
                                       );
                                     })}
+                                {mostrarTotalAnio && (
                                 <td
-                                  className={`px-3 py-2 text-right tabular-nums text-yellow-400 font-bold border-l border-zinc-800 cursor-default ${
+                                  className={`px-3 py-2 text-right tabular-nums text-yellow-400 font-bold ${sepTotalAnio} cursor-default ${
                                     hoverCol === colActualTotal
                                       ? "bg-yellow-400/10"
                                       : ""
@@ -1444,10 +1516,16 @@ export default function VentasVendedorPage() {
                                     ),
                                   )}
                                 </td>
+                                )}
                                 <td
-                                  className={`px-3 py-2 text-center text-base font-bold border-l border-zinc-800 cursor-default ${celdaTendencia(tendencia(fuenteTabla!.totales))}`}
+                                  className={`px-3 py-2 text-center font-bold whitespace-nowrap ${SEP_BLOQUE} cursor-default ${celdaTendencia(tendencia(fuenteTabla!.totales))}`}
                                 >
-                                  {iconoTendencia(tendencia(fuenteTabla!.totales))}
+                                  <span className="text-base">
+                                    {iconoTendencia(tendencia(fuenteTabla!.totales))}
+                                  </span>
+                                  <span className="ml-1 text-xs tabular-nums">
+                                    {fmtPct(pctTendencia(fuenteTabla!.totales))}
+                                  </span>
                                 </td>
                               </tr>
                             </tfoot>
