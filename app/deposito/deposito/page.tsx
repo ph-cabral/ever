@@ -5,6 +5,7 @@ import { WmsTab } from "../components/wmsTab";
 import { MesaControlTab } from "../components/mesaControl";
 import { PedidosAsignadosTab } from "../components/pedidosAsignados";
 import { InicioButton } from "@/components/ui/InicioButton";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Depósito · panel unificado — sidebar angosto a la izquierda con 2 vistas:
@@ -68,6 +69,7 @@ export default function DepositoDepositoPage() {
               <span className="text-zinc-500 text-sm hidden lg:inline">
                 Depósito · Mesas de Control
               </span>
+              <UsuarioActual className="ml-auto" />
             </header>
             <main className="max-w-[1400px] mx-auto px-8 py-8">
               <div className="flex gap-1 mb-6 border-b border-zinc-800">

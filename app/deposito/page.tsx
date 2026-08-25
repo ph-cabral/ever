@@ -17,6 +17,7 @@ import { InicioButton } from "@/components/ui/InicioButton";
 import { MonthRangeField, lastFullMonthRange } from "@/components/ui/date-range-field";
 import { useDepositoData } from "@/lib/deposito/store";
 import { filterDepositoByOperario } from "@/lib/deposito/parseDeposito";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 const TABS = [
   // { id: "resumen", label: "Resumen", icon: LayoutDashboard, needs: "prod" },
@@ -144,6 +145,7 @@ export default function DepositoPage() {
               <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
             </button>
           </div>
+          <UsuarioActual />
         </div>
       </header>
 

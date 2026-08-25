@@ -8,6 +8,7 @@ import { InicioButton } from "@/components/ui/InicioButton";
 import KpiCard from "@/app/rrhh/components/KpiCard";
 import BarChartCard from "@/app/rrhh/components/charts/BarChartCard";
 import PieChartCard from "@/app/rrhh/components/charts/PieChartCard";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/metricas — funnel mensual en ITEMS (artículos distintos, no
@@ -217,6 +218,7 @@ export default function ComprasMetricasPage() {
           >
             <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
           </button>
+          <UsuarioActual />
         </div>
       </header>
 

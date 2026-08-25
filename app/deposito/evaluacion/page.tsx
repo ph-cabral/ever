@@ -4,6 +4,7 @@ import {
   Loader2, RefreshCw, AlertTriangle, Undo2, Check, X, PackageCheck,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Faltantes — renglones pendientes del último día con registro (anterior a hoy).
@@ -306,6 +307,7 @@ export default function FaltantesPage() {
             >
               <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
             </button>
+            <UsuarioActual />
           </div>
         </header>
 

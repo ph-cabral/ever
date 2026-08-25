@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { ACCEPT, EXT_SOPORTADAS } from "@/lib/rrhh/documentosFormatos";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 type Area = { id: number; nombre: string; sectores: { id: number; nombre: string }[] };
 type Puesto = {
@@ -249,6 +250,7 @@ export default function PuestosPage() {
         <button onClick={cargar} className="ml-auto text-zinc-400 hover:text-yellow-400 p-2" title="Refrescar">
           {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
         </button>
+        <UsuarioActual />
       </div>
 
       {aviso && (

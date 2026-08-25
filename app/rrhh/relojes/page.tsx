@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { UserPlus, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 type Empleado = {
   employeeNo: string;
@@ -178,6 +179,7 @@ export default function RelojEmpPage() {
             <UserPlus className="h-4 w-4 mr-1" />
             Nuevo usuario
           </Button>
+          <UsuarioActual className="text-muted-foreground" />
         </div>
       </header>
 

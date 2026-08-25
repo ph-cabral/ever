@@ -15,6 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 type Legajo = {
   id: number;
@@ -105,7 +106,10 @@ function LegajosContent() {
 
   return (
     <div className="container mx-auto px-6 py-8">
-      <InicioButton label="Inicio" iconSize={16} className="text-sm text-muted-foreground hover:text-foreground transition-colors mb-4" />
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <InicioButton label="Inicio" iconSize={16} className="text-sm text-muted-foreground hover:text-foreground transition-colors" />
+        <UsuarioActual className="text-muted-foreground" />
+      </div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-medium">Legajos</h1>

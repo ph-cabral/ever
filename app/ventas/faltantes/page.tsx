@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { exportarFaltantesVentas } from "@/lib/ventas/exportFaltantes";
 import { InicioButton } from "@/components/ui/InicioButton";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /ventas/faltantes — "Tabla 1" (según diagrama del usuario).
@@ -498,6 +499,7 @@ export default function VentasFaltantesPage() {
           >
             <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
           </button>
+          <UsuarioActual />
         </div>
       </header>
 

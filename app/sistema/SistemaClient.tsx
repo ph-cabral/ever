@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 export type Campos = Record<string, string | null>;
 export type Tarjeta = {
@@ -596,6 +597,7 @@ export default function SistemaClient() {
           📋 Vista tabla / editar fechas
         </Link>
         {msg && <span className="text-amber-400 text-sm ml-4">{msg}</span>}
+        <UsuarioActual className="ml-auto" />
       </header>
 
       <nav className="bg-[#1a1a1a] border-b border-zinc-800 px-6 flex gap-1 items-center overflow-x-auto scrollbar-hide">

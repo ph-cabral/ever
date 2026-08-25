@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { exportarFaltantesExistencia } from "@/lib/deposito/exportFaltantesExistencia";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Faltantes — renglones pendientes del último día con registro (anterior a hoy).
@@ -627,6 +628,7 @@ export default function FaltantesPage() {
               )}
               Exportar
             </button>
+            <UsuarioActual />
           </div>
         </header>
 

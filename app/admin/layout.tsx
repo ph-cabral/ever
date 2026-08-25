@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft, Users, UserPlus, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Users, UserPlus, ShieldCheck, User } from "lucide-react";
 import { getSession } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +33,12 @@ export default async function AdminLayout({
               <ShieldCheck className="size-4" /> Permisos
             </Link>
           </nav>
+          {/* Usuario logueado, arriba a la derecha (pedido de Pablo 2026-08-25).
+              Acá el layout ya es server component con la sesión resuelta, así
+              que no hace falta el fetch de <UsuarioActual />. */}
+          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground whitespace-nowrap">
+            <User className="size-4" /> {s.nombre}
+          </span>
         </div>
       </header>
       <main className="mx-auto max-w-4xl p-4">{children}</main>

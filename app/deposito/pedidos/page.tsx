@@ -14,6 +14,7 @@ import {
 } from "../components/ui";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { DateRangeField } from "@/components/ui/date-range-field";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Pedidos preparados — REAL (WMS Picking) vs Ingresados (pedidos registrados).
@@ -338,7 +339,10 @@ export default function PedidosPreparadosPage() {
       )}
 
       <main className="max-w-7xl mx-auto px-4 py-6">
-        <InicioButton label="Inicio" iconSize={14} className="text-xs text-zinc-500 hover:text-yellow-400 transition-colors mb-3" />
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <InicioButton label="Inicio" iconSize={14} className="text-xs text-zinc-500 hover:text-yellow-400 transition-colors" />
+          <UsuarioActual />
+        </div>
         {/* Bloque pegajoso: título + rango de fechas + segmentadores.
             Esta vista no tiene <header> propio, asi que se ancla en top-0
             para que los filtros queden siempre visibles al scrollear. */}

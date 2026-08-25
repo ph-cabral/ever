@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 import KpiCard from "@/app/rrhh/components/KpiCard";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/consumo — consumo mensual de UN artículo (pedido de Pablo
@@ -403,6 +404,7 @@ export default function ComprasConsumoPage() {
           <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
           <span className="hidden md:inline text-zinc-500 text-sm">Compras · Consumo por artículo</span>
         </div>
+        <UsuarioActual className="ml-auto" />
       </header>
 
       <main className="max-w-[1400px] mx-auto px-4 md:px-8 py-8 space-y-6">

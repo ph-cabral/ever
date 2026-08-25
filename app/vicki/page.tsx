@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InicioButton } from "@/components/ui/InicioButton";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -372,6 +373,7 @@ export default function VickiPage() {
       <header className="border-b border-zinc-800 px-6 py-4 flex items-center gap-3">
         <InicioButton className="text-zinc-400 hover:text-white transition-colors p-1.5" />
         <h1 className="text-lg font-semibold">Vicki — Selección de Personal</h1>
+        <UsuarioActual className="ml-auto" />
       </header>
 
       <main className="flex-1 overflow-y-auto px-4 py-6">

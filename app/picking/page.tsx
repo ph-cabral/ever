@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { MapPin, X, Loader2 } from "lucide-react";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(n || 0);
@@ -104,9 +105,10 @@ export default function PickingPage() {
 
   return (
     <div className="h-screen bg-gray-950 text-white p-6 flex flex-col overflow-hidden">
-      <h1 className="text-2xl font-bold mb-6 shrink-0">
-        Deposito - Pedidos pendientes
-      </h1>
+      <div className="flex items-center justify-between gap-4 mb-6 shrink-0">
+        <h1 className="text-2xl font-bold">Deposito - Pedidos pendientes</h1>
+        <UsuarioActual />
+      </div>
 
       <div className="flex gap-2 mb-4 shrink-0 flex-wrap items-center">
         {ESTADOS_DISPONIBLES.map((estado) => (

@@ -17,6 +17,7 @@ import {
   type Tablero,
   type Tarjeta,
 } from "../SistemaClient";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 function truncar(s: string, n: number) {
   const t = s.replace(/\s+/g, " ").trim();
@@ -158,6 +159,7 @@ export default function SistemaEditClient() {
         </Link>
         <h1 className="font-bold text-rose-500 text-lg">Sistema — Vista tabla</h1>
         {msg && <span className="text-amber-400 text-sm ml-4">{msg}</span>}
+        <UsuarioActual className="ml-auto" />
       </header>
 
       <nav className="bg-[#1a1a1a] border-b border-zinc-800 px-6 flex gap-1 items-center overflow-x-auto scrollbar-hide">

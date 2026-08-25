@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import styles from "./armar.module.css";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 type Prz = { file: string; nombre: string; cantidad?: number };
 type Inst = { premios: Prz[] };
@@ -210,6 +211,7 @@ export default function ArmarClient() {
         <span className={styles.contador} data-full={total >= MAX || undefined}>
           {total}/{MAX}
         </span>
+        <UsuarioActual className="ml-auto" />
       </header>
 
       {locked && (

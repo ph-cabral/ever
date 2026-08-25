@@ -29,6 +29,7 @@ import {
   CashTab,
   MacroTab,
 } from "./components/tabs";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 const TABS = [
   { id: "ctasctes", label: "Ctas Ctes", icon: LayoutDashboard },
@@ -154,6 +155,7 @@ export default function FinanzaPage() {
               <Trash2 size={16} />
             </button>
           )}
+          <UsuarioActual />
         </div>
       </header>
 

@@ -24,6 +24,7 @@ import {
   type TableroData,
   type Tarjeta,
 } from "@/lib/tareas/types";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 const CRITERIOS: { v: CriterioOrden; l: string; hint: string }[] = [
   { v: "POSICION", l: "Orden manual", hint: "arrastrar y soltar" },
@@ -360,6 +361,7 @@ export function TareasBoard({
         </Link>
         <h1 className={`font-bold text-lg ${accent.text}`}>{titulo}</h1>
         {msg && <span className="text-amber-400 text-sm ml-4">{msg}</span>}
+        <UsuarioActual className="ml-auto" />
       </header>
 
       <main className="px-6 py-6">

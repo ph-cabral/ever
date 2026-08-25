@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { InicioButton } from "@/components/ui/InicioButton";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 type Filter = { field: string; op: string; value: string };
 const TEXT_OPS = [
@@ -122,7 +123,10 @@ export default function DbAdmin({ models }: { models: Model[] }) {
   return (
     <div className="flex h-screen">
       <aside className="w-56 border-r overflow-auto p-2 shrink-0">
-        <InicioButton label="Inicio" iconSize={14} className="text-sm text-muted-foreground hover:text-foreground transition-colors mb-2 px-2" />
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <InicioButton label="Inicio" iconSize={14} className="text-sm text-muted-foreground hover:text-foreground transition-colors px-2" />
+          <UsuarioActual className="text-muted-foreground" />
+        </div>
         <h2 className="font-bold mb-2 px-2">Tablas</h2>
         {models.map((m) => (
           <button

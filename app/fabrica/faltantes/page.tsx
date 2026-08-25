@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
 import { InicioButton } from "@/components/ui/InicioButton";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /fabrica/faltantes — mismo cruce faltante×OC que /compras/faltantes (misma
@@ -626,6 +627,7 @@ export default function FabricaFaltantesPage() {
           >
             <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
           </button>
+          <UsuarioActual />
         </div>
       </header>
 

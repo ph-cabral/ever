@@ -21,6 +21,7 @@ import { InicioButton } from "@/components/ui/InicioButton";
 import { PROVINCIAS } from "@/lib/buscador/provincias";
 import type { BuscarResponse, Fuente, Prospecto } from "@/lib/buscador/types";
 import { exportarExcel } from "@/lib/buscador/export";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 const MESES_OP = [3, 6, 12, 24, 36];
 
@@ -268,13 +269,16 @@ export default function BuscadorPage() {
           <div className="w-px h-7 bg-yellow-400/30" />
           <span className="text-zinc-400 text-sm">Buscador de clientes</span>
         </div>
-        <button
-          onClick={() => exportarExcel(results, q || "busqueda")}
-          disabled={results.length === 0}
-          className="inline-flex items-center gap-2 rounded-lg bg-yellow-400 text-black px-4 py-2 text-sm font-semibold hover:bg-yellow-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          <Download size={16} /> Exportar a Excel
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => exportarExcel(results, q || "busqueda")}
+            disabled={results.length === 0}
+            className="inline-flex items-center gap-2 rounded-lg bg-yellow-400 text-black px-4 py-2 text-sm font-semibold hover:bg-yellow-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <Download size={16} /> Exportar a Excel
+          </button>
+          <UsuarioActual />
+        </div>
       </header>
 
       <main className="max-w-[1500px] mx-auto px-4 md:px-8 py-6">

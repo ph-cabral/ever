@@ -15,6 +15,7 @@ import ResumenTab from "@/app/rrhh/components/tabs/ResumenTab";
 import ReclutamientoTab from "@/app/rrhh/components/tabs/ReclutamientoTab";
 import { useRrhhData } from "@/lib/rrhh/store";
 import { parseXlsxFile, FILE_TYPE_LABELS, type ParsedFile, type DetectedFileType } from "@/lib/rrhh/parseXlsx";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ── Tabs (sin "Carga de Datos": la carga es global por drag&drop) ─────────────
 const TABS = [
@@ -266,6 +267,7 @@ export default function RrhhDashboardPage() {
               )}
             </div>
           )}
+          <UsuarioActual />
         </div>
       </header>
 

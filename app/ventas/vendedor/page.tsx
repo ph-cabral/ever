@@ -13,6 +13,7 @@ import {
   ListChevronsUpDown,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /ventas/vendedor — pedido de Pablo 2026-08-14: vista de ventas por línea de
@@ -808,6 +809,7 @@ export default function VentasVendedorPage() {
             ))}
           </div>
         </div>
+        <UsuarioActual className="ml-auto" />
       </header>
 
       <main className="max-w-[1400px] mx-auto px-4 md:px-8 py-8 space-y-6">

@@ -37,6 +37,7 @@ import {
   type HorarioAsignacion,
 } from "@/lib/rrhh/asistenciaIndicadores";
 import { RegistroButton, type Opcion } from "./components/RegistroModal";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 type Row = {
   employee_no: string;
@@ -905,6 +906,7 @@ export default function AsistenciaPage() {
             </div>
           </div>
         )}
+        <UsuarioActual className="text-muted-foreground" />
       </header>
 
       {horariosOpen && (

@@ -10,6 +10,7 @@ import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
 import { exportarFaltantesExistencia } from "@/lib/deposito/exportFaltantesExistencia";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { DateRangeField } from "@/components/ui/date-range-field";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/faltantes — faltantes "sin existencia" por (artículo, día).
@@ -930,6 +931,7 @@ export default function ComprasFaltantesPage() {
           >
             <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
           </button>
+          <UsuarioActual />
         </div>
       </header>
 
