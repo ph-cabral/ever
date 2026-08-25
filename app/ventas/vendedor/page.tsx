@@ -1563,9 +1563,9 @@ export default function VentasVendedorPage() {
                                       >
                                         {c.nombre ?? "(sin nombre)"}
                                       </button>{" "}
-                                      <span className="text-zinc-500 font-mono text-xs">
+                                      {/* <span className="text-zinc-500 font-mono text-xs">
                                         ({c.numero})
-                                      </span>
+                                      </span> */}
                                     </td>
                                     <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
                                       {fmtTop(c.monto)}
