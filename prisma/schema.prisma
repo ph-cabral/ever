@@ -752,3 +752,20 @@ model compras_tarea_config {
 
   @@schema("everwear")
 }
+// Accesos directos que cada usuario marcó con la estrella en la sidebar
+// ("Mis accesos"). DDL a mano en sql/usuario_acceso.sql; acá sólo el modelo
+// para Prisma (`npx prisma generate` después de correr el SQL).
+// Es preferencia, no permiso: el catálogo marcable ya viene filtrado por los
+// permisos de la sesión en app/api/preferencias/accesos/route.ts.
+model usuario_acceso {
+  id        Int      @id @default(autoincrement())
+  usuarioId Int
+  href      String   @db.VarChar(200)
+  label     String   @db.VarChar(120)
+  orden     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([usuarioId, href])
+  @@index([usuarioId])
+  @@schema("everwear")
+}

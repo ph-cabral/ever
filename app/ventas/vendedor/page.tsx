@@ -17,12 +17,12 @@ import { InicioButton } from "@/components/ui/InicioButton";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// /ventas/vendedor — pedido de Pablo 2026-08-14: vista de ventas por línea de
+// /ventas/vendedor: vista de ventas por línea de
 // artículo de UN cliente, con año actual y año anterior lado a lado.
 //
 //   · Filtro arriba: búsqueda de cliente por código O por nombre (substring),
 //     autocomplete contra /api/ventas/vendedor/clientes. Al elegir un cliente
-//     de la lista la tabla se carga sola (pedido de Pablo 2026-08-14: se
+//     de la lista la tabla se carga sola (se
 //     sacó el botón "Filtrar", antes había que elegir y después presionarlo).
 //   · Switch "Unidades / Pesos": cambia qué valor muestra la tabla (cantidad
 //     neta vendida vs. monto neto vendido) — mismos datos, otra columna.
@@ -91,7 +91,7 @@ interface RespVentasVendedor {
 // el buscador y del período YTD/meses de la tabla principal.
 //
 // Son DOS rankings que comparten el rango y se alternan con un switch
-// propio (pedido de Pablo 2026-08-18):
+// propio:
 //   · Clientes → solo $ gastado (ya NO cambia con el switch Unidades/Pesos
 //     de la tabla de arriba: acá el monto es lo único que se muestra).
 //   · Líneas   → solo unidades compradas.
@@ -161,9 +161,7 @@ const MESES_CORTOS_ES = [
 type Modo = "unidades" | "pesos";
 type Periodo = "ytd" | "meses";
 
-// Sin decimales en ninguna de las dos métricas (pedido de Pablo 2026-08-25:
-// "quitá de las sumas los decimales") — las unidades se redondean igual que
-// los pesos.
+// Sin decimales en ninguna de las dos métricas
 const fmtNum = (n: number | null | undefined) =>
   new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(n || 0);
 const fmtMoney = (n: number | null | undefined) =>
@@ -177,7 +175,7 @@ const fmtMoney = (n: number | null | undefined) =>
 // también para detectar "no volver a buscar" en el efecto de abajo.
 const labelCliente = (c: Cliente) => (c.nombre ? `${c.nombre} (${c.numero})` : String(c.numero));
 
-// ── Agrupado en acordeón (pedido de Pablo 2026-08-19) ───────────────────────
+// ── Agrupado en acordeón ───────────────────────
 // El back ya no recorta los rankings/búsquedas — trae TODOS los
 // clientes/líneas que entran en el rango (ver indicadores-api/main.py). Con
 // cientos de filas la tabla se vuelve ilegible, así que acá se agrupan de a
@@ -298,8 +296,7 @@ export default function VentasVendedorPage() {
   // (cliente nuevo, o el mismo cliente de nuevo).
   const [filasGrupoAbierto, setFilasGrupoAbierto] = useState(0);
   // Vista activa del ranking del pie ("Top 10 clientes"/"Top 10 líneas") —
-  // la alterna el botón "Mostrar" propio de esa sección (pedido de Pablo
-  // 2026-08-18). Independiente del modal (ver `vistaModal` más abajo): el
+  // la alterna el botón "Mostrar" propio de esa sección. Independiente del modal (ver `vistaModal` más abajo): el
   // modal ahora vive en su propio popup con su propio filtro, no comparte
   // estado con el ranking de la página.
   const [topVista, setTopVista] = useState<TopVista>("clientes");
@@ -308,7 +305,6 @@ export default function VentasVendedorPage() {
 
   // ── Modal "Ventas por cliente y línea" ──────────────────────────────────
   // Se abre al hacer click en un cliente o en una línea del ranking de abajo
-  // (pedido de Pablo 2026-08-18: "convertí la parte de arriba en un modal").
   // El modo del nivel decide qué contenido muestra:
   //   · "cliente" → el buscador + la tabla línea×año de siempre (idéntico
   //     al comportamiento anterior, ahora dentro del modal).
@@ -317,7 +313,7 @@ export default function VentasVendedorPage() {
   // El buscador de cliente sigue disponible en el header del modal en
   // ambos modos: elegir un cliente ahí siempre reinicia en modo "cliente".
   //
-  // ── Navegación en 2 niveles (pedido de Pablo 2026-08-25) ────────────────
+  // ── Navegación en 2 niveles ────────────────
   // El drill-down ahora es SIMÉTRICO y con historial:
   //   Cliente (líneas que compró) → click en una línea → Línea (clientes que
   //   la compraron).
@@ -346,8 +342,7 @@ export default function VentasVendedorPage() {
   const puedeVolver = pila.length > 1;
   const cerrarModal = useCallback(() => setModalOpen(false), []);
 
-  // Filtro del modal colapsable (pedido de Pablo 2026-08-18: "abarca mucho
-  // la parte de filtro, pon que se esconda con un boton") — arranca visible
+  // Filtro del modal colapsable  — arranca visible
   // y se puede plegar con el botón del header para dejarle más lugar a la
   // tabla; se reabre solo cada vez que se abre el modal de nuevo.
   const [filtroVisible, setFiltroVisible] = useState(true);
@@ -367,8 +362,7 @@ export default function VentasVendedorPage() {
   const [clientesLineaLoading, setClientesLineaLoading] = useState(false);
   const [clientesLineaError, setClientesLineaError] = useState<string | null>(null);
 
-  // Trae los 2 años completos con desglose mensual (pedido de Pablo
-  // 2026-08-20) — el filtro YTD/Meses lo hace después el front sobre los
+  // Trae los 2 años completos con desglose mensual — el filtro YTD/Meses lo hace después el front sobre los
   // meses ya cargados, igual que en modo "cliente". O sea: togglear
   // YTD/Meses NO vuelve a pegarle al back (antes sí, mandando desde/hasta).
   const fetchClientesPorLinea = useCallback(
@@ -481,7 +475,7 @@ export default function VentasVendedorPage() {
   // "cliente" (nivel 1) — por si se venía de una línea.
   const elegirCliente = useCallback((c: Cliente) => irACliente(c, false), [irACliente]);
 
-  // Entradas desde el ranking del pie (pedido de Pablo 2026-08-18).
+  // Entradas desde el ranking del pie.
   const abrirModalCliente = useCallback(
     (c: Cliente) => {
       setModalOpen(true);
@@ -570,8 +564,7 @@ export default function VentasVendedorPage() {
       ? topClientes?.totalClientes ?? null
       : topLineas?.totalLineas ?? null;
 
-  // ── Período: botón dividido "YTD" / "Meses" (pedido de Pablo 2026-08-14,
-  // ajustado 2026-08-20). Un solo estado para TODO el modal (modo "cliente"
+  // ── Período: botón dividido "YTD" / "Meses". Un solo estado para TODO el modal (modo "cliente"
   // y modo "linea" comparten el mismo toggle — pedido de Pablo 2026-08-20:
   // "cliente por línea y línea por cliente, ambos casos deben tener filtro
   // ytd y mes"). "YTD" es Enero..mes ANTERIOR al actual (el mes en curso
@@ -632,9 +625,7 @@ export default function VentasVendedorPage() {
   const fmtTop = modo === "unidades" ? fmtNum : fmtMoney;
 
   // ── Tabla año-anterior vs. año-actual del modal ────────────────────────
-  // MISMA tabla para los dos modos (pedido de Pablo 2026-08-20: "que
-  // también aparezca el cambio entre unidad y $ y desglose mes y año en la
-  // vista de línea"). Lo único que cambia es qué identifica a la fila:
+  // MISMA tabla para los dos modos. Lo único que cambia es qué identifica a la fila:
   //   · modo "cliente" → una fila por LÍNEA    (data.lineas)
   //   · modo "linea"   → una fila por CLIENTE  (clientesLinea.clientes)
   // Ambas respuestas traen la misma forma {anioAnterior, anioActual} con
@@ -1051,14 +1042,13 @@ export default function VentasVendedorPage() {
                     {/* Switch $/unidades y desglose por mes de ESTA tabla —
                     estado propio del modal (`vistaModal`/`desglosado`), no el
                     del ranking del pie. Desde 2026-08-20 valen para los DOS
-                    modos (pedido de Pablo): la tabla de clientes de una línea
+                    modos: la tabla de clientes de una línea
                     tiene el mismo desglose año/mes que la de líneas de un
                     cliente. */}
                     {hayTabla && (
                       <>
                         {/* Botón dividido $ | Unidades — mismo cambio que el
-                            Clientes/Líneas del header (pedido de Pablo
-                            2026-08-25). "clientes" = pesos, "lineas" =
+                            Clientes/Líneas del header. "clientes" = pesos, "lineas" =
                             unidades (ver modoModal). */}
                         <div className="flex flex-col gap-1.5">
                           <div className="inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700">
@@ -1650,7 +1640,7 @@ export default function VentasVendedorPage() {
 
         {/* Rankings del pie — top clientes ($) o top líneas (unidades). El
             título, el botón "Mostrar" y el switch Clientes/Líneas se
-            mudaron al header (pedido de Pablo 2026-08-19). El rango es FIJO
+            mudaron al header. El rango es FIJO
             (12 meses terminando en el mes anterior) y lo resuelve el back.
             Clickeando un cliente o una línea de la tabla de abajo se abre
             el modal con el detalle. */}
@@ -1681,7 +1671,7 @@ export default function VentasVendedorPage() {
               }
               return (
                 <>
-                  {/* overflow-x-auto (pedido de Pablo 2026-08-18: "que la tabla no se
+                  {/* overflow-x-auto: "que la tabla no se
                 exceda de la ventana"). Sin min-w-max y con la columna de
                 nombre truncada (max-w-0 w-full truncate — pedido de Pablo
                 2026-08-18: "se sigue escondiendo 3ra columna"): la tabla
