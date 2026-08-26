@@ -1004,7 +1004,6 @@ export default function VentasVendedorPage() {
                             e.key === "Enter" && clienteSel && handleFiltrar()
                           }
                           placeholder="Ej: 1234 o ACME S.A."
-                          autoFocus
                           className="bg-[#1f1f1f] border border-zinc-700 rounded-md pl-7 pr-3 py-2 text-sm text-zinc-100 outline-none w-72 focus:border-yellow-400 placeholder:text-zinc-600"
                         />
                         {buscando && (
