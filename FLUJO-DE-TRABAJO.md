@@ -44,7 +44,11 @@ git commit -m "descripción corta del cambio"
 git push
 ```
 
-### B) En el server (publicar)
+> **Desde el CI/CD, el paso B es automático**: al pushear a `main`, GitHub Actions
+> corre `deploy.sh` en el server. Ver `../CICD.md`. El paso manual de abajo queda
+> como respaldo (o si el runner está caído).
+
+### B) En el server (publicar, manual / respaldo)
 
 ```bash
 ssh <usuario>@10.10.0.159

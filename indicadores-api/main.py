@@ -19,6 +19,7 @@ from deposito import (
 from compras import (
     fetch_ordenes_pendientes, fetch_ordenes_articulos_rango, fetch_compras_valorizado,
     fetch_consumo_articulo, fetch_consumo_articulos, fetch_lineas,
+    fetch_lineas_por_articulos,
 )
 from ingresos import fetch_remitos_ingreso
 from ventas import (
@@ -1269,5 +1270,22 @@ def rrhh_cvs_por_mes(meses: int = Query(default=12, ge=1, le=36)):
     tipo='CV'). Ver rrhh.py."""
     try:
         return fetch_cvs_por_mes(meses)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+# ── Compras: línea (Stk_Nivel1) de una lista puntual de artículos ───────────
+# Para la sección "Faltantes por línea" del dashboard /compras (pedido de
+# Pablo 2026-08-26). Es POST y no GET porque la lista de faltantes de un mes
+# puede ser de varios cientos de códigos y no entra cómoda en la URL.
+class LineasArticulosIn(BaseModel):
+    codigos: list[str]
+
+
+@app.post("/compras/lineas-articulos")
+def compras_lineas_articulos(body: LineasArticulosIn):
+    """{CodArticulo: nombre de línea} para los códigos pedidos. Los que no
+    resuelven a una línea no vienen en el dict (ver fetch_lineas_por_articulos)."""
+    try:
+        return fetch_lineas_por_articulos(body.codigos)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")

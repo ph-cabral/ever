@@ -857,3 +857,49 @@ def fetch_consumo_articulos(
         "sortDir": "asc" if not reverse else "desc",
         "articulos": page_rows,
     }
+
+
+# ── Línea (Stk_Nivel1) de una lista puntual de artículos ─────────────────────
+# Para /compras (dashboard, sección "Faltantes por línea", pedido de Pablo
+# 2026-08-26): los faltantes del mes salen del Postgres propio como lista de
+# CodArticulo, y hay que agruparlos por LÍNEA. Misma resolución de línea que
+# SQL_CODIGOS_POR_LINEA (StkFer_ArtParamet.Nivel1 → Stk_Nivel1.Detalle), pero
+# al revés: dado el código, devolver el nombre de la línea.
+SQL_LINEA_POR_ARTICULO = """
+SELECT LTRIM(RTRIM(s.CodArticulo)) AS CodArticulo,
+       LTRIM(RTRIM(n1.Detalle))    AS Linea
+FROM EVERWEAR.dbo.[StkFer_Articulos] s
+LEFT JOIN EVERWEAR.dbo.[StkFer_ArtParamet] ap ON ap.ArticuloPatron = s.ArticuloPatron
+LEFT JOIN EVERWEAR.dbo.[Stk_Nivel1]        n1 ON n1.Nivel1         = ap.Nivel1
+WHERE LTRIM(RTRIM(s.CodArticulo)) IN ({ph})
+"""
+
+
+def fetch_lineas_por_articulos(codigos: list[str]):
+    """{CodArticulo: nombre de línea} para los códigos pedidos.
+
+    Los códigos que no existen en el catálogo, o cuyo Nivel1 no resuelve a un
+    Stk_Nivel1, simplemente NO aparecen en el dict — el que llama decide qué
+    poner (la vista de /compras los agrupa como 'SIN LÍNEA'). Se consulta en
+    lotes de 900 por el límite de parámetros de SQL Server."""
+    limpios = sorted({(str(c) or "").strip() for c in codigos if (str(c) or "").strip()})
+    if not limpios:
+        return {"total": 0, "lineas": {}}
+
+    out: dict[str, str] = {}
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        for i in range(0, len(limpios), 900):
+            batch = limpios[i:i + 900]
+            ph = ",".join("?" for _ in batch)
+            cur.execute(SQL_LINEA_POR_ARTICULO.format(ph=ph), batch)
+            for cod, linea in cur.fetchall():
+                cod = (str(cod or "")).strip()
+                nombre = (str(linea or "")).strip()
+                if cod and nombre:
+                    out[cod] = nombre
+        return {"total": len(out), "lineas": out}
+    finally:
+        conn.close()

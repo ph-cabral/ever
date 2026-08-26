@@ -98,6 +98,33 @@ const mesActual = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
 
+// /compras/faltantes-linea — faltantes marcados en /deposito/faltantes ese
+// mismo mes, separados en Importados / Nacionales y agrupados por LÍNEA (no
+// por artículo). Pedido de Pablo 2026-08-26.
+interface FilaLinea {
+  linea: string;
+  items: number;
+  cantFaltante: number;
+  cantComprada: number;
+  monto: number;
+}
+interface GrupoLineas {
+  lineas: FilaLinea[];
+  total: { items: number; cantFaltante: number; cantComprada: number; monto: number };
+}
+interface FaltLineaResp {
+  mes: string;
+  desde: string;
+  hasta: string;
+  ocWarn: boolean;
+  clasifWarn: boolean;
+  lineaWarn: boolean;
+  excluidosFabrica: number;
+  articulosFaltantes: number;
+  importados: GrupoLineas;
+  nacionales: GrupoLineas;
+}
+
 export default function ComprasMetricasPage() {
   const [mes, setMes] = useState(mesActual);
   const [data, setData] = useState<Resp | null>(null);
@@ -158,6 +185,34 @@ export default function ComprasMetricasPage() {
       loadRango(data.desde, data.hasta);
     }
   }, [data?.desde, data?.hasta, loadRango]);
+
+  // Faltantes del mes agrupados por línea, separados Importados/Nacionales —
+  // mismo mes del selector de arriba, sin controles propios.
+  const [faltLinea, setFaltLinea] = useState<FaltLineaResp | null>(null);
+  const [faltLineaLoading, setFaltLineaLoading] = useState(false);
+  const [faltLineaError, setFaltLineaError] = useState<string | null>(null);
+
+  const loadFaltLinea = useCallback(async (m: string) => {
+    setFaltLineaLoading(true);
+    setFaltLineaError(null);
+    try {
+      const res = await fetch(`/api/compras/faltantes-linea?mes=${encodeURIComponent(m)}`, {
+        cache: "no-store",
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setFaltLinea(j);
+    } catch (e) {
+      setFaltLineaError(e instanceof Error ? e.message : "Error al cargar");
+      setFaltLinea(null);
+    } finally {
+      setFaltLineaLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadFaltLinea(mes);
+  }, [mes, loadFaltLinea]);
 
   const chartData = useMemo(
     () => (data?.columnas ?? []).map((c) => ({ name: c.label, value: c.total })),
@@ -409,7 +464,131 @@ export default function ComprasMetricasPage() {
             />
           </div>
         </div>
+
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 space-y-5">
+          <div>
+            <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
+              <PackageX size={18} /> Faltantes por línea — {fmtMesLabel(mes)}
+              {faltLineaLoading && <Loader2 size={15} className="animate-spin text-yellow-400" />}
+            </h2>
+            <p className="text-zinc-500 text-sm mt-1">
+              Artículos marcados como faltantes en <b>Depósito → Faltantes</b> durante{" "}
+              {fmtMesLabel(mes)}, separados en Importados y Nacionales y agrupados por línea. La
+              cantidad faltante es la que marcó el operario; la comprada son las unidades de OC
+              hechas ese mismo mes para esos mismos artículos, valorizadas a precio de VENTA.
+              Los artículos de EVER WEAR INDUSTRIAL quedan fuera (se fabrican, no se compran).
+            </p>
+          </div>
+
+          {faltLineaError && (
+            <div className="flex items-center gap-1.5 text-xs text-red-300">
+              <AlertTriangle size={13} /> {faltLineaError}
+            </div>
+          )}
+          {faltLinea?.ocWarn && (
+            <div className="flex items-center gap-1.5 text-xs text-amber-400/80">
+              <AlertTriangle size={13} /> OC del mes no disponible — comprado y $ pueden estar incompletos
+            </div>
+          )}
+          {faltLinea?.clasifWarn && (
+            <div className="flex items-center gap-1.5 text-xs text-amber-400/80">
+              <AlertTriangle size={13} /> No se pudo clasificar proveedor/importación de todos los artículos
+            </div>
+          )}
+          {faltLinea?.lineaWarn && (
+            <div className="flex items-center gap-1.5 text-xs text-amber-400/80">
+              <AlertTriangle size={13} /> No se pudo resolver la línea de los artículos — figuran como “SIN LÍNEA”
+            </div>
+          )}
+          {!!faltLinea?.excluidosFabrica && (
+            <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+              <AlertTriangle size={13} /> {faltLinea.excluidosFabrica} artículo(s) de EVER WEAR INDUSTRIAL excluidos
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            <TablaLineas titulo="Importados" grupo={faltLinea?.importados} loading={faltLineaLoading} accent="#60A5FA" />
+            <TablaLineas titulo="Nacionales" grupo={faltLinea?.nacionales} loading={faltLineaLoading} accent="#4ADE80" />
+          </div>
+        </div>
       </main>
+    </div>
+  );
+}
+
+// Tabla de un grupo (Importados o Nacionales): una fila por línea + fila de
+// total. Se muestra cantidad faltante, cantidad comprada por OC y su valor a
+// precio de venta.
+function TablaLineas({
+  titulo,
+  grupo,
+  loading,
+  accent,
+}: {
+  titulo: string;
+  grupo?: GrupoLineas;
+  loading: boolean;
+  accent: string;
+}) {
+  const filas = grupo?.lineas ?? [];
+  return (
+    <div className="rounded-lg border border-zinc-800 overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900/70 border-b border-zinc-800">
+        <span className="font-semibold text-sm uppercase tracking-wide" style={{ color: accent }}>
+          {titulo}
+        </span>
+        <span className="text-xs text-zinc-500">
+          {fmtNum(grupo?.total.items ?? 0)} artículo(s) · {filas.length} línea(s)
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-zinc-500 text-xs uppercase tracking-wide">
+              <th className="text-left font-medium px-4 py-2">Línea</th>
+              <th className="text-right font-medium px-3 py-2">Faltante</th>
+              <th className="text-right font-medium px-3 py-2">Comprado</th>
+              <th className="text-right font-medium px-4 py-2">$ comprado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filas.map((f) => (
+              <tr key={f.linea} className="border-t border-zinc-800/70 hover:bg-zinc-800/30">
+                <td className="px-4 py-2 text-zinc-200">
+                  {f.linea}
+                  <span className="text-zinc-600 text-xs ml-2">({fmtNum(f.items)})</span>
+                </td>
+                <td className="px-3 py-2 text-right text-orange-300 tabular-nums">{fmtNum(f.cantFaltante)}</td>
+                <td className="px-3 py-2 text-right text-zinc-300 tabular-nums">{fmtNum(f.cantComprada)}</td>
+                <td className="px-4 py-2 text-right text-yellow-300 tabular-nums">{fmtMoney(f.monto)}</td>
+              </tr>
+            ))}
+            {filas.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-4 py-8 text-center text-zinc-500 text-sm">
+                  {loading ? "Consultando la base…" : "Sin faltantes en este grupo."}
+                </td>
+              </tr>
+            )}
+          </tbody>
+          {filas.length > 0 && (
+            <tfoot>
+              <tr className="border-t-2 border-zinc-700 bg-zinc-900/60 font-semibold">
+                <td className="px-4 py-2 text-zinc-300 uppercase text-xs tracking-wide">Total</td>
+                <td className="px-3 py-2 text-right text-orange-300 tabular-nums">
+                  {fmtNum(grupo?.total.cantFaltante ?? 0)}
+                </td>
+                <td className="px-3 py-2 text-right text-zinc-200 tabular-nums">
+                  {fmtNum(grupo?.total.cantComprada ?? 0)}
+                </td>
+                <td className="px-4 py-2 text-right text-yellow-300 tabular-nums">
+                  {fmtMoney(grupo?.total.monto ?? 0)}
+                </td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
     </div>
   );
 }
