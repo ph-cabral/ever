@@ -1086,17 +1086,6 @@ export default function VentasVendedorPage() {
                           </div>
                         </div>
 
-                        {hayTabla && (
-                          <button
-                            type="button"
-                            onClick={() => setDesglosado((v) => !v)}
-                            className="btn-anim flex items-center gap-1.5 border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
-                          >
-                            {desglosado
-                              ? "por año"
-                              : "por mes"}
-                          </button>
-                        )}
                       </>
                     )}
 
@@ -1121,7 +1110,7 @@ export default function VentasVendedorPage() {
                               periodo === "ytd"
                                 ? "bg-yellow-400 text-black font-semibold"
                                 : "text-zinc-300 hover:bg-zinc-800"
-                            }`}
+                              }`}
                           >
                             YTD
                           </button>
@@ -1131,20 +1120,29 @@ export default function VentasVendedorPage() {
                             title={`${MESES_CORTOS_ES[mesActualNum - 1]} completo`}
                             className={`px-3 py-2 transition-colors ${
                               periodo === "meses"
-                                ? "bg-yellow-400 text-black font-semibold"
-                                : "text-zinc-300 hover:bg-zinc-800"
+                              ? "bg-yellow-400 text-black font-semibold"
+                              : "text-zinc-300 hover:bg-zinc-800"
                             }`}
-                          >
+                            >
                             Meses
                           </button>
                         </div>
                       </div>
                     )}
 
-                    {hayTabla && (
                       <span className="text-sm text-zinc-500 pb-2">
                         {filas.length} {esModoLinea ? "cliente(s)" : "línea(s)"}
                       </span>
+                      {hayTabla && (
+                        <button
+                          type="button"
+                          onClick={() => setDesglosado((v) => !v)}
+                          className="btn-anim flex items-center gap-1.5 border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
+                        >
+                          {desglosado
+                            ? "por año"
+                            : "por mes"}
+                        </button>
                     )}
                   </div>
                 )}
