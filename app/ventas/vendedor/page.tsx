@@ -9,11 +9,11 @@ import {
   ChevronDown,
   ChevronUp,
   Trophy,
+  ArrowLeft,
   X,
   ListChevronsUpDown,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
-import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /ventas/vendedor — pedido de Pablo 2026-08-14: vista de ventas por línea de
@@ -67,7 +67,10 @@ interface LineaRow {
 interface FilaTabla {
   key: string;
   etiqueta: string;
+  // Qué representa la fila — exactamente uno de los dos está lleno. Es lo
+  // que decide a dónde lleva el drill-down (ver `irACliente`/`irALinea`).
   cliente: Cliente | null;
+  linea: string | null;
   anioAnterior: AnioVal;
   anioActual: AnioVal;
 }
@@ -305,16 +308,41 @@ export default function VentasVendedorPage() {
   // ── Modal "Ventas por cliente y línea" ──────────────────────────────────
   // Se abre al hacer click en un cliente o en una línea del ranking de abajo
   // (pedido de Pablo 2026-08-18: "convertí la parte de arriba en un modal").
-  // `modalMode` decide qué contenido muestra:
+  // El modo del nivel decide qué contenido muestra:
   //   · "cliente" → el buscador + la tabla línea×año de siempre (idéntico
   //     al comportamiento anterior, ahora dentro del modal).
   //   · "linea"   → una tabla nueva con los CLIENTES que compraron esa
   //     línea, de mayor a menor gasto ($) — ver fetchClientesPorLinea.
   // El buscador de cliente sigue disponible en el header del modal en
-  // ambos modos: elegir un cliente ahí siempre pivotea a "cliente".
+  // ambos modos: elegir un cliente ahí siempre reinicia en modo "cliente".
+  //
+  // ── Navegación en 2 niveles (pedido de Pablo 2026-08-25) ────────────────
+  // El drill-down ahora es SIMÉTRICO y con historial:
+  //   Cliente (líneas que compró) → click en una línea → Línea (clientes que
+  //   la compraron).
+  //   Línea (clientes) → click en un cliente → Cliente (líneas que compró).
+  // `pila` es el historial: el ÚLTIMO elemento es lo que se está viendo.
+  // Máximo DOS niveles ("que sea solo hasta dos modales"): estando en el
+  // nivel 2 las filas dejan de ser clickeables, y el botón ← del header
+  // vuelve al nivel 1.
+  //
+  // Truco que hace que volver atrás NO tenga que refetchear: los dos niveles
+  // siempre son de modos DISTINTOS (cliente→línea o línea→cliente), así que
+  // cada uno vive en su propio estado (`data` para "cliente",
+  // `clientesLinea` para "linea") y ninguno pisa al otro. Volver atrás es
+  // solo recortar la pila.
+  type NivelModal = { mode: "cliente"; cliente: Cliente } | { mode: "linea"; linea: string };
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<"cliente" | "linea">("cliente");
-  const [modalLinea, setModalLinea] = useState<string | null>(null);
+  const [pila, setPila] = useState<NivelModal[]>([]);
+  const nivelActual: NivelModal | null = pila.length ? pila[pila.length - 1] : null;
+  const modalMode: "cliente" | "linea" = nivelActual?.mode ?? "cliente";
+  const modalLinea = nivelActual?.mode === "linea" ? nivelActual.linea : null;
+  // Texto de cada nivel en las migas de pan del header.
+  const etiquetaNivel = (n: NivelModal) =>
+    n.mode === "cliente" ? n.cliente.nombre ?? String(n.cliente.numero) : n.linea;
+  // Nivel 1 = todavía se puede bajar un nivel más; nivel 2 = tope.
+  const puedeBajar = pila.length < 2;
+  const puedeVolver = pila.length > 1;
   const cerrarModal = useCallback(() => setModalOpen(false), []);
 
   // Filtro del modal colapsable (pedido de Pablo 2026-08-18: "abarca mucho
@@ -390,41 +418,92 @@ export default function VentasVendedorPage() {
     }
   }, []);
 
-  const elegirCliente = useCallback(
-    (c: Cliente) => {
+  // ── Navegación del modal ────────────────────────────────────────────────
+  // `apilar` distingue las dos formas de llegar a un nivel:
+  //   · false → ENTRADA: se abre el modal desde afuera (ranking del pie o
+  //     buscador). Reinicia la pila: este pasa a ser el nivel 1.
+  //   · true  → DRILL-DOWN: se clickeó una fila de la tabla que ya se está
+  //     viendo. Apila: pasa a ser el nivel 2. Solo se permite desde el
+  //     nivel 1 (ver `puedeBajar`).
+  const irACliente = useCallback(
+    (c: Cliente, apilar: boolean) => {
       setClienteSel(c);
       setQCliente(labelCliente(c));
       setSugerencias([]);
       setMostrarSug(false);
-      // Elegir un cliente desde el buscador del modal siempre pivotea a modo
-      // "cliente" — por si se venía de modo "linea" (click en un cliente
-      // dentro de la tabla de clientes-por-línea, o búsqueda manual).
-      setModalMode("cliente");
+      setPila((p) =>
+        apilar ? [...p, { mode: "cliente", cliente: c }] : [{ mode: "cliente", cliente: c }],
+      );
       fetchVentas(c.numero);
     },
     [fetchVentas],
   );
 
-  // Dispara el modal en modo "cliente" — al hacer click en un cliente del
-  // ranking "Top 10 clientes" (pedido de Pablo 2026-08-18) o en una fila de
-  // la tabla de clientes-por-línea (drill-down). Mismo comportamiento que
-  // elegir un cliente del buscador.
+  const irALinea = useCallback(
+    (linea: string, apilar: boolean) => {
+      // El buscador del header no filtra la lista de clientes de una línea;
+      // si queda con el texto de una búsqueda anterior parece que sí (ver
+      // pedido de Pablo 2026-08-20). Al volver atrás se restaura solo, ver
+      // `volverAtras`.
+      setQCliente("");
+      setClienteSel(null);
+      setSugerencias([]);
+      setMostrarSug(false);
+      setPila((p) => (apilar ? [...p, { mode: "linea", linea }] : [{ mode: "linea", linea }]));
+      fetchClientesPorLinea(linea);
+    },
+    [fetchClientesPorLinea],
+  );
+
+  // Botón ← del header del modal. No refetchea nada (ver el comentario de
+  // `pila` arriba): el nivel al que se vuelve es de otro modo, así que sus
+  // datos siguen intactos en su propio estado. Lo único que se restaura a
+  // mano es el buscador, que sí se pisa al bajar de nivel.
+  const volverAtras = useCallback(() => {
+    if (pila.length < 2) return;
+    const nueva = pila.slice(0, -1);
+    const dest = nueva[nueva.length - 1];
+    if (dest.mode === "cliente") {
+      setClienteSel(dest.cliente);
+      setQCliente(labelCliente(dest.cliente));
+    } else {
+      setClienteSel(null);
+      setQCliente("");
+    }
+    setSugerencias([]);
+    setMostrarSug(false);
+    setFilasGrupoAbierto(0);
+    setPila(nueva);
+  }, [pila]);
+
+  // Elegir un cliente desde el buscador del modal siempre REINICIA en modo
+  // "cliente" (nivel 1) — por si se venía de una línea.
+  const elegirCliente = useCallback((c: Cliente) => irACliente(c, false), [irACliente]);
+
+  // Entradas desde el ranking del pie (pedido de Pablo 2026-08-18).
   const abrirModalCliente = useCallback(
     (c: Cliente) => {
       setModalOpen(true);
       setFiltroVisible(true);
-      elegirCliente(c);
+      irACliente(c, false);
     },
-    [elegirCliente],
+    [irACliente],
   );
 
-  // abrirModalLinea se define más abajo (necesita `fetchClientesPorLinea`).
+  const abrirModalLinea = useCallback(
+    (linea: string) => {
+      setModalOpen(true);
+      setFiltroVisible(true);
+      irALinea(linea, false);
+    },
+    [irALinea],
+  );
 
   // Abre el modal vacío en modo "cliente", listo para buscar — para no
   // perder la posibilidad de buscar CUALQUIER cliente (no solo los del Top
   // 10) ahora que el buscador vive dentro del modal.
   const abrirModalBusqueda = useCallback(() => {
-    setModalMode("cliente");
+    setPila([]);
     setClienteSel(null);
     setQCliente("");
     setSugerencias([]);
@@ -511,28 +590,6 @@ export default function VentasVendedorPage() {
   // en el año en curso).
   const mesAnteriorNum = mesActualNum - 1;
 
-  // Dispara el modal en modo "linea" — al hacer click en una línea del
-  // ranking "Top 10 líneas" (pedido de Pablo 2026-08-18).
-  const abrirModalLinea = useCallback(
-    (linea: string) => {
-      setModalMode("linea");
-      setModalLinea(linea);
-      // El buscador de cliente del header sigue visible en modo "linea",
-      // pero acá no filtra nada — si quedaba con el texto/selección de una
-      // búsqueda anterior confunde (parece que la lista de clientes de la
-      // línea está acotada a ese cliente). Se limpia al entrar por línea
-      // (pedido de Pablo 2026-08-20).
-      setQCliente("");
-      setClienteSel(null);
-      setSugerencias([]);
-      setMostrarSug(false);
-      setModalOpen(true);
-      setFiltroVisible(true);
-      fetchClientesPorLinea(linea);
-    },
-    [fetchClientesPorLinea],
-  );
-
   const handleFiltrar = useCallback(() => {
     if (!clienteSel) return;
     fetchVentas(clienteSel.numero);
@@ -590,6 +647,7 @@ export default function VentasVendedorPage() {
           key: `cli-${c.numero}`,
           etiqueta: c.nombre ? `${c.nombre} (${c.numero})` : String(c.numero),
           cliente: { numero: c.numero, nombre: c.nombre },
+          linea: null,
           anioAnterior: c.anioAnterior,
           anioActual: c.anioActual,
         }))
@@ -597,6 +655,7 @@ export default function VentasVendedorPage() {
           key: `lin-${l.linea}`,
           etiqueta: l.linea,
           cliente: null,
+          linea: l.linea,
           anioAnterior: l.anioAnterior,
           anioActual: l.anioActual,
         }));
@@ -809,7 +868,6 @@ export default function VentasVendedorPage() {
             ))}
           </div>
         </div>
-        <UsuarioActual className="ml-auto" />
       </header>
 
       <main className="max-w-[1400px] mx-auto px-4 md:px-8 py-8 space-y-6">
@@ -829,30 +887,49 @@ export default function VentasVendedorPage() {
             >
               <div className="shrink-0 bg-[#1A1A1A] border-b border-zinc-800 px-5 py-4 space-y-4 max-h-[60vh] overflow-y-auto">
                 <div className="flex items-start justify-between gap-4">
-                  <div>
-                    {/* Con el filtro plegado seguimos mostrando qué cliente se
-                        está viendo, para no perder el contexto. */}
-                    {!filtroVisible && modalMode === "cliente" && data && (
-                      <p className="text-sm text-zinc-300 mt-1">
-                        {data.cliente.nombre ?? "—"}{" "}
-                        <span className="text-zinc-500 font-mono text-xs">
-                          ({data.cliente.codigo})
-                        </span>
-                      </p>
+                  {/* Migas de pan del drill-down (pedido de Pablo
+                      2026-08-25). Muestra los niveles abiertos —
+                      "ACME S.A. › POLEAS" — con el actual resaltado, y el ←
+                      para volver al anterior. Reemplaza al título suelto de
+                      la línea y al nombre del cliente que solo aparecía con
+                      el filtro plegado. */}
+                  <div className="flex items-center gap-2 min-w-0">
+                    {puedeVolver && (
+                      <button
+                        type="button"
+                        onClick={volverAtras}
+                        title={`Volver a ${etiquetaNivel(pila[pila.length - 2])}`}
+                        aria-label="Volver"
+                        className="btn-anim shrink-0 inline-flex items-center rounded-md border border-zinc-700 px-2 py-1.5 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 transition-colors"
+                      >
+                        <ArrowLeft size={16} />
+                      </button>
                     )}
-                    {/* En modo "linea" el título es la línea — antes vivía en
-                        el header de su propia tabla, que ahora es la misma
-                        que la del modo "cliente" (pedido de Pablo
-                        2026-08-20). */}
-                    {esModoLinea && modalLinea && (
-                      <>
-                        <h3 className="text-yellow-400 font-bold text-base uppercase tracking-wide">
-                          {modalLinea}
+                    {pila.length > 0 && (
+                      <div className="min-w-0">
+                        <h3 className="font-bold text-base uppercase tracking-wide flex items-center gap-1.5 min-w-0">
+                          {pila.map((n, i) => (
+                            <span key={`${n.mode}-${i}`} className="flex items-center gap-1.5 min-w-0">
+                              {i > 0 && <span className="text-zinc-600">›</span>}
+                              <span
+                                className={`truncate ${
+                                  i === pila.length - 1
+                                    ? "text-yellow-400"
+                                    : "text-zinc-500 font-normal"
+                                }`}
+                              >
+                                {etiquetaNivel(n)}
+                              </span>
+                            </span>
+                          ))}
                         </h3>
                         <p className="text-zinc-500 text-xs mt-0.5">
-                          Clientes que compraron esta línea
+                          {esModoLinea
+                            ? "Clientes que compraron esta línea"
+                            : "Líneas que compró este cliente"}
+                          {!puedeBajar && " — volvé con ← para seguir navegando"}
                         </p>
-                      </>
+                      </div>
                     )}
                   </div>
                   {/* La X vive en el header del modal, arriba a la derecha
@@ -930,9 +1007,9 @@ export default function VentasVendedorPage() {
                                 <span className="truncate">
                                   {c.nombre ?? "(sin nombre)"}
                                 </span>
-                                {/* <span className="text-zinc-500 font-mono text-xs shrink-0">
+                                <span className="text-zinc-500 font-mono text-xs shrink-0">
                                   {c.numero}
-                                </span> */}
+                                </span>
                               </button>
                             ))}
                           </div>
@@ -981,6 +1058,17 @@ export default function VentasVendedorPage() {
                           </div>
                         </div>
 
+                        {hayTabla && (
+                          <button
+                            type="button"
+                            onClick={() => setDesglosado((v) => !v)}
+                            className="btn-anim flex items-center gap-1.5 border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
+                          >
+                            {desglosado
+                              ? "por año"
+                              : "por mes"}
+                          </button>
+                        )}
                       </>
                     )}
 
@@ -998,8 +1086,8 @@ export default function VentasVendedorPage() {
                             onClick={() => setPeriodo("ytd")}
                             title={
                               mesAnteriorNum >= 1
-                              ? `Acumulado Enero–${MESES_CORTOS_ES[mesAnteriorNum - 1]}`
-                              : "Todavía no hay mes anterior este año"
+                                ? `Acumulado Enero–${MESES_CORTOS_ES[mesAnteriorNum - 1]}`
+                                : "Todavía no hay mes anterior este año"
                             }
                             className={`px-3 py-2 transition-colors ${
                               periodo === "ytd"
@@ -1017,14 +1105,13 @@ export default function VentasVendedorPage() {
                               periodo === "meses"
                                 ? "bg-yellow-400 text-black font-semibold"
                                 : "text-zinc-300 hover:bg-zinc-800"
-                              }`}
-                              >
+                            }`}
+                          >
                             Meses
                           </button>
                         </div>
                       </div>
                     )}
-
 
                     {hayTabla && (
                       <span className="text-sm text-zinc-500 pb-2">
@@ -1034,17 +1121,6 @@ export default function VentasVendedorPage() {
                   </div>
                 )}
 
-                {hayTabla && (
-                  <button
-                    type="button"
-                    onClick={() => setDesglosado((v) => !v)}
-                    className="btn-anim flex items-center gap-1.5 border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
-                  >
-                    {desglosado
-                      ? "por año"
-                      : "por mes"}
-                  </button>
-                )}
               </div>
 
               <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
@@ -1305,27 +1381,35 @@ export default function VentasVendedorPage() {
                                         key={r.key}
                                         className="border-t border-zinc-800/60 transition-colors"
                                       >
-                                        {/* En modo "linea" la fila ES un
-                                        cliente: se puede clickear para
-                                        pivotear al modo "cliente" con su
-                                        tabla línea×año (mismo drill-down que
-                                        tenía la tabla vieja de clientes por
-                                        línea). En modo "cliente" la etiqueta
-                                        es la línea y no es clickeable. */}
+                                        {/* Drill-down simétrico (pedido de
+                                        Pablo 2026-08-25): la fila es un
+                                        CLIENTE en modo "linea" y una LÍNEA en
+                                        modo "cliente", y en los dos casos se
+                                        puede clickear para bajar al otro
+                                        modo. Solo desde el nivel 1: en el
+                                        nivel 2 (`puedeBajar` false) la
+                                        etiqueta es texto plano y hay que
+                                        volver con el ← del header. */}
                                         <td
-                                          className={`px-3 py-2 text-zinc-100 whitespace-nowrap ${r.cliente ? "" : "cursor-default"} ${celda(rowIdx, COL_LINEA, rowCrece)}`}
+                                          className={`px-3 py-2 text-zinc-100 whitespace-nowrap ${puedeBajar ? "" : "cursor-default"} ${celda(rowIdx, COL_LINEA, rowCrece)}`}
                                           onMouseEnter={() => {
                                             setHoverRow(rowIdx);
                                             setHoverCol(COL_LINEA);
                                           }}
                                         >
-                                          {r.cliente ? (
+                                          {puedeBajar ? (
                                             <button
                                               type="button"
                                               onClick={() =>
-                                                abrirModalCliente(r.cliente!)
+                                                r.cliente
+                                                  ? irACliente(r.cliente, true)
+                                                  : irALinea(r.linea!, true)
                                               }
-                                              title="Ver las líneas que compró este cliente"
+                                              title={
+                                                r.cliente
+                                                  ? "Ver las líneas que compró este cliente"
+                                                  : "Ver los clientes que compraron esta línea"
+                                              }
                                               className="hover:text-yellow-400 hover:underline transition-colors text-left"
                                             >
                                               {r.etiqueta}
