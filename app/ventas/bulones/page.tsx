@@ -842,13 +842,6 @@ export default function VentasBulonesPage() {
                           </div>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => setDesglosado((v) => !v)}
-                          className="btn-anim flex items-center gap-1.5 border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
-                        >
-                          {desglosado ? "por año" : "por mes"}
-                        </button>
                       </>
                     )}
 
@@ -886,11 +879,18 @@ export default function VentasBulonesPage() {
                         </div>
                       </div>
                     )}
-
-                    {hayTabla && (
                       <span className="text-sm text-zinc-500 pb-2">
                         {filas.length} {modalMode === "cliente" ? "cód. patrón" : "cliente(s)"}
                       </span>
+
+                    {hayTabla && (
+                        <button
+                          type="button"
+                          onClick={() => setDesglosado((v) => !v)}
+                          className="btn-anim flex items-center gap-1.5 border border-zinc-700 text-zinc-200 text-sm rounded-md px-3 py-2 hover:border-yellow-400 transition-colors"
+                        >
+                          {desglosado ? "por año" : "por mes"}
+                        </button>
                     )}
                   </div>
                 )}
