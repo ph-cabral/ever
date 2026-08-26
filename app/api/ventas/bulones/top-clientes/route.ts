@@ -1,0 +1,72 @@
+import { NextRequest, NextResponse } from "next/server";
+import { resolverAccesoVendedor } from "@/lib/ventas/vendedorAcceso";
+
+const API_URL =
+  process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+// Proxy -> FastAPI indicadores-api (/ventas/bulones/top-clientes) para /ventas/bulones (pedido de
+// Pablo 2026-08-26). Gemelo de la ruta equivalente de /api/ventas/vendedor:
+// mismo contrato y MISMA resolución de acceso por vendedor (admin = toda la
+// empresa; no-admin = sólo su cartera, resuelto server-side y nunca tomado
+// del query string). Lo único distinto es que el backend acota todo a la
+// línea BULONERÍA y corta por código patrón. Ver bulones.py.
+function mesActual(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+
+export async function GET(req: NextRequest) {
+  const sp = req.nextUrl.searchParams;
+  const desde = sp.get("desde")?.trim() || undefined;
+  const hasta = sp.get("hasta")?.trim() || undefined;
+
+  const acceso = await resolverAccesoVendedor();
+  if (!acceso.ok) {
+    return NextResponse.json({ error: acceso.error }, { status: acceso.status });
+  }
+  if (!acceso.isAdmin && !acceso.vendedorCodigo) {
+    // Sin vendedor asignado todavía = cero clientes visibles (no "sin
+    // restricción"), mismo criterio que /api/ventas/vendedor/*.
+    return NextResponse.json({
+      desde: desde ?? mesActual(),
+      hasta: hasta ?? mesActual(),
+      totalClientes: 0,
+      porMonto: [],
+    });
+  }
+
+  try {
+    const qs = new URLSearchParams();
+    if (!acceso.isAdmin) qs.set("vendedor", String(acceso.vendedorCodigo));
+    if (desde) qs.set("desde", desde);
+    if (hasta) qs.set("hasta", hasta);
+    const res = await fetch(`${API_URL}/ventas/bulones/top-clientes?${qs.toString()}`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(55000),
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => null);
+      const motivo = typeof detail?.detail === "string" ? detail.detail : null;
+      return NextResponse.json(
+        {
+          error: motivo
+            ? `Error en API de top clientes de bulonería: ${motivo}`
+            : "Error en API de top clientes de bulonería",
+          detail,
+        },
+        { status: res.status },
+      );
+    }
+    return NextResponse.json(await res.json());
+  } catch (error) {
+    console.error("GET /api/ventas/bulones/top-clientes", error);
+    return NextResponse.json(
+      { error: "No se pudo conectar al servicio de ventas" },
+      { status: 503 },
+    );
+  }
+}

@@ -477,7 +477,8 @@ def fetch_top_clientes(
 SQL_TOP_LINEAS_VENDEDOR = """
 SELECT
     LTRIM(RTRIM(n1.Detalle)) AS Linea,
-    SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS UnidadesNetas
+    SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS UnidadesNetas,
+    SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
 FROM MAGNUS_SITD.dbo.Clientes c
 JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
 JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma pu  ON LTRIM(RTRIM(pu.Usu_Arma_Nombre)) = LTRIM(RTRIM(vz.Vendedor))
@@ -496,7 +497,8 @@ GROUP BY LTRIM(RTRIM(n1.Detalle))
 SQL_TOP_LINEAS_TODOS = """
 SELECT
     LTRIM(RTRIM(n1.Detalle)) AS Linea,
-    SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS UnidadesNetas
+    SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS UnidadesNetas,
+    SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
 FROM Ven_CompCabecera vc
 JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
 JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
@@ -520,9 +522,12 @@ def fetch_top_lineas(
     fetch_top_clientes, mismo rango/cache/criterio de acceso por vendedor,
     pero agrupando por línea de artículo en vez de por cliente.
 
-    Devuelve `porUnidades` (las `limit` primeras) y `totalLineas` (cuántas
-    líneas distintas entran en la filtración, no cuántas se muestran).
-    Solo unidades — el $ vive en fetch_top_clientes."""
+    Devuelve las DOS métricas (pedido de Pablo 2026-08-26: "que tenga las 2
+    vistas, por unidad y por $"): `porUnidades` (ordenado por unidades) y
+    `porMonto` (ordenado por $), cada item con `unidades` y `monto`, más
+    `totalLineas` / `totalLineasMonto` (cuántas líneas distintas entran en
+    cada filtración, no cuántas se muestran). El front alterna la lista con
+    un botón $ | Unidades sin volver a pegarle al back."""
     desde_ym, hasta_ym, dia_desde, dia_hasta = _resolver_rango(desde, hasta)
 
     limit_i = int(limit)
@@ -544,23 +549,39 @@ def fetch_top_lineas(
 
         # NULL y '' son grupos distintos para SQL pero la misma "sin línea"
         # acá, así que se consolidan antes de filtrar/ordenar.
-        acumulado: dict[str, float] = {}
-        for linea, unidades in cur.fetchall():
+        acumulado: dict[str, list[float]] = {}
+        for linea, unidades, monto in cur.fetchall():
             nombre = _nombre_linea(str(linea or ""))
-            acumulado[nombre] = acumulado.get(nombre, 0.0) + float(_safe(unidades) or 0)
+            acc = acumulado.setdefault(nombre, [0.0, 0.0])
+            acc[0] += float(_safe(unidades) or 0)
+            acc[1] += float(_safe(monto) or 0)
 
-        lineas = [
-            {"linea": nombre, "unidades": round(u, 2)}
-            for nombre, u in acumulado.items()
-            if u > 0
-        ]
-        lineas.sort(key=lambda x: x["unidades"], reverse=True)
+        # Una línea puede tener unidades > 0 y monto <= 0 (o al revés) por las
+        # notas de crédito, así que cada vista filtra por SU métrica — pero
+        # los dos objetos llevan los dos números para que el front pueda
+        # mostrar el que quiera sin refetch.
+        items = {
+            nombre: {"linea": nombre, "unidades": round(u, 2), "monto": round(m, 2)}
+            for nombre, (u, m) in acumulado.items()
+        }
+        por_unidades = sorted(
+            (it for it in items.values() if it["unidades"] > 0),
+            key=lambda x: x["unidades"],
+            reverse=True,
+        )
+        por_monto = sorted(
+            (it for it in items.values() if it["monto"] > 0),
+            key=lambda x: x["monto"],
+            reverse=True,
+        )
 
         resultado = {
             "desde": f"{desde_ym[0]:04d}-{desde_ym[1]:02d}",
             "hasta": f"{hasta_ym[0]:04d}-{hasta_ym[1]:02d}",
-            "totalLineas": len(lineas),
-            "porUnidades": lineas[:limit_i],
+            "totalLineas": len(por_unidades),
+            "totalLineasMonto": len(por_monto),
+            "porUnidades": por_unidades[:limit_i],
+            "porMonto": por_monto[:limit_i],
         }
         _TOP_LINEAS_CACHE[cache_key] = (ahora, resultado)
         return resultado

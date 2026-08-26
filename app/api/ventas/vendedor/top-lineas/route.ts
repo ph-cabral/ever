@@ -15,9 +15,12 @@ export const maxDuration = 60;
 // contrato, misma resolución de acceso; lo único que cambia es la métrica
 // (unidades en vez de $) y el eje de agrupación (línea en vez de cliente).
 //
-// La respuesta trae `porUnidades` (top N) y `totalLineas` (cuántas líneas
-// distintas entran en la filtración, mayor que las que se listan). Ver
-// fetch_top_lineas en ventas.py.
+// La respuesta trae las DOS métricas: `porUnidades` (ordenado por unidades)
+// y `porMonto` (ordenado por $), cada item con `unidades` y `monto`, más
+// `totalLineas`/`totalLineasMonto` (cuántas líneas distintas entran en cada
+// filtración, mayor que las que se listan). Desde 2026-08-26 el ranking de
+// líneas del front tiene su propio botón $ | Unidades y alterna entre las
+// dos listas SIN volver a pegarle acá. Ver fetch_top_lineas en ventas.py.
 //
 // Acceso por vendedor: mismo criterio que /api/ventas/vendedor y
 // /api/ventas/vendedor/clientes — se resuelve server-side si quien pide es
@@ -45,7 +48,9 @@ export async function GET(req: NextRequest) {
       desde: desde ?? mesActual(),
       hasta: hasta ?? mesActual(),
       totalLineas: 0,
+      totalLineasMonto: 0,
       porUnidades: [],
+      porMonto: [],
     });
   }
 

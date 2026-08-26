@@ -94,7 +94,11 @@ interface RespVentasVendedor {
 // propio:
 //   · Clientes → solo $ gastado (ya NO cambia con el switch Unidades/Pesos
 //     de la tabla de arriba: acá el monto es lo único que se muestra).
-//   · Líneas   → solo unidades compradas.
+//   · Líneas   → unidades compradas O $ vendidos, con su propio botón
+//     dividido $ | Unidades (pedido de Pablo 2026-08-26, mismo patrón que
+//     el del modal). Cada vista tiene su PROPIO orden, que resuelve el back
+//     (porUnidades / porMonto): togglear no reordena en el front ni pega de
+//     nuevo al back, ya vienen las dos listas.
 // Cada uno trae además el TOTAL de filas que entran en la filtración
 // (`totalClientes` / `totalLineas`), que es mayor que las 10 que se listan.
 //
@@ -114,16 +118,22 @@ interface RespTopClientes {
   porMonto: TopCliente[];
 }
 
+// Desde 2026-08-26 cada línea trae las DOS métricas y el back manda las dos
+// listas ya ordenadas (`porUnidades` por unidades, `porMonto` por $) — el
+// botón $ | Unidades del ranking solo cambia cuál se usa, no refetchea.
 interface TopLinea {
   linea: string;
   unidades: number;
+  monto: number;
 }
 
 interface RespTopLineas {
   desde: string; // "YYYY-MM"
   hasta: string; // "YYYY-MM"
   totalLineas: number;
+  totalLineasMonto: number;
   porUnidades: TopLinea[];
+  porMonto: TopLinea[];
 }
 
 // Clientes que compraron una línea puntual, de mayor a menor gasto — para
@@ -300,7 +310,10 @@ export default function VentasVendedorPage() {
   // modal ahora vive en su propio popup con su propio filtro, no comparte
   // estado con el ranking de la página.
   const [topVista, setTopVista] = useState<TopVista>("clientes");
-  const modo: Modo = topVista === "clientes" ? "pesos" : "unidades";
+  // Métrica del ranking del pie cuando la vista es "líneas" (pedido de
+  // Pablo 2026-08-26). En vista "clientes" no aplica: ahí siempre es $.
+  const [topMetricaLineas, setTopMetricaLineas] = useState<Modo>("unidades");
+  const modo: Modo = topVista === "clientes" ? "pesos" : topMetricaLineas;
   const [desglosado, setDesglosado] = useState(false);
 
   // ── Modal "Ventas por cliente y línea" ──────────────────────────────────
@@ -782,8 +795,11 @@ export default function VentasVendedorPage() {
   const filasGrupoSeguro = Math.min(filasGrupoAbierto, Math.max(0, filasGrupos.length - 1));
   const totalColsLineaAnio = 2 + 2 * colSpanAnio; // Línea + Año ant. + Año act. + Tend.
 
+  // Cada vista/métrica usa la lista que YA viene ordenada del back.
+  const topLineasItems: TopLinea[] =
+    (topMetricaLineas === "pesos" ? topLineas?.porMonto : topLineas?.porUnidades) ?? [];
   const topItems: (TopCliente | TopLinea)[] =
-    topVista === "clientes" ? topClientes?.porMonto ?? [] : topLineas?.porUnidades ?? [];
+    topVista === "clientes" ? topClientes?.porMonto ?? [] : topLineasItems;
   const topGrupos = agrupar(topItems);
   const topGrupoSeguro = Math.min(topGrupoAbierto, Math.max(0, topGrupos.length - 1));
 
@@ -855,7 +871,7 @@ export default function VentasVendedorPage() {
                   setTopVista(v);
                   setTopGrupoAbierto(0);
                 }}
-                title={v === "clientes" ? "Ranking de clientes ($)" : "Ranking de líneas (unidades)"}
+                title={v === "clientes" ? "Ranking de clientes ($)" : "Ranking de líneas ($ o unidades)"}
                 className={`px-3 py-2 font-semibold transition-colors ${
                   topVista === v
                     ? "bg-yellow-400 text-black"
@@ -1644,6 +1660,39 @@ export default function VentasVendedorPage() {
             (12 meses terminando en el mes anterior) y lo resuelve el back.
             Clickeando un cliente o una línea de la tabla de abajo se abre
             el modal con el detalle. */}
+
+        {/* Botón dividido $ | Unidades del ranking de líneas (pedido de
+            Pablo 2026-08-26: "que tenga las 2 vistas, por unidad y por $
+            como al verse por cliente"). Mismo patrón visual que el del
+            modal y que el Clientes|Líneas del header. Solo aparece en la
+            vista "líneas": el ranking de clientes sigue siendo solo $.
+            Cambiar de métrica NO refetchea — el back manda las dos listas
+            ya ordenadas — pero sí resetea el acordeón al primer grupo,
+            porque el orden de las filas es distinto en cada una. */}
+        {topVista === "lineas" && !topError && (
+          <div className="inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700">
+            {(["pesos", "unidades"] as Modo[]).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => {
+                  if (topMetricaLineas === m) return;
+                  setTopMetricaLineas(m);
+                  setTopGrupoAbierto(0);
+                }}
+                title={m === "pesos" ? "Ver montos en $" : "Ver unidades"}
+                className={`px-3 py-2 font-semibold transition-colors ${
+                  topMetricaLineas === m
+                    ? "bg-yellow-400 text-black"
+                    : "text-zinc-300 hover:bg-zinc-800"
+                }`}
+              >
+                {m === "pesos" ? "$" : "Unidades"}
+              </button>
+            ))}
+          </div>
+        )}
+
         {topError && (
           <div className="rounded-xl border border-red-400/40 bg-zinc-900/40 px-5 py-4 flex items-center gap-3 text-sm text-red-300">
             <AlertTriangle size={16} className="text-red-400" /> {topError}
@@ -1658,7 +1707,7 @@ export default function VentasVendedorPage() {
               const vacio =
                 topVista === "clientes"
                   ? !topClientes?.porMonto?.length
-                  : !topLineas?.porUnidades?.length;
+                  : !topLineasItems.length;
               if (!topLoading && vacio) {
                 return (
                   <div className="px-5 py-12 flex flex-col items-center gap-3 text-center">
@@ -1689,7 +1738,7 @@ export default function VentasVendedorPage() {
                             {topVista === "clientes" ? "Cliente" : "Línea"}
                           </th>
                           <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800">
-                            {topVista === "clientes" ? "Pesos" : "Unidades"}
+                            {modo === "pesos" ? "Pesos" : "Unidades"}
                           </th>
                         </tr>
                       </thead>
@@ -1771,7 +1820,11 @@ export default function VentasVendedorPage() {
                                       </button>
                                     </td>
                                     <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
-                                      {fmtTop(l.unidades)}
+                                      {fmtTop(
+                                        topMetricaLineas === "pesos"
+                                          ? l.monto
+                                          : l.unidades,
+                                      )}
                                     </td>
                                   </tr>
                                 )))}
