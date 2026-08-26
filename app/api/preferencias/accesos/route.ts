@@ -109,3 +109,27 @@ export async function DELETE(req: NextRequest) {
   await prisma.usuario_acceso.deleteMany({ where: { usuarioId: s.uid, href } });
   return NextResponse.json({ ok: true });
 }
+
+// PUT { hrefs: [...] } — reordena "Mis accesos" (drag & drop en la sidebar).
+// Se manda la lista COMPLETA en el orden nuevo; se persiste el indice en `orden`.
+// Solo toca filas del usuario logueado: un href ajeno o inexistente se ignora.
+export async function PUT(req: NextRequest) {
+  const s = await getSession();
+  if (!s) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+
+  const body = (await req.json().catch(() => null)) as { hrefs?: unknown } | null;
+  const hrefs = Array.isArray(body?.hrefs)
+    ? (body.hrefs.filter((h) => typeof h === "string") as string[])
+    : null;
+  if (!hrefs) return NextResponse.json({ error: "Falta hrefs" }, { status: 400 });
+
+  await prisma.$transaction(
+    hrefs.map((href, i) =>
+      prisma.usuario_acceso.updateMany({
+        where: { usuarioId: s.uid, href },
+        data: { orden: i },
+      }),
+    ),
+  );
+  return NextResponse.json({ ok: true });
+}

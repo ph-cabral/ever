@@ -13,6 +13,7 @@ import {
   Plus,
   X,
   Search,
+  GripVertical,
 } from "lucide-react";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -24,13 +25,21 @@ import {
 // Lista TODAS las ubicaciones de compras — al agregar una vista nueva bajo
 // app/compras/, sumarla a NAV.
 //
-// "Mis accesos" (pedido de Pablo 2026-08-26): cada usuario marca con la
-// estrella (⭐ al pasar el mouse) las vistas que quiere tener a mano; quedan
-// fijadas arriba de todo, por usuario, guardadas en everwear.usuario_acceso
-// (ver sql/usuario_acceso.sql y app/api/preferencias/accesos/route.ts). Con el
-// botón "+" se puede fijar CUALQUIER vista de la app permitida para ese
-// usuario, no sólo las de compras. Marcar es preferencia, no permiso: el
-// catálogo ya viene filtrado por los permisos de la sesión desde la API.
+// "Mis accesos" (pedido de Pablo 2026-08-26): cada usuario arma su propia
+// sidebar. Marca con la estrella (⭐ al pasar el mouse) las vistas que quiere
+// tener a mano y las ordena arrastrándolas de la manija (⋮⋮). Se guarda por
+// usuario en everwear.usuario_acceso (ver sql/usuario_acceso.sql y
+// app/api/preferencias/accesos/route.ts). Con el botón "+" se puede fijar
+// CUALQUIER vista de la app permitida para ese usuario, no sólo las de
+// compras. Marcar es preferencia, no permiso: el catálogo ya viene filtrado
+// por los permisos de la sesión desde la API.
+//
+// El drag&drop es HTML5 nativo (sin librería): la FILA entera es el draggable
+// (la manija ⋮⋮ es sólo la pista visual) y el <Link> de adentro va con
+// draggable={false}, si no el navegador arrastra el link en vez de la fila.
+// Al soltar se reordena en pantalla y se manda un PUT con la lista completa de
+// hrefs. OJO: no sirve poner `draggable` según un useRef — el atributo tiene
+// que estar puesto ANTES de que arranque el gesto, y un ref no re-renderiza.
 // ──────────────────────────────────────────────────────────────────────────────
 
 const NAV: { href: string; label: string; icon: typeof BarChart3 }[] = [
@@ -55,6 +64,8 @@ export default function ComprasLayout({ children }: { children: React.ReactNode 
   const [cargado, setCargado] = useState(false);
   const [selector, setSelector] = useState(false); // panel "+ agregar acceso"
   const [q, setQ] = useState("");
+  const [drag, setDrag] = useState<number | null>(null); // índice que se arrastra
+  const [sobre, setSobre] = useState<number | null>(null); // índice donde caería
   const pathname = usePathname();
 
   // Se carga una sola vez, y recién cuando la sidebar se abre por primera vez.
@@ -104,6 +115,32 @@ export default function ComprasLayout({ children }: { children: React.ReactNode 
     [accesos],
   );
 
+  // Guarda el orden nuevo (lista completa de hrefs). Silencioso: si falla, el
+  // orden en pantalla queda igual y se corrige en la próxima carga.
+  const persistirOrden = useCallback((lista: Acceso[]) => {
+    fetch("/api/preferencias/accesos", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hrefs: lista.map((a) => a.href) }),
+    }).catch(() => {});
+  }, []);
+
+  const soltar = useCallback(
+    (destino: number) => {
+      setDrag(null);
+      setSobre(null);
+      if (drag === null || drag === destino) return;
+      setAccesos((prev) => {
+        const lista = [...prev];
+        const [movido] = lista.splice(drag, 1);
+        lista.splice(destino, 0, movido);
+        persistirOrden(lista);
+        return lista;
+      });
+    },
+    [drag, persistirOrden],
+  );
+
   const filtrado = useMemo(() => {
     const t = q.trim().toLowerCase();
     const base = t
@@ -125,6 +162,8 @@ export default function ComprasLayout({ children }: { children: React.ReactNode 
     setOpen(false);
     setSelector(false);
     setQ("");
+    setDrag(null);
+    setSobre(null);
   };
 
   return (
@@ -138,18 +177,21 @@ export default function ComprasLayout({ children }: { children: React.ReactNode 
       />
 
       {/* Pestaña siempre visible (pista de que hay sidebar) */}
-      <div
+      <button
         onMouseEnter={() => setOpen(true)}
+        onClick={() => setOpen(true)}
         className={`fixed left-0 top-1/2 -translate-y-1/2 z-[120] flex items-center justify-center
           w-5 h-16 rounded-r-lg bg-[#1A1A1A] border border-l-0 border-yellow-400/40
           text-yellow-400 transition-opacity duration-200 ${open ? "opacity-0 pointer-events-none" : "opacity-80"}`}
       >
         <ChevronRight size={14} />
-      </div>
+      </button>
 
       {/* Sidebar */}
       <aside
-        onMouseLeave={cerrar}
+        onMouseLeave={() => {
+          if (drag === null) cerrar();
+        }}
         className={`fixed left-0 top-0 h-full w-60 z-[130] bg-[#161616] border-r border-zinc-800
           flex flex-col transition-transform duration-200 ease-out shadow-2xl shadow-black/60
           ${open ? "translate-x-0" : "-translate-x-full"}`}
@@ -162,13 +204,13 @@ export default function ComprasLayout({ children }: { children: React.ReactNode 
         </div>
 
         <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-1">
-          {/* ── Mis accesos (lo que marcó este usuario) ── */}
+          {/* ── Mis accesos (lo que marcó este usuario, en su orden) ── */}
           {accesos.length > 0 && (
             <>
               <div className="px-3 pt-1 pb-1.5 text-[10px] uppercase tracking-wider text-zinc-600 font-semibold">
                 Mis accesos
               </div>
-              {accesos.map(({ href, label }) => (
+              {accesos.map(({ href, label }, i) => (
                 <ItemNav
                   key={`fav-${href}`}
                   href={href}
@@ -177,8 +219,23 @@ export default function ComprasLayout({ children }: { children: React.ReactNode 
                   fijado
                   onToggle={() => toggle(href, label)}
                   onNavegar={cerrar}
+                  arrastrable
+                  arrastrando={drag === i}
+                  marcado={sobre === i && drag !== null && drag !== i}
+                  onDragStart={() => setDrag(i)}
+                  onDragEnter={() => setSobre(i)}
+                  onDrop={() => soltar(i)}
+                  onDragEnd={() => {
+                    setDrag(null);
+                    setSobre(null);
+                  }}
                 />
               ))}
+              {accesos.length > 1 && (
+                <p className="px-3 pt-1 text-[10px] text-zinc-700">
+                  Arrastrá ⋮⋮ para ordenar
+                </p>
+              )}
               <div className="h-px bg-zinc-800 mx-3 my-2" />
             </>
           )}
@@ -264,9 +321,10 @@ export default function ComprasLayout({ children }: { children: React.ReactNode 
   );
 }
 
-// Fila de la sidebar: link + estrella. La estrella aparece al pasar el mouse
-// (o queda fija en amarillo si ya está marcada) y NO navega (stopPropagation +
-// preventDefault: es un <button> adentro de un <Link>).
+// Fila de la sidebar: manija (sólo en "Mis accesos") + link + estrella.
+// La estrella aparece al pasar el mouse (o queda fija en amarillo si ya está
+// marcada) y NO navega (preventDefault + stopPropagation: es un <button>
+// adentro de un <Link>).
 function ItemNav({
   href,
   label,
@@ -275,6 +333,13 @@ function ItemNav({
   fijado,
   onToggle,
   onNavegar,
+  arrastrable,
+  arrastrando,
+  marcado,
+  onDragStart,
+  onDragEnter,
+  onDrop,
+  onDragEnd,
 }: {
   href: string;
   label: string;
@@ -283,19 +348,63 @@ function ItemNav({
   fijado: boolean;
   onToggle: () => void;
   onNavegar: () => void;
+  arrastrable?: boolean;
+  arrastrando?: boolean;
+  marcado?: boolean;
+  onDragStart?: () => void;
+  onDragEnter?: () => void;
+  onDrop?: () => void;
+  onDragEnd?: () => void;
 }) {
   return (
-    <div className="group relative">
+    <div
+      className={`group relative rounded-lg transition-colors ${
+        arrastrando ? "opacity-40" : ""
+      } ${marcado ? "ring-1 ring-yellow-400/60" : ""}`}
+      draggable={!!arrastrable}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart?.();
+      }}
+      onDragOver={(e) => {
+        if (arrastrable) e.preventDefault();
+      }}
+      onDragEnter={() => onDragEnter?.()}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop?.();
+      }}
+      onDragEnd={() => {
+        onDragEnd?.();
+      }}
+    >
       <Link
         href={href}
+        draggable={false}
         onClick={onNavegar}
-        className={`flex items-center gap-3 pl-3 pr-9 py-2.5 rounded-lg border text-sm font-medium transition-colors ${
+        className={`flex items-center gap-2 ${arrastrable ? "pl-1" : "pl-3"} pr-9 py-2.5 rounded-lg border text-sm font-medium transition-colors ${
           activo
             ? "bg-yellow-400/10 border-yellow-400/40 text-yellow-400"
             : "border-transparent text-zinc-400 hover:text-zinc-100 hover:border-zinc-700"
         }`}
       >
-        {Icon ? <Icon size={16} className="shrink-0" /> : <Star size={16} className="shrink-0 opacity-40" />}
+        {arrastrable && (
+          <span
+            title="Arrastrar para ordenar"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            className="shrink-0 cursor-grab active:cursor-grabbing text-zinc-700 group-hover:text-zinc-500"
+          >
+            <GripVertical size={14} />
+          </span>
+        )}
+        {Icon ? (
+          <Icon size={16} className="shrink-0" />
+        ) : (
+          !arrastrable && <Star size={16} className="shrink-0 opacity-40" />
+        )}
         <span className="truncate">{label}</span>
       </Link>
       <button
