@@ -14,6 +14,7 @@ import {
   ListChevronsUpDown,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
+import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /ventas/vendedor — pedido de Pablo 2026-08-14: vista de ventas por línea de
@@ -814,31 +815,38 @@ export default function VentasVendedorPage() {
         </div>
       )}
 
-      <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 flex flex-wrap items-center justify-between px-4 md:px-8 py-3 gap-4">
-        <div className="flex flex-wrap items-center gap-4 min-w-0">
-          <InicioButton />
-          <span className="font-bold text-yellow-400 text-xl md:text-2xl tracking-wide uppercase whitespace-nowrap">
-            EVER WEAR{" "}
-            <span className="text-sm tracking-[3px] font-normal">S.A.</span>
-          </span>
-          <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
+      {/* Header en 3 filas en el teléfono y 1 sola en la computadora (pedido
+          de Pablo 2026-08-25). En mobile es un grid de 2 columnas:
+            fila 1 → logo            | qué se está viendo (clientes/líneas)
+            fila 2 → "Buscar cliente"| switch Clientes|Líneas
+            fila 3 → el vendedor, a la derecha, ocupando el ancho
+          En `md` pasa a flex y el `order-*` reacomoda: logo, buscar, qué se
+          ve, switch, y el vendedor empujado a la derecha con ml-auto. Por eso
+          el orden del DOM no coincide con el de escritorio — al agregar algo
+          nuevo, darle su `md:order-N`. */}
+      <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 px-4 md:px-8 py-3">
+        <div className="grid grid-cols-2 items-center gap-x-3 gap-y-2 md:flex md:flex-wrap md:gap-4">
+          <div className="flex items-center gap-3 min-w-0 md:order-1">
+            <InicioButton />
+            <span className="font-bold text-yellow-400 text-base md:text-2xl tracking-wide uppercase whitespace-nowrap">
+              EVER WEAR{" "}
+              <span className="text-xs md:text-sm tracking-[3px] font-normal">S.A.</span>
+            </span>
+          </div>
+
+          <h2 className="justify-self-end text-yellow-400 font-bold text-base md:text-lg uppercase tracking-wide flex items-center gap-2 whitespace-nowrap md:order-3">
+            {topVista === "clientes" ? <Users size={18} /> : <ListChevronsUpDown size={18} />}
+            {topVista === "clientes" ? "clientes" : "líneas"}
+          </h2>
 
           <button
             type="button"
             onClick={abrirModalBusqueda}
-            className="btn-anim inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors"
+            className="btn-anim inline-flex items-center justify-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors md:order-2"
           >
             <Search size={14} className="text-yellow-400" />
             Buscar cliente
           </button>
-
-          <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
-
-          <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2 whitespace-nowrap">
-            {/* <Trophy size={18} /> */}
-            {topVista === "clientes" ? <Users size={18} /> : <ListChevronsUpDown size={18} />}
-            {topVista === "clientes" ? "clientes" : "líneas"}
-          </h2>
 
           {/* Botón dividido Clientes | Líneas (pedido de Pablo 2026-08-25:
               "que sean 2 botones y la marca se mueva de lado a lado según el
@@ -846,7 +854,7 @@ export default function VentasVendedorPage() {
               vista actual, confuso porque no se sabía si el texto era el
               estado o la acción. Mismo patrón visual que el YTD/Meses del
               modal: el activo va en amarillo sólido. */}
-          <div className="inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700">
+          <div className="justify-self-end inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700 md:order-4">
             {(["clientes", "lineas"] as TopVista[]).map((v) => (
               <button
                 key={v}
@@ -867,6 +875,14 @@ export default function VentasVendedorPage() {
               </button>
             ))}
           </div>
+
+          {/* Quién está mirando (pedido de Pablo 2026-08-25). Es el
+              componente compartido `<UsuarioActual />` que ya está en el
+              header de todas las vistas — NO duplicar el fetch a
+              /api/auth/me acá. En esta pantalla el usuario logueado ES el
+              vendedor: lo que ve está acotado a SU vendedorCodigo (ver
+              lib/ventas/vendedorAcceso.ts). */}
+          <UsuarioActual className="col-span-2 justify-self-end md:col-auto md:order-5 md:ml-auto" />
         </div>
       </header>
 
@@ -876,16 +892,23 @@ export default function VentasVendedorPage() {
             abajo, o en "Buscar cliente" arriba. El filtro queda pegado en
             el header del modal (no scrollea); la tabla scrollea en el
             cuerpo. */}
+        {/* `items-start` + `dvh` (pedido de Pablo 2026-08-25: "que el modal
+            no se vaya tan arriba"). Centrado y con `vh`, en el teléfono el
+            teclado achica el viewport y el modal se corría hacia arriba hasta
+            cortar el título y la X. Anclado arriba con un margen fijo, el
+            header del modal siempre queda visible; `dvh` es la altura REAL
+            disponible (descuenta las barras del navegador y el teclado), a
+            diferencia de `vh`. */}
         {modalOpen && (
           <div
-            className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4"
+            className="fixed inset-0 z-[100] bg-black/70 flex items-start justify-center p-3 md:p-4 overflow-y-auto"
             onClick={cerrarModal}
           >
             <div
-              className="w-full max-w-6xl max-h-[90vh] rounded-xl border border-zinc-800 bg-[#111111] flex flex-col overflow-hidden shadow-2xl"
+              className="w-full max-w-6xl max-h-[calc(100dvh-1.5rem)] md:max-h-[92dvh] rounded-xl border border-zinc-800 bg-[#111111] flex flex-col overflow-hidden shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="shrink-0 bg-[#1A1A1A] border-b border-zinc-800 px-5 py-4 space-y-4 max-h-[60vh] overflow-y-auto">
+              <div className="shrink-0 bg-[#1A1A1A] border-b border-zinc-800 px-5 py-4 space-y-4 max-h-[45dvh] overflow-y-auto">
                 <div className="flex items-start justify-between gap-4">
                   {/* Migas de pan del drill-down (pedido de Pablo
                       2026-08-25). Muestra los niveles abiertos —
