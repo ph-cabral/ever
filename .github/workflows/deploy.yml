@@ -1,6 +1,6 @@
 name: Deploy
 # Corre en el runner self-hosted instalado en el server 10.10.0.159.
-# El runner NO hace checkout: entra al clon de produccion (~/projects/ever)
+# El runner NO hace checkout: entra al clon de produccion (~/projects/vicki_web)
 # y ejecuta deploy.sh, que hace fetch + reset --hard + docker compose up --build.
 on:
   push:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:   # boton "Run workflow" en la pestania Actions
 
 concurrency:
-  group: deploy-ever
+  group: deploy-vicki_web
   cancel-in-progress: false   # no cortar un build a la mitad
 
 jobs:
@@ -21,5 +21,5 @@ jobs:
     steps:
       - name: pull + build en el server
         run: |
-          cd ~/projects/ever
+          cd ~/projects/vicki_web
           bash deploy.sh

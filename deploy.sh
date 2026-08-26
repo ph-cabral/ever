@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy de ever en el server (10.10.0.159).
 # Lo usa el workflow de GitHub Actions (.github/workflows/deploy.yml)
-# y tambien sirve a mano:  ssh server -> cd ~/projects/ever -> ./deploy.sh
+# y tambien sirve a mano:  ssh server -> cd ~/projects/vicki_web -> ./deploy.sh
 #
 # OJO: hace 'git reset --hard origin/main'. En el server NO se edita codigo,
 # asi que cualquier cambio local ahi es basura y se descarta a proposito.
