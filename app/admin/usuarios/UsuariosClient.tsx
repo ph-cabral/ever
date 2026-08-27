@@ -33,9 +33,11 @@ export function UsuariosClient() {
   const [pwd, setPwd] = useState("");
   const [pwd2, setPwd2] = useState("");
   const [savingPwd, setSavingPwd] = useState(false);
-  // Catálogo de vendedores (Magnus, Ped_Usu_Arma) para el selector de la
-  // columna "Vendedor" — pedido de Pablo 2026-08-14, acceso por vendedor en
-  // /ventas/vendedor. Se trae una sola vez, catálogo chico.
+  // Catálogo de vendedores (Magnus, Ped_Usu_Arma) para la columna
+  // "Vendedor" — pedido de Pablo 2026-08-14, acceso por vendedor en
+  // /ventas/vendedor. Se trae una sola vez, catálogo chico. Desde
+  // 2026-08-27 ya no alimenta un combo: el número se TIPEA y el catálogo
+  // sirve para validarlo y mostrar el nombre (ver CeldaVendedor).
   const [vendedores, setVendedores] = useState<Vendedor[]>([]);
   const [vendedoresError, setVendedoresError] = useState(false);
 
@@ -166,28 +168,13 @@ export function UsuariosClient() {
                   <td className="px-3 py-2 tabular-nums">{u.dni}</td>
                   <td className="px-3 py-2">{u.sector || "—"}</td>
                   <td className="px-3 py-2">
-                    <select
-                      value={u.vendedorCodigo ?? ""}
-                      disabled={busy === u.id || (vendedores.length === 0 && !vendedoresError)}
-                      onChange={(e) =>
-                        patch(u.id, {
-                          vendedorCodigo: e.target.value === "" ? null : Number(e.target.value),
-                        })
-                      }
-                      title={
-                        vendedoresError
-                          ? "No se pudo cargar el catálogo de vendedores de Magnus"
-                          : "Vendedor de Magnus asignado a este usuario (acceso en /ventas/vendedor)"
-                      }
-                      className="rounded-md border border-input bg-background px-2 py-1 text-sm disabled:opacity-50"
-                    >
-                      <option value="">Sin asignar</option>
-                      {vendedores.map((v) => (
-                        <option key={v.codigo} value={v.codigo}>
-                          {v.nombre ?? `Código ${v.codigo}`}
-                        </option>
-                      ))}
-                    </select>
+                    <CeldaVendedor
+                      usuario={u}
+                      vendedores={vendedores}
+                      vendedoresError={vendedoresError}
+                      disabled={busy === u.id}
+                      onGuardar={(codigo) => patch(u.id, { vendedorCodigo: codigo })}
+                    />
                   </td>
                   <td className="px-3 py-2">
                     <span
@@ -307,6 +294,107 @@ export function UsuariosClient() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Celda "Vendedor" de la tabla de usuarios — se TIPEA el número de vendedor
+ * de Magnus y con Enter se guarda (pedido de Pablo 2026-08-27; antes era un
+ * combo con los nombres del catálogo, incómodo cuando la lista es larga y
+ * uno ya sabe el número del viajante).
+ *
+ * Reglas:
+ *   · Enter con un número que existe en el catálogo (Ped_Usu_Arma) → guarda
+ *     y debajo queda "código — NOMBRE".
+ *   · Enter con un número que NO existe → no guarda, avisa. Así no queda un
+ *     usuario apuntando a un vendedor inexistente (en /ventas/vendedor eso
+ *     se traduce en "no ve ningún cliente" y es difícil de diagnosticar).
+ *   · Vacío + Enter → "Sin asignar" (vendedorCodigo = null).
+ *   · Escape vuelve al valor guardado.
+ *
+ * Si el catálogo de Magnus no cargó (`vendedoresError`) no se puede validar
+ * el número, así que se acepta lo tipeado tal cual y se avisa que no se pudo
+ * verificar el nombre.
+ */
+function CeldaVendedor({
+  usuario,
+  vendedores,
+  vendedoresError,
+  disabled,
+  onGuardar,
+}: {
+  usuario: U;
+  vendedores: Vendedor[];
+  vendedoresError: boolean;
+  disabled: boolean;
+  onGuardar: (codigo: number | null) => void;
+}) {
+  const [texto, setTexto] = useState(
+    usuario.vendedorCodigo == null ? "" : String(usuario.vendedorCodigo),
+  );
+
+  // Si el usuario se recarga desde el back (load() tras guardar) el input
+  // tiene que reflejar el valor real, no lo que quedó tipeado.
+  useEffect(() => {
+    setTexto(usuario.vendedorCodigo == null ? "" : String(usuario.vendedorCodigo));
+  }, [usuario.vendedorCodigo]);
+
+  const nombreDe = (codigo: number | null) =>
+    codigo == null
+      ? null
+      : vendedores.find((v) => v.codigo === codigo)?.nombre ?? null;
+
+  const nombreGuardado = nombreDe(usuario.vendedorCodigo);
+
+  function confirmar() {
+    const t = texto.trim();
+    if (t === "") {
+      if (usuario.vendedorCodigo != null) onGuardar(null);
+      return;
+    }
+    const n = Number(t);
+    if (!Number.isInteger(n) || n <= 0) {
+      toast.error("El vendedor tiene que ser un número");
+      return;
+    }
+    if (n === usuario.vendedorCodigo) return;
+    if (!vendedoresError && vendedores.length > 0 && !vendedores.some((v) => v.codigo === n)) {
+      toast.error(`No existe el vendedor ${n} en Magnus`);
+      return;
+    }
+    onGuardar(n);
+  }
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <input
+        type="text"
+        inputMode="numeric"
+        value={texto}
+        disabled={disabled}
+        onChange={(e) => setTexto(e.target.value.replace(/[^0-9]/g, ""))}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            confirmar();
+          } else if (e.key === "Escape") {
+            setTexto(usuario.vendedorCodigo == null ? "" : String(usuario.vendedorCodigo));
+          }
+        }}
+        placeholder="N° vendedor"
+        title={
+          vendedoresError
+            ? "No se pudo cargar el catálogo de vendedores de Magnus — se guarda el número sin verificar el nombre"
+            : "Escribí el número de vendedor de Magnus y presioná Enter"
+        }
+        className="w-28 rounded-md border border-input bg-background px-2 py-1 text-sm tabular-nums disabled:opacity-50"
+      />
+      <span className="text-xs text-muted-foreground">
+        {usuario.vendedorCodigo == null
+          ? "Sin asignar"
+          : `${usuario.vendedorCodigo} — ${nombreGuardado ?? "(sin nombre en Magnus)"}`}
+      </span>
     </div>
   );
 }

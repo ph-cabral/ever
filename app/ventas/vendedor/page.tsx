@@ -43,6 +43,13 @@ interface Cliente {
   nombre: string | null;
 }
 
+// Opción del filtro de vendedor del header (solo admin) — ver
+// /api/ventas/vendedor/vendedores.
+interface VendedorOpcion {
+  codigo: number;
+  nombre: string | null;
+}
+
 interface MesVal {
   mes: number;
   label: string;
@@ -265,6 +272,50 @@ export default function VentasVendedorPage() {
   const [sinVendedorAsignado, setSinVendedorAsignado] = useState(false);
   const blurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Filtro de vendedor (solo ADMIN) ────────────────────────────────────
+  // Pedido de Pablo 2026-08-27: un admin puede pararse en un vendedor y ver
+  // la vista como la ve él (buscador de clientes, tabla y rankings). La
+  // lista son los viajantes con legajo ACTIVO en los sectores de venta —
+  // ver lib/ventas/vendedoresActivos.ts.
+  //
+  // /api/ventas/vendedor/vendedores es admin-only: si contesta 403 (o
+  // falla) simplemente no hay filtro y la vista queda como siempre — no
+  // hace falta un fetch aparte a /api/auth/me para saber el rol.
+  // "" = Todos los vendedores (sin restricción, lo de siempre para un admin).
+  const [vendedores, setVendedores] = useState<VendedorOpcion[]>([]);
+  const [vendedorSel, setVendedorSel] = useState("");
+  // Admin = la ruta admin-only contestó 200. Se guarda aparte de la lista
+  // porque puede venir VACÍA (ningún viajante activo con vendedor asignado)
+  // y en ese caso hay que mostrar el filtro igual, con el aviso, en vez de
+  // hacerlo desaparecer sin explicación.
+  const [esAdmin, setEsAdmin] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+    fetch("/api/ventas/vendedor/vendedores", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!vivo || !j) return;
+        setEsAdmin(true);
+        setVendedores(Array.isArray(j.vendedores) ? j.vendedores : []);
+      })
+      .catch(() => {});
+    return () => {
+      vivo = false;
+    };
+  }, []);
+
+  // Se agrega a TODAS las consultas de la vista (buscador, tabla y
+  // rankings). Vacío = sin filtro; el back ignora el parámetro si quien
+  // pide no es admin (ver vendedorParam en lib/ventas/vendedorAcceso.ts).
+  const qsVendedor = useCallback(
+    (qs: URLSearchParams) => {
+      if (vendedorSel) qs.set("vendedor", vendedorSel);
+      return qs;
+    },
+    [vendedorSel],
+  );
+
   useEffect(() => {
     const texto = qCliente.trim();
     // Recién elegido de la lista (ver elegirCliente) — el input ya muestra
@@ -280,7 +331,8 @@ export default function VentasVendedorPage() {
     setBuscando(true);
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/ventas/vendedor/clientes?q=${encodeURIComponent(texto)}`, {
+        const qs = qsVendedor(new URLSearchParams({ q: texto }));
+        const res = await fetch(`/api/ventas/vendedor/clientes?${qs.toString()}`, {
           cache: "no-store",
         });
         const j = await res.json().catch(() => ({}));
@@ -295,7 +347,7 @@ export default function VentasVendedorPage() {
     }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qCliente]);
+  }, [qCliente, vendedorSel]);
 
   // ── Tabla: se carga automáticamente al elegir un cliente de la lista ───
   const [data, setData] = useState<RespVentasVendedor | null>(null);
@@ -387,7 +439,7 @@ export default function VentasVendedorPage() {
       // si no queda "colgado" en un grupo que puede no existir.
       setFilasGrupoAbierto(0);
       try {
-        const qs = new URLSearchParams({ linea });
+        const qs = qsVendedor(new URLSearchParams({ linea }));
         const res = await fetch(`/api/ventas/vendedor/clientes-por-linea?${qs.toString()}`, {
           cache: "no-store",
         });
@@ -401,7 +453,7 @@ export default function VentasVendedorPage() {
         setClientesLineaLoading(false);
       }
     },
-    [],
+    [qsVendedor],
   );
 
   // Recibe el código directamente (en vez de leer clienteSel) porque
@@ -412,7 +464,8 @@ export default function VentasVendedorPage() {
     setError(null);
     setFilasGrupoAbierto(0);
     try {
-      const res = await fetch(`/api/ventas/vendedor?cliente=${codigo}`, {
+      const qs = qsVendedor(new URLSearchParams({ cliente: String(codigo) }));
+      const res = await fetch(`/api/ventas/vendedor?${qs.toString()}`, {
         cache: "no-store",
       });
       const j = await res.json().catch(() => ({}));
@@ -424,7 +477,7 @@ export default function VentasVendedorPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [qsVendedor]);
 
   // ── Navegación del modal ────────────────────────────────────────────────
   // `apilar` distingue las dos formas de llegar a un nivel:
@@ -544,7 +597,10 @@ export default function VentasVendedorPage() {
     setTopLoading(true);
     setTopError(null);
     const pedir = async (ruta: string) => {
-      const res = await fetch(`/api/ventas/vendedor/${ruta}`, { cache: "no-store" });
+      const qs = qsVendedor(new URLSearchParams()).toString();
+      const res = await fetch(`/api/ventas/vendedor/${ruta}${qs ? `?${qs}` : ""}`, {
+        cache: "no-store",
+      });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       return j;
@@ -564,7 +620,9 @@ export default function VentasVendedorPage() {
     return () => {
       cancelado = true;
     };
-  }, []);
+    // Cambiar de vendedor recarga los rankings (el back ya cachea por
+    // vendedor, así que volver a uno ya visto es instantáneo).
+  }, [qsVendedor]);
 
   // Respuesta y total de la pestaña activa. El rango que se muestra en el
   // encabezado sale del BACK (que es quien resuelve el default), no del
@@ -883,13 +941,54 @@ export default function VentasVendedorPage() {
             ))}
           </div>
 
+          {/* Filtro de vendedor — SOLO ADMIN (pedido de Pablo 2026-08-27).
+              No se renderiza si /api/ventas/vendedor/vendedores contestó 403
+              (no-admin): ese usuario ya está acotado a su propio vendedor
+              server-side. Elegir uno reinicia el cliente/tabla que estaba
+              cargado (podía no pertenecer a la cartera del nuevo vendedor) y
+              recarga los rankings. */}
+          {esAdmin && (
+            <div className="col-span-2 flex items-center gap-2 md:col-auto md:order-5">
+              <Users size={14} className="text-yellow-400 shrink-0" />
+              <select
+                value={vendedorSel}
+                onChange={(e) => {
+                  setVendedorSel(e.target.value);
+                  setClienteSel(null);
+                  setQCliente("");
+                  setSugerencias([]);
+                  setData(null);
+                  setTopGrupoAbierto(0);
+                }}
+                title={
+                  vendedores.length === 0
+                    ? "No hay viajantes con legajo activo y vendedor de Magnus asignado — asignalo en Administración → Usuarios"
+                    : "Ver la cartera de un vendedor"
+                }
+                disabled={vendedores.length === 0}
+                className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-yellow-400 max-w-[220px] w-full md:w-auto disabled:opacity-50"
+              >
+                <option value="">
+                  {vendedores.length === 0
+                    ? "Sin vendedores activos"
+                    : "Todos los vendedores"}
+                </option>
+                {vendedores.map((v) => (
+                  <option key={v.codigo} value={String(v.codigo)}>
+                    {v.nombre ?? `Vendedor ${v.codigo}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Quién está mirando (pedido de Pablo 2026-08-25). Es el
               componente compartido `<UsuarioActual />` que ya está en el
               header de todas las vistas — NO duplicar el fetch a
               /api/auth/me acá. En esta pantalla el usuario logueado ES el
               vendedor: lo que ve está acotado a SU vendedorCodigo (ver
               lib/ventas/vendedorAcceso.ts). */}
-          <UsuarioActual className="col-span-2 justify-self-end md:col-auto md:order-5 md:ml-auto" />
+          <UsuarioActual className="col-span-2 justify-self-end md:col-auto md:order-6 md:ml-auto" />
         </div>
       </header>
 

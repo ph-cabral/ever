@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolverAccesoVendedor } from "@/lib/ventas/vendedorAcceso";
+import { resolverAccesoVendedor, vendedorParam } from "@/lib/ventas/vendedorAcceso";
 
 const API_URL =
   process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
@@ -18,7 +18,8 @@ export const maxDuration = 30;
 // backend, que filtra ANTES de devolver la lista. Sin vendedor asignado
 // todavía: lista vacía siempre, ni siquiera pega al backend.
 export async function GET(req: NextRequest) {
-  const q = req.nextUrl.searchParams.get("q")?.trim();
+  const sp = req.nextUrl.searchParams;
+  const q = sp.get("q")?.trim();
   if (!q) {
     return NextResponse.json({ clientes: [] });
   }
@@ -33,7 +34,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const qs = new URLSearchParams({ q });
-    if (!acceso.isAdmin) qs.set("vendedor", String(acceso.vendedorCodigo));
+    const vend = vendedorParam(sp, acceso);
+    if (vend) qs.set("vendedor", vend);
     const res = await fetch(`${API_URL}/clientes?${qs.toString()}`, {
       cache: "no-store",
       signal: AbortSignal.timeout(25000),

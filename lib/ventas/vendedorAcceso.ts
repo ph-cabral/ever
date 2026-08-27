@@ -34,3 +34,29 @@ export async function resolverAccesoVendedor(): Promise<AccesoVendedor> {
   });
   return { ok: true, isAdmin: false, vendedorCodigo: usuario?.vendedorCodigo ?? null };
 }
+
+/**
+ * Código de vendedor que hay que mandarle al backend en una request de
+ * /ventas/vendedor, ya resuelto para los dos casos:
+ *
+ *   · no-admin → SIEMPRE su propio vendedorCodigo (no puede elegir).
+ *   · admin    → el `?vendedor=` del filtro de la vista si vino, o null =
+ *     sin restricción (toda la empresa, comportamiento de siempre).
+ *
+ * Filtro de vendedor para administradores (pedido de Pablo 2026-08-27): el
+ * admin elige un viajante del selector del header y toda la vista (buscador
+ * de clientes, tabla, rankings) pasa a mostrar SOLO su cartera. Es una
+ * comodidad de lectura, no un control de seguridad — un admin ya puede ver
+ * todo —, por eso acá alcanza con validar que sea un entero positivo y no
+ * hace falta chequearlo contra la lista de vendedores activos.
+ */
+export function vendedorParam(
+  sp: URLSearchParams,
+  acceso: Extract<AccesoVendedor, { ok: true }>,
+): string | null {
+  if (!acceso.isAdmin) return acceso.vendedorCodigo ? String(acceso.vendedorCodigo) : null;
+  const v = sp.get("vendedor")?.trim();
+  if (!v) return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 ? String(n) : null;
+}

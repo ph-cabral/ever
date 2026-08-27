@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolverAccesoVendedor } from "@/lib/ventas/vendedorAcceso";
+import { resolverAccesoVendedor, vendedorParam } from "@/lib/ventas/vendedorAcceso";
 
 const API_URL =
   process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
@@ -50,7 +50,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const qs = new URLSearchParams();
-    if (!acceso.isAdmin) qs.set("vendedor", String(acceso.vendedorCodigo));
+    const vend = vendedorParam(sp, acceso);
+    if (vend) qs.set("vendedor", vend);
     if (desde) qs.set("desde", desde);
     if (hasta) qs.set("hasta", hasta);
     const res = await fetch(`${API_URL}/ventas/vendedor/top-clientes?${qs.toString()}`, {
