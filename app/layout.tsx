@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import { TabTitle } from "@/components/TabTitle";
+import { SidebarGlobal } from "@/components/nav/SidebarGlobal";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -30,6 +31,9 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <TabTitle />
+        {/* Sidebar "Mis accesos" en TODAS las vistas (overlay fijo: no corre el
+            layout de las páginas). Se esconde sola en /login. */}
+        <SidebarGlobal />
         {children}
         <Toaster richColors position="top-center" />
       </body>
