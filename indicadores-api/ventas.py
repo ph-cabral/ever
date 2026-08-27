@@ -22,7 +22,8 @@ import calendar
 import re
 import time
 from db import get_connection
-from clientes import fetch_cliente, fetch_vendedor_fijo_cliente
+from clientes import fetch_cliente
+from cartera import SQL_JOIN_CARTERA, params_cartera, cliente_es_de_vendedor
 
 BASE_DATE = date(1800, 12, 28)  # Magnus guarda fechas como días desde esta base
 
@@ -189,28 +190,69 @@ LEFT JOIN Stk_Nivel1        n1 ON n1.Nivel1         = ap.Nivel1
 WHERE c.CodCliente = ?
 """
 
-# Vendedores (Magnus) — para el selector de "vendedorCodigo" de
-# /admin/usuarios (pedido de Pablo 2026-08-14, acceso por vendedor).
+# Catálogo de vendedores — maestro `Vendedores` (ver cartera.py para por qué
+# este y no `Ped_Usu_Arma`). Alimenta el selector de /admin/usuarios y el
+# filtro de vendedor de /ventas/vendedor.
+#
+# Se devuelve TODO el maestro con dos banderas, en vez de filtrar en SQL:
+#   · activo  → Estado_Desc empieza con "Habilitado" (los "No Habilitado->"
+#     son bajas) y el nombre no arranca con "(baja)".
+#   · persona → NO es un seudo-vendedor. El maestro mezcla vendedores reales
+#     con canales y agrupadores: MOSTRADORES, SIN VENDEDOR, ZONA CBA,
+#     VIAJANTE ZONA ROSARIO, VENDEDOR MERCADO LIBRE, COMERCIO EXTERIOR,
+#     GERENCIA COMERCIAL, ATENDIDOS POR LA EMPRESA, cooperativas, etc.
+#
+# Filtrar en el front y no acá es a propósito: /ventas/vendedor quiere solo
+# personas activas, pero /admin/usuarios tiene que poder asignar igual un
+# seudo-vendedor (alguien que atiende mostrador) y mostrar el nombre de un
+# vendedor dado de baja que quedó asignado a un usuario. Si se filtrara en
+# SQL, ese usuario mostraría "(sin nombre)" y nadie entendería por qué.
 SQL_VENDEDORES = """
-SELECT Usu_Arma_Codigo AS codigo, LTRIM(RTRIM(Usu_Arma_Nombre)) AS nombre
-FROM MAGNUS_SITD.dbo.Ped_Usu_Arma
-ORDER BY Usu_Arma_Nombre
+SELECT VendedorCodigo AS codigo,
+       LTRIM(RTRIM(VendedorNombre)) AS nombre,
+       LTRIM(RTRIM(Estado_Desc)) AS estado
+FROM MAGNUS_SITD.dbo.Vendedores
+ORDER BY VendedorNombre
 """
+
+# Prefijos/palabras que marcan un seudo-vendedor (canal, zona, agrupador).
+# Se comparan en MAYÚSCULAS contra el nombre completo.
+_NO_PERSONA = (
+    "MOSTRADOR", "SIN VENDEDOR", "ZONA ", "VIAJANTE ZONA", "VENDEDOR ",
+    "COMERCIO EXTERIOR", "GERENCIA", "ATENDIDOS POR LA EMPRESA", "COOP",
+)
+
+
+def _es_persona(nombre: str | None) -> bool:
+    if not nombre:
+        return False
+    u = nombre.strip().upper()
+    if u in ("VENDEDOR CERO", "VENDEDOR 0"):
+        return False
+    return not any(u.startswith(p) or p in u for p in _NO_PERSONA)
 
 
 def fetch_vendedores() -> list[dict]:
-    """Lista de vendedores {'codigo', 'nombre'} desde Magnus
-    (Ped_Usu_Arma) — catálogo chico, sin paginar."""
+    """Catálogo completo de `Vendedores` como
+    {'codigo', 'nombre', 'activo', 'persona'} — chico, sin paginar."""
     conn = get_connection("EVERWEAR")
     try:
         cur = conn.cursor()
         cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         cur.execute(SQL_VENDEDORES)
         out = []
-        for cod, nombre in cur.fetchall():
+        for cod, nombre, estado in cur.fetchall():
             if cod is None:
                 continue
-            out.append({"codigo": int(cod), "nombre": (str(nombre).strip() if nombre else None)})
+            nom = str(nombre).strip() if nombre else None
+            est = (str(estado).strip() if estado else "").upper()
+            de_baja = bool(nom and nom.upper().startswith("(BAJA)"))
+            out.append({
+                "codigo": int(cod),
+                "nombre": nom,
+                "activo": est.startswith("HABILITADO") and not de_baja,
+                "persona": _es_persona(nom),
+            })
         return out
     finally:
         conn.close()
@@ -356,13 +398,11 @@ SELECT
     LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
     SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
 FROM MAGNUS_SITD.dbo.Clientes c
-JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
-JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma pu  ON LTRIM(RTRIM(pu.Usu_Arma_Nombre)) = LTRIM(RTRIM(vz.Vendedor))
+""" + SQL_JOIN_CARTERA + """
 JOIN Ven_CompCabecera vc ON vc.CodCliente = c.CodCliente
 JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
 JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
-WHERE pu.Usu_Arma_Codigo = ?
-  AND cc.EvitaInformesYListados <> 1
+WHERE cc.EvitaInformesYListados <> 1
   AND vc.FecMovim BETWEEN ? AND ?
 GROUP BY c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre))
 HAVING SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) > 0
@@ -406,9 +446,9 @@ def fetch_top_clientes(
     unidades ahora viven en fetch_top_lineas.
 
     `vendedor`: mismo criterio de acceso que fetch_clientes_search — si se
-    pasa, el ranking sale SOLO de los clientes cuyo "Vendedor por Defecto"
-    fijo es ese código (JOIN Clientes→Vendedor_Zona→Ped_Usu_Arma en la
-    MISMA consulta). `None` (admin) no filtra, ranking de toda la empresa.
+    pasa, el ranking sale SOLO de la cartera de ese vendedor (zona declarada
+    o historial de facturación; ver cartera.py, el JOIN va en la MISMA
+    consulta). `None` (admin) no filtra, ranking de toda la empresa.
 
     `desde`/`hasta` ("YYYY-MM"): rango de meses, AMBOS inclusive y
     completos. Default: ventana fija de TOP_MESES (12) meses terminando en
@@ -435,7 +475,7 @@ def fetch_top_clientes(
         if vendedor is None:
             cur.execute(SQL_TOP_CLIENTES_TODOS, (dia_desde, dia_hasta))
         else:
-            cur.execute(SQL_TOP_CLIENTES_VENDEDOR, (int(vendedor), dia_desde, dia_hasta))
+            cur.execute(SQL_TOP_CLIENTES_VENDEDOR, params_cartera(vendedor) + (dia_desde, dia_hasta))
 
         clientes: list[dict] = []
         for cod, nombre, monto in cur.fetchall():
@@ -480,16 +520,14 @@ SELECT
     SUM(CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END) AS UnidadesNetas,
     SUM(CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END) AS MontoNeto
 FROM MAGNUS_SITD.dbo.Clientes c
-JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
-JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma pu  ON LTRIM(RTRIM(pu.Usu_Arma_Nombre)) = LTRIM(RTRIM(vz.Vendedor))
+""" + SQL_JOIN_CARTERA + """
 JOIN Ven_CompCabecera vc ON vc.CodCliente = c.CodCliente
 JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
 JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
 LEFT JOIN StkFer_Articulos  s  ON s.CodArticulo    = r.CodArticu
 LEFT JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
 LEFT JOIN Stk_Nivel1        n1 ON n1.Nivel1         = ap.Nivel1
-WHERE pu.Usu_Arma_Codigo = ?
-  AND cc.EvitaInformesYListados <> 1
+WHERE cc.EvitaInformesYListados <> 1
   AND vc.FecMovim BETWEEN ? AND ?
 GROUP BY LTRIM(RTRIM(n1.Detalle))
 """
@@ -545,7 +583,7 @@ def fetch_top_lineas(
         if vendedor is None:
             cur.execute(SQL_TOP_LINEAS_TODOS, (dia_desde, dia_hasta))
         else:
-            cur.execute(SQL_TOP_LINEAS_VENDEDOR, (int(vendedor), dia_desde, dia_hasta))
+            cur.execute(SQL_TOP_LINEAS_VENDEDOR, params_cartera(vendedor) + (dia_desde, dia_hasta))
 
         # NULL y '' son grupos distintos para SQL pero la misma "sin línea"
         # acá, así que se consolidan antes de filtrar/ordenar.
@@ -647,15 +685,13 @@ SELECT
     CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END AS Cant,
     CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END AS Monto
 FROM MAGNUS_SITD.dbo.Clientes c
-JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
-JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma pu  ON LTRIM(RTRIM(pu.Usu_Arma_Nombre)) = LTRIM(RTRIM(vz.Vendedor))
+""" + SQL_JOIN_CARTERA + """
 JOIN Ven_CompCabecera vc ON vc.CodCliente = c.CodCliente
 JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
 JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
 LEFT JOIN StkFer_Articulos  s  ON s.CodArticulo    = r.CodArticu
 LEFT JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
-WHERE pu.Usu_Arma_Codigo = ?
-  AND cc.EvitaInformesYListados <> 1
+WHERE cc.EvitaInformesYListados <> 1
   AND vc.FecMovim BETWEEN ? AND ?
   AND {linea_cond}
 """
@@ -769,10 +805,10 @@ def fetch_clientes_por_linea(
             sub = _SUB_CLIENTES_LINEA_VENDEDOR_TPL.format(
                 case_anio_mes=case_am, linea_cond=linea_cond
             )
-            params = (
-                (int(vendedor), dia_desde, dia_hasta)
+            params = params_cartera(vendedor) + (
+                (dia_desde, dia_hasta)
                 if es_sin_linea
-                else (int(vendedor), dia_desde, dia_hasta, linea_norm)
+                else (dia_desde, dia_hasta, linea_norm)
             )
         cur.execute(SQL_CLIENTES_LINEA_WRAP.format(sub=sub), params)
 
@@ -847,12 +883,11 @@ def fetch_ventas_por_linea(cod_cliente: int, vendedor: int | None = None) -> dic
     criterio de "venta neta".
 
     `vendedor` (pedido de Pablo 2026-08-14, acceso por vendedor): si se
-    pasa, se resuelve el "Vendedor por Defecto" FIJO de ESTE cliente (ver
-    clientes.fetch_vendedor_fijo_cliente — maestro Magnus, Clientes.
-    Clasif_VendZona → Vendedor_Zona → Ped_Usu_Arma, confirmado 2026-08-14;
-    reemplaza el criterio anterior de "vendedor más frecuente en el
-    historial", que podía no coincidir con el mismo filtro ya aplicado en
-    /clientes) y, si no coincide, se devuelve `_bloqueado(...)` SIN calcular
+    pasa, se chequea que el cliente esté en la cartera de ese vendedor
+    (cartera.cliente_es_de_vendedor — zona declarada o historial de
+    facturación, mismo criterio exacto que usa el buscador de /clientes, así
+    que un cliente que aparece en el buscador nunca es rechazado acá). Si no
+    está, se devuelve `_bloqueado(...)` SIN calcular
     ni filtrar/agrupar nada más — nunca se arma `lineas`/`totales` reales
     para un cliente ajeno. `None` (admin) no filtra nada, mismo
     comportamiento que antes."""
@@ -861,8 +896,7 @@ def fetch_ventas_por_linea(cod_cliente: int, vendedor: int | None = None) -> dic
     anio_anterior = anio_actual - 1
 
     if vendedor is not None:
-        principal = fetch_vendedor_fijo_cliente(cod_cliente)
-        if principal != int(vendedor):
+        if not cliente_es_de_vendedor(cod_cliente, vendedor):
             return _bloqueado(cod_cliente, anio_anterior, anio_actual)
 
     conn = get_connection("EVERWEAR")

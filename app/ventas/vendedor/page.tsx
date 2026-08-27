@@ -275,7 +275,7 @@ export default function VentasVendedorPage() {
   // ── Filtro de vendedor (solo ADMIN) ────────────────────────────────────
   // Pedido de Pablo 2026-08-27: un admin puede pararse en un vendedor y ver
   // la vista como la ve él (buscador de clientes, tabla y rankings). La
-  // lista son los viajantes con legajo ACTIVO en los sectores de venta —
+  // lista son las personas habilitadas del maestro `Vendedores` de Magnus —
   // ver lib/ventas/vendedoresActivos.ts.
   //
   // /api/ventas/vendedor/vendedores es admin-only: si contesta 403 (o
@@ -962,7 +962,7 @@ export default function VentasVendedorPage() {
                 }}
                 title={
                   vendedores.length === 0
-                    ? "No hay viajantes con legajo activo y vendedor de Magnus asignado — asignalo en Administración → Usuarios"
+                    ? "No se pudo cargar el catálogo de vendedores de Magnus"
                     : "Ver la cartera de un vendedor"
                 }
                 disabled={vendedores.length === 0}

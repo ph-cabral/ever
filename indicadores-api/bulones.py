@@ -27,15 +27,17 @@ Gotchas heredados de ventas.py (NO tocar sin leer eso primero):
     SELECT (revienta la query entera si una fila tiene FecMovim basura).
   · El año/mes sale de un CASE de rangos enteros generado en Python
     (_case_anio_mes de ventas.py), no de YEAR()/MONTH().
-  · Acceso por vendedor: un no-admin sólo ve los clientes cuyo "Vendedor por
-    Defecto" fijo es su código (Clientes.Clasif_VendZona → Vendedor_Zona →
-    Ped_Usu_Arma), mismo join que usa clientes.py.
+  · Acceso por vendedor: un no-admin sólo ve los clientes de SU cartera
+    (zona declarada o historial de facturación) — el criterio está en
+    cartera.py, mismo que usa clientes.py. Migrado 2026-08-27 del maestro
+    `Ped_Usu_Arma` al correcto, `Vendedores`; ver cartera.py.
 """
 from datetime import date
 import os
 import time
 
 from db import get_connection
+from cartera import SQL_JOIN_CARTERA, params_cartera
 from ventas import (
     BASE_DATE,
     _anio_vacio,
@@ -69,14 +71,26 @@ JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
 """
 
 # Cartera del vendedor — se antepone a Ven_CompCabecera cuando hay que
-# acotar por vendedor (no-admin) o agrupar POR vendedor.
+# acotar por vendedor (no-admin). Consume DOS parámetros (ver cartera.py),
+# que por venir del JOIN son siempre los PRIMEROS de la query: usar
+# params_cartera(vendedor) + (resto...).
 _JOIN_VENDEDOR = """
 FROM MAGNUS_SITD.dbo.Clientes c
-JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
-JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma pu  ON LTRIM(RTRIM(pu.Usu_Arma_Nombre)) = LTRIM(RTRIM(vz.Vendedor))
+""" + SQL_JOIN_CARTERA + """
 JOIN Ven_CompCabecera vc ON vc.CodCliente = c.CodCliente
 JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
 JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
+"""
+
+# Para AGRUPAR por vendedor (ranking): acá el vendedor de cada venta sale
+# del comprobante mismo (Ven_CompCabecera.vendedor), no de la zona del
+# cliente. Es más fiel — refleja quién vendió — y además no deja afuera a
+# los vendedores sin zona cargada (ej. Julio Blanco 797).
+_JOIN_VENTA_VENDEDOR = """
+FROM Ven_CompCabecera vc
+JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
+JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
+JOIN MAGNUS_SITD.dbo.Vendedores v ON v.VendedorCodigo = vc.vendedor
 """
 
 _JOIN_CLIENTE = """
@@ -136,8 +150,8 @@ def fetch_top_clientes(vendedor: int | None = None, limit: int = 1_000_000,
     where = "WHERE cc.EvitaInformesYListados <> 1 AND vc.FecMovim BETWEEN ? AND ?"
     params: tuple = (d1, d2)
     if vendedor is not None:
-        where = "WHERE pu.Usu_Arma_Codigo = ? AND cc.EvitaInformesYListados <> 1 AND vc.FecMovim BETWEEN ? AND ?"
-        params = (int(vendedor), d1, d2)
+        where = "WHERE cc.EvitaInformesYListados <> 1 AND vc.FecMovim BETWEEN ? AND ?"
+        params = params_cartera(vendedor) + (d1, d2)
     sql = f"""
 SELECT c.CodCliente, LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre, SUM({_MONTO}) AS MontoNeto
 {joins}{_JOIN_ART}{where}
@@ -185,9 +199,9 @@ def fetch_top_patrones(vendedor: int | None = None, limit: int = 1_000_000,
 
     if vendedor is not None:
         joins, where, params = _JOIN_VENDEDOR, (
-            "WHERE pu.Usu_Arma_Codigo = ? AND cc.EvitaInformesYListados <> 1 "
+            "WHERE cc.EvitaInformesYListados <> 1 "
             "AND vc.FecMovim BETWEEN ? AND ?"
-        ), (int(vendedor), d1, d2)
+        ), params_cartera(vendedor) + (d1, d2)
     else:
         joins, where, params = """
 FROM Ven_CompCabecera vc
@@ -253,16 +267,17 @@ def fetch_top_vendedores(vendedor: int | None = None, limit: int = 1_000_000,
     where = "WHERE cc.EvitaInformesYListados <> 1 AND vc.FecMovim BETWEEN ? AND ?"
     params: tuple = (d1, d2)
     if vendedor is not None:
-        where = "WHERE pu.Usu_Arma_Codigo = ? AND cc.EvitaInformesYListados <> 1 AND vc.FecMovim BETWEEN ? AND ?"
+        where = ("WHERE vc.vendedor = ? AND cc.EvitaInformesYListados <> 1 "
+                 "AND vc.FecMovim BETWEEN ? AND ?")
         params = (int(vendedor), d1, d2)
     sql = f"""
-SELECT pu.Usu_Arma_Codigo AS Codigo,
-       LTRIM(RTRIM(pu.Usu_Arma_Nombre)) AS Nombre,
+SELECT v.VendedorCodigo AS Codigo,
+       LTRIM(RTRIM(v.VendedorNombre)) AS Nombre,
        SUM({_CANT}) AS Unidades,
        SUM({_MONTO}) AS MontoNeto
-{_JOIN_VENDEDOR}{_JOIN_ART}{where}
+{_JOIN_VENTA_VENDEDOR}{_JOIN_ART}{where}
   AND {COND_BULON}
-GROUP BY pu.Usu_Arma_Codigo, LTRIM(RTRIM(pu.Usu_Arma_Nombre))
+GROUP BY v.VendedorCodigo, LTRIM(RTRIM(v.VendedorNombre))
 """
     conn, cur = _conn()
     try:
@@ -381,9 +396,9 @@ def fetch_clientes_por_patron(patron: str, vendedor: int | None = None,
     # cola, así que 'ABC   ' = 'ABC'.
     if vendedor is not None:
         joins = _JOIN_VENDEDOR
-        where = ("WHERE pu.Usu_Arma_Codigo = ? AND cc.EvitaInformesYListados <> 1 "
+        where = ("WHERE cc.EvitaInformesYListados <> 1 "
                  "AND vc.FecMovim BETWEEN ? AND ? AND s.ArticuloPatron = ?")
-        params = (int(vendedor), d1, d2, patron_norm)
+        params = params_cartera(vendedor) + (d1, d2, patron_norm)
     else:
         joins = _JOIN_CLIENTE
         where = ("WHERE cc.EvitaInformesYListados <> 1 "
@@ -427,12 +442,11 @@ def fetch_clientes_por_vendedor(cod_vendedor: int, limit: int = 1_000_000,
 SELECT c.CodCliente AS Clave, LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
        {_case_anio_mes((a_ant, a_act))} AS AnioMes,
        {_CANT} AS Cant, {_MONTO} AS Monto
-{_JOIN_VENDEDOR}{_JOIN_ART}WHERE pu.Usu_Arma_Codigo = ?
-  AND cc.EvitaInformesYListados <> 1
+{_JOIN_VENDEDOR}{_JOIN_ART}WHERE cc.EvitaInformesYListados <> 1
   AND vc.FecMovim BETWEEN ? AND ?
   AND {COND_BULON}
 """
-    filas, totales = _matriz(sub, (int(cod_vendedor), d1, d2), a_ant, a_act)
+    filas, totales = _matriz(sub, params_cartera(cod_vendedor) + (d1, d2), a_ant, a_act)
     clientes = [
         {"numero": int(f["clave"]), "nombre": f["nombre"],
          "anioAnterior": f["anioAnterior"], "anioActual": f["anioActual"]}
@@ -508,17 +522,17 @@ SELECT LTRIM(RTRIM(s.ArticuloPatron)) AS Clave,
 # Catálogo mínimo de vendedores
 # ──────────────────────────────────────────────────────────────────────────
 SQL_VENDEDOR_DE_CLIENTE = """
-SELECT pu.Usu_Arma_Codigo, LTRIM(RTRIM(pu.Usu_Arma_Nombre))
+SELECT v.VendedorCodigo, LTRIM(RTRIM(v.VendedorNombre))
 FROM MAGNUS_SITD.dbo.Clientes c
 JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
-JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma pu  ON LTRIM(RTRIM(pu.Usu_Arma_Nombre)) = LTRIM(RTRIM(vz.Vendedor))
+JOIN MAGNUS_SITD.dbo.Vendedores v ON LTRIM(RTRIM(v.VendedorNombre)) = LTRIM(RTRIM(vz.Vendedor))
 WHERE c.CodCliente = ?
 """
 
 SQL_VENDEDOR_NOMBRE = """
-SELECT LTRIM(RTRIM(Usu_Arma_Nombre))
-FROM MAGNUS_SITD.dbo.Ped_Usu_Arma
-WHERE Usu_Arma_Codigo = ?
+SELECT LTRIM(RTRIM(VendedorNombre))
+FROM MAGNUS_SITD.dbo.Vendedores
+WHERE VendedorCodigo = ?
 """
 
 

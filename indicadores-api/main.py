@@ -927,9 +927,11 @@ def bulones_patrones_por_cliente(
 
 @app.get("/vendedores")
 def vendedores_listar():
-    """Catálogo de vendedores (Magnus, Ped_Usu_Arma) — para el selector de
-    /admin/usuarios (pedido de Pablo 2026-08-14, asignar qué vendedor es
-    cada usuario). Solo lectura."""
+    """Catálogo de vendedores (Magnus, maestro `Vendedores`) — alimenta el
+    selector de /admin/usuarios y el filtro de vendedor de /ventas/vendedor.
+    Devuelve el maestro COMPLETO con banderas `activo` y `persona`; filtrar
+    es cosa de quien consume (ver fetch_vendedores en ventas.py). Migrado
+    2026-08-27 desde `Ped_Usu_Arma` — ver cartera.py. Solo lectura."""
     try:
         return {"vendedores": fetch_vendedores()}
     except Exception as e:

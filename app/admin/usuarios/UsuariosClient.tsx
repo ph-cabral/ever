@@ -20,7 +20,18 @@ type U = {
   createdAt: string;
 };
 
-type Vendedor = { codigo: number; nombre: string | null };
+// Catálogo de Magnus, maestro `Vendedores` (ver indicadores-api/cartera.py
+// para por qué este y no `Ped_Usu_Arma`). Viene completo, con banderas:
+//   activo  → habilitado en Magnus (los de baja se listan igual, marcados,
+//             para poder ver a quién apunta un usuario ya asignado).
+//   persona → no es un canal/zona (MOSTRADORES, ZONA CBA, …). Acá se pueden
+//             asignar igual; el filtro de /ventas/vendedor sí los excluye.
+type Vendedor = {
+  codigo: number;
+  nombre: string | null;
+  activo?: boolean;
+  persona?: boolean;
+};
 
 const fmt = (d: string | null) =>
   d ? new Date(d).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" }) : "—";
@@ -300,22 +311,32 @@ export function UsuariosClient() {
 
 /**
  * Celda "Vendedor" de la tabla de usuarios — se TIPEA el número de vendedor
- * de Magnus y con Enter se guarda (pedido de Pablo 2026-08-27; antes era un
- * combo con los nombres del catálogo, incómodo cuando la lista es larga y
- * uno ya sabe el número del viajante).
+ * de Magnus, o parte del nombre, y con Enter se resuelve (pedido de Pablo
+ * 2026-08-27; antes era un combo con todos los nombres del catálogo).
  *
- * Reglas:
- *   · Enter con un número que existe en el catálogo (Ped_Usu_Arma) → guarda
- *     y debajo queda "código — NOMBRE".
- *   · Enter con un número que NO existe → no guarda, avisa. Así no queda un
- *     usuario apuntando a un vendedor inexistente (en /ventas/vendedor eso
- *     se traduce en "no ve ningún cliente" y es difícil de diagnosticar).
- *   · Vacío + Enter → "Sin asignar" (vendedorCodigo = null).
- *   · Escape vuelve al valor guardado.
+ * Por qué además de número se puede buscar por nombre: el número que uno
+ * tiene a mano NO siempre es el de este maestro. En Magnus conviven DOS
+ * maestros de vendedor con el mismo rango de códigos y personas distintas
+ * en cada código (`Vendedores` y `Ped_Usu_Arma` — ver la nota larga en
+ * indicadores-api/clientes.py). Todo el sistema usa Ped_Usu_Arma, así que
+ * un número sacado de otra pantalla puede no existir acá o, peor, existir
+ * apuntando a otra persona. Buscando por nombre se ve el código correcto.
  *
- * Si el catálogo de Magnus no cargó (`vendedoresError`) no se puede validar
- * el número, así que se acepta lo tipeado tal cual y se avisa que no se pudo
- * verificar el nombre.
+ * Reglas del Enter:
+ *   · Vacío → "Sin asignar" (vendedorCodigo = null).
+ *   · Número que existe en el catálogo → guarda.
+ *   · Cualquier otra cosa (texto, o un número que no existe) → busca por
+ *     código y por nombre (sin acentos, sin distinguir mayúsculas):
+ *       1 resultado  → guarda directo.
+ *       varios       → los lista para elegir con un click.
+ *       ninguno      → avisa y no guarda (un código inexistente se traduce
+ *                      en "no ve ningún cliente" en /ventas/vendedor, y eso
+ *                      es difícil de diagnosticar después).
+ *   · Escape vuelve al valor guardado y cierra la lista.
+ *
+ * Si el catálogo de Magnus no cargó (`vendedoresError`) no hay con qué
+ * buscar ni validar: se acepta el número tipeado tal cual y el title lo
+ * aclara.
  */
 function CeldaVendedor({
   usuario,
@@ -333,67 +354,133 @@ function CeldaVendedor({
   const [texto, setTexto] = useState(
     usuario.vendedorCodigo == null ? "" : String(usuario.vendedorCodigo),
   );
+  const [matches, setMatches] = useState<Vendedor[] | null>(null);
 
   // Si el usuario se recarga desde el back (load() tras guardar) el input
   // tiene que reflejar el valor real, no lo que quedó tipeado.
   useEffect(() => {
     setTexto(usuario.vendedorCodigo == null ? "" : String(usuario.vendedorCodigo));
+    setMatches(null);
   }, [usuario.vendedorCodigo]);
 
-  const nombreDe = (codigo: number | null) =>
-    codigo == null
+  const guardado =
+    usuario.vendedorCodigo == null
       ? null
-      : vendedores.find((v) => v.codigo === codigo)?.nombre ?? null;
+      : vendedores.find((v) => v.codigo === usuario.vendedorCodigo) ?? null;
+  const nombreGuardado = guardado?.nombre ?? null;
 
-  const nombreGuardado = nombreDe(usuario.vendedorCodigo);
+  const normalizar = (t: string) =>
+    t
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+
+  function asignar(codigo: number) {
+    setMatches(null);
+    if (codigo !== usuario.vendedorCodigo) onGuardar(codigo);
+  }
 
   function confirmar() {
     const t = texto.trim();
+    setMatches(null);
     if (t === "") {
       if (usuario.vendedorCodigo != null) onGuardar(null);
       return;
     }
-    const n = Number(t);
-    if (!Number.isInteger(n) || n <= 0) {
-      toast.error("El vendedor tiene que ser un número");
+
+    const esNumero = /^[0-9]+$/.test(t);
+
+    // Sin catálogo no hay nada que validar ni buscar: se guarda el número
+    // tal cual (y si es texto, no hay forma de resolverlo).
+    if (vendedoresError || vendedores.length === 0) {
+      if (!esNumero) {
+        toast.error("No se pudo cargar el catálogo de Magnus — escribí el número de vendedor");
+        return;
+      }
+      asignar(Number(t));
       return;
     }
-    if (n === usuario.vendedorCodigo) return;
-    if (!vendedoresError && vendedores.length > 0 && !vendedores.some((v) => v.codigo === n)) {
-      toast.error(`No existe el vendedor ${n} en Magnus`);
+
+    if (esNumero) {
+      const exacto = vendedores.find((v) => v.codigo === Number(t));
+      if (exacto) {
+        asignar(exacto.codigo);
+        return;
+      }
+    }
+
+    const q = normalizar(t);
+    const encontrados = vendedores.filter(
+      (v) => String(v.codigo).includes(q) || normalizar(v.nombre ?? "").includes(q),
+    );
+    if (encontrados.length === 0) {
+      toast.error(
+        esNumero
+          ? `No existe el vendedor ${t} en Magnus — probá escribiendo el apellido`
+          : `Ningún vendedor coincide con "${t}"`,
+      );
       return;
     }
-    onGuardar(n);
+    if (encontrados.length === 1) {
+      asignar(encontrados[0].codigo);
+      return;
+    }
+    setMatches(encontrados.slice(0, 20));
   }
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="relative flex flex-col gap-0.5">
       <input
         type="text"
-        inputMode="numeric"
         value={texto}
         disabled={disabled}
-        onChange={(e) => setTexto(e.target.value.replace(/[^0-9]/g, ""))}
+        onChange={(e) => {
+          setTexto(e.target.value);
+          setMatches(null);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
             confirmar();
           } else if (e.key === "Escape") {
             setTexto(usuario.vendedorCodigo == null ? "" : String(usuario.vendedorCodigo));
+            setMatches(null);
           }
         }}
-        placeholder="N° vendedor"
+        placeholder="N° o nombre"
         title={
           vendedoresError
             ? "No se pudo cargar el catálogo de vendedores de Magnus — se guarda el número sin verificar el nombre"
-            : "Escribí el número de vendedor de Magnus y presioná Enter"
+            : "Escribí el número de vendedor de Magnus (o parte del apellido) y presioná Enter"
         }
-        className="w-28 rounded-md border border-input bg-background px-2 py-1 text-sm tabular-nums disabled:opacity-50"
+        className="w-36 rounded-md border border-input bg-background px-2 py-1 text-sm disabled:opacity-50"
       />
+
+      {matches && matches.length > 0 && (
+        <div className="absolute top-full left-0 z-20 mt-1 max-h-56 w-64 overflow-y-auto rounded-md border border-border bg-background shadow-lg">
+          {matches.map((v) => (
+            <button
+              key={v.codigo}
+              type="button"
+              onClick={() => asignar(v.codigo)}
+              className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm hover:bg-accent"
+            >
+              <span className="tabular-nums text-muted-foreground w-12 shrink-0">{v.codigo}</span>
+              <span className="truncate">{v.nombre ?? "(sin nombre)"}</span>
+              {v.activo === false && (
+                <span className="ml-auto shrink-0 text-xs text-muted-foreground">baja</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
       <span className="text-xs text-muted-foreground">
         {usuario.vendedorCodigo == null
           ? "Sin asignar"
-          : `${usuario.vendedorCodigo} — ${nombreGuardado ?? "(sin nombre en Magnus)"}`}
+          : `${usuario.vendedorCodigo} — ${nombreGuardado ?? "(no existe en Magnus)"}`}
+        {guardado?.activo === false && " · de baja"}
       </span>
     </div>
   );
