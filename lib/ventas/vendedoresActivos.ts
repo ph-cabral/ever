@@ -1,3 +1,5 @@
+import { prisma } from "@/lib/prisma";
+
 const API_URL =
   process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
 
@@ -26,19 +28,45 @@ export async function fetchCatalogoVendedores(): Promise<VendedorCatalogo[]> {
 }
 
 /**
- * Vendedores para el filtro de admin de /ventas/vendedor: personas activas
- * del maestro `Vendedores`.
+ * Vendedores para el filtro de admin de /ventas/vendedor.
  *
- * Antes (2026-08-27, primera versión) esto se armaba cruzando
- * `usuario.vendedorCodigo` con legajos ACTIVOS de sector viajante. Se
- * reemplazó el mismo día: el maestro de Magnus ya trae `Estado_Desc`, que es
- * el dato de verdad y no depende de que el vendedor tenga usuario en la app
- * ni de cómo esté escrito el sector en su legajo. Un viajante nuevo aparece
- * en el filtro apenas lo cargan en Magnus.
+ * DOS condiciones, las dos obligatorias:
+ *   1. Magnus (`Vendedores`): habilitado y persona — deja afuera bajas y
+ *      seudo-vendedores (MOSTRADORES, ZONA CBA, …).
+ *   2. Postgres: tiene un usuario ACTIVO en la app cuyo LEGAJO está en
+ *      estado ACTIVO (pedido de Pablo 2026-08-27: "deberían estar solo los
+ *      que en postgres legajo están activos").
+ *
+ * El único puente entre el legajo y el código de vendedor de Magnus es
+ * `usuario.vendedorCodigo` (lo asigna un admin en /admin/usuarios), así que
+ * la condición 2 implica pasar por `usuario`.
+ *
+ * CONSECUENCIA a tener presente cuando alguien pregunte "¿por qué no aparece
+ * Fulano en el filtro?": un vendedor habilitado en Magnus que todavía no
+ * tiene usuario en la app —o lo tiene sin vendedor asignado, o con el legajo
+ * en otro estado— NO aparece. Se arregla en Administración → Usuarios, no
+ * acá.
  */
 export async function listarVendedoresActivos(): Promise<VendedorCatalogo[]> {
-  const todos = await fetchCatalogoVendedores();
-  return todos
-    .filter((v) => v.activo && v.persona)
+  const [catalogo, usuarios] = await Promise.all([
+    fetchCatalogoVendedores(),
+    prisma.usuario.findMany({
+      where: {
+        activo: true,
+        NOT: { vendedorCodigo: null },
+        legajo: { estado: "ACTIVO" },
+      },
+      select: { vendedorCodigo: true },
+    }),
+  ]);
+
+  const conLegajoActivo = new Set(
+    usuarios
+      .map((u) => u.vendedorCodigo)
+      .filter((c): c is number => Number.isInteger(c)),
+  );
+
+  return catalogo
+    .filter((v) => v.activo && v.persona && conLegajoActivo.has(v.codigo))
     .sort((a, b) => (a.nombre ?? "").localeCompare(b.nombre ?? "", "es"));
 }

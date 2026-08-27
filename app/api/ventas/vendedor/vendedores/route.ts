@@ -7,9 +7,9 @@ export const maxDuration = 30;
 
 // Vendedores activos para el FILTRO de admin de /ventas/vendedor (pedido de
 // Pablo 2026-08-27). No es el catálogo completo de Magnus (eso es
-// /api/admin/usuarios/vendedores, para asignar): acá sólo las personas con
-// Estado_Desc "Habilitado" del maestro `Vendedores` — ver
-// listarVendedoresActivos.
+// /api/admin/usuarios/vendedores, para asignar): acá sólo las personas
+// habilitadas en Magnus que además tienen usuario activo con legajo ACTIVO
+// en Postgres — ver listarVendedoresActivos.
 //
 // Admin-only a propósito: el front lo usa además como "¿soy admin?" (403 =
 // no se muestra el filtro), y un no-admin ya está acotado a su propio

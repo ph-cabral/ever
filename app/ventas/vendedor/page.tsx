@@ -275,8 +275,9 @@ export default function VentasVendedorPage() {
   // ── Filtro de vendedor (solo ADMIN) ────────────────────────────────────
   // Pedido de Pablo 2026-08-27: un admin puede pararse en un vendedor y ver
   // la vista como la ve él (buscador de clientes, tabla y rankings). La
-  // lista son las personas habilitadas del maestro `Vendedores` de Magnus —
-  // ver lib/ventas/vendedoresActivos.ts.
+  // lista son las personas habilitadas en Magnus QUE ADEMÁS tienen usuario
+  // activo con legajo ACTIVO en Postgres — ver
+  // lib/ventas/vendedoresActivos.ts.
   //
   // /api/ventas/vendedor/vendedores es admin-only: si contesta 403 (o
   // falla) simplemente no hay filtro y la vista queda como siempre — no
@@ -962,7 +963,7 @@ export default function VentasVendedorPage() {
                 }}
                 title={
                   vendedores.length === 0
-                    ? "No se pudo cargar el catálogo de vendedores de Magnus"
+                    ? "Ningún vendedor habilitado en Magnus tiene usuario con legajo activo — revisá Administración → Usuarios"
                     : "Ver la cartera de un vendedor"
                 }
                 disabled={vendedores.length === 0}
