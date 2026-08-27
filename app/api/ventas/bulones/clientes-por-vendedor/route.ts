@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolverAccesoVendedor } from "@/lib/ventas/vendedorAcceso";
+import { resolverAccesoBulones } from "@/lib/ventas/bulonesAcceso";
 
 const API_URL =
   process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Falta 'codigo' (vendedor)" }, { status: 400 });
   }
 
-  const acceso = await resolverAccesoVendedor();
+  const acceso = await resolverAccesoBulones();
   if (!acceso.ok) {
     return NextResponse.json({ error: acceso.error }, { status: acceso.status });
   }

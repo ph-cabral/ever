@@ -241,8 +241,11 @@ function FilaGrupo({
 
 export default function VentasBulonesPage() {
   // ── Búsqueda de cliente (header del modal) ──────────────────────────────
-  // Reusa /api/ventas/vendedor/clientes: es el mismo maestro de clientes y
-  // el mismo criterio de acceso por vendedor, no hace falta una ruta propia.
+  // Usa /api/ventas/bulones/clientes (mismo maestro de clientes que
+  // /ventas/vendedor, mismo contrato). Ruta propia y NO la de vendedor porque
+  // el acceso de esta vista se resuelve con resolverAccesoBulones: los
+  // vendedores con acceso total a bulonería (ver lib/ventas/bulonesAcceso.ts)
+  // tienen que poder buscar cualquier cliente, no sólo su cartera.
   const [qCliente, setQCliente] = useState("");
   const [sugerencias, setSugerencias] = useState<Cliente[]>([]);
   const [buscando, setBuscando] = useState(false);
@@ -264,7 +267,7 @@ export default function VentasBulonesPage() {
     setBuscando(true);
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/ventas/vendedor/clientes?q=${encodeURIComponent(texto)}`, {
+        const res = await fetch(`/api/ventas/bulones/clientes?q=${encodeURIComponent(texto)}`, {
           cache: "no-store",
         });
         const j = await res.json().catch(() => ({}));
