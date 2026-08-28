@@ -496,6 +496,13 @@ model usuario {
   // clientes en esa vista hasta que un admin se lo asigne en
   // /admin/usuarios). Los ADMIN ignoran este campo (ven todos).
   vendedorCodigo Int?
+  // Acceso total a /ventas/bulones (2026-08-28): true = este usuario ve el
+  // 100% de la empresa en esa vista aunque no sea ADMIN (hay viajantes que
+  // manejan la línea entera de bulonería, no una cartera). Sólo afecta a
+  // /ventas/bulones; en /ventas/vendedor y el resto sigue viendo su cartera.
+  // Lo asigna un admin en /admin/usuarios (antes era una lista de nombres
+  // hardcodeada en lib/ventas/bulonesAcceso.ts).
+  bulonesAccesoTotal Boolean @default(false)
   activo         Boolean   @default(true)
   ultimoAcceso   DateTime?
   createdAt      DateTime  @default(now())

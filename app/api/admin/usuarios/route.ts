@@ -17,6 +17,7 @@ export async function GET() {
       rol: true,
       sector: true,
       vendedorCodigo: true,
+      bulonesAccesoTotal: true,
       activo: true,
       ultimoAcceso: true,
       createdAt: true,

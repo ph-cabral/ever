@@ -3,7 +3,19 @@ import { prisma } from "@/lib/prisma";
 
 export type AccesoVendedor =
   | { ok: true; isAdmin: true; vendedorCodigo: null }
-  | { ok: true; isAdmin: false; vendedorCodigo: number | null }
+  | {
+      ok: true;
+      isAdmin: false;
+      vendedorCodigo: number | null;
+      /**
+       * Bandera `usuario.bulonesAccesoTotal`: este usuario ve el 100% de la
+       * empresa en /ventas/bulones aunque no sea ADMIN. Se resuelve acá —y no
+       * en una consulta aparte— porque ya estamos leyendo la fila del usuario:
+       * el acceso a bulonería no cuesta ni una query más. Sólo la usa
+       * resolverAccesoBulones(); el resto de la app la ignora.
+       */
+      bulonesAccesoTotal: boolean;
+    }
   | { ok: false; status: number; error: string };
 
 /**
@@ -30,9 +42,14 @@ export async function resolverAccesoVendedor(): Promise<AccesoVendedor> {
   if (session.rol === "ADMIN") return { ok: true, isAdmin: true, vendedorCodigo: null };
   const usuario = await prisma.usuario.findUnique({
     where: { id: session.uid },
-    select: { vendedorCodigo: true },
+    select: { vendedorCodigo: true, bulonesAccesoTotal: true },
   });
-  return { ok: true, isAdmin: false, vendedorCodigo: usuario?.vendedorCodigo ?? null };
+  return {
+    ok: true,
+    isAdmin: false,
+    vendedorCodigo: usuario?.vendedorCodigo ?? null,
+    bulonesAccesoTotal: usuario?.bulonesAccesoTotal ?? false,
+  };
 }
 
 /**

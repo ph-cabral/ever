@@ -15,6 +15,9 @@ type U = {
   rol: string;
   sector: string | null;
   vendedorCodigo: number | null;
+  // Ve el 100% de la empresa en /ventas/bulones aunque no sea ADMIN
+  // (columna "Bulonería"). Ver lib/ventas/bulonesAcceso.ts.
+  bulonesAccesoTotal: boolean;
   activo: boolean;
   ultimoAcceso: string | null;
   createdAt: string;
@@ -153,6 +156,7 @@ export function UsuariosClient() {
               <th className="px-3 py-2 font-medium">DNI</th>
               <th className="px-3 py-2 font-medium">Sector</th>
               <th className="px-3 py-2 font-medium">Vendedor</th>
+              <th className="px-3 py-2 font-medium">Bulonería</th>
               <th className="px-3 py-2 font-medium">Rol</th>
               <th className="px-3 py-2 font-medium">Estado</th>
               <th className="px-3 py-2 font-medium">Último acceso</th>
@@ -162,13 +166,13 @@ export function UsuariosClient() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">
+                <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">
                   <Loader2 className="inline size-5 animate-spin" />
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">
+                <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">
                   Todavía no hay usuarios.
                 </td>
               </tr>
@@ -185,6 +189,13 @@ export function UsuariosClient() {
                       vendedoresError={vendedoresError}
                       disabled={busy === u.id}
                       onGuardar={(codigo) => patch(u.id, { vendedorCodigo: codigo })}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <CeldaBulones
+                      usuario={u}
+                      disabled={busy === u.id}
+                      onCambiar={(v) => patch(u.id, { bulonesAccesoTotal: v })}
                     />
                   </td>
                   <td className="px-3 py-2">
@@ -306,6 +317,61 @@ export function UsuariosClient() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Celda "Bulonería": quién ve TODA la empresa en /ventas/bulones y quién ve
+ * sólo su cartera (2026-08-28). Antes esto era una lista de nombres en el
+ * código — ahora lo asigna el admin con un click, y sale de la bandera
+ * `usuario.bulonesAccesoTotal` (ver lib/ventas/bulonesAcceso.ts).
+ *
+ * Alcance: SÓLO /ventas/bulones. Un usuario con "toda la empresa" acá sigue
+ * viendo únicamente su cartera en /ventas/vendedor y en el resto de la app.
+ *
+ * Los ADMIN no se muestran conmutables: ya ven todo en cualquier vista, la
+ * bandera no les cambia nada.
+ *
+ * Toma efecto en la próxima consulta del usuario, sin relogin: el acceso se
+ * resuelve en vivo contra Postgres (ver resolverAccesoVendedor).
+ */
+function CeldaBulones({
+  usuario,
+  disabled,
+  onCambiar,
+}: {
+  usuario: U;
+  disabled: boolean;
+  onCambiar: (valor: boolean) => void;
+}) {
+  if (usuario.rol === "ADMIN") {
+    return (
+      <span className="text-xs text-muted-foreground" title="Los admin ya ven toda la empresa en todas las vistas">
+        toda la empresa (admin)
+      </span>
+    );
+  }
+
+  const total = usuario.bulonesAccesoTotal;
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onCambiar(!total)}
+      title={
+        total
+          ? "Ve toda la empresa en Ventas → Bulonería. Click para volver a filtrarlo por su vendedor."
+          : "Ve sólo los clientes de su vendedor en Ventas → Bulonería. Click para darle toda la empresa."
+      }
+      className={
+        "rounded-full px-2 py-0.5 text-xs transition disabled:opacity-50 " +
+        (total
+          ? "bg-amber-100 text-amber-900 hover:bg-amber-200"
+          : "bg-secondary text-muted-foreground hover:bg-accent")
+      }
+    >
+      {total ? "toda la empresa" : "su cartera"}
+    </button>
   );
 }
 

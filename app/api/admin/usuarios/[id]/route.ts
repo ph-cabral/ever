@@ -24,6 +24,7 @@ export async function PATCH(
     rol?: string;
     passwordHash?: string;
     vendedorCodigo?: number | null;
+    bulonesAccesoTotal?: boolean;
   } = {};
   if (typeof body?.activo === "boolean") data.activo = body.activo;
   if (body?.rol === "ADMIN" || body?.rol === "USUARIO") data.rol = body.rol;
@@ -41,6 +42,13 @@ export async function PATCH(
       }
       data.vendedorCodigo = v;
     }
+  }
+
+  // Acceso total a bulonería (2026-08-28): el usuario ve el 100% de la
+  // empresa en /ventas/bulones aunque no sea admin. NO afecta a
+  // /ventas/vendedor ni al resto de la app — ver lib/ventas/bulonesAcceso.ts.
+  if (typeof body?.bulonesAccesoTotal === "boolean") {
+    data.bulonesAccesoTotal = body.bulonesAccesoTotal;
   }
 
   // Reseteo de contraseña: el admin asigna una nueva (mín. 6 caracteres).
@@ -80,7 +88,14 @@ export async function PATCH(
     const usuario = await prisma.usuario.update({
       where: { id },
       data,
-      select: { id: true, nombre: true, rol: true, activo: true, vendedorCodigo: true },
+      select: {
+      id: true,
+      nombre: true,
+      rol: true,
+      activo: true,
+      vendedorCodigo: true,
+      bulonesAccesoTotal: true,
+    },
     });
     return NextResponse.json({ ok: true, usuario });
   } catch {
