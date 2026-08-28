@@ -1,0 +1,75 @@
+repo: C:\Users\cabralp\Desktop\projects\vicki\vicki_web\indicadores-api
+driver: {SQL Server}   server: 10.10.0.235
+==============================================================================
+clientes-por-linea — línea 'PRECINTOS'
+==============================================================================
+(impersonando EVERWEAR\administrador)
+
+  total del endpoint      :   22.81 s   (518 clientes)
+  de eso, SQL (execute)   :    5.44 s
+  de eso, traer filas     :    0.02 s
+  de eso, Python (armado) :   17.34 s
+
+--- PLAN REAL (STATISTICS PROFILE) ---
+         filas    ejec          est  operador
+         1,293       1        2,209  SELECT CodCliente, Nombre, AnioMes,
+       SUM(Cant)  AS CantidadNeta,
+       SUM(Monto) AS MontoNeto
+FROM (
+SELECT
+    c.CodCliente AS CodCliente,
+  
+         1,293       1        2,209    |--Compute Scalar(DEFINE:([Expr1012]=CASE WHEN [Expr1269]=(0) THEN NULL ELSE [Expr1270] END, [Expr1013]=CASE WHEN [Expr1271]=(0) THEN NULL ELSE [Exp
+         1,293       1        2,209         |--Hash Match(Aggregate, HASH:([c].[CodCliente], [Expr1008], [Expr1009]), RESIDUAL:([MAGNUS_SITD].[dbo].[Clientes].[CodCliente] as [c].[CodClie
+         3,896       1        7,326              |--Compute Scalar(DEFINE:([Expr1072]=CASE WHEN [EVERWEAR].[dbo].[Ven_CodCom].[DebitoCredito] as [cc].[DebitoCredito]=(1) THEN CONVERT_IMPL
+         3,896       1        7,326                   |--Hash Match(Inner Join, HASH:([n].[Nivel1])=([ap].[Nivel1]), RESIDUAL:([EVERWEAR].[dbo].[StkFer_ArtParamet].[Nivel1] as [ap].[Nivel
+             1       1            1                      |--Clustered Index Scan(OBJECT:([EVERWEAR].[dbo].[Stk_Nivel1].[K_NI1_Cla_Nivel1] AS [n]),  WHERE:(CONVERT_IMPLICIT(nvarchar(30),lt   <== SCAN
+         3,896       1        5,313                      |--Hash Match(Inner Join, HASH:([s].[CodArticulo])=([r].[CodArticu]), RESIDUAL:([EVERWEAR].[dbo].[StkFer_Articulos].[CodArticulo] 
+            40       1          444                      |--Adaptive Join
+             6       1           17                      |    |--Index Scan(OBJECT:([EVERWEAR].[dbo].[StkFer_ArtParamet].[KF_ARTPAR_Cla_Niv1Niv4Niv2Art] AS [ap]),  WHERE:(PROBE([Opt_Bitma   <== SCAN
+             0       0       41,172                      |    |--Index Scan(OBJECT:([EVERWEAR].[dbo].[StkFer_Articulos].[KF_ART_Cla_ArtPatronArticulo] AS [s]))   <== SCAN
+            40       6           26                      |    |--Index Seek(OBJECT:([EVERWEAR].[dbo].[StkFer_Articulos].[KF_ART_Cla_ArticuloPatron] AS [s]), SEEK:([s].[ArticuloPatron]=[EV
+         3,896       1        4,689                      |--Adaptive Join
+        90,697       1        2,542                      |--Hash Match(Inner Join, HASH:([vc].[CodCliente])=([c].[CodCliente]), RESIDUAL:([EVERWEAR].[dbo].[Ven_CompCabecera].[CodCliente] 
+        90,697       1        2,542                      |    |--Compute Scalar(DEFINE:([Expr1009]=CASE WHEN [EVERWEAR].[dbo].[Ven_CompCabecera].[FecMovim] as [vc].[FecMovim]>=(81819) AND
+        90,697       1        2,542                      |    |    |--Nested Loops(Inner Join, OUTER REFERENCES:([vc].[NroMovVenta], [Expr1268]) OPTIMIZED WITH UNORDERED PREFETCH)
+        90,697       1        2,542                      |    |         |--Nested Loops(Inner Join, OUTER REFERENCES:([cc].[CompCodigo], [Expr1267]) WITH UNORDERED PREFETCH)
+            88       1           30                      |    |         |    |--Clustered Index Scan(OBJECT:([EVERWEAR].[dbo].[Ven_CodCom].[V_CODCOM_Cla_CompCodigo] AS [cc]), WHERE:([EVER   <== SCAN
+        90,697      88           84                      |    |         |    |--Filter(WHERE:(CASE WHEN [EVERWEAR].[dbo].[Ven_CompCabecera].[FecMovim] as [vc].[FecMovim]>=(81819) AND [EVE
+        90,697      88           84                      |    |         |         |--Index Seek(OBJECT:([EVERWEAR].[dbo].[Ven_CompCabecera].[V_CAB_Cla_CompCodigoNumero] AS [vc]), SEEK:([v
+        90,697   90697            1                      |    |         |--Clustered Index Seek(OBJECT:([EVERWEAR].[dbo].[Ven_CompCabecera].[V_CAB_Cla_NroMovVta] AS [vc]), SEEK:([vc].[Nro
+         4,663       1        1,933                      |    |--Compute Scalar(DEFINE:([Expr1008]=ltrim(rtrim([MAGNUS_SITD].[dbo].[Clientes].[Cliente_Nombre] as [c].[Cliente_Nombre]))))
+         4,663       1        1,933                      |         |--Table Scan(OBJECT:([MAGNUS_SITD].[dbo].[Clientes] AS [c]),  WHERE:(PROBE([Opt_Bitmap1040],[MAGNUS_SITD].[dbo].[Client   <== SCAN
+         3,896       1        3,133                      |--Filter(WHERE:(PROBE([Opt_Bitmap1063],[EVERWEAR].[dbo].[Ven_CompRenglon].[CodArticu] as [r].[CodArticu])))
+       385,232       1        3,133                      |    |--Clustered Index Scan(OBJECT:([EVERWEAR].[dbo].[Ven_CompRenglon].[V_REN_Cla_NroMovVenta] AS [r]),  WHERE:(PROBE([Opt_Bitmap   <== SCAN
+             0       0          184                      |--Filter(WHERE:(PROBE([Opt_Bitmap1063],[EVERWEAR].[dbo].[Ven_CompRenglon].[CodArticu] as [r].[CodArticu])))
+             0       0          184                      |--Clustered Index Seek(OBJECT:([EVERWEAR].[dbo].[Ven_CompRenglon].[V_REN_Cla_NroMovVenta] AS [r]), SEEK:([r].[NroMovVenta]=[EVERW
+
+--- SQL EJECUTADO ---
+params: (81819, 82548, 'PRECINTOS')
+
+SELECT CodCliente, Nombre, AnioMes,
+       SUM(Cant)  AS CantidadNeta,
+       SUM(Monto) AS MontoNeto
+FROM (
+SELECT
+    c.CodCliente AS CodCliente,
+    LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
+    CASE WHEN vc.FecMovim BETWEEN 81819 AND 81849 THEN 202501 WHEN vc.FecMovim BETWEEN 81850 AND 81877 THEN 202502 WHEN vc.FecMovim BETWEEN 81878 AND 81908 THEN 202503 WHEN vc.FecMovim BETWEEN 81909 AND 81938 THEN 202504 WHEN vc.FecMovim BETWEEN 81939 AND 81969 THEN 202505 WHEN vc.FecMovim BETWEEN 81970 AND 81999 THEN 202506 WHEN vc.FecMovim BETWEEN 82000 AND 82030 THEN 202507 WHEN vc.FecMovim BETWEEN 82031 AND 82061 THEN 202508 WHEN vc.FecMovim BETWEEN 82062 AND 82091 THEN 202509 WHEN vc.FecMovim BETWEEN 82092 AND 82122 THEN 202510 WHEN vc.FecMovim BETWEEN 82123 AND 82152 THEN 202511 WHEN vc.FecMovim BETWEEN 82153 AND 82183 THEN 202512 WHEN vc.FecMovim BETWEEN 82184 AND 82214 THEN 202601 WHEN vc.FecMovim BETWEEN 82215 AND 82242 THEN 202602 WHEN vc.FecMovim BETWEEN 82243 AND 82273 THEN 202603 WHEN vc.FecMovim BETWEEN 82274 AND 82303 THEN 202604 WHEN vc.FecMovim BETWEEN 82304 AND 82334 THEN 202605 WHEN vc.FecMovim BETWEEN 82335 AND 82364 THEN 202606 WHEN vc.FecMovim BETWEEN 82365 AND 82395 THEN 202607 WHEN vc.FecMovim BETWEEN 82396 AND 82426 THEN 202608 WHEN vc.FecMovim BETWEEN 82427 AND 82456 THEN 202609 WHEN vc.FecMovim BETWEEN 82457 AND 82487 THEN 202610 WHEN vc.FecMovim BETWEEN 82488 AND 82517 THEN 202611 WHEN vc.FecMovim BETWEEN 82518 AND 82548 THEN 202612 ELSE NULL END AS AnioMes,
+    CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END AS Cant,
+    CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END AS Monto
+FROM MAGNUS_SITD.dbo.Clientes c
+JOIN Ven_CompCabecera vc ON vc.CodCliente = c.CodCliente
+JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
+JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
+LEFT JOIN StkFer_Articulos  s  ON s.CodArticulo    = r.CodArticu
+LEFT JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
+WHERE cc.EvitaInformesYListados <> 1
+  AND vc.FecMovim BETWEEN ? AND ?
+  AND ap.Nivel1 IN (SELECT n.Nivel1 FROM Stk_Nivel1 n WHERE LTRIM(RTRIM(n.Detalle)) = ?)
+) t
+WHERE AnioMes IS NOT NULL
+GROUP BY CodCliente, Nombre, AnioMes
+
+
+==============================================================================

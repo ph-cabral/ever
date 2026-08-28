@@ -1,0 +1,32 @@
+repo: C:\Users\cabralp\Desktop\projects\vicki\vicki_web\indicadores-api
+==============================================================================
+VERIFICACIÓN — clientes-por-linea viejo vs nuevo
+==============================================================================
+(impersonando EVERWEAR\administrador)
+
+líneas a probar: ['MANGUERAS', 'CORREAS EVER WEAR', 'EVER WEAR FABRICA', 'MANGUERAS NACIONALES', 'LUBRICANTES TOTAL', 'CADENAS EVER WEAR', 'ALAMBRE', 'ENGRANAJES-PIÑONES EVER WEAR', '(Sin línea)']
+vendedor de prueba: 7
+
+  línea                         vend    viejo    nuevo     x  resultado
+  MANGUERAS                      adm     1.67     0.59  2.8x  IDÉNTICO ✔
+  MANGUERAS                        7     2.76     2.08  1.3x  IDÉNTICO ✔
+  CORREAS EVER WEAR              adm     2.54     2.71  0.9x  IDÉNTICO ✔
+  CORREAS EVER WEAR                7     1.39     2.44  0.6x  IDÉNTICO ✔
+  EVER WEAR FABRICA              adm     1.52     0.70  2.2x  IDÉNTICO ✔
+  EVER WEAR FABRICA                7     1.34     1.50  0.9x  IDÉNTICO ✔
+  MANGUERAS NACIONALES           adm     2.19     0.58  3.8x  IDÉNTICO ✔
+  MANGUERAS NACIONALES             7     1.78     2.01  0.9x  IDÉNTICO ✔
+  LUBRICANTES TOTAL              adm     1.22     0.23  5.4x  IDÉNTICO ✔
+  LUBRICANTES TOTAL                7     1.14     1.14  1.0x  IDÉNTICO ✔
+  CADENAS EVER WEAR              adm     1.13     0.23  4.9x  IDÉNTICO ✔
+  CADENAS EVER WEAR                7     1.34     1.00  1.3x  IDÉNTICO ✔
+  ALAMBRE                        adm     3.11     0.33  9.4x  IDÉNTICO ✔
+  ALAMBRE                          7     1.46     1.79  0.8x  IDÉNTICO ✔
+  ENGRANAJES-PIÑONES EVER WEAR   adm     1.71     0.52  3.3x  IDÉNTICO ✔
+  ENGRANAJES-PIÑONES EVER WEAR     7     1.54     1.79  0.9x  IDÉNTICO ✔
+  (Sin línea)                    adm     3.75     2.47  1.5x  IDÉNTICO ✔
+  (Sin línea)                      7     1.10     0.82  1.3x  IDÉNTICO ✔
+
+==============================================================================
+TODAS IGUALES ✔
+==============================================================================

@@ -1,0 +1,55 @@
+repo: C:\Users\cabralp\Desktop\projects\vicki\vicki_web\indicadores-api
+==============================================================================
+clientes-por-linea — 3 variantes — línea 'PRECINTOS'
+rango: 2025-01-01 .. 2026-12-31  (enteros 81819..82548)
+==============================================================================
+(impersonando EVERWEAR\administrador)
+
+--- 0. ¿r.FecMovim coincide con vc.FecMovim? ---
+  iguales: 385,205   distintas: 2   dif min/max: 0 / 1
+  OJO: no siempre coinciden — B y C pueden perder filas.
+
+--- 1. Tiempos (1ª corrida / 2ª corrida) ---
+  A producción      4.07 s /    1.34 s   1,293 filas   518 clientes
+  B +fecha reng     1.16 s /    0.90 s   1,293 filas   518 clientes
+  C por artícu      0.69 s /    0.53 s   1,293 filas   518 clientes
+
+--- 2. ¿Dan lo mismo? ---
+  B vs A: IDÉNTICO ✔
+  C vs A: IDÉNTICO ✔
+
+--- 3. Mejora ---
+  B: 1.34 s -> 0.90 s   (1.5x)
+  C: 1.34 s -> 0.53 s   (2.5x)
+
+--- PLAN de la variante C (la más rápida) ---
+         filas    ejec          est  operador
+         1,293       1           12  SELECT CodCliente, AnioMes, SUM(Cant) AS Cant, SUM(Monto) AS Monto
+FROM (
+SELECT vc.CodCliente AS CodCliente,
+       CASE WHEN vc.
+             0       0           12    |--Compute Scalar(DEFINE:([Expr1009]=CASE WHEN [Expr1178]=(0) THEN NULL ELSE [Expr1179] END, [Expr1010]=CASE WHEN [Expr1180]=(0)
+         1,293       1           12         |--Stream Aggregate(GROUP BY:([Expr1006], [vc].[CodCliente]) DEFINE:([Expr1178]=COUNT_BIG(CASE WHEN [EVERWEAR].[dbo].[Ven_C
+         3,896       1           16              |--Sort(ORDER BY:([Expr1006] ASC, [vc].[CodCliente] ASC))
+         3,896       1           16                   |--Hash Match(Inner Join, HASH:([vc].[NroMovVenta])=([r].[NroMovVenta])DEFINE:([Opt_Bitmap1083]))
+        90,698       1        2,542                      |--Compute Scalar(DEFINE:([Expr1006]=CASE WHEN [EVERWEAR].[dbo].[Ven_CompCabecera].[FecMovim] as [vc].[FecMovi
+        90,698       1        2,542                      |    |--Nested Loops(Inner Join, OUTER REFERENCES:([vc].[NroMovVenta], [Expr1175]) OPTIMIZED WITH UNORDERED PR
+        90,698       1        2,542                      |         |--Nested Loops(Inner Join, OUTER REFERENCES:([cc].[CompCodigo], [Expr1174]) WITH UNORDERED PREFETCH
+            88       1           30                      |         |    |--Clustered Index Scan(OBJECT:([EVERWEAR].[dbo].[Ven_CodCom].[V_CODCOM_Cla_CompCodigo] AS [cc]   <== SCAN
+        90,698      88           84                      |         |    |--Filter(WHERE:(CASE WHEN [EVERWEAR].[dbo].[Ven_CompCabecera].[FecMovim] as [vc].[FecMovim]>=(
+        90,698      88           84                      |         |         |--Index Seek(OBJECT:([EVERWEAR].[dbo].[Ven_CompCabecera].[V_CAB_Cla_CompCodigoNumero] AS 
+        90,698   90698            1                      |         |--Clustered Index Seek(OBJECT:([EVERWEAR].[dbo].[Ven_CompCabecera].[V_CAB_Cla_NroMovVta] AS [vc]), 
+         3,896       1        2,440                      |--Hash Match(Inner Join, HASH:([ap].[ArticuloPatron])=([s].[ArticuloPatron]), RESIDUAL:([EVERWEAR].[dbo].[Stk
+             6       1           24                      |--Adaptive Join
+             1       1            1                      |    |--Clustered Index Scan(OBJECT:([EVERWEAR].[dbo].[Stk_Nivel1].[K_NI1_Cla_Nivel1] AS [n]),  WHERE:(CONVERT   <== SCAN
+             0       0           17                      |    |--Index Scan(OBJECT:([EVERWEAR].[dbo].[StkFer_ArtParamet].[KF_ARTPAR_Cla_Niv1Niv4Niv2Art] AS [ap]),  WHE   <== SCAN
+             6       1           22                      |    |--Index Seek(OBJECT:([EVERWEAR].[dbo].[StkFer_ArtParamet].[KF_ARTPAR_Cla_Niv1Niv2Niv3Niv4Art] AS [ap]), 
+         3,896       1          357                      |--Nested Loops(Inner Join, OUTER REFERENCES:([r].[NroMovVenta], [r].[NroRenglon], [Expr1177]) OPTIMIZED WITH 
+         3,896       1        3,568                      |--Nested Loops(Inner Join, OUTER REFERENCES:([s].[CodArticulo], [Expr1176]) OPTIMIZED WITH UNORDERED PREFETCH
+            40       1          412                      |    |--Filter(WHERE:(PROBE([Opt_Bitmap1085],[EVERWEAR].[dbo].[StkFer_Articulos].[ArticuloPatron] as [s].[Arti
+        41,172       1          412                      |    |    |--Index Scan(OBJECT:([EVERWEAR].[dbo].[StkFer_Articulos].[KF_ART_Cla_ArtPatronArticulo] AS [s]))   <== SCAN
+         3,896      40            9                      |    |--Filter(WHERE:(PROBE([Opt_Bitmap1083],[EVERWEAR].[dbo].[Ven_CompRenglon].[NroMovVenta] as [r].[NroMovVe
+         3,896      40            9                      |         |--Index Seek(OBJECT:([EVERWEAR].[dbo].[Ven_CompRenglon].[V_REN_Cla_Articu] AS [r]), SEEK:([r].[CodA
+         3,896    3896            1                      |--Clustered Index Seek(OBJECT:([EVERWEAR].[dbo].[Ven_CompRenglon].[V_REN_Cla_NroMovVenta] AS [r]), SEEK:([r].
+
+==============================================================================

@@ -714,6 +714,77 @@ WHERE cc.EvitaInformesYListados <> 1
   AND {linea_cond}
 """
 
+# ── Variante rápida: arrancar por los ARTÍCULOS de la línea ────────────────
+# (2026-08-26, medido) La forma de arriba arranca por Clientes/comprobantes y
+# filtra por línea al final. El plan real hacía Clustered Index Scan de
+# `Ven_CompRenglon` (385.232 filas leídas para quedarse con 3.896, sobre una
+# tabla de 3,1 M) y 90.697 key lookups en `Ven_CompCabecera` (7,5 GB).
+#
+# Una línea son POCOS artículos (PRECINTOS: 40) y existe el índice
+# `V_REN_Cla_Articu (CodArticu, FecMovim)`: resolviendo primero los artículos
+# se entra por SEEK en vez de escanear la tabla entera. Medido en PRECINTOS:
+# 4,07 s -> 0,69 s en frío, 1,34 s -> 0,53 s en caliente, resultado IDÉNTICO
+# (518 clientes, 1.293 filas agregadas).
+#
+# `r.FecMovim BETWEEN ...` es lo que habilita el seek — sin eso el índice no
+# sirve. Se verificó que la fecha del renglón coincide con la de la cabecera
+# (385.205 de 385.207 filas de 2 años; las 2 restantes difieren en 1 día),
+# igual va con margen de ±_MARGEN_FECHA_RENGLON días y la fecha que MANDA
+# sigue siendo `vc.FecMovim`.
+#
+# Solo aplica a una línea concreta. Para SIN_LINEA se sigue usando la forma de
+# arriba: ahí el criterio es el COMPLEMENTO (artículos que no matchean el
+# catálogo, más renglones cuyo artículo ni siquiera existe) y el LEFT JOIN es
+# parte del criterio, no una optimización.
+_MARGEN_FECHA_RENGLON = 7
+
+_SUB_ART_DE_LINEA = """
+    SELECT s.CodArticulo
+    FROM StkFer_ArtParamet ap
+    JOIN StkFer_Articulos s ON s.ArticuloPatron = ap.ArticuloPatron
+    WHERE {linea_cond}
+"""
+
+_SUB_CLIENTES_LINEA_TODOS_ART_TPL = """
+SELECT
+    c.CodCliente AS CodCliente,
+    LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
+    {case_anio_mes} AS AnioMes,
+    CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END AS Cant,
+    CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END AS Monto
+FROM (""" + _SUB_ART_DE_LINEA + """) a
+JOIN Ven_CompRenglon r          ON r.CodArticu    = a.CodArticulo
+JOIN Ven_CompCabecera vc        ON vc.NroMovVenta = r.NroMovVenta
+JOIN Ven_CodCom cc              ON cc.CompCodigo  = vc.CompCodigo
+JOIN MAGNUS_SITD.dbo.Clientes c ON c.CodCliente   = vc.CodCliente
+WHERE cc.EvitaInformesYListados <> 1
+  AND r.FecMovim  BETWEEN ? AND ?
+  AND vc.FecMovim BETWEEN ? AND ?
+"""
+
+# OJO con el orden de los parámetros: acá `Clientes` NO es la tabla que
+# arranca la query, así que los dos parámetros de SQL_JOIN_CARTERA NO son los
+# primeros (como sí lo son en el resto de las queries de este módulo). Van
+# después del nombre de la línea. Ver params en fetch_clientes_por_linea.
+_SUB_CLIENTES_LINEA_VENDEDOR_ART_TPL = """
+SELECT
+    c.CodCliente AS CodCliente,
+    LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
+    {case_anio_mes} AS AnioMes,
+    CASE cc.DebitoCredito WHEN 1 THEN r.Cantidad ELSE r.Cantidad * -1 END AS Cant,
+    CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) ELSE (r.Cantidad * r.PrecioVenta) * -1 END AS Monto
+FROM (""" + _SUB_ART_DE_LINEA + """) a
+JOIN Ven_CompRenglon r          ON r.CodArticu    = a.CodArticulo
+JOIN Ven_CompCabecera vc        ON vc.NroMovVenta = r.NroMovVenta
+JOIN Ven_CodCom cc              ON cc.CompCodigo  = vc.CompCodigo
+JOIN MAGNUS_SITD.dbo.Clientes c ON c.CodCliente   = vc.CodCliente
+""" + SQL_JOIN_CARTERA + """
+WHERE cc.EvitaInformesYListados <> 1
+  AND r.FecMovim  BETWEEN ? AND ?
+  AND vc.FecMovim BETWEEN ? AND ?
+"""
+
+
 SQL_CLIENTES_LINEA_WRAP = """
 SELECT CodCliente, Nombre, AnioMes,
        SUM(Cant)  AS CantidadNeta,
@@ -796,20 +867,27 @@ def fetch_clientes_por_linea(
         cur = conn.cursor()
         cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
         case_am = _case_anio_mes((anio_anterior, anio_actual))
-        if vendedor is None:
-            sub = _SUB_CLIENTES_LINEA_TODOS_TPL.format(
-                case_anio_mes=case_am, linea_cond=linea_cond
-            )
-            params = (dia_desde, dia_hasta) if es_sin_linea else (dia_desde, dia_hasta, linea_norm)
+        if es_sin_linea:
+            # Complemento del catálogo: hay que recorrer por comprobante, no
+            # se puede resolver como "los artículos de la línea".
+            tpl = (_SUB_CLIENTES_LINEA_TODOS_TPL if vendedor is None
+                   else _SUB_CLIENTES_LINEA_VENDEDOR_TPL)
+            sub = tpl.format(case_anio_mes=case_am, linea_cond=linea_cond)
+            params = (dia_desde, dia_hasta)
+            if vendedor is not None:
+                params = params_cartera(vendedor) + params
         else:
-            sub = _SUB_CLIENTES_LINEA_VENDEDOR_TPL.format(
-                case_anio_mes=case_am, linea_cond=linea_cond
-            )
-            params = params_cartera(vendedor) + (
-                (dia_desde, dia_hasta)
-                if es_sin_linea
-                else (dia_desde, dia_hasta, linea_norm)
-            )
+            # Forma rápida: arranca por los artículos de la línea y entra a
+            # Ven_CompRenglon por seek. Orden de parámetros: línea, [cartera],
+            # fechas del renglón (con margen), fechas de la cabecera.
+            tpl = (_SUB_CLIENTES_LINEA_TODOS_ART_TPL if vendedor is None
+                   else _SUB_CLIENTES_LINEA_VENDEDOR_ART_TPL)
+            sub = tpl.format(case_anio_mes=case_am, linea_cond=linea_cond)
+            m = _MARGEN_FECHA_RENGLON
+            params = (linea_norm,)
+            if vendedor is not None:
+                params += params_cartera(vendedor)
+            params += (dia_desde - m, dia_hasta + m, dia_desde, dia_hasta)
         cur.execute(SQL_CLIENTES_LINEA_WRAP.format(sub=sub), params)
 
         clientes: dict[int, dict] = {}
