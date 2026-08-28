@@ -36,7 +36,11 @@ export const maxDuration = 60;
 //   4b. Color/visibilidad de cada bucket "vivo" (2026-07-27, 4 casos, en orden):
 //      · stock SOLO (sin la OC) ya cubre el acumulado → NO es problema de
 //        compras: el bucket se EXCLUYE de la respuesta (desaparece de toda
-//        la vista, ver resueltoPorStock).
+//        la vista, ver resueltoPorStock). Desde 2026-08-28 alcanza con que
+//        lo haya cubierto EN ALGÚN MOMENTO: se compara contra la marca de
+//        agua del stock (preparado.faltante_stock_max, punto 3c/5b), no
+//        contra el stock de este instante — si la mercadería entró y después
+//        se vendió, el artículo ya quedó cubierto y no vuelve a la tabla.
 //      · si no, pero OC+stock juntos cubren todo (descubierto=0) → estado
 //        "completo", SE MUESTRA en verde (antes también se ocultaba; ahora
 //        solo se oculta el caso de arriba, resuelto por stock puro).
@@ -99,6 +103,7 @@ interface Bucket {
   estado: Estado;
   stock: number; // existencia real en depósito 1 (WMS, en vivo) — ver /deposito/stock
   resueltoPorStock: boolean; // el STOCK SOLO (sin la OC) ya cubre todo el acumulado — se excluye de la respuesta (ver punto 4b), no llega al front
+  yaCubierto: boolean; // en alguna corrida anterior el stock ya cubrió este día (preparado.faltante_stock_max) — se excluye para siempre
 }
 
 const keyLine = (p: number, r: number) => `${p}-${r}`;
@@ -372,6 +377,7 @@ export async function GET(req: NextRequest) {
         estado: "sin_orden",
         stock: 0,
         resueltoPorStock: false,
+        yaCubierto: false,
       };
       buckets.set(k, b);
     }
@@ -460,6 +466,51 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // 3c) Memoria de cobertura por stock (preparado.faltante_stock_max): marca de
+  // agua del stock por artículo + hasta qué día de faltante ya quedó cubierto.
+  // El stock se lee EN VIVO, así que si la mercadería entró y después se
+  // vendió, el momento en que cubría el faltante ya no se puede observar y el
+  // artículo quedaba clavado en la vista. Con esta tabla, una vez que el stock
+  // superó al acumulado el bucket sale y NO vuelve (ver sql/compras_faltante_stock_max.sql).
+  // Best-effort: si la tabla no está aplicada, la vista funciona sin memoria.
+  const stockMaxPrev = new Map<string, number>();
+  const cubiertoHasta = new Map<string, string>();
+  // Día en que se detectó la cobertura (updatedAt de la marca) — solo para
+  // mostrarlo en la solapa "Retirados" de la vista.
+  const cubiertoEl = new Map<string, string>();
+  let stockMaxWarn = false;
+  if (codigosUnicos.length) {
+    try {
+      const prevRows = await prisma.$queryRaw<
+        {
+          codArticulo: string;
+          stockMax: number | null;
+          cubiertoHasta: string | null;
+          cubiertoEl: string | null;
+        }[]
+      >`
+        SELECT "codArticulo", "stockMax",
+               to_char("cubiertoHasta", 'YYYY-MM-DD') AS "cubiertoHasta",
+               to_char("updatedAt", 'YYYY-MM-DD')     AS "cubiertoEl"
+        FROM preparado.faltante_stock_max
+      `;
+      for (const r of prevRows) {
+        const cod = String(r.codArticulo ?? "").trim();
+        if (!cod) continue;
+        stockMaxPrev.set(cod, Number(r.stockMax) || 0);
+        if (r.cubiertoHasta) {
+          cubiertoHasta.set(cod, r.cubiertoHasta);
+          if (r.cubiertoEl) cubiertoEl.set(cod, r.cubiertoEl);
+        }
+      }
+    } catch (e) {
+      stockMaxWarn = true;
+      console.error("read faltante_stock_max", e);
+    }
+  }
+  // Se persisten al final: marca de agua nueva y último día cubierto.
+  const cubiertosNuevos: { cod: string; fecha: string; stock: number; faltan: number }[] = [];
+
   const artImporte = new Map<string, number>();
   for (const [cod, arr] of porArt) {
     arr.sort((a, c) => (a.fecha < c.fecha ? -1 : a.fecha > c.fecha ? 1 : 0));
@@ -474,9 +525,20 @@ export async function GET(req: NextRequest) {
     let acumuladoBruto = 0;
     let acumulado = 0;
     let imp = 0;
+    // Día hasta el cual este artículo ya quedó cubierto por stock en alguna
+    // corrida anterior: esos buckets no se muestran NI acumulan (el acumulado
+    // arranca de cero después de esa fecha).
+    const cubHasta = cubiertoHasta.get(cod) ?? null;
+    // Mayor stock visto alguna vez (marca de agua). Si en algún momento superó
+    // al acumulado, el faltante está cubierto aunque hoy ya se haya vendido.
+    const stockPico = Math.max(stock, stockMaxPrev.get(cod) ?? 0);
     for (const b of arr) {
-      imp += b.importe;
       b.stock = stock;
+      if (cubHasta && b.fecha <= cubHasta) {
+        b.yaCubierto = true; // cubierto en su momento: no acumula ni se muestra
+        continue;
+      }
+      imp += b.importe;
       if (!b.vivo) {
         // Histórico ya entregado: cubierto con stock, no consume la OC por llegar.
         b.cubierto = b.faltan;
@@ -500,7 +562,9 @@ export async function GET(req: NextRequest) {
       // hoy: no es un problema de compras (no hace falta encargar nada), así
       // que este bucket se excluye más abajo en vez de pintarse — desaparece
       // de la tabla en lugar de quedar verde o neutro.
-      const resueltoPorStock = stock >= acumuladoDelDia;
+      // Cubierto por stock: alcanza con que el stock haya superado al acumulado
+      // EN ALGÚN MOMENTO (stockPico = marca de agua persistida), no solo ahora.
+      const resueltoPorStock = stockPico >= acumuladoDelDia;
 
       // Cobertura INTERNA de hoy (OC pendiente actual + stock físico actual,
       // las dos en vivo — no la fecha manual de "Arribo" ni ninguna
@@ -538,9 +602,43 @@ export async function GET(req: NextRequest) {
       //   · si no (no hay OC y el stock tampoco alcanza)  → "sin_orden"
       //     (sin color — antes rojo, ver rowCls en page.tsx).
       b.estado = descNetoStock <= 0 ? "completo" : cub > 0 ? "incompleto" : "sin_orden";
+      if (resueltoPorStock) {
+        // Queda registrado: de acá en más este día no vuelve a mostrarse y el
+        // acumulado arranca de cero (lo posterior es faltante nuevo).
+        cubiertosNuevos.push({ cod, fecha: b.fecha, stock: stockPico, faltan: acumuladoDelDia });
+        acumuladoBruto = 0;
+        acumulado = 0;
+      }
     }
     artImporte.set(cod, imp);
   }
+
+  // 4c) Filas RETIRADAS por cobertura de stock (las que ya no se muestran en la
+  //     tabla): se devuelven aparte, en `cubiertos`, para poder ver QUÉ salió y
+  //     CUÁNDO — no vuelven a `rows`. Incluye las que salieron en corridas
+  //     anteriores (yaCubierto) y las que salen en ésta (resueltoPorStock).
+  const hoyISO = new Date().toISOString().slice(0, 10);
+  const cubiertosOut = [...buckets.values()]
+    .filter((b) => b.yaCubierto || (b.estado === "completo" && b.resueltoPorStock))
+    .map((b) => ({
+      CodArticulo: b.CodArticulo,
+      Nombre: b.Nombre,
+      Linea: b.Linea,
+      Proveedor: b.Proveedor,
+      fecha: b.fecha, // día del faltante que quedó cubierto
+      faltan: r2(b.faltan),
+      stock: r2(b.stock),
+      stockPico: r2(Math.max(b.stock, stockMaxPrev.get(b.CodArticulo) ?? 0)),
+      importe: r2(b.importe),
+      renglones: b.renglones,
+      pedidos: b.pedidos.size,
+      cubiertoEl: b.yaCubierto ? (cubiertoEl.get(b.CodArticulo) ?? null) : hoyISO,
+    }))
+    .sort((a, c) =>
+      (c.cubiertoEl ?? "") !== (a.cubiertoEl ?? "")
+        ? (c.cubiertoEl ?? "") < (a.cubiertoEl ?? "") ? -1 : 1
+        : c.importe - a.importe,
+    );
 
   // 5) ordenar: artículos por importe total desc, días asc dentro del artículo.
   //    conArribo=0 (default): oculta buckets con TODOS sus renglones ya con
@@ -560,6 +658,7 @@ export async function GET(req: NextRequest) {
     // secas (OC+stock cubren todo pero el stock por sí solo NO alcanzaba):
     // ese caso NO se excluye más abajo, se manda con estado "completo" y se
     // pinta verde (cambio 2026-07-27, antes también se ocultaba).
+    .filter((b) => !b.yaCubierto)
     .filter((b) => !(b.estado === "completo" && b.resueltoPorStock))
     .sort((a, c) => {
       const ia = artImporte.get(a.CodArticulo) ?? 0;
@@ -605,6 +704,40 @@ export async function GET(req: NextRequest) {
       };
     });
 
+  // 5b) persistir la marca de agua del stock + hasta qué día quedó cubierto
+  //     (preparado.faltante_stock_max, ver sql/compras_faltante_stock_max.sql).
+  //     Un solo INSERT ... ON CONFLICT con GREATEST: la marca nunca baja, así
+  //     que el artículo no vuelve a la vista cuando el stock se vende.
+  //     Se escribe para TODOS los artículos en pantalla (marca de agua), y con
+  //     cubiertoHasta solo para los que quedaron cubiertos en esta corrida.
+  if (codigosUnicos.length) {
+    try {
+      const cubMap = new Map<string, { fecha: string; stock: number; faltan: number }>();
+      for (const c of cubiertosNuevos) {
+        const prev = cubMap.get(c.cod);
+        if (!prev || c.fecha > prev.fecha) cubMap.set(c.cod, c);
+      }
+      const values = codigosUnicos.map((cod) => {
+        const cub = cubMap.get(cod) ?? null;
+        const stk = Math.max(stockMap.get(cod) ?? 0, stockMaxPrev.get(cod) ?? 0);
+        return Prisma.sql`(${cod}, ${stk}, ${cub ? cub.fecha : null}::date, ${cub ? cub.faltan : null}, now())`;
+      });
+      await prisma.$executeRaw`
+        INSERT INTO preparado.faltante_stock_max
+          ("codArticulo", "stockMax", "cubiertoHasta", "faltanCubierto", "updatedAt")
+        VALUES ${Prisma.join(values)}
+        ON CONFLICT ("codArticulo") DO UPDATE SET
+          "stockMax"       = GREATEST(preparado.faltante_stock_max."stockMax", EXCLUDED."stockMax"),
+          "cubiertoHasta"  = GREATEST(preparado.faltante_stock_max."cubiertoHasta", EXCLUDED."cubiertoHasta"),
+          "faltanCubierto" = COALESCE(EXCLUDED."faltanCubierto", preparado.faltante_stock_max."faltanCubierto"),
+          "updatedAt"      = now()
+      `;
+    } catch (e) {
+      stockMaxWarn = true;
+      console.error("persist faltante_stock_max", e);
+    }
+  }
+
   // 6) persistir el consumo por día (best-effort; tabla aplicada a mano por SQL)
   //    Solo demanda viva: los entregados históricos no imputan OC.
   let consumoWarn = false;
@@ -642,10 +775,13 @@ export async function GET(req: NextRequest) {
     conArribo,
     total: rowsOut.length,
     rows: rowsOut,
+    // Filas retiradas por cobertura de stock (ver 4c) — no están en `rows`.
+    cubiertos: cubiertosOut,
     ocWarn,
     consumoWarn,
     extraWarn,
     stockWarn,
+    stockMaxWarn,
     descartWarn,
   });
 }

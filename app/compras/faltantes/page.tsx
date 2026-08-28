@@ -34,14 +34,16 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 //     artículo (descubierto llega a 0) — sale sola, sin acción manual.
 //
 //   Color de fila por estado del DÍA (4 reglas, 2026-07-27 — Pablo):
-//     · (sin fila) → el STOCK SOLO (sin la OC) ya cubre el acumulado: no es
-//       problema de compras, el backend directamente NO manda ese bucket
-//       (resueltoPorStock, ver faltantes-consumo/route.ts punto 4b).
+//     · (sin fila) → el STOCK SOLO (sin la OC) cubrió el acumulado en algún
+//       momento: no es problema de compras, el backend directamente NO manda
+//       ese bucket (resueltoPorStock, ver faltantes-consumo/route.ts punto
+//       4b). Se compara contra la marca de agua del stock, así que el
+//       artículo tampoco vuelve cuando esa mercadería se vende.
 //     · verde  → OC + stock juntos cubren TODO el acumulado (descubierto = 0,
 //       estado "completo") pero el stock por sí solo NO alcanzaba — hizo
-//       falta la OC. Se muestra para dejar constancia de que quedó resuelta
-//       (hasta 2026-07-27 este caso también se ocultaba, igual que el de
-//       arriba; ahora se distinguen).
+//       falta la OC. NO se muestra en "Todos" (2026-08-28): ya está
+//       satisfecho, sale solo de la tabla apenas ingresa la mercadería. Queda
+//       accesible con el chip "Cubiertos" (filtro=completo), en verde.
 //     · rojo   → sigue descubierto y HAY algo de OC cargada, pero no alcanza
 //       ni sumando el stock (estado "incompleto").
 //     · sin color → sigue descubierto y NO hay ninguna OC pendiente (estado
@@ -63,6 +65,24 @@ type Estado = "completo" | "incompleto" | "sin_orden" | "entregado";
 type Filtro = "todos" | Estado;
 // Origen del proveedor (r.importacion): cicla Todos → Importados → Nacionales.
 type Origen = "importados" | "nacionales";
+
+// Fila RETIRADA de la tabla porque el stock cubrió el faltante (backend, punto
+// 4c: llegan en `cubiertos`, aparte de `rows`). Sirve para ver QUÉ salió y
+// CUÁNDO — no se puede accionar sobre ellas.
+interface RowCubierta {
+  CodArticulo: string;
+  Nombre: string;
+  Linea: string | number | null;
+  Proveedor: string | null;
+  fecha: string;       // día del faltante que quedó cubierto
+  faltan: number;
+  stock: number;       // stock actual
+  stockPico: number;   // mayor stock visto (marca de agua) — lo que lo cubrió
+  importe: number;
+  renglones: number;
+  pedidos: number;
+  cubiertoEl: string | null; // día en que se detectó la cobertura
+}
 
 interface Row {
   CodArticulo: string;
@@ -508,6 +528,8 @@ function TablaExtraordinarios({
 
 export default function ComprasFaltantesPage() {
   const [rows, setRows] = useState<Row[]>([]);
+  const [cubiertos, setCubiertos] = useState<RowCubierta[]>([]); // retiradas por stock (ver RowCubierta)
+  const [verRetirados, setVerRetirados] = useState(false);
   const [fecha, setFecha] = useState<string | null>(null);
   const [desdeResp, setDesdeResp] = useState<string | null>(null);
   const [hastaResp, setHastaResp] = useState<string | null>(null);
@@ -544,6 +566,7 @@ export default function ComprasFaltantesPage() {
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       setRows(j.rows ?? []);
+      setCubiertos(j.cubiertos ?? []);
       setFecha(j.fecha ?? null);
       setDesdeResp(j.desde ?? null);
       setHastaResp(j.hasta ?? null);
@@ -552,6 +575,7 @@ export default function ComprasFaltantesPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al cargar");
       setRows([]);
+      setCubiertos([]);
     } finally {
       setLoading(false);
     }
@@ -737,8 +761,14 @@ export default function ComprasFaltantesPage() {
   // clave, los renglones de un mismo artículo (y de un mismo proveedor) quedan
   // siempre contiguos y el orden por $ no se pierde (se agrupa, no se ignora).
   const visibles = useMemo(() => {
+    // "Todos" NO muestra los cubiertos (estado "completo", descubierto = 0):
+    // apenas la mercadería entra y OC+stock tapan todo el faltante, la fila
+    // sale sola de la tabla (2026-08-28). Siguen accesibles con el chip
+    // "Cubiertos", que los lista aparte para corroborar.
     const base =
-      filtro === "todos" ? porArticuloOrigen : porArticuloOrigen.filter((r) => r.estado === filtro);
+      filtro === "todos"
+        ? porArticuloOrigen.filter((r) => r.estado !== "completo")
+        : porArticuloOrigen.filter((r) => r.estado === filtro);
 
     const provImporte = new Map<string, number>();
     const artImporte = new Map<string, number>();
@@ -1037,6 +1067,23 @@ export default function ComprasFaltantesPage() {
           </button>
 
           <button
+            onClick={() => setVerRetirados((v) => !v)}
+            disabled={cubiertos.length === 0}
+            title="Ver los artículos que salieron de la tabla porque el stock cubrió el faltante"
+            className={`chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium disabled:opacity-40 disabled:hover:scale-100 disabled:hover:translate-y-0 ${
+              verRetirados
+                ? "bg-emerald-500/15 border-emerald-400 text-emerald-300"
+                : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
+            }`}
+          >
+            <PackageCheck size={14} />
+            Retirados
+            {cubiertos.length > 0 && (
+              <span className="tabular-nums text-zinc-500">{cubiertos.length}</span>
+            )}
+          </button>
+
+          <button
             onClick={ciclarOrigen}
             title="Filtra por origen del proveedor — click para alternar: Importados / Nacionales"
             className={`chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium ${
@@ -1145,6 +1192,62 @@ export default function ComprasFaltantesPage() {
             </span>
           )}
         </div>
+
+        {/* Retirados por stock: artículos que salieron de la tabla porque el
+            stock cubrió el faltante acumulado (backend punto 4c). Solo
+            lectura — quedan acá como constancia de qué se fue y cuándo. */}
+        {verRetirados && cubiertos.length > 0 && (
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.04] overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-emerald-500/20">
+              <span className="flex items-center gap-2 text-xs font-medium text-emerald-300">
+                <PackageCheck size={14} />
+                Retirados por stock ({cubiertos.length})
+              </span>
+              <button
+                onClick={() => setVerRetirados(false)}
+                className="text-zinc-500 hover:text-zinc-300"
+                title="Cerrar"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="overflow-x-auto max-h-80">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-zinc-950/95 text-zinc-500">
+                  <tr className="text-left">
+                    <th className="px-3 py-2 font-medium">Cód.</th>
+                    <th className="px-3 py-2 font-medium">Artículo</th>
+                    <th className="px-3 py-2 font-medium">Proveedor</th>
+                    <th className="px-3 py-2 font-medium">Día faltante</th>
+                    <th className="px-3 py-2 font-medium text-right">Faltaban</th>
+                    <th className="px-3 py-2 font-medium text-right">Stock que lo cubrió</th>
+                    <th className="px-3 py-2 font-medium">Retirado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cubiertos.map((c) => (
+                    <tr
+                      key={`${c.CodArticulo}__${c.fecha}`}
+                      className="border-t border-zinc-800/70 text-zinc-300"
+                    >
+                      <td className="px-3 py-1.5 font-mono text-[11px]">{c.CodArticulo}</td>
+                      <td className="px-3 py-1.5">{c.Nombre}</td>
+                      <td className="px-3 py-1.5 text-zinc-400">{c.Proveedor || "—"}</td>
+                      <td className="px-3 py-1.5 tabular-nums text-zinc-400">{fmtAr(c.fecha)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(c.faltan)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
+                        {fmtNum(c.stockPico)}
+                      </td>
+                      <td className="px-3 py-1.5 tabular-nums text-zinc-400">
+                        {fmtAr(c.cubiertoEl)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* Tarjeta que gira: frente = tabla normal, reverso = extraordinarios */}
         <div className="[perspective:2000px]">
