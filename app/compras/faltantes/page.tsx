@@ -56,6 +56,9 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 //   preparado.faltante_control (/api/compras/faltantes-arribo). Por defecto
 //   un bucket con TODOS sus renglones ya con fecha de arribo se oculta de esta
 //   vista — botón "Ver con arribo" para corroborar los que ya se pasaron.
+//   Cargar esa fecha es además el "pase a compras": queda registrado con la
+//   foto del bucket en preparado.faltante_pase_compras y se consulta por mes
+//   en /compras/pases (comparación fin de mes: pasado a compras vs comprado).
 //   Reemplaza a /deposito/faltantes/control (ahora redirige acá). "¿Cliente lo
 //   quiere?" se sigue decidiendo en /ventas/faltantes, sin cambios.
 //   El consumo por día se guarda solo (preparado.faltante_oc_consumo).
@@ -658,7 +661,26 @@ export default function ComprasFaltantesPage() {
       const res = await fetch("/api/compras/faltantes-arribo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fecha: row.fecha, codArticulo: row.CodArticulo, fechaArribo }),
+        // `snapshot`: foto del bucket al momento del pase — el backend la
+        // guarda en preparado.faltante_pase_compras (registro de faltantes que
+        // pasan a compras, para comparar a fin de mes contra lo comprado en
+        // /compras/pases). No se recalcula después.
+        body: JSON.stringify({
+          fecha: row.fecha,
+          codArticulo: row.CodArticulo,
+          fechaArribo,
+          snapshot: {
+            nombre: row.Nombre,
+            proveedor: row.Proveedor,
+            linea: row.Linea == null ? null : String(row.Linea),
+            faltan: row.faltan,
+            descubierto: row.descubierto,
+            ocTotal: row.ocTotal,
+            stock: row.stock,
+            importe: row.importe,
+            importacion: row.importacion,
+          },
+        }),
       });
       if (!res.ok) throw new Error();
     } catch {
