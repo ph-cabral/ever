@@ -23,10 +23,15 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 //
 //   1. Todo sale filtrado por la línea BULONERÍA (lo hace el back, ver
 //      bulones.py — acá no se filtra nada).
-//   2. Como la línea es UNA sola, el eje "línea" se reemplaza por el CÓDIGO
-//      PATRÓN (StkFer_Articulos.ArticuloPatron), mostrado pelado.
-//   3. Hay un TERCER ranking, Vendedor, a la derecha de Clientes | Cód.
-//      patrón. Click en un vendedor → sus clientes.
+//   2. Como la línea es UNA sola, el eje "línea" se reemplaza por el PATRÓN
+//      (StkFer_Articulos.ArticuloPatron). Se muestra su NOMBRE
+//      (DetallePatron, campo `detalle`): el código es sólo un número y no
+//      dice nada. El código igual viaja en `patron` porque es la clave con
+//      la que se pide el drill-down, y se usa de fallback si un patrón no
+//      tiene nombre cargado.
+//   3. Hay un TERCER ranking, Vendedor, a la derecha de Clientes | Patrón —
+//      sólo vendedores ACTIVOS, igual que /ventas/vendedor. Click en un
+//      vendedor → sus clientes.
 //
 // 🔑 UN SOLO NIVEL DE MODAL ("acá solo se abrirá un modal, no puede ir otro
 // modal más"). Por eso ACÁ NO EXISTE la pila de niveles de /ventas/vendedor
@@ -86,12 +91,16 @@ interface ClienteVal {
 
 interface PatronVal {
   patron: string;
+  // Nombre del patrón (StkFer_Articulos.DetallePatron). null = sin nombre
+  // cargado en Magnus → se cae al código.
+  detalle: string | null;
   anioAnterior: AnioVal;
   anioActual: AnioVal;
 }
 
 interface RespClientesPorPatron extends RespMatriz {
   patron: string;
+  detalle: string | null;
   totalClientes: number;
   clientes: ClienteVal[];
 }
@@ -112,6 +121,15 @@ interface RespPatronesPorCliente extends RespMatriz {
   patrones: PatronVal[];
 }
 
+/**
+ * Cómo se muestra un patrón en pantalla: el NOMBRE (DetallePatron) y, si no
+ * está cargado en Magnus, el código pelado como último recurso. El código
+ * nunca es la etiqueta principal — no le dice nada a nadie —, pero se
+ * conserva en el `title` de la fila para poder cruzarlo con Magnus.
+ */
+const etiquetaPatron = (p: { patron: string; detalle: string | null }) =>
+  p.detalle?.trim() || p.patron;
+
 // Fila normalizada de la tabla del modal — unifica los tres modos.
 interface FilaTabla {
   key: string;
@@ -128,6 +146,7 @@ interface TopCliente {
 
 interface TopPatron {
   patron: string;
+  detalle: string | null;
   unidades: number;
   monto: number;
 }
@@ -507,7 +526,7 @@ export default function VentasBulonesPage() {
       modalMode === "cliente"
         ? (detCliente?.patrones ?? []).map((p) => ({
             key: `pat-${p.patron}`,
-            etiqueta: p.patron,
+            etiqueta: etiquetaPatron(p),
             anioAnterior: p.anioAnterior,
             anioActual: p.anioActual,
           }))
@@ -531,22 +550,22 @@ export default function VentasBulonesPage() {
   const hayTabla = !!fuenteTabla;
   const sinDatos = !!fuenteTabla && !fuenteTabla.tieneDatos;
   // Encabezado de la primera columna del modal.
-  const colEtiqueta = modalMode === "cliente" ? "Cód. patrón" : "Cliente";
+  const colEtiqueta = modalMode === "cliente" ? "Patrón" : "Cliente";
   const sinMesesPeriodo = periodo === "ytd" && mesesActivos.length === 0;
 
   const tituloNivel =
     nivel?.mode === "cliente"
       ? nivel.cliente.nombre ?? String(nivel.cliente.numero)
       : nivel?.mode === "patron"
-        ? nivel.patron
+        ? detPatron?.detalle?.trim() || nivel.patron
         : nivel?.mode === "vendedor"
           ? nivel.vendedor.nombre ?? String(nivel.vendedor.codigo)
           : "";
   const subtituloNivel =
     modalMode === "cliente"
-      ? "Códigos patrón de bulonería que compró este cliente"
+      ? "Patrones de bulonería que compró este cliente"
       : modalMode === "patron"
-        ? "Clientes que compraron este código patrón"
+        ? "Clientes que compraron este patrón"
         : "Clientes de este vendedor";
 
   const mesesMostrados = mesesActivos;
@@ -628,7 +647,7 @@ export default function VentasBulonesPage() {
   const topGrupos = agrupar(topItems);
   const topGrupoSeguro = Math.min(topGrupoAbierto, Math.max(0, topGrupos.length - 1));
   const colTop =
-    topVista === "clientes" ? "Cliente" : topVista === "patrones" ? "Cód. patrón" : "Vendedor";
+    topVista === "clientes" ? "Cliente" : topVista === "patrones" ? "Patrón" : "Vendedor";
 
   return (
     <div className="min-h-screen bg-[#111111] text-white">
@@ -650,7 +669,7 @@ export default function VentasBulonesPage() {
       {/* Header: 3 filas en el teléfono / 1 en la computadora, con `md:order-*`
           reacomodando. Mismo patrón que /ventas/vendedor — al agregar algo
           nuevo, darle su `md:order-N` o se rompe la alineación. El switch
-          ahora tiene TRES botones (Clientes | Cód. patrón | Vendedor), con
+          ahora tiene TRES botones (Clientes | Patrón | Vendedor), con
           Vendedor a la derecha (pedido de Pablo 2026-08-26). */}
       <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 px-4 md:px-8 py-3">
         <div className="grid grid-cols-2 items-center gap-x-3 gap-y-2 md:flex md:flex-wrap md:gap-4">
@@ -670,7 +689,7 @@ export default function VentasBulonesPage() {
             ) : (
               <UserRound size={18} />
             )}
-            bulonería · {topVista === "clientes" ? "clientes" : topVista === "patrones" ? "cód. patrón" : "vendedores"}
+            bulonería · {topVista === "clientes" ? "clientes" : topVista === "patrones" ? "patrones" : "vendedores"}
           </h2>
 
           <button
@@ -703,7 +722,7 @@ export default function VentasBulonesPage() {
                   topVista === v ? "bg-yellow-400 text-black" : "text-zinc-300 hover:bg-zinc-800"
                 }`}
               >
-                {v === "clientes" ? "Clientes" : v === "patrones" ? "Cód. patrón" : "Vendedor"}
+                {v === "clientes" ? "Clientes" : v === "patrones" ? "Patrón" : "Vendedor"}
               </button>
             ))}
           </div>
@@ -1394,8 +1413,12 @@ export default function VentasBulonesPage() {
                           const etiqueta = cli
                             ? cli.nombre ?? "(sin nombre)"
                             : pat
-                              ? pat.patron
+                              ? etiquetaPatron(pat)
                               : ven!.nombre ?? String(ven!.codigo);
+                          // El código patrón no se muestra, pero queda en el
+                          // tooltip para poder buscarlo en Magnus.
+                          const tituloEtiqueta =
+                            pat && pat.detalle ? `${etiqueta} · cód. ${pat.patron}` : etiqueta;
                           const valorTop = cli
                             ? cli.monto
                             : topMetrica === "pesos"
@@ -1408,9 +1431,9 @@ export default function VentasBulonesPage() {
                                 ? abrirPatron(pat.patron)
                                 : abrirVendedor({ codigo: ven!.codigo, nombre: ven!.nombre });
                           const titulo = cli
-                            ? "Ver los códigos patrón que compró este cliente"
+                            ? "Ver los patrones que compró este cliente"
                             : pat
-                              ? "Ver los clientes que compraron este código patrón"
+                              ? "Ver los clientes que compraron este patrón"
                               : "Ver los clientes de este vendedor";
                           return (
                             <tr
@@ -1422,7 +1445,7 @@ export default function VentasBulonesPage() {
                               </td>
                               <td
                                 className="px-3 py-2 text-zinc-100 max-w-0 w-full truncate"
-                                title={etiqueta}
+                                title={tituloEtiqueta}
                               >
                                 <button
                                   type="button"

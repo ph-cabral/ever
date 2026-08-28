@@ -11,9 +11,12 @@ agregados". Las diferencias con ventas.py son TRES y sólo tres:
   2. Como la línea es UNA sola, el eje "línea" pierde sentido y se
      reemplaza por el CÓDIGO PATRÓN (StkFer_Articulos.ArticuloPatron), que
      es el que agrupa los artículos adentro de la línea. Se muestra el
-     código pelado (pedido de Pablo: "solo el código").
-  3. Se agrega un tercer ranking: VENDEDORES. Click en un vendedor → sus
-     clientes.
+     NOMBRE del patrón (StkFer_Articulos.DetallePatron) — el código es sólo
+     un número y no dice nada; viaja igual en el payload (`patron`) porque
+     es la clave del drill-down. El nombre va en `detalle`.
+  3. Se agrega un tercer ranking: VENDEDORES, sólo los ACTIVOS del maestro
+     MAGNUS_SITD.dbo.Vendedores (mismo criterio que /ventas/vendedor: ver
+     _vendedor_activo más abajo).
 
 Fuente y criterio de "venta neta": IDÉNTICOS a ventas.py (Ven_CompCabecera +
 Ven_CompRenglon, neto de nota de crédito según Ven_CodCom.DebitoCredito,
@@ -42,6 +45,7 @@ from ventas import (
     BASE_DATE,
     _anio_vacio,
     _case_anio_mes,
+    _es_persona,
     _resolver_rango,
     _round_anio,
     _safe,
@@ -62,6 +66,25 @@ COND_BULON = (
 )
 
 SIN_PATRON = "(Sin código patrón)"
+
+# Nombre del patrón. StkFer_Articulos.DetallePatron es la descripción del
+# patrón repetida en cada artículo (misma columna que el "Detalle" de los
+# remitos de compra, ver HANDOFF_extracciones_sql.md). Se toma con MAX() en
+# vez de agrupar por ella: agrupar sumaría una columna de texto al GROUP BY
+# y, si un patrón tuviera dos escrituras distintas, lo partiría en dos filas
+# del ranking. MAX sobre un grupo chico es gratis y siempre devuelve UNA.
+_DETALLE_PATRON = "MAX(LTRIM(RTRIM(s.DetallePatron)))"
+
+# Vendedores ACTIVOS del maestro Vendedores — mismo criterio que
+# /ventas/vendedor (ventas.fetch_vendedores): Estado_Desc "Habilitado" y el
+# nombre no arranca con "(baja)". Va en SQL para no traer al ranking gente
+# dada de baja. Lo que NO se puede resolver en SQL (que sea una PERSONA y no
+# un canal/zona: MOSTRADORES, ZONA CBA, …) se filtra en Python con
+# _es_persona, que es la misma función que usa la otra vista.
+_COND_VENDEDOR_ACTIVO = (
+    "LTRIM(RTRIM(v.Estado_Desc)) LIKE 'Habilitado%' "
+    "AND LTRIM(RTRIM(v.VendedorNombre)) NOT LIKE '(baja)%'"
+)
 
 # Los joins que agregan artículo + parámetros; son INNER porque el filtro de
 # línea ya excluye lo que no matchea (un LEFT no sumaría filas útiles).
@@ -211,6 +234,7 @@ JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
 
     sql = f"""
 SELECT LTRIM(RTRIM(s.ArticuloPatron)) AS Patron,
+       {_DETALLE_PATRON} AS Detalle,
        SUM({_CANT}) AS Unidades,
        SUM({_MONTO}) AS MontoNeto
 {joins}{_JOIN_ART}{where}
@@ -220,15 +244,17 @@ GROUP BY LTRIM(RTRIM(s.ArticuloPatron))
     conn, cur = _conn()
     try:
         cur.execute(sql, params)
-        acum: dict[str, list[float]] = {}
-        for patron, unid, monto in cur.fetchall():
-            nombre = (str(patron or "").strip()) or SIN_PATRON
-            a = acum.setdefault(nombre, [0.0, 0.0])
+        acum: dict[str, list] = {}
+        for patron, detalle, unid, monto in cur.fetchall():
+            codigo = (str(patron or "").strip()) or SIN_PATRON
+            a = acum.setdefault(codigo, [0.0, 0.0, None])
             a[0] += float(_safe(unid) or 0)
             a[1] += float(_safe(monto) or 0)
+            if a[2] is None:
+                a[2] = (str(detalle).strip() or None) if detalle else None
         items = {
-            p: {"patron": p, "unidades": round(u, 2), "monto": round(m, 2)}
-            for p, (u, m) in acum.items()
+            p: {"patron": p, "detalle": d, "unidades": round(u, 2), "monto": round(m, 2)}
+            for p, (u, m, d) in acum.items()
         }
         # Una nota de crédito puede dejar unidades > 0 con monto <= 0 (o al
         # revés), así que cada lista filtra por SU métrica — igual que
@@ -252,11 +278,19 @@ GROUP BY LTRIM(RTRIM(s.ArticuloPatron))
 def fetch_top_vendedores(vendedor: int | None = None, limit: int = 1_000_000,
                          desde: str | None = None, hasta: str | None = None,
                          forzar: bool = False) -> dict:
-    """Ranking de VENDEDORES por bulonería vendida a SU cartera (pedido de
-    Pablo 2026-08-26, el agregado propio de esta vista). El vendedor de cada
-    venta es el "Vendedor por Defecto" FIJO del cliente — el mismo criterio
-    que ya usa el acceso por vendedor, no el vendedor que cargó el
-    comprobante. Un no-admin sólo se ve a sí mismo."""
+    """Ranking de VENDEDORES por bulonería vendida (el agregado propio de
+    esta vista). Un no-admin sólo se ve a sí mismo.
+
+    El vendedor de cada venta sale del COMPROBANTE (Ven_CompCabecera.vendedor
+    → MAGNUS_SITD.dbo.Vendedores), no de la zona del cliente: refleja quién
+    vendió y no deja afuera a los vendedores sin zona cargada.
+
+    Sólo entran los vendedores ACTIVOS, igual que en /ventas/vendedor: el
+    estado se filtra en SQL (_COND_VENDEDOR_ACTIVO) y los seudo-vendedores
+    (canales/zonas como MOSTRADORES o ZONA CBA) se descartan en Python con
+    _es_persona. Consecuencia buscada: las ventas de mostrador y las de gente
+    de baja NO figuran en este ranking — para el total de la línea están los
+    otros dos rankings."""
     desde_ym, hasta_ym, d1, d2 = _resolver_rango(desde, hasta)
     limit_i = int(limit)
     key = ("ven", vendedor, limit_i, desde_ym, hasta_ym)
@@ -264,10 +298,12 @@ def fetch_top_vendedores(vendedor: int | None = None, limit: int = 1_000_000,
     if hit is not None:
         return hit
 
-    where = "WHERE cc.EvitaInformesYListados <> 1 AND vc.FecMovim BETWEEN ? AND ?"
+    where = (f"WHERE {_COND_VENDEDOR_ACTIVO} AND cc.EvitaInformesYListados <> 1 "
+             "AND vc.FecMovim BETWEEN ? AND ?")
     params: tuple = (d1, d2)
     if vendedor is not None:
-        where = ("WHERE vc.vendedor = ? AND cc.EvitaInformesYListados <> 1 "
+        where = (f"WHERE vc.vendedor = ? AND {_COND_VENDEDOR_ACTIVO} "
+                 "AND cc.EvitaInformesYListados <> 1 "
                  "AND vc.FecMovim BETWEEN ? AND ?")
         params = (int(vendedor), d1, d2)
     sql = f"""
@@ -286,9 +322,15 @@ GROUP BY v.VendedorCodigo, LTRIM(RTRIM(v.VendedorNombre))
         for cod, nom, unid, monto in cur.fetchall():
             if cod is None:
                 continue
+            nom = str(nom).strip() if nom else None
+            # Canal/zona, no persona (MOSTRADORES, ZONA CBA, VENDEDOR CERO…):
+            # no es alguien a quien rankear. Mismo criterio que el filtro de
+            # vendedores de /ventas/vendedor.
+            if not _es_persona(nom):
+                continue
             items.append({
                 "codigo": int(cod),
-                "nombre": (str(nom).strip() if nom else None),
+                "nombre": nom,
                 "unidades": round(float(_safe(unid) or 0), 2),
                 "monto": round(float(_safe(monto) or 0), 2),
             })
@@ -419,6 +461,7 @@ SELECT c.CodCliente AS Clave, LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
     ]
     return _guardar(key, {
         "patron": patron_norm,
+        "detalle": fetch_detalle_patron(patron_norm),
         "anioAnterior": a_ant,
         "anioActual": a_act,
         "tieneDatos": bool(clientes),
@@ -472,7 +515,7 @@ def fetch_patrones_por_cliente(cod_cliente: int, vendedor: int | None = None,
     `vendedor`: si se pasa (no-admin) y el cliente no es de su cartera, se
     devuelve vacío — mismo criterio de acceso que ventas.py."""
     a_ant, a_act, d1, d2 = _anios_y_rango()
-    asignado = fetch_vendedor_de_cliente(cod_cliente)
+    nombre_cliente, asignado = fetch_cliente_y_vendedor(cod_cliente)
     if vendedor is not None and (asignado is None or asignado["codigo"] != int(vendedor)):
         return {
             "cliente": {"codigo": int(cod_cliente), "nombre": None},
@@ -488,9 +531,12 @@ def fetch_patrones_por_cliente(cod_cliente: int, vendedor: int | None = None,
     if hit is not None:
         return hit
 
+    # `Nombre` acá es el nombre del PATRÓN (DetallePatron), no el del cliente
+    # —el cliente es uno solo y su nombre ya viene de fetch_cliente_y_vendedor—.
+    # Es lo que se muestra en la primera columna del modal.
     sub = f"""
 SELECT LTRIM(RTRIM(s.ArticuloPatron)) AS Clave,
-       LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
+       LTRIM(RTRIM(s.DetallePatron)) AS Nombre,
        {_case_anio_mes((a_ant, a_act))} AS AnioMes,
        {_CANT} AS Cant, {_MONTO} AS Monto
 {_JOIN_CLIENTE}{_JOIN_ART}WHERE c.CodCliente = ?
@@ -499,9 +545,9 @@ SELECT LTRIM(RTRIM(s.ArticuloPatron)) AS Clave,
   AND {COND_BULON}
 """
     filas, totales = _matriz(sub, (int(cod_cliente), d1, d2), a_ant, a_act)
-    nombre_cliente = filas[0]["nombre"] if filas else None
     patrones = [
         {"patron": (f["clave"] or SIN_PATRON),
+         "detalle": f["nombre"],
          "anioAnterior": f["anioAnterior"], "anioActual": f["anioActual"]}
         for f in filas
     ]
@@ -521,12 +567,25 @@ SELECT LTRIM(RTRIM(s.ArticuloPatron)) AS Clave,
 # ──────────────────────────────────────────────────────────────────────────
 # Catálogo mínimo de vendedores
 # ──────────────────────────────────────────────────────────────────────────
-SQL_VENDEDOR_DE_CLIENTE = """
-SELECT v.VendedorCodigo, LTRIM(RTRIM(v.VendedorNombre))
+# Nombre del cliente + su Vendedor por Defecto en UNA sola consulta. Los
+# JOIN son LEFT a propósito: un cliente de mostrador no tiene
+# Clasif_VendZona y aun así hay que devolver su nombre.
+SQL_CLIENTE_Y_VENDEDOR = """
+SELECT LTRIM(RTRIM(c.Cliente_Nombre)) AS Cliente,
+       v.VendedorCodigo,
+       LTRIM(RTRIM(v.VendedorNombre)) AS Vendedor
 FROM MAGNUS_SITD.dbo.Clientes c
-JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
-JOIN MAGNUS_SITD.dbo.Vendedores v ON LTRIM(RTRIM(v.VendedorNombre)) = LTRIM(RTRIM(vz.Vendedor))
+LEFT JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz ON vz.Clasif_VendZona = c.Clasif_VendZona
+LEFT JOIN MAGNUS_SITD.dbo.Vendedores v ON LTRIM(RTRIM(v.VendedorNombre)) = LTRIM(RTRIM(vz.Vendedor))
 WHERE c.CodCliente = ?
+"""
+
+# Nombre de un código patrón. TOP 1: DetallePatron es la misma descripción
+# repetida en todos los artículos del patrón.
+SQL_DETALLE_PATRON = """
+SELECT TOP 1 LTRIM(RTRIM(DetallePatron))
+FROM StkFer_Articulos
+WHERE ArticuloPatron = ? AND DetallePatron IS NOT NULL
 """
 
 SQL_VENDEDOR_NOMBRE = """
@@ -536,17 +595,49 @@ WHERE VendedorCodigo = ?
 """
 
 
-def fetch_vendedor_de_cliente(cod_cliente: int) -> dict | None:
-    """{'codigo','nombre'} del Vendedor por Defecto de un cliente, o None
-    (mostrador / sin Clasif_VendZona — ver clientes.fetch_vendedor_fijo_
-    cliente, mismo join, acá además se trae el nombre para mostrarlo)."""
+def fetch_cliente_y_vendedor(cod_cliente: int) -> tuple[str | None, dict | None]:
+    """(nombre del cliente, {'codigo','nombre'} de su Vendedor por Defecto).
+
+    El vendedor puede ser None (mostrador / sin Clasif_VendZona — ver
+    clientes.fetch_vendedor_fijo_cliente, mismo join) y el nombre también si
+    el cliente no existe. Las dos cosas salen de la misma consulta porque el
+    modal de patrones-por-cliente necesita ambas y son un único acceso a la
+    tabla de clientes."""
     conn, cur = _conn()
     try:
-        cur.execute(SQL_VENDEDOR_DE_CLIENTE, (int(cod_cliente),))
+        cur.execute(SQL_CLIENTE_Y_VENDEDOR, (int(cod_cliente),))
         row = cur.fetchone()
-        if not row or row[0] is None:
-            return None
-        return {"codigo": int(row[0]), "nombre": (str(row[1]).strip() if row[1] else None)}
+        if not row:
+            return None, None
+        nombre_cli = str(row[0]).strip() if row[0] else None
+        if row[1] is None:
+            return nombre_cli, None
+        return nombre_cli, {
+            "codigo": int(row[1]),
+            "nombre": (str(row[2]).strip() if row[2] else None),
+        }
+    finally:
+        conn.close()
+
+
+# Cache de nombres de patrón: son fijos y el modal los pide de a uno.
+_CACHE_PATRON: dict[str, str | None] = {}
+
+
+def fetch_detalle_patron(patron: str) -> str | None:
+    """Nombre (DetallePatron) de un código patrón, o None si no se encuentra."""
+    p = (patron or "").strip()
+    if not p or p == SIN_PATRON:
+        return None
+    if p in _CACHE_PATRON:
+        return _CACHE_PATRON[p]
+    conn, cur = _conn()
+    try:
+        cur.execute(SQL_DETALLE_PATRON, (p,))
+        row = cur.fetchone()
+        nombre = (str(row[0]).strip() or None) if row and row[0] else None
+        _CACHE_PATRON[p] = nombre
+        return nombre
     finally:
         conn.close()
 
