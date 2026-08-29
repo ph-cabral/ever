@@ -29,31 +29,76 @@ from ventas import COMP_CODIGOS_EXCLUIDOS, _es_valido
 
 BASE_DATE = date(1800, 12, 28)  # Magnus guarda fechas como días desde esta base
 
-# Estados de CABECERA a excluir (p. ej. anuladas). Vacío = no excluir nada.
-# Confirmar códigos reales con Com_SituacionOC / Com_OrdCompCabecera.Estado.
-ESTADOS_CAB_EXCLUIR: tuple[int, ...] = ()
+# ── Clasificación de la OC (2026-08-28) ──────────────────────────────────────
+# Códigos de Com_OrdCompCabecera.Estado, verificados contra el reporte Magnus
+# de OC del mes: 1 pendiente de recibir · 2 cumplida · 3 cumplida parcialmente
+# · 4 cancelada.
+ESTADO_OC = {1: "PENDIENTE DE RECIBIR", 2: "CUMPLIDA",
+             3: "CUMPLIDA PARCIALMENTE", 4: "CANCELADA"}
+ESTADO_CANCELADA = 4
+
+# Estados de CABECERA a excluir SIEMPRE: una OC cancelada no cubre faltantes ni
+# cuenta como comprada en ningún reporte.
+ESTADOS_CAB_EXCLUIR: tuple[int, ...] = (ESTADO_CANCELADA,)
 
 _EXCL = (
     f"AND cab.Estado NOT IN ({','.join(str(e) for e in ESTADOS_CAB_EXCLUIR)})"
     if ESTADOS_CAB_EXCLUIR else ""
 )
 
+# Origen del artículo: StkFer_Articulos.NacionalImportado → Stk_TiposArticulos.
+# Descripcion ∈ {Nacional, Importado, Fabril, Generico, Original}.
+#   · Generico  = presupuestos de servicio (P.INDUSTRIA, P.MKT) — NUNCA son
+#                 compra de mercadería, se excluyen en todas las vistas.
+#   · Fabril    = producción interna (PRODUCCION HIDRAULICA / FUNDICION) — solo
+#                 se incluye cuando el consumidor lo pide (vistas de fábrica).
+#   · Original  = proveedor externo real, cuenta como nacional.
+# El join va por CodArticulo char = char (sin LTRIM/RTRIM) para que use índice:
+# SQL Server ignora los espacios finales al comparar.
+_JOIN_TIPO = """
+LEFT JOIN EVERWEAR.dbo.StkFer_Articulos   a_t ON a_t.CodArticulo = r.CodArticulo
+LEFT JOIN EVERWEAR.dbo.Stk_TiposArticulos t_t ON t_t.CodigoTipo  = a_t.NacionalImportado
+"""
+
+
+def _cond_tipo(incluir_fabril: bool = False) -> str:
+    """Filtro de origen para el WHERE. Sin tipo cargado ⇒ se trata como Nacional
+    (no se pierde la fila, que era el bug de poner t.Descripcion = 'Nacional')."""
+    excluidos = ["'Generico'"] if incluir_fabril else ["'Generico'", "'Fabril'"]
+    return f"AND ISNULL(t_t.Descripcion, 'Nacional') NOT IN ({', '.join(excluidos)})"
+
+
+def _dias(fecha: date) -> int:
+    """date → int días Magnus (base 1800-12-28), para filtrar por FecMovim en el
+    propio SQL. Es un literal constante, así que filtra bien y usa índice — a
+    diferencia de comparar una fecha calculada contra un parámetro `?`."""
+    return (fecha - BASE_DATE).days
+
+
 # Renglones de OC con saldo pendiente de recibir (Cantidad - CantidadCumplida).
-SQL_OC_PENDIENTES = f"""
+# `{_fecha}` lo completa fetch_ordenes_pendientes con el corte por FecMovim.
+SQL_OC_PENDIENTES = """
 SELECT
     cab.CompCentro                       AS CompCentro,
+    cab.CompNumero                       AS CompNumero,
     cab.NroOrdCompra                     AS NroOC,
-    cab.FecMovim                          AS FecMovim,
+    cab.FecMovim                         AS FecMovim,
+    cab.Estado                           AS Estado,
+    ISNULL(cab.NroImportacion, 0)        AS NroImportacion,
     LTRIM(RTRIM(r.CodArticulo))          AS CodArticu,
     r.Cantidad                           AS CantPedida,
     ISNULL(r.CantidadCumplida, 0)        AS CantRecibida,
     r.FecEntregaPactada                  AS FechaEntrega,
-    pr.RazonSocial                       AS Proveedor
+    pr.RazonSocial                       AS Proveedor,
+    ISNULL(t_t.Descripcion, 'Nacional')  AS TipoArticulo
 FROM EVERWEAR.dbo.Com_OrdCompRenglones r
 INNER JOIN EVERWEAR.dbo.Com_OrdCompCabecera cab ON cab.NroOrdCompra = r.NroOrdCompra
 LEFT  JOIN EVERWEAR.dbo.Com_Proveedores    pr  ON pr.CodProveed   = cab.CodProveed
+{_join_tipo}
 WHERE ISNULL(r.Cantidad, 0) - ISNULL(r.CantidadCumplida, 0) > 0
-  {_EXCL}
+  {_excl}
+  {_tipo}
+  {_fecha}
 """
 
 # Fecha de corte por defecto: solo se cruzan las OC hechas (FecMovim) desde acá.
@@ -76,7 +121,7 @@ def _safe(value):
 
 def _fecha_entrega(v):
     """ISO yyyy-mm-dd o None. FecEntregaPactada = int (días Magnus).
-    0 / sentinela ⇒ None ⇒ la vista lo muestra como 'Importación' (sin fecha aún)."""
+    0 / sentinela ⇒ None (renglón sin fecha de entrega pactada)."""
     if v is None:
         return None
     if isinstance(v, (date, datetime)):
@@ -109,7 +154,12 @@ def _to_date(v):
 
 
 def _nro_oc(centro, numero):
-    """Formatea como en Magnus: '0001-00014349' (CompCentro-NroOrdCompra)."""
+    """Formatea como en Magnus: '0001-00014700'.
+
+    OJO: el número que Magnus imprime y que sale en sus reportes es
+    CompCentro-CompNumero, NO NroOrdCompra (ese es el id interno con el que
+    joinean los renglones). Para la misma OC: NroOrdCompra 14582 =
+    comprobante 0001-00014700 (verificado 2026-08-28)."""
     try:
         c = int(centro) if centro is not None else 0
     except (TypeError, ValueError):
@@ -121,12 +171,17 @@ def _nro_oc(centro, numero):
     return f"{c:04d}-{n:08d}"
 
 
-def fetch_ordenes_pendientes(desde=None):
+def fetch_ordenes_pendientes(desde=None, incluir_fabril: bool = False):
     """Agrega por artículo lo pendiente de recibir de las OC.
 
     desde = 'YYYY-MM-DD' (o None → OC_DESDE_DEFAULT): solo se toman las OC cuyo
     FecMovim (fecha en que se hizo la orden) sea >= a esa fecha. Así las OC viejas
-    con saldo pendiente no cubren faltantes actuales."""
+    con saldo pendiente no cubren faltantes actuales. El corte va EN EL SQL
+    (literal int días-Magnus), no en Python: con volumen alto traer toda la OC
+    histórica para descartarla después era lo más caro de esta consulta.
+
+    incluir_fabril=True: suma también la producción interna (vistas de fábrica).
+    Los presupuestos genéricos nunca entran."""
     corte = None
     desde = desde or OC_DESDE_DEFAULT
     if desde:
@@ -135,11 +190,18 @@ def fetch_ordenes_pendientes(desde=None):
         except ValueError:
             corte = None
 
+    sql = SQL_OC_PENDIENTES.format(
+        _join_tipo=_JOIN_TIPO,
+        _excl=_EXCL,
+        _tipo=_cond_tipo(incluir_fabril),
+        _fecha=f"AND cab.FecMovim >= {_dias(corte)}" if corte else "",
+    )
+
     conn = get_connection("EVERWEAR")
     try:
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
-        cur.execute(SQL_OC_PENDIENTES)
+        cur.execute(sql)
         cols = [c[0] for c in cur.description]
 
         agg: dict[str, dict] = {}
@@ -148,21 +210,25 @@ def fetch_ordenes_pendientes(desde=None):
             cod = (str(d.get("CodArticu") or "")).strip()
             if not cod:
                 continue
-            # fecha de la orden (FecMovim) — se usa para el corte y también se
-            # expone como FechaOC (más temprana) para que los consumidores
-            # puedan armar un arribo estimado (FechaOC + N días) cuando no hay
-            # FecEntregaPactada confiable (Importacion=True, FechaEntrega=None).
+            # fecha de la orden (FecMovim) — se expone como FechaOC (más
+            # temprana) para que los consumidores puedan armar un arribo
+            # estimado (FechaOC + N días) cuando no hay FecEntregaPactada.
             fmov = _to_date(d.get("FecMovim"))
-            if corte is not None:
-                if fmov is None or fmov < corte:
-                    continue
             pend = float(_safe(d.get("CantPedida")) or 0) - float(_safe(d.get("CantRecibida")) or 0)
             if pend <= 0:
                 continue
             fecha = _fecha_entrega(d.get("FechaEntrega"))
             fmov_iso = fmov.isoformat() if fmov else None
-            nro = _nro_oc(d.get("CompCentro"), d.get("NroOC"))
+            nro = _nro_oc(d.get("CompCentro"), d.get("CompNumero"))
             prov = (str(d.get("Proveedor") or "")).strip() or None
+            tipo = (str(d.get("TipoArticulo") or "")).strip() or None
+            # Importación: dato REAL de la cabecera (NroImportacion != 0). Antes
+            # se infería de "renglón sin fecha de entrega", que marcaba como
+            # importado cualquier renglón nacional al que no le cargaron fecha.
+            try:
+                es_impo = int(_safe(d.get("NroImportacion")) or 0) != 0
+            except (TypeError, ValueError):
+                es_impo = False
 
             a = agg.get(cod)
             if not a:
@@ -173,15 +239,18 @@ def fetch_ordenes_pendientes(desde=None):
                     "FechaEntrega": fecha,    # se queda con la más temprana
                     "FechaOC": fmov_iso,      # fecha de la OC (FecMovim) más temprana
                     "Importacion": False,
+                    "TipoArticulo": tipo,
                     "NroOCs": [],
                 }
                 agg[cod] = a
             a["PorLlegar"] += pend
             if prov and not a["Proveedor"]:
                 a["Proveedor"] = prov
-            if fecha is None:
-                a["Importacion"] = True       # algún renglón sin fecha ⇒ importación
-            elif a["FechaEntrega"] is None or fecha < a["FechaEntrega"]:
+            if tipo and not a["TipoArticulo"]:
+                a["TipoArticulo"] = tipo
+            if es_impo:
+                a["Importacion"] = True
+            if fecha is not None and (a["FechaEntrega"] is None or fecha < a["FechaEntrega"]):
                 a["FechaEntrega"] = fecha
             if fmov_iso and (a["FechaOC"] is None or fmov_iso < a["FechaOC"]):
                 a["FechaOC"] = fmov_iso
@@ -200,7 +269,23 @@ def fetch_ordenes_pendientes(desde=None):
         conn.close()
 
 
-def fetch_ordenes_articulos_rango(desde: str, hasta: str):
+# Renglones de OC HECHAS en un rango (por FecMovim de la cabecera), sin importar
+# si ya se recibieron. `{_fecha}` = corte por rango, siempre presente.
+SQL_OC_RANGO = """
+SELECT
+    cab.FecMovim                         AS FecMovim,
+    LTRIM(RTRIM(r.CodArticulo))          AS CodArticu,
+    r.Cantidad                           AS Cantidad
+FROM EVERWEAR.dbo.Com_OrdCompRenglones r
+INNER JOIN EVERWEAR.dbo.Com_OrdCompCabecera cab ON cab.NroOrdCompra = r.NroOrdCompra
+{_join_tipo}
+WHERE cab.FecMovim BETWEEN {_d1} AND {_d2}
+  {_excl}
+  {_tipo}
+"""
+
+
+def fetch_ordenes_articulos_rango(desde: str, hasta: str, incluir_fabril: bool = False):
     """Artículos con al menos un renglón de Orden de Compra HECHA en el rango
     [desde, hasta] (por FecMovim de la cabecera) — a diferencia de
     fetch_ordenes_pendientes, ACÁ NO importa si ya se recibió o sigue
@@ -210,24 +295,15 @@ def fetch_ordenes_articulos_rango(desde: str, hasta: str):
     mes, cuántos tuvieron una OC ese mismo mes). Devuelve solo la lista de
     CodArticulo distintos (no cantidades) — es lo único que necesita el funnel.
 
-    NOTA rendimiento/riesgo: igual que fetch_ordenes_pendientes, NO hay filtro
-    de fecha en el WHERE de SQL — FecMovim puede venir como int días-Magnus o
-    como datetime nativo según el entorno, y _to_date ya resuelve ambos casos
-    en Python (mismo patrón ya probado en producción en esta función hermana).
-    Acá se pierde el filtro por "pendiente" que acotaba el volumen en esa
-    función, así que esta consulta trae MÁS filas (toda OC histórica). Si se
-    vuelve lento, agregar un corte adicional (p.ej. NroOrdCompra >= umbral).
-    """
+    El rango se filtra EN EL SQL (literales int días-Magnus): antes se traía
+    toda la OC histórica y se descartaba en Python."""
     d1 = datetime.strptime(str(desde)[:10], "%Y-%m-%d").date()
     d2 = datetime.strptime(str(hasta)[:10], "%Y-%m-%d").date()
 
-    sql = """
-    SELECT
-        cab.FecMovim                  AS FecMovim,
-        LTRIM(RTRIM(r.CodArticulo))   AS CodArticu
-    FROM EVERWEAR.dbo.Com_OrdCompRenglones r
-    INNER JOIN EVERWEAR.dbo.Com_OrdCompCabecera cab ON cab.NroOrdCompra = r.NroOrdCompra
-    """
+    sql = SQL_OC_RANGO.format(
+        _join_tipo=_JOIN_TIPO, _excl=_EXCL, _tipo=_cond_tipo(incluir_fabril),
+        _d1=_dias(d1), _d2=_dias(d2),
+    )
 
     conn = get_connection("EVERWEAR")
     try:
@@ -240,12 +316,8 @@ def fetch_ordenes_articulos_rango(desde: str, hasta: str):
         for row in cur.fetchall():
             d = dict(zip(cols, row))
             cod = (str(d.get("CodArticu") or "")).strip()
-            if not cod:
-                continue
-            fmov = _to_date(d.get("FecMovim"))
-            if fmov is None or fmov < d1 or fmov > d2:
-                continue
-            arts.add(cod)
+            if cod:
+                arts.add(cod)
 
         return {
             "total": len(arts),
@@ -257,42 +329,33 @@ def fetch_ordenes_articulos_rango(desde: str, hasta: str):
         conn.close()
 
 
-def fetch_compras_valorizado(desde: str, hasta: str):
+def fetch_compras_valorizado(desde: str, hasta: str, incluir_fabril: bool = False):
     """Unidades y $ de las Órdenes de Compra HECHAS en [desde, hasta] (por
     FecMovim de la cabecera) — mismo criterio que fetch_ordenes_articulos_rango
     (no importa si el renglón ya se recibió o sigue pendiente), pero acá SÍ se
     suman cantidades y se valoriza en $.
 
     El $ NO sale de la OC: Com_OrdCompRenglones no expone acá un costo de
-    compra confiable, y aunque lo tuviera, el pedido explícito de Pablo
-    (2026-08-04) es valorizar a precio de VENTA. Se usa el mismo criterio
-    "no hay tabla de lista de precios en el proyecto" que ya usa deposito.py
-    (fetch_faltantes_ot, /deposito/faltantes): el ÚLTIMO PrecioVenta visto
-    para ese CodArticulo en CUALQUIER pedido de Ven_PedRenPendientes.
-    Aproximado a propósito: puede no reflejar el precio vigente si cambió
-    después del último pedido con ese artículo; los artículos sin ningún
-    PrecioVenta encontrado quedan valorizados en 0 y se cuentan en
-    'articulosSinPrecio' (para poder avisar en la vista sin romperla).
+    compra confiable, y aunque lo tuviera, el criterio definido es valorizar a
+    precio de VENTA. Se usa el mismo criterio "no hay tabla de lista de precios
+    en el proyecto" que ya usa deposito.py (fetch_faltantes_ot,
+    /deposito/faltantes): el ÚLTIMO PrecioVenta visto para ese CodArticulo en
+    CUALQUIER pedido de Ven_PedRenPendientes. Aproximado a propósito: puede no
+    reflejar el precio vigente si cambió después del último pedido con ese
+    artículo; los artículos sin ningún PrecioVenta encontrado quedan
+    valorizados en 0 y se cuentan en 'articulosSinPrecio'.
 
     Para el selector de rango libre de /compras, independiente del mes del
     funnel de /compras/metricas.
 
-    NOTA rendimiento/riesgo: igual que fetch_ordenes_articulos_rango, NO hay
-    filtro de fecha en el WHERE de SQL (FecMovim puede venir como int
-    días-Magnus o datetime nativo) — se filtra en Python con _to_date. Trae
-    toda la OC histórica antes de filtrar; si se vuelve lento, agregar un
-    corte adicional (p. ej. NroOrdCompra >= umbral)."""
+    El rango se filtra EN EL SQL (literales int días-Magnus)."""
     d1 = datetime.strptime(str(desde)[:10], "%Y-%m-%d").date()
     d2 = datetime.strptime(str(hasta)[:10], "%Y-%m-%d").date()
 
-    sql = """
-    SELECT
-        cab.FecMovim                  AS FecMovim,
-        LTRIM(RTRIM(r.CodArticulo))   AS CodArticu,
-        r.Cantidad                    AS Cantidad
-    FROM EVERWEAR.dbo.Com_OrdCompRenglones r
-    INNER JOIN EVERWEAR.dbo.Com_OrdCompCabecera cab ON cab.NroOrdCompra = r.NroOrdCompra
-    """
+    sql = SQL_OC_RANGO.format(
+        _join_tipo=_JOIN_TIPO, _excl=_EXCL, _tipo=_cond_tipo(incluir_fabril),
+        _d1=_dias(d1), _d2=_dias(d2),
+    )
 
     conn = get_connection("EVERWEAR")
     try:
@@ -306,9 +369,6 @@ def fetch_compras_valorizado(desde: str, hasta: str):
             d = dict(zip(cols, row))
             cod = (str(d.get("CodArticu") or "")).strip()
             if not cod:
-                continue
-            fmov = _to_date(d.get("FecMovim"))
-            if fmov is None or fmov < d1 or fmov > d2:
                 continue
             cant = float(_safe(d.get("Cantidad")) or 0)
             unidades[cod] = unidades.get(cod, 0.0) + cant
@@ -367,6 +427,7 @@ def fetch_compras_valorizado(desde: str, hasta: str):
         }
     finally:
         conn.close()
+
 
 
 # ── Consumo mensual de UN artículo + stock por depósito (/compras/consumo) ────

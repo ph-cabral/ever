@@ -418,13 +418,16 @@ def deposito_ot_diferencias(
 
 # ── Compras: OC pendientes de recibir por artículo (lo que "va a llegar") ─────
 @app.get("/compras/ordenes-pendientes")
-def compras_ordenes_pendientes(desde: str | None = Query(default=None)):
+def compras_ordenes_pendientes(
+    desde: str | None = Query(default=None),
+    fabril: int = Query(default=0),
+):
     """OC abiertas, pendiente de recibir (Pedida - Recibida) agregado por artículo.
     Solo lectura sobre Magnus; se cruza con faltantes en /compras/faltantes.
     `desde`='YYYY-MM-DD' (default OC_DESDE_DEFAULT): solo OC con FecMovim >= desde,
     para que las OC viejas no cubran faltantes actuales."""
     try:
-        return fetch_ordenes_pendientes(desde)
+        return fetch_ordenes_pendientes(desde, incluir_fabril=bool(fabril))
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
@@ -449,13 +452,14 @@ def compras_ingresos(
 def compras_ordenes_mes(
     desde: str = Query(...),
     hasta: str = Query(...),
+    fabril: int = Query(default=0),
 ):
     """Artículos (CodArticulo distintos) con al menos un renglón de OC hecho
     en [desde, hasta] por FecMovim de la cabecera — sin importar si ya se
     recibió o sigue pendiente (a diferencia de /compras/ordenes-pendientes).
     Para /compras/metricas: funnel faltantes del mes → con OC ese mes."""
     try:
-        return fetch_ordenes_articulos_rango(desde, hasta)
+        return fetch_ordenes_articulos_rango(desde, hasta, incluir_fabril=bool(fabril))
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
@@ -466,12 +470,13 @@ def compras_ordenes_mes(
 def compras_compras_valorizado(
     desde: str = Query(...),
     hasta: str = Query(...),
+    fabril: int = Query(default=0),
 ):
     """Artículos con OC hecha en [desde, hasta]: unidades totales (Cantidad de
     Com_OrdCompRenglones) y $ valorizado al último PrecioVenta visto en
     cualquier pedido (Ven_PedRenPendientes) — NO al costo de la OC."""
     try:
-        return fetch_compras_valorizado(desde, hasta)
+        return fetch_compras_valorizado(desde, hasta, incluir_fabril=bool(fabril))
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

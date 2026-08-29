@@ -161,7 +161,15 @@ export async function GET(req: NextRequest) {
   // agrupado, punto 3) — el param ?historico= del front quedó sin efecto.
   qs.set("historico", "1");
   const faltUrl = `${API_URL}/deposito/faltantes${qs.toString() ? `?${qs}` : ""}`;
-  const ocUrl = `${API_URL}/compras/ordenes-pendientes?desde=${encodeURIComponent(ocDesde)}`;
+  // fabril=1: incluye las OC de producción interna (PRODUCCION HIDRAULICA /
+  // FUNDICION). Lo manda solo /fabrica/faltantes (ver app/api/fabrica/
+  // faltantes/route.ts); en compras/ventas esas OC no son compra y quedan
+  // afuera, igual que los presupuestos genéricos (P.INDUSTRIA / P.MKT), que
+  // no entran nunca (indicadores-api/compras.py, _cond_tipo).
+  const fabril = sp.get("fabril") === "1";
+  const ocUrl =
+    `${API_URL}/compras/ordenes-pendientes?desde=${encodeURIComponent(ocDesde)}` +
+    (fabril ? "&fabril=1" : "");
 
   // 1) faltantes (obligatorio) + OC (best-effort) en paralelo
   const [faltRes, ocRes] = await Promise.allSettled([
