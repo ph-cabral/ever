@@ -292,8 +292,10 @@ def fetch_ordenes_articulos_rango(desde: str, hasta: str, incluir_fabril: bool =
     pendiente: solo interesa si la OC se generó ese período.
 
     Para /compras/metricas (funnel mensual: de los artículos faltantes del
-    mes, cuántos tuvieron una OC ese mismo mes). Devuelve solo la lista de
-    CodArticulo distintos (no cantidades) — es lo único que necesita el funnel.
+    mes, cuántos tuvieron una OC ese mismo mes). Devuelve los CodArticulo
+    distintos Y las unidades pedidas por artículo ("unidades"): el funnel
+    ahora muestra items + unidades en cada columna. La cantidad ya venía en
+    SQL_OC_RANGO, así que sumarla no agrega ninguna consulta.
 
     El rango se filtra EN EL SQL (literales int días-Magnus): antes se traía
     toda la OC histórica y se descartaba en Python."""
@@ -312,16 +314,19 @@ def fetch_ordenes_articulos_rango(desde: str, hasta: str, incluir_fabril: bool =
         cur.execute(sql)
         cols = [c[0] for c in cur.description]
 
-        arts: set[str] = set()
+        unidades: dict[str, float] = {}
         for row in cur.fetchall():
             d = dict(zip(cols, row))
             cod = (str(d.get("CodArticu") or "")).strip()
-            if cod:
-                arts.add(cod)
+            if not cod:
+                continue
+            unidades[cod] = unidades.get(cod, 0.0) + float(_safe(d.get("Cantidad")) or 0)
 
         return {
-            "total": len(arts),
-            "articulos": sorted(arts),
+            "total": len(unidades),
+            "articulos": sorted(unidades.keys()),
+            "unidades": {c: round(v, 2) for c, v in unidades.items()},
+            "totalUnidades": round(sum(unidades.values()), 2),
             "desde": d1.isoformat(),
             "hasta": d2.isoformat(),
         }

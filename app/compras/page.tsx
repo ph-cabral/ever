@@ -11,8 +11,8 @@ import PieChartCard from "@/app/rrhh/components/charts/PieChartCard";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// /compras/metricas — funnel mensual en ITEMS (artículos distintos, no
-// unidades): Faltantes detectados en el mes → de esos, cuántos tuvieron una
+// /compras/metricas — funnel mensual en ITEMS (artículos distintos) Y
+// UNIDADES en cada etapa: Faltantes detectados en el mes → de esos, cuántos tuvieron una
 // Orden de Compra ese mismo mes → de esos, cuántos ya ingresaron a la empresa
 // ese mismo mes. Fuente: /api/compras/metricas (ver comentario ahí para el
 // detalle de cada columna). Selector de mes, default = mes actual.
@@ -21,7 +21,8 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 interface Columna {
   key: string;
   label: string;
-  total: number;
+  total: number;       // items = artículos distintos
+  unidades: number;    // unidades de esa etapa (faltantes / pedidas en OC / ingresadas)
   articulos: string[];
 }
 interface Grupo {
@@ -228,6 +229,11 @@ export default function ComprasMetricasPage() {
     (key: string) => data?.columnas.find((c) => c.key === key)?.total ?? 0,
     [data],
   );
+  // Unidades de la etapa (mismo recorte del funnel que los items).
+  const unid = useCallback(
+    (key: string) => data?.columnas.find((c) => c.key === key)?.unidades ?? 0,
+    [data],
+  );
 
   return (
     <div className="min-h-screen bg-[#111111] text-white">
@@ -283,7 +289,7 @@ export default function ComprasMetricasPage() {
             <BarChart3 size={20} /> Faltantes, OC e ingresos
           </h1>
           <p className="text-zinc-500 text-sm mt-1">
-            Cantidad de artículos distintos (items, no unidades) — de los faltantes detectados en{" "}
+            Items (artículos distintos) y unidades de cada etapa — de los faltantes detectados en{" "}
             {fmtMesLabel(mes)}, cuántos tuvieron una Orden de Compra ese mismo mes y, de esos, cuántos ya
             ingresaron a la empresa. La torta clasifica esos mismos faltantes por origen: Importados,
             Nacionales o EVER WEAR INDUSTRIAL (proveedor propio, se excluye de los otros dos grupos).
@@ -316,22 +322,22 @@ export default function ComprasMetricasPage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <KpiCard
             label="Faltantes del mes"
-            value={col("faltantes")}
-            hint="Artículos marcados sin existencia"
+            value={`${fmtNum(col("faltantes"))} items · ${fmtNum(unid("faltantes"))} u.`}
+            hint="Artículos marcados sin existencia y sus unidades pendientes"
             icon={PackageX}
             accent="orange"
           />
           <KpiCard
             label="Con OC ese mes"
-            value={col("conOC")}
-            hint="De los faltantes, con Orden de Compra"
+            value={`${fmtNum(col("conOC"))} items · ${fmtNum(unid("conOC"))} u.`}
+            hint="De los faltantes, con Orden de Compra — unidades pedidas en esas OC"
             icon={ShoppingCart}
             accent="blue"
           />
           <KpiCard
             label="Ingresados ese mes"
-            value={col("ingresados")}
-            hint="De esos, ya recibidos en depósito"
+            value={`${fmtNum(col("ingresados"))} items · ${fmtNum(unid("ingresados"))} u.`}
+            hint="De esos, ya recibidos en depósito — unidades ingresadas por remito"
             icon={PackageCheck}
             accent="green"
           />

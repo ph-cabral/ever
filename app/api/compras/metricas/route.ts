@@ -27,6 +27,17 @@ export const maxDuration = 60;
 //     un remito de ingreso x OC ya concretado ese mismo mes (indicadores-api
 //     GET /compras/ingresos, por FecComprobante).
 //
+//   Cada columna informa items (artículos distintos) Y unidades:
+//     · Faltantes  -> CantPend de los renglones sin existencia del mes
+//       (GET /deposito/faltantes, mismo fetch que ya se hace para la torta).
+//     · Con OC     -> Cantidad de los renglones de OC del mes, solo de los
+//       artículos de la columna (GET /compras/ordenes-mes → `unidades`).
+//     · Ingresados -> CantidadIngresada de los remitos del mes, solo de los
+//       artículos de la columna (GET /compras/ingresos → CantidadIngresada).
+//   Las unidades siguen el mismo recorte del funnel que los items (col2 ⊆ col1,
+//   col3 ⊆ col2), así las tres columnas hablan del mismo conjunto y no cuesta
+//   ninguna consulta extra: los 3 endpoints ya se llamaban.
+//
 //   Es un funnel estricto (decisión del usuario): col2 ⊆ col1, col3 ⊆ col2.
 //   Los sets B y C (Magnus, indicadores-api) son best-effort: si alguno no
 //   responde, la columna correspondiente (y las que dependen de ella) se
@@ -86,6 +97,11 @@ function mesRange(mes: string | null) {
   return { mes: `${yStr}-${mStr}`, desde, hasta };
 }
 
+// Suma las unidades de un map solo para los artículos de la columna (el
+// funnel ya viene recortado: col2 ⊆ col1, col3 ⊆ col2).
+const sumUnid = (arts: string[], map: Map<string, number>) =>
+  Math.round(arts.reduce((a, c) => a + (map.get(c) ?? 0), 0) * 100) / 100;
+
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const { mes, desde, hasta } = mesRange(sp.get("mes"));
@@ -114,12 +130,16 @@ export async function GET(req: NextRequest) {
 
   // 2) Set B: artículos con OC hecha en el mes (Magnus, best-effort).
   let setB = new Set<string>();
+  const ocUnidMap = new Map<string, number>();
   let ocWarn = false;
   try {
     const ocJson = await getJson(
       `${API_URL}/compras/ordenes-mes?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`,
     );
     setB = new Set((ocJson.articulos ?? []) as string[]);
+    for (const [cod, u] of Object.entries((ocJson.unidades ?? {}) as Record<string, number>)) {
+      ocUnidMap.set(cod, Number(u) || 0);
+    }
   } catch (e) {
     ocWarn = true;
     console.error("GET /api/compras/metricas — ordenes-mes", e);
@@ -127,17 +147,22 @@ export async function GET(req: NextRequest) {
 
   // 3) Set C: artículos con remito de ingreso x OC concretado en el mes
   // (Magnus, best-effort).
-  let setC = new Set<string>();
+  const setC = new Set<string>();
+  const ingUnidMap = new Map<string, number>();
   let ingresoWarn = false;
   try {
     const ingJson = await getJson(
       `${API_URL}/compras/ingresos?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`,
     );
-    setC = new Set(
-      ((ingJson.rows ?? []) as { CodArticulo: string }[])
-        .map((r) => (r.CodArticulo ?? "").trim())
-        .filter(Boolean),
-    );
+    for (const r of (ingJson.rows ?? []) as {
+      CodArticulo: string;
+      CantidadIngresada?: number;
+    }[]) {
+      const cod = (r.CodArticulo ?? "").trim();
+      if (!cod) continue;
+      setC.add(cod);
+      ingUnidMap.set(cod, (ingUnidMap.get(cod) ?? 0) + (Number(r.CantidadIngresada) || 0));
+    }
   } catch (e) {
     ingresoWarn = true;
     console.error("GET /api/compras/metricas — ingresos", e);
@@ -257,9 +282,27 @@ export async function GET(req: NextRequest) {
     pctUnidades,
     pctImporte,
     columnas: [
-      { key: "faltantes", label: "Faltantes", total: faltantes.length, articulos: faltantes },
-      { key: "conOC", label: "Con OC", total: conOC.length, articulos: conOC },
-      { key: "ingresados", label: "Ingresados", total: ingresados.length, articulos: ingresados },
+      {
+        key: "faltantes",
+        label: "Faltantes",
+        total: faltantes.length,
+        unidades: faltantesUnidades,
+        articulos: faltantes,
+      },
+      {
+        key: "conOC",
+        label: "Con OC",
+        total: conOC.length,
+        unidades: sumUnid(conOC, ocUnidMap),
+        articulos: conOC,
+      },
+      {
+        key: "ingresados",
+        label: "Ingresados",
+        total: ingresados.length,
+        unidades: sumUnid(ingresados, ingUnidMap),
+        articulos: ingresados,
+      },
     ],
     torta: [
       { key: "importados", label: "Importados", total: importados },
