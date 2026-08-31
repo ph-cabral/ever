@@ -33,6 +33,26 @@ export interface PermisosSector {
   ocultos: string[]; // keys/hrefs ocultos del inicio (con acceso)
 }
 
+/**
+ * Vistas que abre la bandera `usuario.bulonesAccesoTotal` (2026-08-31).
+ *
+ * La bandera ya existía para que un no-admin vea el 100% de la empresa en
+ * /ventas/bulones (ver lib/ventas/bulonesAcceso.ts). Desde acá pasa a ser
+ * además la LLAVE DE ACCESO a las vistas de bulonería: quien la tiene entra
+ * aunque su sector no las tenga habilitadas.
+ *
+ * Por qué: los permisos de vista son por SECTOR, así que habilitar
+ * /ventas/presupuestos en el sector "ventas" se la daría a TODOS los
+ * vendedores. El responsable de la línea de bulonería no es un sector, es una
+ * persona — y ya está identificada por esta bandera, editable por un admin en
+ * /admin/usuarios sin redeploy.
+ *
+ * Sólo SUMA permisos: no le saca nada a nadie, y un usuario sin la bandera
+ * sigue viendo exactamente lo que le da su sector.
+ */
+const BULONES_MOD: ModuleKey = "ventas";
+const BULONES_VISTAS = ["/ventas/bulones", "/ventas/presupuestos"];
+
 /** Todas las vistas de los módulos habilitados (default cuando no hay selección guardada). */
 function allViewsForMods(mods: ModuleKey[]): string[] {
   return mods.flatMap((m) => viewsForModule(m).map((v) => v.href));
@@ -59,15 +79,29 @@ export async function permisosForSector(sector?: string | null): Promise<Permiso
   return { mods, vistas, ocultos };
 }
 
-/** Permisos efectivos de un usuario: ADMIN ve todo; el resto, por su sector. */
+/**
+ * Permisos efectivos de un usuario: ADMIN ve todo; el resto, por su sector
+ * MÁS los extras que le dé su ficha (hoy: bulonesAccesoTotal, ver arriba).
+ */
 export async function permisosForUsuario(opts: {
   rol: string;
   sector?: string | null;
+  bulonesAccesoTotal?: boolean | null;
 }): Promise<PermisosSector> {
   if (opts.rol === "ADMIN") {
     return { mods: [...ALL_MODULE_KEYS], vistas: [...ALL_VIEW_HREFS], ocultos: [] };
   }
-  return permisosForSector(opts.sector);
+  const base = await permisosForSector(opts.sector);
+  if (!opts.bulonesAccesoTotal) return base;
+  // Sin filtrar por isViewHref a propósito: si el nav generado todavía no
+  // registró la vista, un href de más en la cookie es inofensivo (el
+  // middleware sólo pregunta si está en la lista), mientras que filtrarlo
+  // dejaría al responsable de bulonería afuera sin ningún error visible.
+  return {
+    mods: base.mods.includes(BULONES_MOD) ? base.mods : [...base.mods, BULONES_MOD],
+    vistas: [...new Set([...base.vistas, ...BULONES_VISTAS])],
+    ocultos: base.ocultos,
+  };
 }
 
 // --- Compat: helpers viejos que devuelven solo los módulos ---

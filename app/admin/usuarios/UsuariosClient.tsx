@@ -326,14 +326,22 @@ export function UsuariosClient() {
  * código — ahora lo asigna el admin con un click, y sale de la bandera
  * `usuario.bulonesAccesoTotal` (ver lib/ventas/bulonesAcceso.ts).
  *
- * Alcance: SÓLO /ventas/bulones. Un usuario con "toda la empresa" acá sigue
- * viendo únicamente su cartera en /ventas/vendedor y en el resto de la app.
+ * Alcance: la línea de bulonería, o sea /ventas/bulones y /ventas/presupuestos.
+ * Un usuario con "toda la empresa" acá sigue viendo únicamente su cartera en
+ * /ventas/vendedor y en el resto de la app.
+ *
+ * Desde 2026-08-31 la bandera hace DOS cosas (ver lib/auth/permissions.ts):
+ *   1. QUÉ DATOS ve dentro de esas vistas: toda la empresa en vez de su
+ *      cartera. Toma efecto en la próxima consulta, sin relogin — se resuelve
+ *      en vivo contra Postgres (ver resolverAccesoVendedor).
+ *   2. SI PUEDE ENTRAR a esas vistas, aunque su sector no las tenga
+ *      habilitadas. Los permisos de vista son por sector, así que ésta es la
+ *      única forma de dárselas a una persona sola (el responsable de la
+ *      línea) sin dárselas a todos los vendedores. Esto viaja horneado en la
+ *      cookie: recién le cambia el acceso CUANDO VUELVE A LOGUEAR.
  *
  * Los ADMIN no se muestran conmutables: ya ven todo en cualquier vista, la
  * bandera no les cambia nada.
- *
- * Toma efecto en la próxima consulta del usuario, sin relogin: el acceso se
- * resuelve en vivo contra Postgres (ver resolverAccesoVendedor).
  */
 function CeldaBulones({
   usuario,
@@ -360,8 +368,8 @@ function CeldaBulones({
       onClick={() => onCambiar(!total)}
       title={
         total
-          ? "Ve toda la empresa en Ventas → Bulonería. Click para volver a filtrarlo por su vendedor."
-          : "Ve sólo los clientes de su vendedor en Ventas → Bulonería. Click para darle toda la empresa."
+          ? "Entra a Ventas → Bulonería y Presupuestos, y ahí ve toda la empresa. Click para volver a filtrarlo por su vendedor (el acceso a las vistas se le va en el próximo login)."
+          : "Ve sólo los clientes de su vendedor en Ventas → Bulonería. Click para darle toda la empresa + acceso a Presupuestos (aplica cuando vuelva a loguear)."
       }
       className={
         "rounded-full px-2 py-0.5 text-xs transition disabled:opacity-50 " +

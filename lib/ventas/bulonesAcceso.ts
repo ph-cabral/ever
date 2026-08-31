@@ -8,9 +8,14 @@ import { resolverAccesoVendedor, type AccesoVendedor } from "./vendedorAcceso";
  * vista de BULONERÍA tienen que ver el 100% de la consulta (toda la
  * empresa), porque manejan la línea entera y no una cartera.
  *
- * La excepción es SÓLO para /ventas/bulones: en /ventas/vendedor y en el
- * resto de la app esos usuarios siguen viendo únicamente su cartera (por eso
- * esto vive en un archivo aparte y no dentro de resolverAccesoVendedor).
+ * La excepción es SÓLO para las vistas de bulonería (/ventas/bulones y, desde
+ * 2026-08-31, /ventas/presupuestos): en /ventas/vendedor y en el resto de la
+ * app esos usuarios siguen viendo únicamente su cartera (por eso esto vive en
+ * un archivo aparte y no dentro de resolverAccesoVendedor).
+ *
+ * La misma bandera decide además si el usuario PUEDE ENTRAR a esas vistas
+ * aunque su sector no las tenga habilitadas — ver lib/auth/permissions.ts.
+ * Acá sólo se resuelve QUÉ DATOS ve una vez adentro.
  *
  * Quién la tiene lo decide un ADMIN desde /admin/usuarios, columna
  * "Bulonería" (bandera `usuario.bulonesAccesoTotal` en Postgres, ver

@@ -8,10 +8,14 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // Proxy -> FastAPI indicadores-api (/ventas/presupuestos/bulones) para
-// /ventas/presupuestos (pedido de Pablo 2026-08-31: ver los presupuestos de
-// bulonería separados por estado). Mismo contrato y MISMA resolución de
-// acceso que /api/ventas/bulones/*: admin = toda la empresa; no-admin = sólo
-// lo suyo, resuelto server-side y NUNCA tomado del query string.
+// /ventas/presupuestos (2026-08-31): los presupuestos de bulonería separados
+// por estado. Mismo contrato y MISMA resolución de acceso que
+// /api/ventas/bulones/*: admin = toda la empresa; no-admin = sólo lo suyo,
+// resuelto server-side y NUNCA tomado del query string.
+//
+// Quién ENTRA a la vista sale de la misma bandera `bulonesAccesoTotal`
+// (lib/auth/permissions.ts): los permisos de vista son por sector, y esta
+// pantalla es del responsable de la línea, no de todo el sector ventas.
 //
 // Diferencia de criterio con /api/ventas/bulones/*: allá "lo suyo" es la
 // cartera de clientes del vendedor; acá es el vendedor que CARGÓ el

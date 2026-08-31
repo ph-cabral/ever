@@ -44,6 +44,10 @@ export async function POST(req: NextRequest) {
   const { mods, vistas, ocultos } = await permisosForUsuario({
     rol: usuario.rol,
     sector: usuario.sector,
+    // Los permisos viajan HORNEADOS en la cookie: prender/apagar la bandera en
+    // /admin/usuarios recién le cambia el acceso al usuario cuando vuelve a
+    // loguear (mismo comportamiento que /admin/permisos).
+    bulonesAccesoTotal: usuario.bulonesAccesoTotal,
   });
   const { token, maxAge } = signSession({
     uid: usuario.id,
