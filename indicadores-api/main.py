@@ -29,6 +29,11 @@ from ventas import (
 # /ventas/bulones — misma vista que /ventas/vendedor pero acotada a la línea
 # BULONERÍA, con el corte por CÓDIGO PATRÓN y un ranking extra de vendedores
 # (pedido de Pablo 2026-08-26). Ver bulones.py.
+# /ventas/presupuestos — presupuestos de bulonería (CodComp 45) separados por
+# estado. El ranking de VENTAS del pie de esa vista reusa los endpoints de
+# /ventas/bulones, acá sólo van los presupuestos. Ver presupuestos.py.
+from presupuestos import fetch_presupuestos_bulones
+
 from bulones import (
     fetch_top_clientes as fetch_bulones_top_clientes,
     fetch_top_patrones as fetch_bulones_top_patrones,
@@ -878,6 +883,27 @@ def bulones_top_vendedores(
     """Ranking de vendedores por bulonería vendida a su cartera."""
     try:
         return fetch_bulones_top_vendedores(vendedor=vendedor, limit=limit, desde=desde, hasta=hasta)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+
+# ── /ventas/presupuestos ───────────────────────────────────────────────────
+@app.get("/ventas/presupuestos/bulones")
+def presupuestos_bulones(
+    vendedor: int | None = Query(default=None, description="No-admin: sólo los presupuestos que cargó él"),
+    desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: mes en curso)"),
+    hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: = desde)"),
+    forzar: bool = Query(default=False, description="Saltea el cache de 5 min"),
+):
+    """Presupuestos de BULONERÍA (Ven_CodCom 45) del rango, con renglones y
+    resumen por estado. Default: mes en curso (a diferencia de los rankings de
+    ventas, que usan la ventana fija de 12 meses cerrados). Ver
+    presupuestos.py."""
+    try:
+        return fetch_presupuestos_bulones(vendedor=vendedor, desde=desde, hasta=hasta,
+                                          forzar=forzar)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
