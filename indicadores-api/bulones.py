@@ -334,10 +334,29 @@ GROUP BY v.VendedorCodigo, LTRIM(RTRIM(v.VendedorNombre))
                 "unidades": round(float(_safe(unid) or 0), 2),
                 "monto": round(float(_safe(monto) or 0), 2),
             })
-        por_u = sorted((i for i in items if i["unidades"] > 0),
-                       key=lambda x: x["unidades"], reverse=True)
-        por_m = sorted((i for i in items if i["monto"] > 0),
-                       key=lambda x: x["monto"], reverse=True)
+        # PADRÓN ÚNICO para las dos listas (2026-08-31). A diferencia de
+        # patrones/clientes, acá las filas son PERSONAS y el que las mira sabe
+        # quiénes son: si alguien está en $ y no en Unidades, se lee como un
+        # bug ("falta un vendedor"), no como un dato.
+        #
+        # Pasa de verdad: monto y unidades salen de la MISMA Cantidad
+        # (_CANT / _MONTO), así que un vendedor no puede tener monto ≠ 0 con
+        # cantidad 0. Lo que sí puede es quedar con unidades NETAS <= 0 y
+        # monto NETO > 0 — una nota de crédito por muchas unidades baratas
+        # contra ventas de pocas unidades caras (o una devolución con
+        # cantidad negativa dentro del mismo comprobante). Filtrar cada lista
+        # por SU métrica lo hacía desaparecer del ranking por unidades.
+        #
+        # Criterio: entra todo el que tuvo ACTIVIDAD neta en el período
+        # (cualquiera de las dos métricas distinta de cero), y cada lista se
+        # ordena por la suya — los <= 0 caen solos al final. El front muestra
+        # el número real y les da 0% de participación (ver
+        # app/ventas/presupuestos/page.tsx). Patrones y clientes siguen
+        # filtrando por su métrica: ahí las listas son largas y anónimas, y un
+        # patrón en cero no le falta a nadie.
+        con_actividad = [i for i in items if i["unidades"] != 0 or i["monto"] != 0]
+        por_u = sorted(con_actividad, key=lambda x: x["unidades"], reverse=True)
+        por_m = sorted(con_actividad, key=lambda x: x["monto"], reverse=True)
         return _guardar(key, {
             "desde": f"{desde_ym[0]:04d}-{desde_ym[1]:02d}",
             "hasta": f"{hasta_ym[0]:04d}-{hasta_ym[1]:02d}",

@@ -17,7 +17,8 @@ from deposito import (
     PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN,
 )
 from compras import (
-    fetch_ordenes_pendientes, fetch_ordenes_articulos_rango, fetch_compras_valorizado,
+    fetch_ordenes_pendientes, fetch_ordenes_articulos_rango, fetch_ordenes_detalle_rango,
+    fetch_compras_valorizado,
     fetch_consumo_articulo, fetch_consumo_articulos, fetch_lineas,
     fetch_lineas_por_articulos,
 )
@@ -465,6 +466,21 @@ def compras_ordenes_mes(
     Para /compras/metricas: funnel faltantes del mes → con OC ese mes."""
     try:
         return fetch_ordenes_articulos_rango(desde, hasta, incluir_fabril=bool(fabril))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+# ── Compras: detalle por artículo de las OC del mes (export a Excel) ─────────
+@app.get("/compras/ordenes-detalle")
+def compras_ordenes_detalle(
+    desde: str = Query(...),
+    hasta: str = Query(...),
+    fabril: int = Query(default=0),
+):
+    """Mismo recorte que /compras/ordenes-mes, pero una fila por artículo con
+    los NÚMEROS de OC ('0001-00014700'), proveedor, descripción y fecha de la
+    última OC. Para el export a Excel de /compras."""
+    try:
+        return fetch_ordenes_detalle_rango(desde, hasta, incluir_fabril=bool(fabril))
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

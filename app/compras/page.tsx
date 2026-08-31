@@ -2,8 +2,9 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageX, ShoppingCart, PackageCheck, BarChart3,
-  Package, Wallet, Percent,
+  Package, Wallet, Percent, Download,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import { InicioButton } from "@/components/ui/InicioButton";
 import KpiCard from "@/app/rrhh/components/KpiCard";
 import BarChartCard from "@/app/rrhh/components/charts/BarChartCard";
@@ -44,6 +45,10 @@ interface Resp {
   pedidosMesImporte: number;
   pctUnidades: number | null;
   pctImporte: number | null;
+  // Toda la OC del mes (sin recortar por faltantes) — denominador de la card
+  // "Con OC ese mes", que por el funnel solo cuenta los artículos faltantes.
+  ocTotalItems: number;
+  ocTotalUnidades: number;
   columnas: Columna[];
   torta: Grupo[];
 }
@@ -235,6 +240,77 @@ export default function ComprasMetricasPage() {
     [data],
   );
 
+  // Export a Excel: una fila por artículo del mes con faltante / OC (y sus
+  // números) / ingreso (y sus remitos). Los datos se piden recién al apretar el
+  // botón (/api/compras/detalle-mes) — es la consulta más pesada de la vista y
+  // no tiene sentido pagarla en cada carga de página. El .xlsx se arma en el
+  // browser, mismo patrón que /compras/pases.
+  const [exportando, setExportando] = useState(false);
+
+  const exportar = useCallback(async () => {
+    setExportando(true);
+    try {
+      const res = await fetch(`/api/compras/detalle-mes?mes=${encodeURIComponent(mes)}`, {
+        cache: "no-store",
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+
+      const filas = (j.rows ?? []).map(
+        (r: {
+          codArticulo: string;
+          nombre: string | null;
+          proveedor: string | null;
+          esFaltante: boolean;
+          cantFaltante: number;
+          cantOC: number;
+          nroOCs: string[];
+          fechaUltimaOC: string | null;
+          cantIngresada: number;
+          nroRemitos: string[];
+          fechaUltimoIngreso: string | null;
+        }) => ({
+          "Código": r.codArticulo,
+          "Artículo": r.nombre || "",
+          Proveedor: r.proveedor || "",
+          "¿Faltante?": r.esFaltante ? "Sí" : "No",
+          "Cant. faltante": r.cantFaltante,
+          "Cant. en OC": r.cantOC,
+          "N° de OC": r.nroOCs.join(", "),
+          "Última OC": r.fechaUltimaOC || "",
+          "Cant. ingresada": r.cantIngresada,
+          "N° de remitos": r.nroRemitos.join(", "),
+          "Último ingreso": r.fechaUltimoIngreso || "",
+        }),
+      );
+      if (!filas.length) {
+        setError("No hay movimientos para exportar en ese mes");
+        return;
+      }
+
+      const ws = XLSX.utils.json_to_sheet(filas);
+      const cols = Object.keys(filas[0]);
+      ws["!cols"] = cols.map((c) => {
+        let max = c.length;
+        for (const f of filas) max = Math.max(max, String((f as Record<string, unknown>)[c] ?? "").length);
+        return { wch: Math.min(Math.max(max + 2, 8), 60) };
+      });
+      ws["!autofilter"] = { ref: XLSX.utils.encode_range({
+        s: { c: 0, r: 0 },
+        e: { c: cols.length - 1, r: filas.length },
+      }) };
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Faltantes OC e ingresos");
+      XLSX.writeFile(wb, `compras_faltantes_oc_ingresos_${mes}.xlsx`);
+
+      if ((j.warns ?? []).length) setError((j.warns as string[]).join(" · "));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo exportar");
+    } finally {
+      setExportando(false);
+    }
+  }, [mes]);
+
   return (
     <div className="min-h-screen bg-[#111111] text-white">
       {(loading || error) && (
@@ -271,6 +347,15 @@ export default function ComprasMetricasPage() {
             onChange={(e) => setMes(e.target.value || mesActual())}
             className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-xs text-zinc-200 outline-none [color-scheme:dark] focus:border-yellow-400"
           />
+          <button
+            onClick={exportar}
+            title="Exportar a Excel: artículo por artículo, faltante / OC / ingreso del mes"
+            disabled={exportando}
+            className="btn-anim flex items-center gap-1.5 bg-[#1f1f1f] border border-zinc-700 hover:border-yellow-400 hover:text-yellow-400 rounded-md px-2.5 py-1.5 text-xs text-zinc-300 disabled:opacity-40"
+          >
+            {exportando ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            <span className="hidden sm:inline">Excel</span>
+          </button>
           <button
             onClick={load}
             title="Refrescar"
@@ -329,8 +414,8 @@ export default function ComprasMetricasPage() {
           />
           <KpiCard
             label="Con OC ese mes"
-            value={`${fmtNum(col("conOC"))} items · ${fmtNum(unid("conOC"))} u.`}
-            hint="De los faltantes, con Orden de Compra — unidades pedidas en esas OC"
+            value={`${fmtNum(col("conOC"))} de ${fmtNum(data?.ocTotalItems ?? 0)} items · ${fmtNum(unid("conOC"))} u.`}
+            hint={`De los faltantes, con Orden de Compra — unidades pedidas en esas OC. El total son los ${fmtNum(data?.ocTotalItems ?? 0)} items (${fmtNum(data?.ocTotalUnidades ?? 0)} u.) con OC ese mes, faltantes o no`}
             icon={ShoppingCart}
             accent="blue"
           />

@@ -38,6 +38,11 @@ export const maxDuration = 60;
 //   col3 ⊆ col2), así las tres columnas hablan del mismo conjunto y no cuesta
 //   ninguna consulta extra: los 3 endpoints ya se llamaban.
 //
+//   ocTotalItems/ocTotalUnidades (2026-08-31): el set B COMPLETO, sin recortar
+//   por faltantes — o sea toda la OC del mes. Es el denominador de la columna 2
+//   ("135 de 701 items"): el recorte del funnel hacía parecer que faltaban OC
+//   cuando en realidad la card solo contaba las de artículos faltantes.
+//
 //   Es un funnel estricto (decisión del usuario): col2 ⊆ col1, col3 ⊆ col2.
 //   Los sets B y C (Magnus, indicadores-api) son best-effort: si alguno no
 //   responde, la columna correspondiente (y las que dependen de ella) se
@@ -168,6 +173,15 @@ export async function GET(req: NextRequest) {
     console.error("GET /api/compras/metricas — ingresos", e);
   }
 
+  // Denominador de la columna 2: TODA la OC del mes, sin recortar por faltantes
+  // (setB completo). Sirve para leer la card como "X de Y items": Y es lo que
+  // sale del reporte de OC del mes de Magnus, X lo que además era faltante.
+  // No cuesta ninguna consulta extra: setB/ocUnidMap ya están armados.
+  const ocTotalItems = setB.size;
+  let ocTotalUnidades = 0;
+  for (const u of ocUnidMap.values()) ocTotalUnidades += u;
+  ocTotalUnidades = Math.round(ocTotalUnidades * 100) / 100;
+
   // Funnel estricto: col2 ⊆ col1 (∩ setB), col3 ⊆ col2 (∩ setC).
   const faltantes = [...setA].sort();
   const conOC = faltantes.filter((c) => setB.has(c));
@@ -281,6 +295,8 @@ export async function GET(req: NextRequest) {
     pedidosMesImporte,
     pctUnidades,
     pctImporte,
+    ocTotalItems,
+    ocTotalUnidades,
     columnas: [
       {
         key: "faltantes",

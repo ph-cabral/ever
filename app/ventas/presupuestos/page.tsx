@@ -274,8 +274,13 @@ export default function VentasPresupuestosPage() {
     { estado: cod, nombre: `Estado ${cod}`, cantidad: 0, renglones: 0, neto: 0, total: 0, unidades: 0, pendiente: 0 };
 
   const valorTop = (i: TopItem) => (modo === "pesos" ? i.monto : i.unidades);
-  const maxTop = top.length ? Math.max(...top.map(valorTop)) : 0;
-  const totalTop = top.reduce((acc, i) => acc + valorTop(i), 0);
+  // Sólo los valores POSITIVOS entran en el líder y en el total: el ranking
+  // de vendedores puede traer a alguien en cero o en negativo por una nota de
+  // crédito (ver fetch_top_vendedores en bulones.py), y sumarlo achicaría el
+  // denominador de la participación.
+  const positivosTop = top.map(valorTop).filter((v) => v > 0);
+  const maxTop = positivosTop.length ? Math.max(...positivosTop) : 0;
+  const totalTop = positivosTop.reduce((acc, v) => acc + v, 0);
 
   const cabecerasOrden: { campo: OrdenCampo; label: string; align: string }[] = [
     { campo: "fecha", label: "Fecha", align: "text-left" },
@@ -737,8 +742,15 @@ export default function VentasPresupuestosPage() {
                       // ranking, que es el número que se suele pedir. No hay
                       // objetivo cargado en la base, así que no hay
                       // "cumplimiento" acá.
-                      const anchoBarra = maxTop > 0 ? Math.max((v / maxTop) * 100, 1.5) : 0;
-                      const share = totalTop > 0 ? (v / totalTop) * 100 : 0;
+                      // v <= 0 es un caso REAL en el ranking de vendedores:
+                      // una nota de crédito puede dejar las unidades netas
+                      // del mes en cero o en negativo con el monto todavía
+                      // positivo (ver fetch_top_vendedores en bulones.py).
+                      // Esa fila se muestra con su número real, sin barra y
+                      // con 0% — meterla en la participación restaría del
+                      // total y le inflaría el porcentaje a todos los demás.
+                      const anchoBarra = v > 0 && maxTop > 0 ? Math.max((v / maxTop) * 100, 1.5) : 0;
+                      const share = v > 0 && totalTop > 0 ? (v / totalTop) * 100 : 0;
                       return (
                         <tr key={`${i.clave}-${idx}`} className="border-t border-zinc-900 hover:bg-zinc-900/50">
                           <td
@@ -749,7 +761,17 @@ export default function VentasPresupuestosPage() {
                           <td className="px-3 py-2 font-semibold text-zinc-100 truncate max-w-0" title={i.etiqueta}>
                             {i.etiqueta}
                           </td>
-                          <td className="px-3 py-2 text-right whitespace-nowrap text-zinc-100 border-l border-zinc-900">
+                          <td
+                            className={
+                              "px-3 py-2 text-right whitespace-nowrap border-l border-zinc-900 " +
+                              (v < 0 ? "text-red-400" : "text-zinc-100")
+                            }
+                            title={
+                              v < 0
+                                ? "Neto negativo en el período: las devoluciones (notas de crédito) superaron a lo facturado en esta métrica."
+                                : undefined
+                            }
+                          >
                             {modo === "pesos" ? fmtMoney(v) : fmtNum(v)}
                           </td>
                           <td className="px-3 py-2">

@@ -334,6 +334,122 @@ def fetch_ordenes_articulos_rango(desde: str, hasta: str, incluir_fabril: bool =
         conn.close()
 
 
+# ── Detalle de OC del mes por artículo (export a Excel de /compras) ──────────
+# Mismo recorte que SQL_OC_RANGO (FecMovim de la cabecera, sin canceladas, sin
+# Genérico/Fabril) pero agrega lo que el funnel no necesita y el Excel sí:
+# NÚMERO de OC (CompCentro-CompNumero, como lo imprime Magnus), proveedor,
+# descripción del artículo y fecha. Va en un SQL aparte a propósito: SQL_OC_RANGO
+# lo usan 2 endpoints "calientes" (/compras/ordenes-mes y /compras/compras-
+# valorizado) y no tienen por qué pagar 2 joins más en cada llamada.
+SQL_OC_RANGO_DETALLE = """
+SELECT
+    cab.FecMovim                         AS FecMovim,
+    cab.CompCentro                       AS CompCentro,
+    cab.CompNumero                       AS CompNumero,
+    LTRIM(RTRIM(r.CodArticulo))          AS CodArticu,
+    r.Cantidad                           AS Cantidad,
+    pr.RazonSocial                       AS Proveedor,
+    ap_t.Detalle                         AS Detalle,
+    a_t.DetalleMedida                    AS DetalleMedida,
+    a_t.UnidadMedida                     AS UnidadMedida
+FROM EVERWEAR.dbo.Com_OrdCompRenglones r
+INNER JOIN EVERWEAR.dbo.Com_OrdCompCabecera cab ON cab.NroOrdCompra = r.NroOrdCompra
+LEFT  JOIN EVERWEAR.dbo.Com_Proveedores     pr  ON pr.CodProveed    = cab.CodProveed
+{_join_tipo}
+LEFT  JOIN EVERWEAR.dbo.StkFer_ArtParamet   ap_t ON ap_t.ArticuloPatron = a_t.ArticuloPatron
+WHERE cab.FecMovim BETWEEN {_d1} AND {_d2}
+  {_excl}
+  {_tipo}
+"""
+
+
+def _nro_comp(centro, numero) -> str:
+    """CompCentro + CompNumero → '0001-00014700' (formato impreso de Magnus,
+    mismo que ingresos.py usa para el número de remito)."""
+    try:
+        c = int(centro) if centro is not None else 0
+    except (TypeError, ValueError):
+        c = 0
+    try:
+        n = int(numero) if numero is not None else 0
+    except (TypeError, ValueError):
+        n = 0
+    return f"{c:04d}-{n:08d}"
+
+
+def fetch_ordenes_detalle_rango(desde: str, hasta: str, incluir_fabril: bool = False):
+    """Igual recorte que fetch_ordenes_articulos_rango, pero agregado por
+    artículo CON los números de OC, proveedor, descripción y fecha de la última
+    OC. Para el export a Excel de /compras (una fila por artículo).
+
+    Devuelve {"rows": [...]}: CodArticulo, Nombre, Proveedor, CantidadOC,
+    NroOCs (lista de '0001-00014700'), FechaUltimaOC."""
+    d1 = datetime.strptime(str(desde)[:10], "%Y-%m-%d").date()
+    d2 = datetime.strptime(str(hasta)[:10], "%Y-%m-%d").date()
+
+    sql = SQL_OC_RANGO_DETALLE.format(
+        _join_tipo=_JOIN_TIPO, _excl=_EXCL, _tipo=_cond_tipo(incluir_fabril),
+        _d1=_dias(d1), _d2=_dias(d2),
+    )
+
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(sql)
+        cols = [c[0] for c in cur.description]
+
+        agg: dict[str, dict] = {}
+        for row in cur.fetchall():
+            d = dict(zip(cols, row))
+            cod = (str(d.get("CodArticu") or "")).strip()
+            if not cod:
+                continue
+            nro = _nro_comp(d.get("CompCentro"), d.get("CompNumero"))
+            fecha = _fecha_entrega(d.get("FecMovim"))
+            prov = (str(d.get("Proveedor") or "")).strip() or None
+            nombre = " ".join(
+                " ".join(
+                    (str(d.get(c) or "")).strip()
+                    for c in ("Detalle", "DetalleMedida", "UnidadMedida")
+                ).split()
+            ) or None
+
+            a = agg.get(cod)
+            if not a:
+                a = {
+                    "CodArticulo": cod,
+                    "Nombre": nombre,
+                    "Proveedor": prov,
+                    "CantidadOC": 0.0,
+                    "NroOCs": [],
+                    "FechaUltimaOC": fecha,
+                }
+                agg[cod] = a
+            a["CantidadOC"] += float(_safe(d.get("Cantidad")) or 0)
+            if prov and not a["Proveedor"]:
+                a["Proveedor"] = prov
+            if nombre and not a["Nombre"]:
+                a["Nombre"] = nombre
+            if fecha and (not a["FechaUltimaOC"] or fecha > a["FechaUltimaOC"]):
+                a["FechaUltimaOC"] = fecha
+            if nro and nro not in a["NroOCs"]:
+                a["NroOCs"].append(nro)
+
+        rows = sorted(agg.values(), key=lambda x: x["CodArticulo"])
+        for r in rows:
+            r["CantidadOC"] = round(r["CantidadOC"], 2)
+            r["NroOCs"].sort()
+        return {
+            "total": len(rows),
+            "rows": rows,
+            "desde": d1.isoformat(),
+            "hasta": d2.isoformat(),
+        }
+    finally:
+        conn.close()
+
+
 def fetch_compras_valorizado(desde: str, hasta: str, incluir_fabril: bool = False):
     """Unidades y $ de las Órdenes de Compra HECHAS en [desde, hasta] (por
     FecMovim de la cabecera) — mismo criterio que fetch_ordenes_articulos_rango
