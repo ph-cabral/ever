@@ -14,9 +14,10 @@ agregados". Las diferencias con ventas.py son TRES y sólo tres:
      NOMBRE del patrón (StkFer_Articulos.DetallePatron) — el código es sólo
      un número y no dice nada; viaja igual en el payload (`patron`) porque
      es la clave del drill-down. El nombre va en `detalle`.
-  3. Se agrega un tercer ranking: VENDEDORES, sólo los ACTIVOS del maestro
-     MAGNUS_SITD.dbo.Vendedores (mismo criterio que /ventas/vendedor: ver
-     _vendedor_activo más abajo).
+  3. Se agrega un tercer ranking: VENDEDORES — TODOS los que figuran en el
+     comprobante (Ven_CompCabecera.vendedor), sin filtrar por estado ni por
+     "que sea una persona": MOSTRADOR, ECOMMERCE y demás canales facturan
+     bulonería y tienen que verse. Ver fetch_top_vendedores.
 
 Fuente y criterio de "venta neta": IDÉNTICOS a ventas.py (Ven_CompCabecera +
 Ven_CompRenglon, neto de nota de crédito según Ven_CodCom.DebitoCredito,
@@ -45,7 +46,6 @@ from ventas import (
     BASE_DATE,
     _anio_vacio,
     _case_anio_mes,
-    _es_persona,
     _resolver_rango,
     _round_anio,
     _safe,
@@ -75,16 +75,22 @@ SIN_PATRON = "(Sin código patrón)"
 # del ranking. MAX sobre un grupo chico es gratis y siempre devuelve UNA.
 _DETALLE_PATRON = "MAX(LTRIM(RTRIM(s.DetallePatron)))"
 
-# Vendedores ACTIVOS del maestro Vendedores — mismo criterio que
-# /ventas/vendedor (ventas.fetch_vendedores): Estado_Desc "Habilitado" y el
-# nombre no arranca con "(baja)". Va en SQL para no traer al ranking gente
-# dada de baja. Lo que NO se puede resolver en SQL (que sea una PERSONA y no
-# un canal/zona: MOSTRADORES, ZONA CBA, …) se filtra en Python con
-# _es_persona, que es la misma función que usa la otra vista.
-_COND_VENDEDOR_ACTIVO = (
-    "LTRIM(RTRIM(v.Estado_Desc)) LIKE 'Habilitado%' "
-    "AND LTRIM(RTRIM(v.VendedorNombre)) NOT LIKE '(baja)%'"
-)
+# El ranking de vendedores de ESTA vista NO filtra por estado ni por
+# "seudo-vendedor": muestra el vendedor tal cual quedó grabado en el
+# comprobante. MOSTRADOR y ECOMMERCE no son personas del maestro pero SÍ son
+# canales que facturan bulonería, y sacarlos dejaba el ranking muy por debajo
+# del total de la línea. Los dados de baja también entran: si vendieron en el
+# período, esa venta existió. (En /ventas/vendedor el filtro sigue igual: allá
+# el ranking es de personas.)
+
+
+def _nombre_vendedor(codigo, nombre):
+    """Etiqueta de la fila. Si el código del comprobante no está en el maestro
+    Vendedores (venta vieja, código depurado) se muestra el código en vez de
+    dejar la fila sin nombre."""
+    n = (str(nombre).strip() if nombre else "")
+    return n or "(sin nombre) {}".format(codigo)
+
 
 # Los joins que agregan artículo + parámetros; son INNER porque el filtro de
 # línea ya excluye lo que no matchea (un LEFT no sumaría filas útiles).
@@ -109,11 +115,15 @@ JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
 # del comprobante mismo (Ven_CompCabecera.vendedor), no de la zona del
 # cliente. Es más fiel — refleja quién vendió — y además no deja afuera a
 # los vendedores sin zona cargada (ej. Julio Blanco 797).
+#
+# El JOIN al maestro es LEFT y sólo aporta el NOMBRE: la clave del ranking es
+# vc.vendedor, así que un código que no exista en Vendedores igual suma su
+# venta (con la etiqueta de _nombre_vendedor) en vez de desaparecer del total.
 _JOIN_VENTA_VENDEDOR = """
 FROM Ven_CompCabecera vc
 JOIN Ven_CompRenglon r   ON r.NroMovVenta = vc.NroMovVenta
 JOIN Ven_CodCom cc       ON vc.CompCodigo = cc.CompCodigo
-JOIN MAGNUS_SITD.dbo.Vendedores v ON v.VendedorCodigo = vc.vendedor
+LEFT JOIN MAGNUS_SITD.dbo.Vendedores v ON v.VendedorCodigo = vc.vendedor
 """
 
 _JOIN_CLIENTE = """
@@ -281,16 +291,16 @@ def fetch_top_vendedores(vendedor: int | None = None, limit: int = 1_000_000,
     """Ranking de VENDEDORES por bulonería vendida (el agregado propio de
     esta vista). Un no-admin sólo se ve a sí mismo.
 
-    El vendedor de cada venta sale del COMPROBANTE (Ven_CompCabecera.vendedor
-    → MAGNUS_SITD.dbo.Vendedores), no de la zona del cliente: refleja quién
-    vendió y no deja afuera a los vendedores sin zona cargada.
+    El vendedor de cada venta sale del COMPROBANTE (Ven_CompCabecera.vendedor),
+    no de la zona del cliente: refleja quién vendió y no deja afuera a los
+    vendedores sin zona cargada.
 
-    Sólo entran los vendedores ACTIVOS, igual que en /ventas/vendedor: el
-    estado se filtra en SQL (_COND_VENDEDOR_ACTIVO) y los seudo-vendedores
-    (canales/zonas como MOSTRADORES o ZONA CBA) se descartan en Python con
-    _es_persona. Consecuencia buscada: las ventas de mostrador y las de gente
-    de baja NO figuran en este ranking — para el total de la línea están los
-    otros dos rankings."""
+    SIN filtro de estado ni de "seudo-vendedor" (2026-09-01): entra todo lo
+    que figura en la base, incluidos los canales que no son personas
+    (MOSTRADOR, ECOMMERCE, ZONA …) y los dados de baja que hayan facturado en
+    el período. Así la suma del ranking cierra con el total de la línea, que
+    es lo que se compara contra los otros dos rankings. El maestro Vendedores
+    entra por LEFT JOIN y sólo aporta el nombre."""
     desde_ym, hasta_ym, d1, d2 = _resolver_rango(desde, hasta)
     limit_i = int(limit)
     key = ("ven", vendedor, limit_i, desde_ym, hasta_ym)
@@ -298,22 +308,26 @@ def fetch_top_vendedores(vendedor: int | None = None, limit: int = 1_000_000,
     if hit is not None:
         return hit
 
-    where = (f"WHERE {_COND_VENDEDOR_ACTIVO} AND cc.EvitaInformesYListados <> 1 "
+    where = ("WHERE cc.EvitaInformesYListados <> 1 "
              "AND vc.FecMovim BETWEEN ? AND ?")
     params: tuple = (d1, d2)
     if vendedor is not None:
-        where = (f"WHERE vc.vendedor = ? AND {_COND_VENDEDOR_ACTIVO} "
+        where = ("WHERE vc.vendedor = ? "
                  "AND cc.EvitaInformesYListados <> 1 "
                  "AND vc.FecMovim BETWEEN ? AND ?")
         params = (int(vendedor), d1, d2)
+    # Se agrupa por vc.vendedor (la columna del comprobante, entera y ya
+    # indexada) y el nombre se trae con MAX: un código sin fila en el maestro
+    # devuelve NULL y no parte el grupo, y sumar el texto al GROUP BY sería
+    # más caro sin agregar nada — el maestro tiene un nombre por código.
     sql = f"""
-SELECT v.VendedorCodigo AS Codigo,
-       LTRIM(RTRIM(v.VendedorNombre)) AS Nombre,
+SELECT vc.vendedor AS Codigo,
+       MAX(LTRIM(RTRIM(v.VendedorNombre))) AS Nombre,
        SUM({_CANT}) AS Unidades,
        SUM({_MONTO}) AS MontoNeto
 {_JOIN_VENTA_VENDEDOR}{_JOIN_ART}{where}
   AND {COND_BULON}
-GROUP BY v.VendedorCodigo, LTRIM(RTRIM(v.VendedorNombre))
+GROUP BY vc.vendedor
 """
     conn, cur = _conn()
     try:
@@ -322,15 +336,11 @@ GROUP BY v.VendedorCodigo, LTRIM(RTRIM(v.VendedorNombre))
         for cod, nom, unid, monto in cur.fetchall():
             if cod is None:
                 continue
-            nom = str(nom).strip() if nom else None
-            # Canal/zona, no persona (MOSTRADORES, ZONA CBA, VENDEDOR CERO…):
-            # no es alguien a quien rankear. Mismo criterio que el filtro de
-            # vendedores de /ventas/vendedor.
-            if not _es_persona(nom):
-                continue
+            # Los canales (MOSTRADOR, ECOMMERCE, ZONA …) y los dados de baja
+            # NO se descartan: son ventas de la línea y tienen que estar.
             items.append({
                 "codigo": int(cod),
-                "nombre": nom,
+                "nombre": _nombre_vendedor(int(cod), nom),
                 "unidades": round(float(_safe(unid) or 0), 2),
                 "monto": round(float(_safe(monto) or 0), 2),
             })
@@ -493,7 +503,18 @@ SELECT c.CodCliente AS Clave, LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
 def fetch_clientes_por_vendedor(cod_vendedor: int, limit: int = 1_000_000,
                                 forzar: bool = False) -> dict:
     """Ranking de clientes de UN vendedor, en bulonería — lo que abre el
-    modal al clickear un vendedor del ranking."""
+    modal al clickear un vendedor del ranking.
+
+    Corta por el vendedor del COMPROBANTE (vc.vendedor), no por la cartera del
+    vendedor (2026-09-01). Dos razones:
+      · Es lo mismo que suma el ranking, así que el total del modal cierra con
+        la fila que se clickeó. Con la cartera traía todas las compras de esos
+        clientes, las hubiera facturado él u otro.
+      · Los canales (MOSTRADOR, ECOMMERCE) no tienen cartera declarada; por
+        cartera el modal les quedaba mezclado con las ventas de los vendedores
+        de esos mismos clientes.
+    De paso es más barata: se va el UNION sobre Clientes/Vendedor_Zona y queda
+    un filtro sargable sobre una columna del comprobante."""
     a_ant, a_act, d1, d2 = _anios_y_rango()
     key = ("cxv", int(cod_vendedor), int(limit), a_ant, a_act)
     hit = _cacheado(key, forzar)
@@ -504,11 +525,12 @@ def fetch_clientes_por_vendedor(cod_vendedor: int, limit: int = 1_000_000,
 SELECT c.CodCliente AS Clave, LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
        {_case_anio_mes((a_ant, a_act))} AS AnioMes,
        {_CANT} AS Cant, {_MONTO} AS Monto
-{_JOIN_VENDEDOR}{_JOIN_ART}WHERE cc.EvitaInformesYListados <> 1
+{_JOIN_CLIENTE}{_JOIN_ART}WHERE vc.vendedor = ?
+  AND cc.EvitaInformesYListados <> 1
   AND vc.FecMovim BETWEEN ? AND ?
   AND {COND_BULON}
 """
-    filas, totales = _matriz(sub, params_cartera(cod_vendedor) + (d1, d2), a_ant, a_act)
+    filas, totales = _matriz(sub, (int(cod_vendedor), d1, d2), a_ant, a_act)
     clientes = [
         {"numero": int(f["clave"]), "nombre": f["nombre"],
          "anioAnterior": f["anioAnterior"], "anioActual": f["anioActual"]}
@@ -662,10 +684,13 @@ def fetch_detalle_patron(patron: str) -> str | None:
 
 
 def fetch_vendedor_nombre(cod_vendedor: int) -> str | None:
+    """Nombre del vendedor para el encabezado del modal. Si el código no está
+    en el maestro devuelve la misma etiqueta que usa el ranking, para que el
+    título del modal no quede vacío al abrir una fila sin nombre."""
     conn, cur = _conn()
     try:
         cur.execute(SQL_VENDEDOR_NOMBRE, (int(cod_vendedor),))
         row = cur.fetchone()
-        return (str(row[0]).strip() if row and row[0] else None)
+        return _nombre_vendedor(int(cod_vendedor), row[0] if row else None)
     finally:
         conn.close()

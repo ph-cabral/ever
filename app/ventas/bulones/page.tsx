@@ -30,8 +30,10 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 //      la que se pide el drill-down, y se usa de fallback si un patrón no
 //      tiene nombre cargado.
 //   3. Hay un TERCER ranking, Vendedor, a la derecha de Clientes | Patrón —
-//      sólo vendedores ACTIVOS, igual que /ventas/vendedor. Click en un
-//      vendedor → sus clientes.
+//      el vendedor TAL CUAL figura en el comprobante, sin filtrar por estado
+//      ni por "que sea una persona": entran MOSTRADOR, ECOMMERCE y demás
+//      canales (a diferencia de /ventas/vendedor). Click en un vendedor →
+//      los clientes que ÉL facturó (no su cartera). Ver bulones.py.
 //
 // 🔑 UN SOLO NIVEL DE MODAL ("acá solo se abrirá un modal, no puede ir otro
 // modal más"). Por eso ACÁ NO EXISTE la pila de niveles de /ventas/vendedor
@@ -43,7 +45,7 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 // Las tres entradas al modal:
 //   · Cliente  → códigos patrón que compró + el VENDEDOR ASIGNADO arriba.
 //   · Patrón   → ranking de clientes que lo compraron.
-//   · Vendedor → ranking de clientes de su cartera.
+//   · Vendedor → ranking de clientes que ese vendedor facturó.
 //
 // Fuente: /api/ventas/bulones/* → indicadores-api (bulones.py). Mismo
 // criterio de "venta neta" ya verificado contra el pivot Excel real.

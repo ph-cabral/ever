@@ -896,7 +896,9 @@ def bulones_top_vendedores(
     desde: str | None = Query(default=None),
     hasta: str | None = Query(default=None),
 ):
-    """Ranking de vendedores por bulonería vendida a su cartera."""
+    """Ranking de vendedores por bulonería facturada, tomando el vendedor del
+    comprobante tal cual está en la base: incluye los canales que no son
+    personas (MOSTRADOR, ECOMMERCE …) y los dados de baja. Ver bulones.py."""
     try:
         return fetch_bulones_top_vendedores(vendedor=vendedor, limit=limit, desde=desde, hasta=hasta)
     except ValueError as e:
@@ -944,10 +946,11 @@ def bulones_clientes_por_patron(
 
 @app.get("/ventas/bulones/clientes-por-vendedor")
 def bulones_clientes_por_vendedor(
-    codigo: int = Query(..., description="Usu_Arma_Codigo del vendedor"),
+    codigo: int = Query(..., description="VendedorCodigo (Ven_CompCabecera.vendedor)"),
     limit: int = Query(default=1_000_000, ge=1),
 ):
-    """Clientes de un vendedor, en bulonería — mismo desglose año/mes."""
+    """Clientes que ese vendedor FACTURÓ en bulonería (por vc.vendedor, igual
+    que el ranking — no por cartera), mismo desglose año/mes."""
     try:
         return fetch_bulones_clientes_por_vendedor(codigo, limit=limit)
     except ValueError as e:
