@@ -776,3 +776,27 @@ model usuario_acceso {
   @@index([usuarioId])
   @@schema("everwear")
 }
+
+// Presupuesto APROBADO por área de compras (pestaña "Presupuestos" de
+// /finanza). Lo ejecutado sale de Magnus (OC por tipo de comprobante); esto es
+// el techo contra el que se compara. DDL a mano en
+// sql/finanza_presupuesto_area.sql; acá sólo el modelo para Prisma
+// (`npx prisma generate` después de correr el SQL).
+// `monto` está en PESOS (en la pantalla se carga en millones y la API
+// multiplica). El período es un rango de meses inclusive 'YYYY-MM'.
+model finanza_presupuesto_area {
+  id         Int      @id @default(autoincrement())
+  codigoArea Int
+  area       String   @db.VarChar(120)
+  mesDesde   String   @db.Char(7)
+  mesHasta   String   @db.Char(7)
+  monto      Decimal  @db.Decimal(18, 2)
+  nota       String?  @db.VarChar(200)
+  creadoPor  Int?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([codigoArea, mesDesde, mesHasta])
+  @@index([mesHasta, mesDesde])
+  @@schema("everwear")
+}

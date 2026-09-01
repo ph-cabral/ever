@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Loader2, AlertTriangle } from "lucide-react";
+import { RefreshCw, Loader2, AlertTriangle, Plus, Trash2, X } from "lucide-react";
 import {
   PageTitle,
   SectionTitle,
@@ -9,7 +9,6 @@ import {
   KPI,
   Grid,
   Alert,
-  Progress,
   ChartBar,
   ChartDonut,
   PALETTE,
@@ -19,6 +18,8 @@ import {
   fmtMes,
   MatrixTable,
   BarrasH,
+  RangoMeses,
+  BarraPresupuesto,
   type BarraH,
   type MatRow,
 } from "./ui";
@@ -35,11 +36,20 @@ import {
 //
 // Por eso es la ÚNICA pestaña de /finanza que anda sin Excel cargado: se pide
 // sola al montar y tiene su propio selector de MESES (no de días: una OC se
-// mira por mes). Default = mes en curso.
+// mira por mes). Default = mes en curso, en un solo control de rango.
 //
 // Los importes están PESIFICADOS a la cotización de cada OC (las de impo van
 // en U$S; un total que mezcla monedas no significa nada). Las OC CANCELADAS
 // quedan fuera de todos los totales y se informan al pie.
+//
+// Dos lecturas distintas conviven acá y no hay que mezclarlas:
+//   · GRÁFICO "Importe por área": lo EJECUTADO, agrupado SÓLO por área — el
+//     estado de cada OC no corta la barra (el desglose por estado está en el
+//     donut y en la tabla).
+//   · SECCIÓN "Ejecución del presupuesto": lo ejecutado contra el APROBADO que
+//     se carga a mano (/api/finanza/presupuestos/aprobados). Ahí la barra
+//     entera es el 100% del presupuesto del área y se rellena con las OC del
+//     período sin importar su estado.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Acum = {
@@ -67,6 +77,21 @@ export type OcPorArea = {
   meses: (Acum & { mes: string })[];
 };
 
+// Presupuesto aprobado (Postgres, cargado a mano). `montoPeriodo` ya viene
+// PRORRATEADO por la API a los meses que caen dentro del filtro.
+type PresupAprobado = {
+  id: number;
+  codigoArea: number;
+  area: string;
+  mesDesde: string;
+  mesHasta: string;
+  monto: number;
+  nota: string | null;
+  meses: number;
+  mesesPeriodo: number;
+  montoPeriodo: number;
+};
+
 const EST_PENDIENTE = 1;
 const EST_CUMPLIDA = 2;
 const EST_PARCIAL = 3;
@@ -91,13 +116,6 @@ const AREA_CORTA: Record<number, string> = {
   78: "Sistemas IT",
   80: "Ing.Ind.Comercial",
 };
-const EST_CORTO: Record<number, string> = {
-  0: "S/conf.",
-  1: "Pend.",
-  2: "Cumpl.",
-  3: "Parcial",
-  5: "Elim.",
-};
 const ESTADO_LABEL: Record<number, string> = {
   0: "Sin confirmar",
   1: "Pendiente",
@@ -105,6 +123,19 @@ const ESTADO_LABEL: Record<number, string> = {
   3: "Cumpl. parcial",
   5: "Eliminada",
 };
+// Áreas ofrecidas al cargar un presupuesto. Es el mismo catálogo de
+// comprobantes de compra de Magnus, fijo acá porque un presupuesto se puede
+// cargar para un área que todavía no tuvo ni una OC en el período mirado (y
+// entonces no vendría en la respuesta de /oc-por-area).
+const AREAS_CATALOGO: { codigo: number; nombre: string }[] = [
+  { codigo: 70, nombre: "ORDEN DE COMPRA" },
+  { codigo: 75, nombre: "ORDEN DE COMPRA IMPO" },
+  { codigo: 76, nombre: "ORDEN COMPRA INDUSTRIA" },
+  { codigo: 77, nombre: "ORDEN DE COMPRA MARKETING" },
+  { codigo: 74, nombre: "ORDEN COMPRA RRHH" },
+  { codigo: 78, nombre: "ORDEN DE COMPRA SISTEMAS IT" },
+  { codigo: 80, nombre: "INGRESO INDUSTRIA A COMERCIAL" },
+];
 
 const mesActual = () => {
   const d = new Date();
@@ -112,11 +143,13 @@ const mesActual = () => {
 };
 const clip = (s: string, n = 22) => (s.length > n ? s.slice(0, n) + "…" : s);
 const est = (a: AreaAcum, cod: number) => a.estados.find((e) => e.estado === cod);
-const areaCorta = (a: AreaAcum) =>
-  AREA_CORTA[a.codigo] ??
-  clip(a.area.replace(/^ORDEN\s+(DE\s+)?COMPRA/i, "OC").trim(), 18);
-const pct = (parte: number, total: number) =>
-  total > 0 ? (parte / total) * 100 : 0;
+const areaCorta = (codigo: number, nombre: string) =>
+  AREA_CORTA[codigo] ??
+  clip(nombre.replace(/^ORDEN\s+(DE\s+)?COMPRA/i, "OC").trim(), 18);
+const rotulo = (p: PresupAprobado) =>
+  p.mesDesde === p.mesHasta
+    ? fmtMes(p.mesDesde)
+    : `${fmtMes(p.mesDesde)} → ${fmtMes(p.mesHasta)}`;
 
 export function PresupuestosTab() {
   const [desde, setDesde] = useState(mesActual);
@@ -124,18 +157,27 @@ export function PresupuestosTab() {
   const [d, setD] = useState<OcPorArea | null>(null);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aprobados, setAprobados] = useState<PresupAprobado[]>([]);
+  const [esAdmin, setEsAdmin] = useState(false);
+  const [modal, setModal] = useState(false);
 
   const cargar = useCallback(async (dsd: string, hst: string) => {
     setCargando(true);
     setError(null);
     try {
       const qs = new URLSearchParams({ desde: dsd, hasta: hst });
-      const res = await fetch(`/api/finanza/presupuestos?${qs}`, {
-        cache: "no-store",
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? "No se pudieron traer las OC");
+      // Las dos mitades del cuadro (ejecutado y aprobado) se piden en
+      // paralelo: son fuentes distintas y ninguna depende de la otra.
+      const [resOc, resApr] = await Promise.all([
+        fetch(`/api/finanza/presupuestos?${qs}`, { cache: "no-store" }),
+        fetch(`/api/finanza/presupuestos/aprobados?${qs}`, { cache: "no-store" }),
+      ]);
+      const json = await resOc.json();
+      if (!resOc.ok) throw new Error(json?.error ?? "No se pudieron traer las OC");
       setD(json as OcPorArea);
+      // Que falte la tabla de presupuestos no puede voltear la vista de OC.
+      const jsonApr = resApr.ok ? await resApr.json().catch(() => null) : null;
+      setAprobados(jsonApr?.presupuestos ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error inesperado");
       setD(null);
@@ -147,6 +189,21 @@ export function PresupuestosTab() {
   useEffect(() => {
     cargar(desde, hasta);
   }, [cargar, desde, hasta]);
+
+  // El alta/baja de presupuestos es sólo ADMIN (lo vuelve a chequear la API;
+  // esto es nada más para no mostrar botones que van a dar 403).
+  useEffect(() => {
+    let vivo = true;
+    fetch("/api/auth/me", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (vivo) setEsAdmin(j?.usuario?.rol === "ADMIN");
+      })
+      .catch(() => {});
+    return () => {
+      vivo = false;
+    };
+  }, []);
 
   const vista = useMemo(() => {
     if (!d) return null;
@@ -162,26 +219,24 @@ export function PresupuestosTab() {
       color: COLOR_ESTADO[e.estado] ?? PALETTE[e.estado % PALETTE.length],
     }));
 
-    // Barras: una por ÁREA × ESTADO, de mayor a menor importe. Cada fila dice
-    // el área y el estado, así se lee sin leyenda; antes era una sola barra
-    // apilada por área con una serie por estado.
+    // Una barra POR ÁREA, sin abrir por estado: el gráfico responde "cuánta
+    // plata mueve cada área", y el estado se mira en el donut y en la tabla.
+    // El detalle por estado queda en el tooltip para no perderlo.
     const barras: BarraH[] = d.areas
-      .flatMap((a) =>
-        [EST_CUMPLIDA, EST_PENDIENTE, EST_PARCIAL].flatMap((cod) => {
-          const e = est(a, cod);
-          if (!e || e.importe <= 0) return [];
-          return [
-            {
-              label: `${areaCorta(a)} ${EST_CORTO[cod]}`,
-              value: e.importe,
-              color: COLOR_ESTADO[cod],
-              hint: `${a.area} · ${e.nombre}: ${fmtArs(e.importe)} · ${fmtNum(e.items)} items`,
-            },
-          ];
-        }),
-      )
-      .sort((x, y) => y.value - x.value)
-      .slice(0, 12);
+      .filter((a) => a.importe > 0)
+      .map((a, i) => ({
+        label: areaCorta(a.codigo, a.area),
+        value: a.importe,
+        color: PALETTE[i % PALETTE.length],
+        hint:
+          `${a.area}: ${fmtArs(a.importe)} · ${fmtNum(a.ocs)} OC · ` +
+          `${fmtNum(a.items)} items — ` +
+          a.estados
+            .filter((e) => e.importe > 0)
+            .map((e) => `${ESTADO_LABEL[e.estado] ?? e.nombre} ${fmtShort(e.importe)}`)
+            .join(" · "),
+      }))
+      .sort((x, y) => y.value - x.value);
 
     const rows: MatRow[] = d.areas.map((a) => {
       const p = est(a, EST_PENDIENTE);
@@ -230,6 +285,42 @@ export function PresupuestosTab() {
     return { d, r, cumpl, pend, parcial, donut, barras, rows, evo };
   }, [d]);
 
+  // Ejecución del presupuesto: una fila por área, mezclando las que tienen OC
+  // con las que sólo tienen presupuesto cargado (un área que aprobó plata y no
+  // gastó nada tiene que verse, justamente).
+  const ejecucion = useMemo(() => {
+    const aprobadoPorArea = new Map<number, { monto: number; nombre: string }>();
+    for (const p of aprobados) {
+      if (p.mesesPeriodo <= 0) continue;
+      const acc = aprobadoPorArea.get(p.codigoArea);
+      if (acc) acc.monto += p.montoPeriodo;
+      else aprobadoPorArea.set(p.codigoArea, { monto: p.montoPeriodo, nombre: p.area });
+    }
+    const filas = new Map<
+      number,
+      { codigo: number; area: string; ejecutado: number; aprobado: number }
+    >();
+    for (const a of d?.areas ?? []) {
+      filas.set(a.codigo, {
+        codigo: a.codigo,
+        area: a.area,
+        ejecutado: a.importe,
+        aprobado: aprobadoPorArea.get(a.codigo)?.monto ?? 0,
+      });
+    }
+    for (const [cod, v] of aprobadoPorArea) {
+      if (!filas.has(cod))
+        filas.set(cod, { codigo: cod, area: v.nombre, ejecutado: 0, aprobado: v.monto });
+    }
+    const lista = [...filas.values()].sort(
+      (x, y) => (y.aprobado || y.ejecutado) - (x.aprobado || x.ejecutado),
+    );
+    const totalAprobado = lista.reduce((s, f) => s + f.aprobado, 0);
+    const totalEjecutado = lista.reduce((s, f) => s + f.ejecutado, 0);
+    const referencia = Math.max(0, ...lista.map((f) => f.ejecutado));
+    return { lista, totalAprobado, totalEjecutado, referencia };
+  }, [d, aprobados]);
+
   return (
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
@@ -238,26 +329,14 @@ export function PresupuestosTab() {
           sub="Por área (tipo de comprobante) y estado — datos en vivo de Magnus, importes pesificados a la cotización de cada OC"
         />
         <div className="flex items-end gap-2 pb-1">
-          <label className="text-[11px] uppercase tracking-wider text-zinc-500">
-            Desde
-            <input
-              type="month"
-              value={desde}
-              max={hasta}
-              onChange={(e) => e.target.value && setDesde(e.target.value)}
-              className="block mt-1 bg-[#171717] border border-zinc-800 rounded-md px-2.5 py-1.5 text-[12px] text-zinc-200 focus:border-yellow-400/60 outline-none"
-            />
-          </label>
-          <label className="text-[11px] uppercase tracking-wider text-zinc-500">
-            Hasta
-            <input
-              type="month"
-              value={hasta}
-              min={desde}
-              onChange={(e) => e.target.value && setHasta(e.target.value)}
-              className="block mt-1 bg-[#171717] border border-zinc-800 rounded-md px-2.5 py-1.5 text-[12px] text-zinc-200 focus:border-yellow-400/60 outline-none"
-            />
-          </label>
+          <RangoMeses
+            desde={desde}
+            hasta={hasta}
+            onChange={(dsd, hst) => {
+              setDesde(dsd);
+              setHasta(hst);
+            }}
+          />
           <button
             onClick={() => cargar(desde, hasta)}
             disabled={cargando}
@@ -320,9 +399,11 @@ export function PresupuestosTab() {
               label="Importe total OC"
               value={fmtShort(vista.r.importe)}
               sub={
-                vista.r.importeUsd > 0
-                  ? `incluye ${fmtShort(vista.r.importeUsd)} de OC en U$S`
-                  : "valor total comprometido"
+                ejecucion.totalAprobado > 0
+                  ? `${fmtShort(ejecucion.totalAprobado)} presupuestado`
+                  : vista.r.importeUsd > 0
+                    ? `incluye ${fmtShort(vista.r.importeUsd)} de OC en U$S`
+                    : "valor total comprometido"
               }
               accent="yellow"
             />
@@ -336,7 +417,7 @@ export function PresupuestosTab() {
                 fmt={(n) => fmtNum(n)}
               />
             </Panel>
-            <Panel title="Importe por área" accent="($ · top 12 área/estado)">
+            <Panel title="Importe por área" accent="($ · total por área)">
               <BarrasH data={vista.barras} labelWidth={150} />
             </Panel>
           </div>
@@ -384,21 +465,119 @@ export function PresupuestosTab() {
             rows={vista.rows}
           />
 
-          <div className="mt-4">
-            {vista.d.areas.slice(0, 8).map((a) => (
-              <Progress
-                key={a.codigo}
-                label={a.area}
-                pct={pct(a.importe, vista.d.areas[0]?.importe ?? 0)}
-                value={fmtShort(a.importe)}
-                tone={
-                  (est(a, EST_PENDIENTE)?.importe ?? 0) > a.importe / 2
-                    ? "red"
-                    : "green"
-                }
+          <div className="flex items-center gap-3 mt-7 mb-3">
+            <span className="text-[13px] font-semibold text-zinc-100">
+              🎯 Ejecución del presupuesto por área
+            </span>
+            <span className="flex-1 h-px bg-zinc-800" />
+            {esAdmin && (
+              <button
+                onClick={() => setModal(true)}
+                className="flex items-center gap-1.5 bg-[#171717] border border-zinc-800 hover:border-yellow-400/60 rounded-md px-2.5 py-1 text-[11px] text-zinc-300"
+              >
+                <Plus size={12} className="text-yellow-400" />
+                Crear presupuesto
+              </button>
+            )}
+          </div>
+
+          <p className="text-[11px] text-zinc-600 mb-3">
+            La barra es el 100 % del presupuesto aprobado del área y se rellena
+            con las OC del período, cumplidas o no. Los presupuestos que abarcan
+            varios meses se prorratean por mes.
+            {ejecucion.totalAprobado > 0 && (
+              <>
+                {" "}
+                Total: {fmtArs(ejecucion.totalEjecutado)} ejecutado sobre{" "}
+                {fmtArs(ejecucion.totalAprobado)} aprobado (
+                {(
+                  (ejecucion.totalEjecutado / ejecucion.totalAprobado) *
+                  100
+                ).toLocaleString("es-AR", { maximumFractionDigits: 0 })}{" "}
+                %).
+              </>
+            )}
+          </p>
+
+          {ejecucion.totalAprobado === 0 && (
+            <div className="mb-3">
+              <Alert tone="neutral">
+                Todavía no hay presupuestos aprobados cargados para este período
+                {esAdmin
+                  ? ": creá uno con “Crear presupuesto” y las barras pasan a medir el consumo."
+                  : ". Las barras muestran el importe relativo de cada área."}
+              </Alert>
+            </div>
+          )}
+
+          <div className="mt-1">
+            {ejecucion.lista.map((f) => (
+              <BarraPresupuesto
+                key={f.codigo}
+                label={f.area}
+                ejecutado={f.ejecutado}
+                aprobado={f.aprobado}
+                referencia={ejecucion.referencia}
+                fmt={(n) => fmtShort(n)}
               />
             ))}
           </div>
+
+          {aprobados.length > 0 && (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="text-zinc-500 text-left">
+                    <th className="py-1 pr-3 font-normal">Presupuesto cargado</th>
+                    <th className="py-1 pr-3 font-normal">Período</th>
+                    <th className="py-1 pr-3 font-normal text-right">Aprobado</th>
+                    <th className="py-1 pr-3 font-normal text-right">
+                      En el filtro
+                    </th>
+                    <th className="py-1 font-normal" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {aprobados.map((p) => (
+                    <tr key={p.id} className="border-t border-zinc-900">
+                      <td className="py-1 pr-3 text-zinc-300">
+                        {p.area}
+                        {p.nota && (
+                          <span className="text-zinc-600"> — {p.nota}</span>
+                        )}
+                      </td>
+                      <td className="py-1 pr-3 text-zinc-500">{rotulo(p)}</td>
+                      <td className="py-1 pr-3 text-right tabular-nums text-zinc-300">
+                        {fmtArs(p.monto)}
+                      </td>
+                      <td className="py-1 pr-3 text-right tabular-nums text-yellow-400/80">
+                        {p.mesesPeriodo === p.meses
+                          ? "completo"
+                          : `${fmtArs(p.montoPeriodo)} (${p.mesesPeriodo}/${p.meses} meses)`}
+                      </td>
+                      <td className="py-1 text-right">
+                        {esAdmin && (
+                          <button
+                            title="Borrar presupuesto"
+                            onClick={async () => {
+                              await fetch(
+                                `/api/finanza/presupuestos/aprobados?id=${p.id}`,
+                                { method: "DELETE" },
+                              );
+                              cargar(desde, hasta);
+                            }}
+                            className="text-zinc-600 hover:text-red-400"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {vista.d.meses.length > 1 && (
             <>
@@ -441,7 +620,8 @@ export function PresupuestosTab() {
             Fuente: Com_OrdCompCabecera / Com_OrdCompRenglones (Magnus, lectura
             en vivo). El área es el tipo de comprobante de la OC. Importe = suma
             de (unidades pedidas × precio del renglón neto de bonificaciones),
-            pesificado a la cotización de cada OC.
+            pesificado a la cotización de cada OC. Los presupuestos aprobados no
+            están en Magnus: se cargan a mano y viven en Postgres.
             {vista.d.canceladas.items > 0 && (
               <>
                 {" "}
@@ -452,6 +632,176 @@ export function PresupuestosTab() {
           </p>
         </>
       )}
+
+      {modal && (
+        <ModalPresupuesto
+          desde={desde}
+          hasta={hasta}
+          onCerrar={() => setModal(false)}
+          onGuardado={() => {
+            setModal(false);
+            cargar(desde, hasta);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Alta de presupuesto aprobado ────────────────────────────────────────────
+// El monto se carga en MILLONES a propósito (no hay que escribir los ceros); la
+// API lo multiplica antes de guardar. El período usa el mismo control de rango
+// que el filtro de arriba: un solo input para los dos meses.
+function ModalPresupuesto({
+  desde,
+  hasta,
+  onCerrar,
+  onGuardado,
+}: {
+  desde: string;
+  hasta: string;
+  onCerrar: () => void;
+  onGuardado: () => void;
+}) {
+  const [codigo, setCodigo] = useState(AREAS_CATALOGO[0].codigo);
+  const [mesDesde, setMesDesde] = useState(desde);
+  const [mesHasta, setMesHasta] = useState(hasta);
+  const [millones, setMillones] = useState("");
+  const [nota, setNota] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const monto = Number(millones.replace(/\./g, "").replace(",", "."));
+  const valido = Number.isFinite(monto) && monto > 0;
+
+  const guardar = async () => {
+    if (!valido) return;
+    setGuardando(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/finanza/presupuestos/aprobados", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          codigoArea: codigo,
+          area: AREAS_CATALOGO.find((a) => a.codigo === codigo)?.nombre ?? "",
+          mesDesde,
+          mesHasta,
+          montoMillones: monto,
+          nota: nota || null,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error ?? "No se pudo guardar");
+      onGuardado();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Error inesperado");
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      onClick={onCerrar}
+    >
+      <div
+        className="w-full max-w-md bg-[#171717] border border-zinc-800 rounded-lg p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-yellow-400 font-semibold text-sm uppercase tracking-wide">
+            Crear presupuesto
+          </h3>
+          <button onClick={onCerrar} className="text-zinc-600 hover:text-zinc-300">
+            <X size={16} />
+          </button>
+        </div>
+
+        <label className="block text-[11px] uppercase tracking-wider text-zinc-500 mb-3">
+          Área
+          <select
+            value={codigo}
+            onChange={(e) => setCodigo(Number(e.target.value))}
+            className="block w-full mt-1 bg-[#111] border border-zinc-800 rounded-md px-2.5 py-1.5 text-[12px] text-zinc-200 focus:border-yellow-400/60 outline-none"
+          >
+            {AREAS_CATALOGO.map((a) => (
+              <option key={a.codigo} value={a.codigo}>
+                {a.nombre}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="mb-3">
+          <RangoMeses
+            label="Período"
+            desde={mesDesde}
+            hasta={mesHasta}
+            onChange={(dsd, hst) => {
+              setMesDesde(dsd);
+              setMesHasta(hst);
+            }}
+          />
+        </div>
+
+        <label className="block text-[11px] uppercase tracking-wider text-zinc-500 mb-1">
+          Monto aprobado (en millones)
+          <span className="flex items-center gap-1.5 mt-1 bg-[#111] border border-zinc-800 rounded-md px-2.5 py-1.5 focus-within:border-yellow-400/60">
+            <span className="text-zinc-500 text-[12px]">$</span>
+            <input
+              value={millones}
+              onChange={(e) => setMillones(e.target.value)}
+              inputMode="decimal"
+              placeholder="250"
+              className="flex-1 bg-transparent border-0 outline-none text-[12px] text-zinc-200"
+            />
+            <span className="text-zinc-500 text-[12px]">M</span>
+          </span>
+        </label>
+        <p className="text-[10px] text-zinc-600 mb-3">
+          {valido
+            ? `Se guarda como ${fmtArs(monto * 1e6)}`
+            : "Se carga en millones: 250 = $ 250.000.000"}
+        </p>
+
+        <label className="block text-[11px] uppercase tracking-wider text-zinc-500 mb-4">
+          Nota (opcional)
+          <input
+            value={nota}
+            onChange={(e) => setNota(e.target.value)}
+            maxLength={200}
+            className="block w-full mt-1 bg-[#111] border border-zinc-800 rounded-md px-2.5 py-1.5 text-[12px] text-zinc-200 focus:border-yellow-400/60 outline-none"
+          />
+        </label>
+
+        {err && (
+          <div className="mb-3">
+            <Alert tone="red">
+              <AlertTriangle size={14} className="mt-px shrink-0" />
+              {err}
+            </Alert>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onCerrar}
+            className="px-3 py-1.5 text-[12px] text-zinc-400 hover:text-zinc-200"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={guardar}
+            disabled={!valido || guardando}
+            className="flex items-center gap-2 bg-yellow-400/10 border border-yellow-400/40 hover:border-yellow-400 rounded-md px-3 py-1.5 text-[12px] text-yellow-400 disabled:opacity-40"
+          >
+            {guardando && <Loader2 size={13} className="animate-spin" />}
+            Guardar
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

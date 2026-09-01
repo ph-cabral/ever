@@ -857,3 +857,156 @@ function Empty({ h }: { h: number }) {
     </div>
   );
 }
+
+// ─── RangoMeses — desde/hasta de MESES en un solo control ────────────────────
+// (2026-09-01) un solo input para el rango en vez de dos cajas
+// "Desde" y "Hasta" separadas. `<input type="month">` no sabe hacer rangos, así
+// que son dos campos SIN borde propio metidos adentro de un mismo recuadro con
+// una flecha en el medio: para el que lo usa es una sola caja, y se sigue
+// apoyando en el date picker nativo del navegador (nada de calendario propio).
+//
+// El foco de cualquiera de los dos campos enciende el borde del recuadro
+// entero (focus-within), y cada campo acota al otro con min/max para que no se
+// pueda armar un rango invertido.
+export function RangoMeses({
+  desde,
+  hasta,
+  onChange,
+  label = "Período",
+  min,
+  max,
+}: {
+  desde: string;
+  hasta: string;
+  onChange: (desde: string, hasta: string) => void;
+  label?: string;
+  min?: string;
+  max?: string;
+}) {
+  const campo =
+    "bg-transparent border-0 outline-none text-[12px] text-zinc-200 " +
+    "[color-scheme:dark] px-0 py-0 w-[112px]";
+  return (
+    <label className="text-[11px] uppercase tracking-wider text-zinc-500">
+      {label}
+      <span
+        className="mt-1 flex items-center gap-1.5 bg-[#171717] border border-zinc-800
+                   rounded-md px-2.5 py-1.5 focus-within:border-yellow-400/60"
+      >
+        <input
+          type="month"
+          value={desde}
+          min={min}
+          max={hasta || max}
+          onChange={(e) => e.target.value && onChange(e.target.value, hasta)}
+          className={campo}
+          aria-label="Mes desde"
+        />
+        <span className="text-zinc-600 select-none">→</span>
+        <input
+          type="month"
+          value={hasta}
+          min={desde || min}
+          max={max}
+          onChange={(e) => e.target.value && onChange(desde, e.target.value)}
+          className={campo}
+          aria-label="Mes hasta"
+        />
+      </span>
+    </label>
+  );
+}
+
+// ─── BarraPresupuesto — consumo de un presupuesto aprobado ───────────────────
+// (2026-09-01) la barra representa el 100% del presupuesto
+// aprobado del área y se va rellenando con las OC del período, sin importar el
+// estado de cada una.
+//
+// Por eso el 100% es SIEMPRE el aprobado (no el área más grande, como hacía
+// el Progress genérico): dos áreas con presupuestos distintos se leen igual de
+// llenas cuando gastaron la misma proporción, que es justo lo que se quiere
+// mirar. Si se pasa del aprobado, la barra queda llena en rojo y el excedente
+// se dibuja rayado; si el área no tiene presupuesto cargado, no hay 100% contra
+// qué comparar y la barra queda gris al ancho relativo del área más grande.
+export function BarraPresupuesto({
+  label,
+  ejecutado,
+  aprobado,
+  referencia,
+  fmt,
+  labelMin = 190,
+}: {
+  label: string;
+  ejecutado: number;
+  aprobado?: number | null;
+  /** Sólo para áreas SIN presupuesto: el mayor ejecutado del cuadro. */
+  referencia?: number;
+  fmt: (n: number) => string;
+  labelMin?: number;
+}) {
+  const conPresupuesto = !!aprobado && aprobado > 0;
+  const pct = conPresupuesto
+    ? (ejecutado / (aprobado as number)) * 100
+    : referencia && referencia > 0
+      ? (ejecutado / referencia) * 100
+      : 0;
+  const excedido = conPresupuesto && pct > 100;
+  const color = !conPresupuesto
+    ? "bg-zinc-600"
+    : excedido
+      ? "bg-red-400"
+      : pct >= 85
+        ? "bg-amber-400"
+        : "bg-green-400";
+  const texto = !conPresupuesto
+    ? "text-zinc-400"
+    : excedido
+      ? "text-red-400"
+      : pct >= 85
+        ? "text-amber-400"
+        : "text-green-400";
+
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <div
+        className="text-[11px] text-zinc-400 truncate"
+        style={{ minWidth: labelMin }}
+        title={label}
+      >
+        {label}
+      </div>
+      <div className="flex-1 h-2 bg-[#1f1f1f] rounded-full overflow-hidden relative">
+        <div
+          className={`h-full rounded-full ${color}`}
+          style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
+        />
+        {excedido && (
+          <div
+            className="absolute inset-0 rounded-full opacity-40"
+            style={{
+              backgroundImage:
+                "repeating-linear-gradient(45deg, transparent 0 4px, rgba(255,255,255,.5) 4px 6px)",
+            }}
+          />
+        )}
+      </div>
+      <div
+        className="text-[11px] tabular-nums text-right text-zinc-300"
+        style={{ minWidth: 130 }}
+      >
+        {fmt(ejecutado)}
+        {conPresupuesto ? (
+          <span className="text-zinc-600"> / {fmt(aprobado as number)}</span>
+        ) : (
+          <span className="text-zinc-700"> / s/pres.</span>
+        )}
+      </div>
+      <div
+        className={`text-[11px] tabular-nums text-right ${texto}`}
+        style={{ minWidth: 46 }}
+      >
+        {conPresupuesto ? `${pct.toLocaleString("es-AR", { maximumFractionDigits: 0 })}%` : "—"}
+      </div>
+    </div>
+  );
+}
