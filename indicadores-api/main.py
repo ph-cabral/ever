@@ -22,6 +22,7 @@ from compras import (
     fetch_consumo_articulo, fetch_consumo_articulos, fetch_lineas,
     fetch_lineas_por_articulos,
 )
+from oc_areas import fetch_oc_por_area
 from ingresos import fetch_remitos_ingreso
 from ventas import (
     fetch_pedidos_mes, fetch_ventas_por_linea, fetch_vendedores,
@@ -585,6 +586,25 @@ def compras_consumo_articulos_export(
 def compras_lineas():
     try:
         return fetch_lineas()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+# ── Compras: OC agregadas por ÁREA (tipo de comprobante) y estado ───────────
+# Alimenta la pestaña "Presupuestos" de /finanza, que dejó de armarse del
+# Excel financiero y ahora lee la base en vivo (2026-09-01). Ver oc_areas.py.
+@app.get("/compras/oc-por-area")
+def compras_oc_por_area(
+    desde: str | None = Query(default=None),
+    hasta: str | None = Query(default=None),
+    forzar: int = Query(default=0),
+):
+    """OC de [desde, hasta] (meses 'YYYY-MM', default mes en curso) agrupadas
+    por tipo de comprobante y estado, con importes pesificados a la cotización
+    de cada OC. Las canceladas van aparte, fuera de los totales."""
+    try:
+        return fetch_oc_por_area(desde, hasta, forzar=bool(forzar))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

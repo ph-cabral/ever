@@ -360,6 +360,11 @@ function parseProveedores(wb: XLSX.WorkBook) {
 }
 
 // ─── PRESUPUESTOS ───────────────────────────────────────────────────────────
+// YA NO ALIMENTA LA VISTA (2026-09-01): la pestaña "Presupuestos" de /finanza
+// pasó a leer las órdenes de compra de Magnus en vivo por área
+// (app/finanza/components/presupuestos.tsx → /api/finanza/presupuestos). Se
+// sigue parseando la hoja para no romper los Excel ya guardados en
+// localStorage ni el tipo FinanzaData, pero nadie la lee.
 function parsePresupuestos(wb: XLSX.WorkBook) {
   const m = sheet(wb, "PRESUPUESTOS");
   const map = new Map<string, Map<string, number>>();

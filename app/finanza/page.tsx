@@ -23,12 +23,14 @@ import {
   CtasCtesTab,
   ComexTab,
   ProveedoresTab,
-  PresupuestosTab,
   ImpuestosTab,
   PrestamosTab,
   CashTab,
   MacroTab,
 } from "./components/tabs";
+// Única tab que NO sale del Excel: lee las OC de Magnus en vivo (ver
+// components/presupuestos.tsx).
+import { PresupuestosTab } from "./components/presupuestos";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 const TABS = [
@@ -178,7 +180,7 @@ export default function FinanzaPage() {
 
       {/* Contenido */}
       <main className="max-w-[1400px] mx-auto px-8 py-8">
-        {!hydrated ? null : !data && tab !== "macro" ? (
+        {!hydrated ? null : !data && tab !== "macro" && tab !== "presupuestos" ? (
           <div className="flex flex-col items-center justify-center py-28 gap-4 text-center">
             <FileSpreadsheet size={48} className="text-zinc-700" />
             <div>
@@ -195,9 +197,7 @@ export default function FinanzaPage() {
             {tab === "proveedores" && data && (
               <ProveedoresTab d={data.proveedores} />
             )}
-            {tab === "presupuestos" && data && (
-              <PresupuestosTab d={data.presupuestos} />
-            )}
+            {tab === "presupuestos" && <PresupuestosTab />}
             {tab === "impuestos" && data && <ImpuestosTab d={data.impuestos} />}
             {tab === "prestamos" && data && <PrestamosTab d={data.prestamos} />}
             {tab === "cash" && data && <CashTab d={data.cash} />}
