@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 15;
 
 // Proxy → FastAPI indicadores-api: opciones fijas del select de Detalle
-// Error PROPIAS de Calidad (REDISEÑO 2026-08-20, a pedido de Pablo) —
+// Error PROPIAS de Calidad (REDISEÑO 2026-08-20) —
 // distintas de las de Mesa (/api/deposito/errores-mesa/opciones). Ver
 // DETALLE_ERROR_OPCIONES_CALIDAD / opciones_calidad en errores_mesa.py.
 export async function GET() {

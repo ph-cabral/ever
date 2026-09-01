@@ -6,7 +6,7 @@ import { createAllDayEvent } from "@/lib/rrhh/googleCalendar";
 export const dynamic = "force-dynamic";
 
 // POST: registrar un Estado/Novedad en un RANGO de fechas de una sola vez —
-// pedido de Pablo (2026-08-01). Sólo se ofrece en el front para opciones con
+// (2026-08-01). Sólo se ofrece en el front para opciones con
 // genera_calendario = true (ver /api/rrhh/asistencia/opciones); acá se
 // revalida por las dudas.
 //
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 //  1) Crea el evento de todo el día en el Google Calendar elegido (si esto
 //     falla, no se toca la base — mejor un error claro que dejar el estado
 //     marcado sin que nadie se entere por Calendar). Si vienen `invitados`
-//     (correos sueltos, pedido de Pablo 2026-08-03: "hay calendarios base
+//     (correos sueltos, 2026-08-03: "hay calendarios base
 //     pero a veces se agregan participantes"), se suman como attendees del
 //     evento además de la gente que ya tiene el calendario base.
 //  2) Marca los días del rango:

@@ -3,7 +3,7 @@ Total de pedidos de venta del mes (Magnus, SOLO LECTURA).
 
 Para /compras/metricas: denominador contra el que se compara el total de
 faltantes del mes (unidades y $) — "cuánto representa lo que faltó sobre el
-total pedido ese mes" (pedido 2026-07-28, Pablo). Reusa el mismo criterio de
+total pedido ese mes" (pedido 2026-07-28). Reusa el mismo criterio de
 "pedido válido" que ya usa deposito.py/main.py (_es_valido: Estado
 Cerrado/Facturado, blacklist de CompCodigo) para no contar comprobantes que
 no son pedidos reales — mismos valores confirmados 2026-07-10 (ver
@@ -124,7 +124,7 @@ def fetch_pedidos_mes(desde: str, hasta: str) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Ventas por línea de un cliente — /ventas/vendedor (pedido de Pablo
+# Ventas por línea de un cliente — /ventas/vendedor (
 # 2026-08-14): vista con filtro de cliente (código/nombre), tabla líneas x
 # año actual/anterior (con desglose mensual opcional) y switch
 # unidades/pesos.
@@ -301,13 +301,13 @@ def _bloqueado(cod_cliente: int, anio_anterior: int, anio_actual: int) -> dict:
 # no-admin nunca ve acá un cliente que no es suyo. Admin (`vendedor=None`)
 # ve el ranking de toda la empresa.
 #
-# RANGO (pedido de Pablo 2026-08-18): ventana FIJA de 12 meses que termina
+# RANGO (2026-08-18): ventana FIJA de 12 meses que termina
 # en el MES ANTERIOR al actual — el mes en curso queda afuera por estar
 # incompleto. En agosto 2026 eso es agosto 2025 → julio 2026. El front ya
 # no manda `desde`/`hasta` ni deja elegir el rango; los parámetros siguen
 # existiendo en la ruta HTTP solo para debug.
 #
-# FILTRO DE FECHA EN SQL (pedido de Pablo 2026-08-18, "todo el trabajo
+# FILTRO DE FECHA EN SQL (2026-08-18, "todo el trabajo
 # debe ser en sql porque se ralentiza mucho la consulta"): ahora el rango
 # se recorta en el WHERE, no en Python. El filtro va contra la COLUMNA
 # CRUDA `vc.FecMovim` — entero base 1800-12-28, igual que FechaPedido en
@@ -321,7 +321,7 @@ def _bloqueado(cod_cliente: int, anio_anterior: int, anio_actual: int) -> dict:
 #   2. Es sargable: sin UDF escalar por fila, el motor puede usar índice
 #      sobre FecMovim. Un `WHERE YEAR(dbo.fecha_cla2sql(...)) = ?` habría
 #      forzado igual el scan completo + una llamada a la UDF por renglón,
-#      o sea el problema de velocidad que Pablo pidió arreglar.
+#      o sea el problema de velocidad que había que arreglar.
 #
 # Si `FecMovim` no fuera ese entero, esta query falla RUIDOSAMENTE (error
 # de conversión o cero filas), no en silencio — que es justo lo contrario
@@ -371,7 +371,7 @@ def _resolver_rango(desde: str | None, hasta: str | None, meses: int = TOP_MESES
     BASE_DATE) del PRIMER día del mes `desde` y del ÚLTIMO día del mes
     `hasta` — o sea, ambos meses quedan incluidos completos.
 
-    Default (pedido de Pablo 2026-08-18): ventana FIJA de `meses` meses que
+    Default (2026-08-18): ventana FIJA de `meses` meses que
     termina en el MES ANTERIOR al actual — el mes en curso NO entra porque
     está incompleto. Corriendo en agosto 2026 da agosto 2025 → julio 2026.
 
@@ -428,7 +428,7 @@ ORDER BY MontoNeto DESC
 
 def fetch_top_clientes(
     vendedor: int | None = None,
-    limit: int = 1_000_000,  # "sin límite" (pedido de Pablo 2026-08-19) — ver main.py
+    limit: int = 1_000_000,  # "sin límite" (2026-08-19) — ver main.py
     desde: str | None = None,
     hasta: str | None = None,
     forzar: bool = False,
@@ -437,11 +437,11 @@ def fetch_top_clientes(
     ranking debajo de la tabla de /ventas/vendedor.
 
     Devuelve `porMonto` (las `limit` primeras, ya ordenadas por SQL) y
-    `totalClientes` (pedido de Pablo 2026-08-18: cuántos clientes distintos
+    `totalClientes` (2026-08-18: cuántos clientes distintos
     entran en la filtración, NO cuántos se muestran — o sea, el total puede
     ser mucho mayor que len(porMonto)).
 
-    Solo $: el ranking por unidades se sacó a propósito (pedido de Pablo
+    Solo $: el ranking por unidades se sacó a propósito (
     2026-08-18, "acá solo dejamos ver $ gastado por ese cliente"). Las
     unidades ahora viven en fetch_top_lineas.
 
@@ -502,7 +502,7 @@ def fetch_top_clientes(
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Top líneas (pedido de Pablo 2026-08-18: "agregamos vista de líneas, al
+# Top líneas (2026-08-18: "agregamos vista de líneas, al
 # igual que el top, traemos el total de líneas y acá dejamos ver solo
 # unidades compradas"). Línea = nombre de Stk_Nivel1.Detalle resuelto desde
 # el código StkFer_ArtParamet.Nivel1 (ver catálogo arriba) — el mismo campo
@@ -551,7 +551,7 @@ GROUP BY LTRIM(RTRIM(n1.Detalle))
 
 def fetch_top_lineas(
     vendedor: int | None = None,
-    limit: int = 1_000_000,  # "sin límite" (pedido de Pablo 2026-08-19) — ver main.py
+    limit: int = 1_000_000,  # "sin límite" (2026-08-19) — ver main.py
     desde: str | None = None,
     hasta: str | None = None,
     forzar: bool = False,
@@ -560,7 +560,7 @@ def fetch_top_lineas(
     fetch_top_clientes, mismo rango/cache/criterio de acceso por vendedor,
     pero agrupando por línea de artículo en vez de por cliente.
 
-    Devuelve las DOS métricas (pedido de Pablo 2026-08-26: "que tenga las 2
+    Devuelve las DOS métricas (2026-08-26: "que tenga las 2
     vistas, por unidad y por $"): `porUnidades` (ordenado por unidades) y
     `porMonto` (ordenado por $), cada item con `unidades` y `monto`, más
     `totalLineas` / `totalLineasMonto` (cuántas líneas distintas entran en
@@ -628,12 +628,12 @@ def fetch_top_lineas(
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Clientes por línea — /ventas/vendedor/clientes-por-linea (pedido de Pablo
+# Clientes por línea — /ventas/vendedor/clientes-por-linea (
 # 2026-08-18: al hacer click en una línea del ranking "Top líneas", el
 # modal de /ventas/vendedor tiene que mostrar los CLIENTES que compraron esa
 # línea).
 #
-# Desde 2026-08-20 (pedido de Pablo) esta vista es el ESPEJO EXACTO de la
+# Desde 2026-08-20 esta vista es el ESPEJO EXACTO de la
 # tabla línea×año del modo "cliente" (fetch_ventas_por_linea): mismos dos
 # años (anterior/actual), mismo desglose mensual y mismas dos métricas
 # ($/unidades), para que el modal pueda ofrecer los mismos toggles
@@ -820,7 +820,7 @@ _LINEA_COND_SIN_LINEA = (
 def fetch_clientes_por_linea(
     linea: str,
     vendedor: int | None = None,
-    limit: int = 1_000_000,  # "sin límite" (pedido de Pablo 2026-08-19) — ver main.py
+    limit: int = 1_000_000,  # "sin límite" (2026-08-19) — ver main.py
     forzar: bool = False,
 ) -> dict:
     """Clientes que compraron una línea de artículo, con el MISMO desglose
@@ -960,7 +960,7 @@ def fetch_ventas_por_linea(cod_cliente: int, vendedor: int | None = None) -> dic
     /ventas/vendedor. Ver docstring del módulo (arriba) para la fuente y el
     criterio de "venta neta".
 
-    `vendedor` (pedido de Pablo 2026-08-14, acceso por vendedor): si se
+    `vendedor` (2026-08-14, acceso por vendedor): si se
     pasa, se chequea que el cliente esté en la cartera de ese vendedor
     (cartera.cliente_es_de_vendedor — zona declarada o historial de
     facturación, mismo criterio exacto que usa el buscador de /clientes, así

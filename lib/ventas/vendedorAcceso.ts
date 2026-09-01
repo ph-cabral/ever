@@ -19,7 +19,7 @@ export type AccesoVendedor =
   | { ok: false; status: number; error: string };
 
 /**
- * Acceso por vendedor de /ventas/vendedor (pedido de Pablo 2026-08-14): un
+ * Acceso por vendedor de /ventas/vendedor (2026-08-14): un
  * usuario no-admin solo puede ver los clientes de SU vendedor
  * (usuario.vendedorCodigo, asignado por un admin en /admin/usuarios contra
  * el catálogo de Magnus — Ped_Usu_Arma). Los ADMIN no tienen restricción
@@ -27,7 +27,7 @@ export type AccesoVendedor =
  *
  * `vendedorCodigo: null` en un no-admin significa "todavía sin vendedor
  * asignado" — las rutas que llaman a esto deben tratarlo como CERO clientes
- * visibles, no como "sin restricción" (pedido explícito de Pablo: "si no
+ * visibles, no como "sin restricción" (pedido explícito: "si no
  * coincide no debería traer dato, ni aparecer en el filtro").
  *
  * Se resuelve en VIVO contra Postgres (prisma.usuario), no desde la cookie
@@ -60,7 +60,7 @@ export async function resolverAccesoVendedor(): Promise<AccesoVendedor> {
  *   · admin    → el `?vendedor=` del filtro de la vista si vino, o null =
  *     sin restricción (toda la empresa, comportamiento de siempre).
  *
- * Filtro de vendedor para administradores (pedido de Pablo 2026-08-27): el
+ * Filtro de vendedor para administradores (2026-08-27): el
  * admin elige un viajante del selector del header y toda la vista (buscador
  * de clientes, tabla, rankings) pasa a mostrar SOLO su cartera. Es una
  * comodidad de lectura, no un control de seguridad — un admin ya puede ver

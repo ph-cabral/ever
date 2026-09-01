@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// /compras — sección "Faltantes por línea" (pedido de Pablo 2026-08-26).
+// /compras — sección "Faltantes por línea" (2026-08-26).
 //
 // Los faltantes de un mes, tal como se marcaron en /deposito/faltantes
 // (preparado.faltante_existencia con existencia=false), separados en dos
@@ -16,7 +16,7 @@ export const maxDuration = 60;
 // Por cada línea:
 //   · items          → artículos distintos faltantes
 //   · cantFaltante   → suma de faltante_existencia.cantidad, o sea lo que el
-//                      operario marcó como sin existencia (decisión de Pablo:
+//                      operario marcó como sin existencia (decisión:
 //                      NO el CantPend de Magnus que usa la torta de arriba).
 //   · cantComprada   → unidades de OC hechas ESE MISMO MES para esos mismos
 //                      artículos (/compras/compras-valorizado, por FecMovim).
@@ -28,7 +28,7 @@ export const maxDuration = 60;
 //   · Importación sale SOLO de /compras/ordenes-pendientes; sin OC asociada →
 //     Nacional (mismo default que faltantes-consumo y metricas).
 //   · EVER WEAR S.A. INDUSTRIAL (proveedor propio) se EXCLUYE de la vista
-//     (decisión de Pablo): no se compra, se fabrica. Se informa cuántos
+//     (decisión): no se compra, se fabrica. Se informa cuántos
 //     artículos se excluyeron en `excluidosFabrica`.
 //
 // Todo lo de Magnus es best-effort: si una fuente no responde, se avisa por

@@ -5,8 +5,7 @@ import { listarVendedoresActivos } from "@/lib/ventas/vendedoresActivos";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-// Vendedores activos para el FILTRO de admin de /ventas/vendedor (pedido de
-// Pablo 2026-08-27). No es el catálogo completo de Magnus (eso es
+// Vendedores activos para el FILTRO de admin de /ventas/vendedor (2026-08-27). No es el catálogo completo de Magnus (eso es
 // /api/admin/usuarios/vendedores, para asignar): acá sólo las personas
 // habilitadas en Magnus que además tienen usuario activo con legajo ACTIVO
 // en Postgres — ver listarVendedoresActivos.

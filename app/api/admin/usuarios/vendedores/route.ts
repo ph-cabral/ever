@@ -9,7 +9,7 @@ export const maxDuration = 30;
 
 // Proxy → FastAPI indicadores-api: catálogo de vendedores (Magnus,
 // Ped_Usu_Arma) — alimenta el selector de "Vendedor" en /admin/usuarios
-// (pedido de Pablo 2026-08-14, acceso por vendedor en /ventas/vendedor).
+// (2026-08-14, acceso por vendedor en /ventas/vendedor).
 // Admin-only: es información interna de asignación de usuarios.
 export async function GET() {
   const g = await requireAdmin();

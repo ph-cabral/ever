@@ -34,7 +34,7 @@ export async function fetchCatalogoVendedores(): Promise<VendedorCatalogo[]> {
  *   1. Magnus (`Vendedores`): habilitado y persona — deja afuera bajas y
  *      seudo-vendedores (MOSTRADORES, ZONA CBA, …).
  *   2. Postgres: tiene un usuario ACTIVO en la app cuyo LEGAJO está en
- *      estado ACTIVO (pedido de Pablo 2026-08-27: "deberían estar solo los
+ *      estado ACTIVO (2026-08-27: "deberían estar solo los
  *      que en postgres legajo están activos").
  *
  * El único puente entre el legajo y el código de vendedor de Magnus es

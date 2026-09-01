@@ -491,7 +491,7 @@ model usuario {
   rol            String    @default("USUARIO") @db.VarChar(20) // ADMIN | USUARIO
   sector         String?   @db.VarChar(80)
   // Código de vendedor en Magnus (MAGNUS_SITD.dbo.Ped_Usu_Arma.Usu_Arma_Codigo)
-  // — para /ventas/vendedor (pedido de Pablo 2026-08-14): un usuario
+  // — para /ventas/vendedor (2026-08-14): un usuario
   // no-admin solo ve los clientes de SU vendedor. null = sin asignar (ve 0
   // clientes en esa vista hasta que un admin se lo asigne en
   // /admin/usuarios). Los ADMIN ignoran este campo (ven todos).
@@ -681,7 +681,7 @@ model puesto_documento {
 }
 
 // ===== Tableros de tareas de RRHH y Compras (duplicados de "sistema") =====
-// A pedido de Pablo (2026-08-13): mismo patrón visual/funcional que el tablero
+// (2026-08-13): mismo patrón visual/funcional que el tablero
 // Trello de "sistema" (ver sistema_tablero/columna/tarjeta más arriba), pero
 // un tablero simple por área (sin múltiples tableros ni vinculación entre
 // ellos) y con tablas 100% propias — RRHH y Compras gestionan sus propias

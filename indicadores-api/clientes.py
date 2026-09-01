@@ -41,7 +41,7 @@ def fetch_cliente(numero: int):
 
 
 # Búsqueda por código (substring numérico) o nombre (substring) — para el
-# filtro de clientes de /ventas/vendedor (pedido de Pablo 2026-08-14). A
+# filtro de clientes de /ventas/vendedor (2026-08-14). A
 # diferencia de fetch_cliente (lookup exacto por número), esto alimenta un
 # autocomplete: el usuario tipea parte del código o parte del nombre y elige
 # de la lista antes de "Filtrar".

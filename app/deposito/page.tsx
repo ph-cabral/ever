@@ -38,7 +38,7 @@ export default function DepositoPage() {
   const [tab, setTab] = useState<TabId>("picking");
 
   // Por defecto: el último mes calendario completo (cliente, evita mismatch
-  // SSR). A pedido de Pablo, 2026-08-20 — antes arrancaba en "hoy".
+  // SSR). 2026-08-20 — antes arrancaba en "hoy".
   useEffect(() => {
     const [d, h] = lastFullMonthRange();
     setDesde(d);
@@ -105,8 +105,7 @@ export default function DepositoPage() {
         <div className="flex items-center gap-3 text-sm">
           {/* Filtro de fechas: único, en el header, para todas las pestañas
               (incluida Errores de Mesa — antes tenía su propio selector
-              duplicado). Solo mes a mes, sin calendario de días (a pedido de
-              Pablo, 2026-08-20). Oculto solo en Mesas de Control, que filtra
+              duplicado). Solo mes a mes, sin calendario de días (2026-08-20). Oculto solo en Mesas de Control, que filtra
               por checkbox de meses propio (ver mesaControl.tsx). */}
           <div className={tab === "mesa-control" ? "invisible pointer-events-none" : ""}>
             <MonthRangeField

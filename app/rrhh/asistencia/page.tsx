@@ -68,7 +68,7 @@ const todayLocal = () => {
 };
 
 // Ingreso/Egreso combinado: 24 hs, sin AM/PM, sin cero a la izquierda en la
-// hora (ej. "6:05", "18:02"). Pedido de Pablo 2026-07-31.
+// hora (ej. "6:05", "18:02") (2026-07-31).
 const fmtTime24 = (iso: string | null) => {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -104,7 +104,7 @@ const toHHMM = (iso: string) => {
 // fichaje, no cuenta como falta: todos los empleados faltarían igual ese día.
 // Con 1 solo fichaje (sin egreso): si es el día de hoy todavía puede estar
 // trabajando, así que se muestra "Presente"; si es de un día anterior, se
-// mantiene "Revisar" (pedido de Pablo 2026-07-29).
+// mantiene "Revisar" (2026-07-29).
 const calcEstado = (
   r: Row,
 ): "Normal" | "Ausente" | "Revisar" | "Presente" | "Feriado" => {
@@ -115,7 +115,7 @@ const calcEstado = (
 };
 
 // Abreviatura del día de semana, para identificar sábados/domingos de un
-// vistazo en la columna Fecha (pedido de Pablo 2026-07-29, junto con la
+// vistazo en la columna Fecha (2026-07-29, junto con la
 // columna "Extra").
 const DOW_SHORT = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 const dowShort = (fecha: string) =>
@@ -276,7 +276,7 @@ const CAL_MESES = [
 // laborables. Esos días quedan en asistencia.feriado (sql/asistencia_feriados.sql)
 // y hacen que calcEstado muestre "Feriado" en vez de "Ausente" cuando no hay
 // fichaje, para no ensuciar el control de inasistencias con un día en el que
-// nadie trabajó. Pedido de Pablo, 2026-07-29.
+// nadie trabajó (2026-07-29).
 function FeriadosButton({ onSaved }: { onSaved: () => void }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -421,7 +421,7 @@ function FeriadosButton({ onSaved }: { onSaved: () => void }) {
 type EmailRegistrado = { id: number; email: string; nombre: string | null };
 
 // Botón "Emails": libreta de correos (asistencia.email_registrado, ver
-// sql/asistencia_emails_registrados.sql) — pedido de Pablo (2026-08-03).
+// sql/asistencia_emails_registrados.sql) — (2026-08-03).
 // Alimenta el autocompletado de "invitados" del modal de Estado/Novedad
 // (RegistroModal.tsx, step "calendario"); acá se administra: agregar,
 // ponerle un nombre para reconocerla más fácil, y borrar. Sin gating de
@@ -831,7 +831,7 @@ export default function AsistenciaPage() {
   );
 
   // Widget "presentes": agrupa por lugar (Oficina/Depósito/Fábrica/etc.), no por
-  // área — pedido de Pablo 2026-07-30. Mientras no se le asigne lugar a un legajo
+  // área — 2026-07-30. Mientras no se le asigne lugar a un legajo
   // desde /rrhh/legajos, cae en el balde "Sin lugar".
   const empleadosPorArea = useMemo(() => {
     const m = new Map<string, number>();

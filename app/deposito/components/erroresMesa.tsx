@@ -12,7 +12,7 @@ import { exportarErroresMesa } from "@/lib/deposito/exportErroresMesa";
 // vista es solo lectura + filtros. Fuente: GET /api/deposito/errores-mesa
 // (→ indicadores-api, fetch_errores_mesa_list en errores_mesa.py).
 //
-// A pedido de Pablo, 2026-07-21 (varias vueltas de cambios el mismo día,
+// 2026-07-21 (varias vueltas de cambios el mismo día,
 // ver errores_mesa.py para el detalle de cada una):
 //   · Registrada = quién HIZO EL REGISTRO (N° ingresado al abrir el
 //     widget) → columna `registradoPor` para los 2 orígenes (antes, en
@@ -39,7 +39,7 @@ import { exportarErroresMesa } from "@/lib/deposito/exportErroresMesa";
 //     `nombreArmador`) sobre el que es el error, unificado para los 2
 //     orígenes desde la 1ra vuelta (esto no se tocó).
 //
-// Artículos (columna nueva, a pedido de Pablo, mismo día): selector
+// Artículos (columna nueva, mismo día): selector
 // multiple-choice agregado en los 2 widgets — solo muestra los artículos
 // que están en el pedido (WMS OTItem de la OT de Picking, ver
 // fetch_articulos_pedido en errores_mesa.py). Se guarda ya formateado
@@ -136,7 +136,7 @@ function ObservacionCell({
 }
 
 // desde/hasta ahora vienen del filtro único del header (MonthOrRangeField en
-// page.tsx) — a pedido de Pablo, 2026-08-20. Antes esta pestaña tenía su
+// page.tsx) — 2026-08-20. Antes esta pestaña tenía su
 // propio DateRangeField acá adentro, separado del de arriba.
 export function ErroresMesaTab({ desde, hasta }: { desde: string; hasta: string }) {
   const [rows, setRows] = useState<ErrorMesaRow[]>([]);
@@ -144,7 +144,7 @@ export function ErroresMesaTab({ desde, hasta }: { desde: string; hasta: string 
   const [error, setError] = useState<string | null>(null);
   const [controlador, setControlador] = useState(ALL);
   const [preparador, setPreparador] = useState(ALL);
-  // Filtro por Controlador real de Magnus (a pedido de Pablo, 2026-08-24) —
+  // Filtro por Controlador real de Magnus (2026-08-24) —
   // distinto de `controlador`/"Registrada", que es quién cargó el widget.
   const [controladorReal, setControladorReal] = useState(ALL);
 
@@ -238,7 +238,7 @@ export function ErroresMesaTab({ desde, hasta }: { desde: string; hasta: string 
 
   // ── Errores por persona — top 20, respeta desde/hasta + los filtros
   // activos. Antes era un solo gráfico con toggle "Ver por: Operario/
-  // Controlador"; a pedido de Pablo (2026-08-20) se separó en 2 tarjetas
+  // Controlador"; (2026-08-20) se separó en 2 tarjetas
   // fijas, una al lado de la otra, para ver ambos a la vez.
   // "Operario" = getOperario (nombreArmador, preparador sobre el que es el
   // error, siempre poblado). "Controlador" = nombreControladorReal (Magnus,
@@ -271,8 +271,7 @@ export function ErroresMesaTab({ desde, hasta }: { desde: string; hasta: string 
   }, [filtered]);
 
   // ── Tendencia de errores en el tiempo (por día, fecha del pedido) — mismo
-  // rango/filtros que el resto de la vista. 2 líneas (2026-08-20, a pedido
-  // de Pablo): "Operarios" cuenta todas las filas con fecha (mismo criterio
+  // rango/filtros que el resto de la vista. 2 líneas (2026-08-20): "Operarios" cuenta todas las filas con fecha (mismo criterio
   // que porOperario, que siempre tiene dato); "Controladores" cuenta solo
   // las filas con nombreControladorReal (mismo criterio que porControlador).
   const tendencia = useMemo(() => {

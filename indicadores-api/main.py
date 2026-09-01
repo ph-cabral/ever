@@ -29,7 +29,7 @@ from ventas import (
 )
 # /ventas/bulones — misma vista que /ventas/vendedor pero acotada a la línea
 # BULONERÍA, con el corte por CÓDIGO PATRÓN y un ranking extra de vendedores
-# (pedido de Pablo 2026-08-26). Ver bulones.py.
+# (2026-08-26). Ver bulones.py.
 # /ventas/presupuestos — presupuestos de bulonería (CodComp 45) separados por
 # estado. El ranking de VENTAS del pie de esa vista reusa los endpoints de
 # /ventas/bulones, acá sólo van los presupuestos. Ver presupuestos.py.
@@ -81,7 +81,7 @@ app.add_middleware(
 )
 
 # ── Snapshot periódico de "Abiertos" (Magnus) para /deposito/pedidos-hora ────
-# A pedido de Pablo 2026-07-23: reconstruir el backlog abierto desde
+# 2026-07-23: reconstruir el backlog abierto desde
 # FechaPedido/FechaCierre quedaba plano (no una serie de tiempo real). En vez
 # de reconstruir el pasado, se saca una FOTO real cada
 # PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN minutos y se guarda en Postgres (ver
@@ -486,7 +486,7 @@ def compras_ordenes_detalle(
 
 # ── Compras: unidades y $ (a precio de VENTA, no de OC) de las OC hechas ─────
 # en un rango de fechas libre — selector independiente del mes de
-# /compras/metricas. Pedido de Pablo 2026-08-04.
+# /compras/metricas (2026-08-04).
 @app.get("/compras/compras-valorizado")
 def compras_compras_valorizado(
     desde: str = Query(...),
@@ -502,7 +502,7 @@ def compras_compras_valorizado(
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
 # ── Compras: consumo mensual de un artículo + stock por depósito ─────────────
-# Para /compras/consumo (pedido de Pablo 2026-08-11): vendido por mes en un
+# Para /compras/consumo (2026-08-11): vendido por mes en un
 # rango de MESES (YYYY-MM), total/promedio/máximo/mínimo>0 y stock 1/2/3.
 @app.get("/compras/consumo-articulo")
 def compras_consumo_articulo(
@@ -521,7 +521,7 @@ def compras_consumo_articulo(
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
 # ── Compras: consumo mensual de TODOS los artículos + stock (vista "Tabla") ──
-# Para el botón "Tabla" de /compras/consumo (pedido de Pablo 2026-08-11):
+# Para el botón "Tabla" de /compras/consumo (2026-08-11):
 # mismo cálculo que /compras/consumo-articulo pero sin filtrar por código.
 # Ordenado y paginado EN EL SERVIDOR (2026-08-12: la v1 devolvía el catálogo
 # completo y tiraba abajo el proceso con catálogos grandes — ver NOTA en
@@ -539,7 +539,7 @@ def compras_consumo_articulos(
 ):
     """Vendido/promedio/máximo/mínimo>0 y stock por artículo, para los
     artículos que matchean `q` (código) y/o `linea` (nombre de Stk_Nivel1) — al menos uno
-    de los dos es obligatorio (pedido de Pablo 2026-08-12, ver NOTA en
+    de los dos es obligatorio (2026-08-12, ver NOTA en
     fetch_consumo_articulos): sin filtro se agregaría TODO el catálogo."""
     try:
         return fetch_consumo_articulos(
@@ -552,7 +552,7 @@ def compras_consumo_articulos(
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
 # ── Compras: export a Excel de la tabla de consumo (TODOS los artículos, sin
-# paginar) — botón "Exportar Excel" de /compras/consumo (pedido de Pablo
+# paginar) — botón "Exportar Excel" de /compras/consumo (
 # 2026-08-12). Requiere `linea`: no se puede exportar sin elegir una línea
 # (ver NOTA en fetch_consumo_articulos, gateado también acá con Query(...)).
 @app.get("/compras/consumo-articulos/export")
@@ -578,7 +578,7 @@ def compras_consumo_articulos_export(
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
 # ── Compras: líneas del catálogo con cantidad de artículos ───────────────────
-# Para el datalist del input "línea" de /compras/consumo (pedido de Pablo
+# Para el datalist del input "línea" de /compras/consumo (
 # 2026-08-12): saber cuántos artículos hay por línea antes de decidir cómo
 # dejar el filtro (dropdown vs texto libre) — con datos reales, no a ciegas.
 @app.get("/compras/lineas")
@@ -731,7 +731,7 @@ def clientes_buscar(
     vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
 ):
     """Búsqueda de clientes por código o nombre (substring) — para el filtro
-    de /ventas/vendedor (pedido de Pablo 2026-08-14). Solo lectura, Magnus.
+    de /ventas/vendedor (2026-08-14). Solo lectura, Magnus.
     `vendedor`: acceso por vendedor — Next.js lo resuelve del usuario
     logueado y lo manda SOLO para no-admins (nunca confiar en un valor que
     venga directo del navegador sin pasar por esa resolución de sesión)."""
@@ -749,7 +749,7 @@ def ventas_vendedor(
 ):
     """Ventas (cantidad y monto, netas de nota de crédito) de un cliente,
     agrupadas por línea de artículo y por año actual/anterior, con desglose
-    mensual — para /ventas/vendedor (pedido de Pablo 2026-08-14). Ver
+    mensual — para /ventas/vendedor (2026-08-14). Ver
     docstring de fetch_ventas_por_linea (ventas.py) para la fuente y para el
     chequeo de `vendedor` (devuelve permitido=false + nada de datos si el
     cliente no es de ese vendedor)."""
@@ -763,7 +763,7 @@ def ventas_vendedor(
 def ventas_vendedor_top_clientes(
     vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
     # Antes default=10, le=50, y después default=10000, le=10000: seguía
-    # siendo un tope, aunque alto. Pablo aclaró (2026-08-19): "no tiene que
+    # siendo un tope, aunque alto. se aclaró (2026-08-19): "no tiene que
     # tener límite, todo lo que entre en el rango de fecha debe ser
     # traído". Sin `le` = sin tope superior; el default alto es solo para
     # que un caller que no mande `limit` (como el proxy Next) igual reciba
@@ -776,8 +776,8 @@ def ventas_vendedor_top_clientes(
 ):
     """Top clientes por MONTO (venta neta, $) en un rango de meses — para el
     ranking debajo de la tabla de /ventas/vendedor. Por defecto, últimos 12
-    meses (pedido de Pablo 2026-08-18) y TODOS los clientes que entran en
-    ese rango (pedido de Pablo 2026-08-19, no un top recortado). Devuelve
+    meses (2026-08-18) y TODOS los clientes que entran en
+    ese rango (2026-08-19, no un top recortado). Devuelve
     también `totalClientes`: cuántos clientes distintos entran en la
     filtración (con el límite alto, coincide con len(porMonto) salvo casos
     extremos). Ver docstring de fetch_top_clientes (ventas.py) para el
@@ -794,7 +794,7 @@ def ventas_vendedor_top_clientes(
 @app.get("/ventas/vendedor/top-lineas")
 def ventas_vendedor_top_lineas(
     vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
-    # Mismo cambio que top-clientes (pedido de Pablo 2026-08-19): traer
+    # Mismo cambio que top-clientes (2026-08-19): traer
     # TODAS las líneas del rango, sin tope superior — ver el comentario en
     # ventas_vendedor_top_clientes.
     limit: int = Query(default=1_000_000, ge=1),
@@ -802,14 +802,14 @@ def ventas_vendedor_top_lineas(
     hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes actual)"),
 ):
     """Top líneas por UNIDADES compradas en un rango de meses — gemelo de
-    /ventas/vendedor/top-clientes (pedido de Pablo 2026-08-18: "agregamos
+    /ventas/vendedor/top-clientes (2026-08-18: "agregamos
     vista de líneas, al igual que el top, traemos el total de líneas y acá
     dejamos ver solo unidades compradas"). Mismo rango por defecto (12
     meses) y, desde 2026-08-19, TODAS las líneas que entran en ese rango
     (no un top recortado). Mismo criterio de acceso por vendedor. Devuelve
     las DOS métricas — `porUnidades` (ordenado por unidades) y `porMonto`
     (ordenado por $), cada item con `unidades` y `monto` — más
-    `totalLineas` / `totalLineasMonto` (pedido de Pablo 2026-08-26: el
+    `totalLineas` / `totalLineasMonto` (2026-08-26: el
     ranking de líneas ahora tiene botón $ | Unidades como el modal). Ver
     fetch_top_lineas (ventas.py)."""
     try:
@@ -826,7 +826,7 @@ def ventas_vendedor_clientes_por_linea(
     vendedor: int | None = Query(default=None, description="Filtra a clientes de este vendedor (no-admin)"),
     # Antes default=100, le=500, y después default=10000, le=10000: con
     # líneas grandes (ej. línea 44, 385 clientes) el modal se cortaba.
-    # Mismo cambio que top-clientes/top-lineas (pedido de Pablo 2026-08-19,
+    # Mismo cambio que top-clientes/top-lineas (2026-08-19,
     # aclarado el mismo día: "no tiene que tener límite"): sin tope
     # superior — traer TODOS los clientes que compraron esa línea en el
     # rango; el front agrupa de a 50 en acordeones colapsables en pantalla.
@@ -834,10 +834,10 @@ def ventas_vendedor_clientes_por_linea(
 ):
     """Clientes que compraron una línea de artículo, con el MISMO desglose
     que la tabla línea×año del modo "cliente": año anterior y año actual,
-    cada uno con total y los 12 meses, en cantidad y monto (pedido de Pablo
+    cada uno con total y los 12 meses, en cantidad y monto (
     2026-08-20, para que el modal de línea tenga los mismos toggles
     $/Unidades y por mes/por año). Ordenados por monto total de mayor a
-    menor. Trae TODOS los clientes de esa línea (pedido de Pablo
+    menor. Trae TODOS los clientes de esa línea (
     2026-08-19), no un recorte a 100.
 
     Ya NO recibe desde/hasta: el filtro YTD/Meses lo hace el front sobre el
@@ -1207,7 +1207,7 @@ class ErrorCalidadIn(BaseModel):
 # mismo patrón que ErrorMesaItem/ErrorMesaItemsIn arriba — ver
 # insert_error_calidad_items en errores_mesa.py.
 #
-# CAMBIO 2026-08-20, 2da vuelta (a pedido de Pablo): se sacó el input único
+# CAMBIO 2026-08-20, 2da vuelta: se sacó el input único
 # de Observaciones del widget — `observacion` ya NO va a nivel de
 # ErrorCalidadItemsIn (compartido para todo el lote), ahora es un campo
 # opcional POR ÍTEM (nota distinta por artículo, tipeada justo después de
@@ -1274,7 +1274,7 @@ def deposito_errores_mesa_opciones():
 @app.get("/deposito/errores-mesa/calidad/opciones")
 def deposito_errores_mesa_calidad_opciones():
     """Opciones fijas del select de Detalle Error PARA CALIDAD (REDISEÑO
-    2026-08-20, a pedido de Pablo) — lista propia, distinta de Mesa. Ver
+    2026-08-20) — lista propia, distinta de Mesa. Ver
     errores_mesa.py — DETALLE_ERROR_OPCIONES_CALIDAD."""
     return errores_mesa_opciones_calidad()
 
@@ -1340,8 +1340,7 @@ def deposito_errores_mesa_calidad_crear(body: ErrorCalidadIn):
 
 @app.post("/deposito/errores-mesa/calidad/items")
 def deposito_errores_mesa_calidad_crear_items(body: ErrorCalidadItemsIn):
-    """Botón "Finalizar" del widget de Calidad (REDISEÑO 2026-08-20, a pedido
-    de Pablo — mismo patrón que /errores-mesa/items para Mesa de Control):
+    """Botón "Finalizar" del widget de Calidad (REDISEÑO 2026-08-20: mismo patrón que /errores-mesa/items para Mesa de Control):
     alta en lote, 1 fila en deposito.errores_mesa por artículo, cada uno con
     su propio detalleError Y su propia observación (elegidos artículo por
     artículo en el widget, sin input de Observaciones único) — ver
@@ -1438,8 +1437,7 @@ def rrhh_cvs_por_mes(meses: int = Query(default=12, ge=1, le=36)):
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
 # ── Compras: línea (Stk_Nivel1) de una lista puntual de artículos ───────────
-# Para la sección "Faltantes por línea" del dashboard /compras (pedido de
-# Pablo 2026-08-26). Es POST y no GET porque la lista de faltantes de un mes
+# Para la sección "Faltantes por línea" del dashboard /compras (2026-08-26). Es POST y no GET porque la lista de faltantes de un mes
 # puede ser de varios cientos de códigos y no entra cómoda en la URL.
 class LineasArticulosIn(BaseModel):
     codigos: list[str]

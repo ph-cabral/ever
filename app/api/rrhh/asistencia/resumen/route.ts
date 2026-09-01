@@ -173,8 +173,7 @@ export async function GET(req: NextRequest) {
       -- exactamente 3, la del medio es un fichaje espurio (duplicado/error de
       -- reloj) — si se toma como egreso de un "corte", resta como no
       -- trabajado un tramo que en realidad sí se trabajó. Se descarta esa
-      -- marca del medio y quedan sólo la 1ra y la última. Pedido de Pablo
-      -- 2026-07-30.
+      -- marca del medio y quedan sólo la 1ra y la última (2026-07-30).
       marcas_cnt AS (
         SELECT emp_key, fecha, COUNT(*) AS cnt
         FROM marcas

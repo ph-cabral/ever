@@ -17,7 +17,7 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /ventas/presupuestos — presupuestos de BULONERÍA (Ven_CodCom 45) separados
-// por estado, y abajo el ranking de VENTAS (pedido de Pablo 2026-08-31).
+// por estado, y abajo el ranking de VENTAS (2026-08-31).
 //
 // Dos mitades que NO comparten fuente y conviene no confundir:
 //

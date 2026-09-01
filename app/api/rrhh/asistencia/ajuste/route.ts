@@ -5,7 +5,7 @@ import { requireAdmin } from "@/lib/auth/guard";
 export const dynamic = "force-dynamic";
 
 // Ajuste manual de ingreso/egreso (ver sql/asistencia_ajuste_manual.sql).
-// Sólo un ADMIN puede cargarlo (a pedido de Pablo, 2026-07-29) — a diferencia
+// Sólo un ADMIN puede cargarlo (2026-07-29) — a diferencia
 // de estado_diario/novedad_diaria, que cualquiera con acceso a la vista puede
 // editar.
 // check_in / check_out: ISO 8601 con offset (ej. "2026-07-29T08:15:00-03:00").

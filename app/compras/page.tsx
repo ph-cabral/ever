@@ -55,7 +55,7 @@ interface Resp {
 
 // /compras/compras-valorizado — mismo mes que el selector de arriba:
 // unidades e $ de las OC hechas ese mes, valorizado a precio de VENTA (no al
-// costo de la OC). Pedido de Pablo 2026-08-04.
+// costo de la OC) (2026-08-04).
 interface RangoResp {
   desde: string;
   hasta: string;
@@ -106,7 +106,7 @@ const mesActual = () => {
 
 // /compras/faltantes-linea — faltantes marcados en /deposito/faltantes ese
 // mismo mes, separados en Importados / Nacionales y agrupados por LÍNEA (no
-// por artículo). Pedido de Pablo 2026-08-26.
+// por artículo) (2026-08-26).
 interface FilaLinea {
   linea: string;
   items: number;
@@ -373,12 +373,6 @@ export default function ComprasMetricasPage() {
           <h1 className="text-yellow-400 font-bold text-xl uppercase tracking-wide flex items-center gap-2">
             <BarChart3 size={20} /> Faltantes, OC e ingresos
           </h1>
-          <p className="text-zinc-500 text-sm mt-1">
-            Items (artículos distintos) y unidades de cada etapa — de los faltantes detectados en{" "}
-            {fmtMesLabel(mes)}, cuántos tuvieron una Orden de Compra ese mismo mes y, de esos, cuántos ya
-            ingresaron a la empresa. La torta clasifica esos mismos faltantes por origen: Importados,
-            Nacionales o EVER WEAR INDUSTRIAL (proveedor propio, se excluye de los otros dos grupos).
-          </p>
         </div>
 
         {(data?.ocWarn || data?.ingresoWarn) && (
@@ -397,12 +391,7 @@ export default function ComprasMetricasPage() {
             No se pudo clasificar proveedor/importación para algunos artículos — la torta puede estar incompleta
           </div>
         )}
-        {data?.pedidosMesWarn && (
-          <div className="flex items-center gap-1.5 text-xs text-amber-400/80">
-            <AlertTriangle size={13} />
-            Total pedido del mes no disponible — el % sobre el total no se puede calcular
-          </div>
-        )}
+
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <KpiCard

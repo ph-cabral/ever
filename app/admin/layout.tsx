@@ -33,7 +33,7 @@ export default async function AdminLayout({
               <ShieldCheck className="size-4" /> Permisos
             </Link>
           </nav>
-          {/* Usuario logueado, arriba a la derecha (pedido de Pablo 2026-08-25).
+          {/* Usuario logueado, arriba a la derecha (2026-08-25).
               Acá el layout ya es server component con la sesión resuelta, así
               que no hace falta el fetch de <UsuarioActual />. */}
           <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground whitespace-nowrap">

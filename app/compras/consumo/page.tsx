@@ -10,7 +10,7 @@ import KpiCard from "@/app/rrhh/components/KpiCard";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// /compras/consumo — consumo mensual de UN artículo (pedido de Pablo
+// /compras/consumo — consumo mensual de UN artículo (
 // 2026-08-11): input "Cod Art" + rango por MESES (no días) → cantidad vendida
 // por cada mes del rango, total, promedio (total / meses del rango, contando
 // los meses en 0), máximo, total/máximo, mínimo > 0, total/mínimo, y stock
@@ -24,7 +24,7 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 // 20 y ordenable por Código/Stock/Vendido/Promedio/Máximo/Mínimo (clic en el
 // encabezado). Fuente: /api/compras/consumo-articulos (plural).
 //
-// Rediseño 2026-08-12 (pedido de Pablo, mismo día que lo de arriba):
+// Rediseño 2026-08-12 (mismo día que lo de arriba):
 //   · La tabla es ahora la vista principal (ya no hay toggle Individual/Tabla).
 //   · Filtro por Código y filtro por Línea (StkFer_ArtParamet.Nivel1) se
 //     combinan por AND, pero NINGUNO es obligatorio por separado — con la
@@ -39,7 +39,7 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 //     artículo) ya no tiene su propio formulario de código: se abre haciendo
 //     clic en una fila de la tabla, con botón "Volver a la tabla".
 //
-// Export a Excel (pedido de Pablo 2026-08-12): botón "Exportar Excel" en la
+// Export a Excel (2026-08-12): botón "Exportar Excel" en la
 // vista "Tabla", trae TODOS los artículos que matchean el filtro (sin
 // paginar) vía /api/compras/consumo-articulos/export. Habilitado SOLO si hay
 // una línea aplicada (appliedLinea) — código solo no alcanza, para no
@@ -190,13 +190,13 @@ export default function ComprasConsumoPage() {
   const [filtroLinea, setFiltroLinea] = useState(""); // línea: lo tipeado, todavía no aplicado
   // Lo efectivamente usado en la última consulta — solo cambia al presionar
   // "Refrescar" (ver handleRefrescar). Escribir en los inputs de arriba NO
-  // dispara nada por sí solo (pedido de Pablo 2026-08-12).
+  // dispara nada por sí solo (2026-08-12).
   const [appliedCod, setAppliedCod] = useState("");
   const [appliedLinea, setAppliedLinea] = useState("");
   const [refreshTick, setRefreshTick] = useState(0); // fuerza refetch aunque el filtro no cambie
 
   // Líneas del catálogo (Nivel1) con cantidad de artículos — alimenta el
-  // datalist del input "Buscar línea" (pedido de Pablo 2026-08-12: saber
+  // datalist del input "Buscar línea" (2026-08-12: saber
   // cuántos artículos hay por línea para decidir cómo dejar el filtro). Se
   // trae una sola vez al entrar a la página, es liviano (agregado sobre el
   // catálogo, no sobre ventas).
@@ -258,7 +258,7 @@ export default function ComprasConsumoPage() {
     if (vista === "tabla") loadTabla();
   }, [vista, loadTabla]);
 
-  // Único disparador de una búsqueda nueva por texto (pedido de Pablo
+  // Único disparador de una búsqueda nueva por texto (
   // 2026-08-12): aplica lo tipeado en código/línea y fuerza el refetch
   // (refreshTick) — así "Refrescar" siempre trae datos frescos, incluso
   // repitiendo el mismo filtro.
@@ -270,7 +270,7 @@ export default function ComprasConsumoPage() {
   }, [filtroCod, filtroLinea]);
 
   // Exportar a Excel — SOLO habilitado con una línea aplicada (appliedLinea),
-  // código solo no alcanza (pedido de Pablo 2026-08-12). Trae TODOS los
+  // código solo no alcanza (2026-08-12). Trae TODOS los
   // artículos del filtro actual (desde/hasta/orden/código/línea), sin
   // paginar — mismo patrón fetch→blob→<a download> que /deposito/stock.
   const [exporting, setExporting] = useState(false);
@@ -794,15 +794,14 @@ export default function ComprasConsumoPage() {
                     </thead>
                     <tbody>
                       {filasTabla.map((r) => {
-                        // Cobertura = máximo/mínimo mensual sobre el stock actual (pedido
-                        // de Pablo 2026-08-12) — cuánto "pesa" un mes pico/piso frente a lo
+                        // Cobertura = máximo/mínimo mensual sobre el stock actual (2026-08-12) — cuánto "pesa" un mes pico/piso frente a lo
                         // que hay en stock hoy. Sin stock (0) queda sin definir ("—").
                         const cobMax = r.stock > 0 ?  r.stock / r.maximo: null;
                         const cobMin =
                           r.stock > 0 && r.minimo != null
                             ? r.stock / r.minimo
                             : null;
-                        // Semáforo por fila (pedido de Pablo 2026-08-12): promedio*2 vs
+                        // Semáforo por fila (2026-08-12): promedio*2 vs
                         // stock actual — 2 meses de demanda promedio como referencia.
                         // Menos que eso en stock (promedio*2 < stock es FALSO) no entra acá;
                         // literal: promedio*2 < stock ⇒ rojo, promedio*2 > stock ⇒ verde,

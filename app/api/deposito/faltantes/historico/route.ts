@@ -36,7 +36,7 @@ const API_URL =
 //
 // v3 (2026-07-31): mismo endpoint ahora se consume también desde
 // /compras/faltantes (botón "Excel (existencia)"), no solo desde
-// /deposito/faltantes. A pedido de Pablo se excluyen acá los renglones cuyo
+// /deposito/faltantes. se excluyen acá los renglones cuyo
 // pedido es comprobante Magnus 70 o 75 (cab.CompCodigo, expuesto por
 // indicadores-api en /deposito/ot-diferencias desde este mismo cambio) —
 // aplica a AMBOS consumidores por igual, ya que es el mismo reporte.
@@ -66,7 +66,7 @@ interface OtDifRow {
   CompCodigo: number | null;
 }
 
-// Comprobantes Magnus a excluir de este export (pedido de Pablo, 2026-07-31).
+// Comprobantes Magnus a excluir de este export (2026-07-31).
 // Best-effort: solo aplica a renglones resueltos vía ot-diferencias (que ahora
 // trae CompCodigo); el fallback preparado.faltante_wms no lo tiene y no se
 // filtra por este criterio.

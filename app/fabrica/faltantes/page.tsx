@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
+import { origenArticulo } from "@/lib/compras/origenArticulo";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
@@ -52,6 +53,7 @@ interface Row {
   ocTotal: number;
   fechaEntrega: string | null;
   importacion: boolean;
+  tipoArticulo: string | null; // "Nacional"/"Importado"/"Original"/"Fabrica" (Magnus) — clasificación de origen
   ocs: string[];
   estado: Estado;
   extraordinario: boolean;
@@ -60,18 +62,13 @@ interface Row {
   tieneArribo: boolean;
 }
 
-// Filtro de proveedor: contains normalizado (sin acentos, case-insensitive,
-// trim) — tolera variaciones de mayúsculas/espacios tal como vienen de Magnus.
-// Mismo patrón que lib/rrhh/aggregations.ts (norm + includes("ever wear")).
-const PROVEEDOR_OBJETIVO = "ever wear s.a. industrial";
-const norm = (s: string) =>
-  s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(new RegExp("[\\u0300-\\u036f]", "g"), "")
-    .trim();
-const esProveedorObjetivo = (p: string | null) =>
-  !!p && norm(p).includes(PROVEEDOR_OBJETIVO);
+// Universo de esta vista: todo lo de fábrica. Ya no es solo el proveedor
+// EVER WEAR S.A. INDUSTRIAL — también entra el artículo de tipo Fabril
+// (Magnus StkFer_Articulos.NacionalImportado) aunque venga con otro proveedor.
+// Esos mismos artículos quedan FUERA de /compras/faltantes, así que el
+// criterio es uno solo y vive en lib/compras/origenArticulo.ts.
+const esDeFabrica = (r: { Proveedor: string | null; tipoArticulo?: string | null }) =>
+  origenArticulo(r) === "fabrica";
 
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(n || 0);
@@ -485,10 +482,10 @@ export default function FabricaFaltantesPage() {
     }, EXIT_MS);
   }, []);
 
-  // Nunca extraordinario, y acotado al proveedor EVER WEAR S.A. INDUSTRIAL.
+  // Nunca extraordinario, y acotado a lo de fábrica (proveedor EVER WEAR S.A.
+  // INDUSTRIAL o artículo de tipo Fabril).
   const frontRows = useMemo(
-    () =>
-      rows.filter((r) => !r.extraordinario && esProveedorObjetivo(r.Proveedor)),
+    () => rows.filter((r) => !r.extraordinario && esDeFabrica(r)),
     [rows],
   );
 

@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 // Proxy → FastAPI indicadores-api: alta en lote del widget de Calidad
-// (REDISEÑO 2026-08-20, a pedido de Pablo — mismo patrón que
+// (REDISEÑO 2026-08-20: mismo patrón que
 // /api/deposito/errores-mesa/items para Mesa de Control) — botón "Finalizar"
 // manda {nroPedido, nroOperario, observacion, items:[{codArticulo,
 // detalleError}, ...]} y se inserta 1 fila de deposito.errores_mesa POR

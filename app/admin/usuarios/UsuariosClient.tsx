@@ -48,7 +48,7 @@ export function UsuariosClient() {
   const [pwd2, setPwd2] = useState("");
   const [savingPwd, setSavingPwd] = useState(false);
   // Catálogo de vendedores (Magnus, Ped_Usu_Arma) para la columna
-  // "Vendedor" — pedido de Pablo 2026-08-14, acceso por vendedor en
+  // "Vendedor" — 2026-08-14, acceso por vendedor en
   // /ventas/vendedor. Se trae una sola vez, catálogo chico. Desde
   // 2026-08-27 ya no alimenta un combo: el número se TIPEA y el catálogo
   // sirve para validarlo y mostrar el nombre (ver CeldaVendedor).
@@ -385,7 +385,7 @@ function CeldaBulones({
 
 /**
  * Celda "Vendedor" de la tabla de usuarios — se TIPEA el número de vendedor
- * de Magnus, o parte del nombre, y con Enter se resuelve (pedido de Pablo
+ * de Magnus, o parte del nombre, y con Enter se resuelve (
  * 2026-08-27; antes era un combo con todos los nombres del catálogo).
  *
  * Por qué además de número se puede buscar por nombre: el número que uno

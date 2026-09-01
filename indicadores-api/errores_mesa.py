@@ -6,17 +6,17 @@ ever/sql/deposito_errores_mesa.sql). El lookup por Nro Pedido es SOLO LECTURA:
   · Fecha + Tipo Pedido  ← EVERWEAR.dbo.VenFer_PedidoCabecera + MAGNUS_SITD.
     "Tipo Pedido" = nombre del comprobante (Ven_CodComprobante.DetalleCorto
     por CompCodigo, NO el código numérico) — mismo join que Comprobante_Desc
-    en main.py/SQL_QUERY. Ajustado 2026-07-15 a pedido de Pablo: antes era
+    en main.py/SQL_QUERY. Ajustado 2026-07-15: antes era
     el origen de venta (Web/Móvil/Acopio, Vta/Ped_OrigenRegistracion).
   · OT + N° Armador/Nombre ← WMS OT + Personal, mismo patrón que
     deposito.py (OT_COL_PEDIDO, P_Repositor / OTUsuarioGUID_Repositor).
   · Ubicación ← campo "Observaciones" de la pantalla de OT en WMS (confirmado
-    con captura de Pablo: ahí anotan cosas como "Est 2 10" / "01-16-10-I").
+    con captura de pantalla: ahí anotan cosas como "Est 2 10" / "01-16-10-I").
     La columna real de OT se detecta sola por nombre (LIKE '%OBSERV%', ver
     _col_observaciones_ot) — mismo patrón "candidatos" que ya usa deposito.py
     (OT_candidatos_pedido) para no hardcodear un nombre sin confirmar.
 
-REDISEÑO 2026-07-15 (a pedido de Pablo): se sacó el select de Mesa/Reclamos.
+REDISEÑO 2026-07-15: se sacó el select de Mesa/Reclamos.
 Ahora, al abrir el widget se pide un N° de operario (el controlador que está
 parado en la mesa) y se resuelve su NOMBRE contra WMS.Personal — mismo origen
 que "nombreArmador" (fetch_operario_nombre abajo) — UNA sola vez por sesión
@@ -25,20 +25,20 @@ del widget. Ese nombre va en la columna que antes era "aviso", ahora
 y el server resuelve el nombre (no confía en lo que mande el cliente).
 "Detalle Error" sigue siendo un select manual — ver DETALLE_ERROR_OPCIONES.
 
-CAMBIO 2026-07-21 (a pedido de Pablo): la vista /deposito separa "Registrada"
+CAMBIO 2026-07-21: la vista /deposito separa "Registrada"
 (quién cargó el error) de "Controlador" (el controlador real del pedido,
 Magnus Ven_PedImpresoCP.CodControlador1/2, vía fetch_controlador_pedido).
 Este dato SOLO se resuelve para origen='calidad' (ver insert_error_calidad) —
 ver "3ra vuelta, REVERTIDA" abajo para por qué Mesa de Control no lo usa.
 
-CAMBIO 2026-07-21, 2da vuelta (a pedido de Pablo): la columna `controlador`
+CAMBIO 2026-07-21, 2da vuelta: la columna `controlador`
 en sí dejó de guardar a quien carga el registro — eso ahora va en
 `registradoPor` para los 2 orígenes (antes era así solo en Calidad). Los
 registros insertados ANTES de este cambio quedan con el registrante en
 `controlador` y `registradoPor` NULL — no rompen nada porque el dato sigue
 ahí; el fallback para mostrarlos vive en getRegistrador (erroresMesa.tsx).
 
-CAMBIO 2026-07-21, 3ra vuelta, REVERTIDA (a pedido de Pablo): se había hecho
+CAMBIO 2026-07-21, 3ra vuelta, REVERTIDA: se había hecho
 que `insert_error_mesa` TAMBIÉN resolviera el Controlador real (Magnus) igual
 que Calidad, guardándolo en `controlador` (duplicado de nombreControladorReal).
 Se revirtió: para Mesa de Control, quien carga el widget YA ES el controlador
@@ -76,7 +76,7 @@ DETALLE_ERROR_OPCIONES = [
     "Producto sin identificación",
 ]
 
-# Lista PROPIA de Calidad (REDISEÑO 2026-08-20, a pedido de Pablo): antes el
+# Lista PROPIA de Calidad (REDISEÑO 2026-08-20): antes el
 # widget de Calidad usaba esta MISMA lista que Mesa de Control (vía
 # DETALLE_ERROR_OPCIONES/opciones() arriba) — no había forma de tener errores
 # distintos para cada origen. Ahora Calidad tiene la suya, servida por
@@ -94,7 +94,7 @@ DETALLE_ERROR_OPCIONES_CALIDAD = [
 # "TipoPedido" = nombre del comprobante (ej. "Factura A"), no el código
 # numérico — mismo join (CompCodigo -> Ven_CodComprobante.DetalleCorto) que
 # Comprobante_Desc en main.py/SQL_QUERY.
-# `Cliente`/`CodCliente` agregados 2026-08-20 (a pedido de Pablo: el widget
+# `Cliente`/`CodCliente` agregados 2026-08-20 (el widget
 # de Calidad muestra el nombre del cliente en vez de "Pedido N" arriba) —
 # mismo join (CodCliente -> MAGNUS_SITD.dbo.Clientes.Cliente_Nombre) que ya
 # usa SQL_MAGNUS_ABIERTOS_TODOS en control_asignacion.py.
@@ -117,7 +117,7 @@ _ot_observ_col_cache: dict = {"col": None, "resolved": False}
 
 def _col_observaciones_ot(conn) -> str | None:
     """Nombre real de la columna de OT que trae 'Observaciones' (ubicación
-    tipo 'Est 2 10' / '01-16-10-I', ver captura de Pablo). Detección por
+    tipo 'Est 2 10' / '01-16-10-I', ver captura de pantalla). Detección por
     nombre (LIKE '%OBSERV%'), no hardcodeada — mismo patrón que
     OT_candidatos_pedido en deposito.py. Cacheado en memoria del proceso."""
     if _ot_observ_col_cache["resolved"]:
@@ -153,7 +153,7 @@ def fetch_pedido_lookup(nro_pedido: int) -> dict | None:
     """Fecha + Tipo Pedido (Magnus) + OT + N° Armador/Nombre + Ubicación (WMS),
     por Nro Pedido (NroMovVenta). None si el pedido no existe en Magnus.
 
-    CAMBIO 2026-08-14 (a pedido de Pablo): el pedido en Magnus tiene varias
+    CAMBIO 2026-08-14: el pedido en Magnus tiene varias
     fechas vinculadas, no solo la de registración — se agregan al lookup
     (todas opcionales, `None` si esa etapa todavía no pasó):
       · `fecha`         — FechaPedido (registración), como ya estaba.
@@ -227,7 +227,7 @@ def fetch_pedido_lookup(nro_pedido: int) -> dict | None:
 
 
 # ── Artículos del pedido (para el selector multiple-choice de los widgets) ────
-# A pedido de Pablo (2026-07-21): en vez de tipear el pedido a mano, ambos
+# (2026-07-21): en vez de tipear el pedido a mano, ambos
 # widgets (Mesa de Control y Calidad) deben poder elegir 1 o más artículos
 # ENTRE LOS QUE ESTÁN EN ESE PEDIDO, para asociarlos al error cargado.
 # Fuente: renglones de la MISMA OT de Picking que ya resuelve
@@ -385,7 +385,7 @@ def _normalizar_articulos(articulos: list[str] | None) -> list[str] | None:
 def fetch_ubicacion_diag(nro_pedido: int | None = None) -> dict:
     """Diagnóstico: qué columna de OT se detectó para 'Observaciones'/ubicación
     y, si se pasa nro_pedido, el valor real que trae para ese pedido. Para
-    confirmar contra la pantalla de OT en WMS (ver captura de Pablo)."""
+    confirmar contra la pantalla de OT en WMS (ver captura de pantalla)."""
     conn = get_connection("WMS")
     try:
         col = _col_observaciones_ot(conn)
@@ -419,7 +419,7 @@ def insert_error_mesa(
     (por nro_operario, WMS.Personal) del lado del server (no confía en lo que
     mande el cliente) e inserta 1 fila en deposito.errores_mesa.
 
-    `articulos` (opcional, a pedido de Pablo 2026-07-21): códigos de
+    `articulos` (opcional, 2026-07-21): códigos de
     artículo elegidos en el selector multiple-choice del widget (ver
     fetch_articulos_pedido) — se re-validan acá contra el pedido (mismo
     criterio de no confiar en el cliente que el resto del archivo) y se
@@ -427,11 +427,11 @@ def insert_error_mesa(
     si viene vacío/ausente, ni si algún código no matchea (se descarta
     silenciosamente).
 
-    CAMBIO 2026-07-21 (a pedido de Pablo, 2da vuelta): `controlador` dejó de
+    CAMBIO 2026-07-21 (2da vuelta): `controlador` dejó de
     guardar a quien carga el registro — ese dato ahora va en `registradoPor`,
     mismo criterio que ya usaba `insert_error_calidad`.
 
-    CAMBIO 2026-07-21, 3ra vuelta, REVERTIDA (a pedido de Pablo): se había
+    CAMBIO 2026-07-21, 3ra vuelta, REVERTIDA: se había
     resuelto acá también el "Controlador real" (Magnus, fetch_controlador_pedido)
     igual que en Calidad — pero para Mesa de Control eso es redundante y
     confuso: quien carga ESTE widget YA ES el controlador que está parado en
@@ -497,7 +497,7 @@ def insert_error_mesa(
     }
 
 
-# ── Alta en lote, 1 fila por artículo (REDISEÑO 2026-08-04, a pedido de Pablo) ─
+# ── Alta en lote, 1 fila por artículo (REDISEÑO 2026-08-04) ─
 # Antes el widget de Mesa de Control cargaba 1 solo detalleError para TODO el
 # pedido (con `articulos` como simple etiqueta/lista adjunta, ver
 # insert_error_mesa arriba). Ahora cada artículo puede tener SU PROPIO error:
@@ -588,7 +588,7 @@ def insert_error_mesa_items(
 # A diferencia del widget de Mesa de Control (arriba), acá el controlador NO
 # se tipea (no hay pantalla de N° Operario): se resuelve solo por Nro Pedido
 # contra Magnus (Ven_PedImpresoCP.CodControlador1/2, mismo origen que
-# mesa_control.py — cod1==cod2 confirmado ahí). A pedido de Pablo (2026-07-16):
+# mesa_control.py — cod1==cod2 confirmado ahí). (2026-07-16):
 # esta alta NO guarda preparador (nroArmador/nombreArmador quedan NULL).
 SQL_CONTROLADOR_PEDIDO = """
 SELECT TOP 1 CodControlador1, CodControlador2
@@ -603,7 +603,7 @@ def fetch_controlador_pedido(nro_pedido: int) -> dict | None:
     """Controlador real del pedido (Magnus, atado a NroMovVenta). None si el
     pedido no tiene control registrado.
 
-    FIX 2026-07-21 (bug reportado por Pablo: pedido con control confirmado en
+    FIX 2026-07-21 (bug reportado: pedido con control confirmado en
     Magnus igual daba "sin controlador registrado"): Ven_PedImpresoCP puede
     tener MÁS DE UNA fila por NroMovVenta (recontrol/reimpresión — mismo caso
     ya confirmado y filtrado en mesa_control.py, ver SQL_RENGLONES_CONTROLADOS
@@ -652,7 +652,7 @@ def fetch_fecha_control_pedido(nro_pedido: int):
     fetch_controlador_pedido (mas reciente CON CodControlador1/2 > 0) — para
     `fechaControl` en fetch_pedido_lookup. `datetime.date` o `None`.
 
-    CAMBIO 2026-08-14 (a pedido de Pablo, encontrado corriendo en bulk sobre
+    CAMBIO 2026-08-14 (encontrado corriendo en bulk sobre
     36 pedidos de acopio): dbo.FECHA_Cla2SQL(FechaControl) revienta (SQL
     error 242, varchar->datetime fuera de rango) si el INT de FechaControl
     no es un dia valido — pasa para datos viejos/corruptos en alguna fila
@@ -732,7 +732,7 @@ def insert_error_calidad(
     fetch_operario_nombre) y va en `registradoPor`, separado de `controlador`
     (que acá sale solo de Magnus, no lo tipea nadie). origen='calidad'.
 
-    CAMBIO 2026-07-21 (a pedido de Pablo): esta alta ahora SÍ guarda el
+    CAMBIO 2026-07-21: esta alta ahora SÍ guarda el
     preparador (nroArmador/nombreArmador, mismo lookup WMS que usa
     insert_error_mesa — antes se descartaba a propósito, ver docstring vieja
     "Tampoco guarda preparador"). Es el mismo dato que la vista /deposito
@@ -798,7 +798,7 @@ def insert_error_calidad(
 
 
 # ── Alta en lote, 1 fila por artículo — Calidad (REDISEÑO 2026-08-20, a
-# pedido de Pablo: "que tenga la misma opción de seleccionar ítems [que Mesa],
+# "que tenga la misma opción de seleccionar ítems [que Mesa],
 # limitado a lista de 10, y que al hacer click se despliegen los errores").
 # Mismo patrón que insert_error_mesa_items (REDISEÑO 2026-08-04) pero para
 # Calidad: cada artículo puede tener SU PROPIO error (self.articulos_errores
@@ -808,7 +808,7 @@ def insert_error_calidad(
 # real que insert_error_calidad (fetch_controlador_pedido): si el pedido no
 # tiene control registrado en Magnus, no se guarda nada.
 #
-# CAMBIO 2026-08-20, 2da vuelta (a pedido de Pablo: "eliminar el input de
+# CAMBIO 2026-08-20, 2da vuelta ("eliminar el input de
 # Observaciones [único, para todo el pedido] y que aparezca un input para
 # rellenar por ítem luego de seleccionar el error"): `observacion` dejó de
 # ser un parámetro compartido para TODO el lote — ahora viaje DENTRO de cada

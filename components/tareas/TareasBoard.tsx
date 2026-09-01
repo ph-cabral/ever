@@ -537,18 +537,11 @@ function TarjetaVisual({ card, expandir, flotante }: { card: Tarjeta; expandir: 
           <p className="overflow-hidden text-sm text-zinc-400 whitespace-pre-line break-words">{rest.join("\n")}</p>
         </div>
       )}
-      {(fecha || card.campos.responsable) && (
+      {fecha && (
         <div className="flex flex-wrap items-center gap-1 mt-1.5">
-          {fecha && (
-            <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[11px] text-zinc-400">
-              🕒 {fecha.toLocaleDateString("es-AR", { day: "2-digit", month: "short" })}
-            </span>
-          )}
-          {card.campos.responsable && (
-            <span className="max-w-full truncate rounded bg-white/[0.06] px-1.5 py-0.5 text-[11px] text-zinc-400">
-              {card.campos.responsable}
-            </span>
-          )}
+          <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[11px] text-zinc-400">
+            🕒 {fecha.toLocaleDateString("es-AR", { day: "2-digit", month: "short" })}
+          </span>
         </div>
       )}
     </div>

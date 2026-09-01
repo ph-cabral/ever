@@ -523,7 +523,7 @@ def fetch_verificar_presupuestos(items: list[dict]) -> list[dict]:
 # Distinto del caso Todo Goma/41879: ahí el presupuesto NUNCA llegó a ser
 # pedido (VenFer_PedidoCabecera) — no hay ningún rastro en ningún sistema, así
 # que ninguna consulta puede confirmar solo si era plata real o una cotización
-# que no se cerró (eso lo sabe Pablo, no la base). "Presupuesto sin factura"
+# que no se cerró (eso no lo sabe la base, es un dato externo a Magnus). "Presupuesto sin factura"
 # es, de hecho, el estado NORMAL de cualquier cotización todavía no cerrada —
 # sumar eso automáticamente infla la facturación con ventas que nunca pasaron.
 #

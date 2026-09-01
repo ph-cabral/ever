@@ -9,7 +9,7 @@ export const maxDuration = 60;
 
 // Proxy → FastAPI indicadores-api: ventas de UN cliente agrupadas por línea
 // de artículo, año actual y año anterior (con desglose mensual) — para
-// /ventas/vendedor (pedido de Pablo 2026-08-14). Ver fetch_ventas_por_linea
+// /ventas/vendedor (2026-08-14). Ver fetch_ventas_por_linea
 // en ventas.py (indicadores-api) para la fuente/criterio de "venta neta".
 //
 // Acceso por vendedor (mismo pedido, 2026-08-14): resuelve server-side si

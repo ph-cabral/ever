@@ -1,7 +1,7 @@
 """
 Presupuestos de BULONERÍA (CodComp 45) — para /ventas/presupuestos.
 
-Pedido de Pablo 2026-08-31: una vista donde se vean los presupuestos SEPARADOS
+ 2026-08-31: una vista donde se vean los presupuestos SEPARADOS
 POR ESTADO, y abajo el ranking de VENTAS (no de presupuestos) por unidades o
 por $. El ranking de abajo NO se implementa acá: el front reusa tal cual los
 endpoints que ya existen (/ventas/bulones/top-vendedores | top-patrones |
@@ -77,7 +77,7 @@ def _rango(desde: str | None, hasta: str | None):
     """('YYYY-MM'|None, 'YYYY-MM'|None) -> (desde_ym, hasta_ym, int1, int2).
 
     Default DISTINTO al de los rankings de ventas: acá es el MES EN CURSO
-    (pedido de Pablo: "mes en curso + selector"). En ventas el default es la
+    ("mes en curso + selector"). En ventas el default es la
     ventana fija de 12 meses terminando el mes anterior porque el mes en
     curso está incompleto; un presupuesto, en cambio, se mira mientras está
     vivo — el mes incompleto es justamente el que interesa.

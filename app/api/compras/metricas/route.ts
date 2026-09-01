@@ -60,7 +60,7 @@ export const maxDuration = 60;
 //       fuente) — default false (Nacional) si el artículo no tiene OC
 //       asociada, mismo default que ya usa faltantes-consumo.
 //
-//   Totales unidades/$ + % (agregado 2026-07-28, Pablo): además del conteo en
+//   Totales unidades/$ + % (agregado 2026-07-28): además del conteo en
 //   items, se informa faltantesUnidades/faltantesImporte (suma de
 //   CantPend/Importe por renglón del set A completo, mismo dato que ya trae
 //   /deposito/faltantes para la torta — no cuesta una llamada extra) y

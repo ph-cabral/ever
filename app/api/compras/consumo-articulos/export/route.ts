@@ -9,7 +9,7 @@ export const maxDuration = 90;
 
 // Proxy → FastAPI indicadores-api: TODOS los artículos (sin paginar) que
 // matchean el filtro de la vista "Tabla" de /compras/consumo, para el botón
-// "Exportar Excel" (pedido de Pablo 2026-08-12). A diferencia de
+// "Exportar Excel" (2026-08-12). A diferencia de
 // /api/compras/consumo-articulos (paginado), acá se arma el .xlsx directo
 // (lib "xlsx" ya es dependencia del proyecto, mismo patrón que
 // /api/deposito/stock/export).

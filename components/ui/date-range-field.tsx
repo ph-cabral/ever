@@ -79,8 +79,7 @@ const monthLabel = (ym: string): string => {
 
 /**
  * Primer y último día ISO del último mes calendario completo (el anterior al
- * actual) — pensado como default inicial para MonthRangeField (a pedido de
- * Pablo, 2026-08-20: el filtro de Depósito arranca en el mes pasado, no en
+ * actual) — pensado como default inicial para MonthRangeField (2026-08-20: el filtro de Depósito arranca en el mes pasado, no en
  * "hoy").
  */
 export function lastFullMonthRange(): [string, string] {
@@ -373,8 +372,7 @@ export function DateRangeField({
 /* ---------------- MonthRangeField (2 meses: Desde / Hasta) ---------------- */
 
 // Filtro de Depósito: 2 selects de mes calendario, uno al lado del otro
-// ("Desde" / "Hasta"), sin calendario de días ni toggle de modo. A pedido de
-// Pablo, 2026-08-20 — primero se probó con toggle "Mes"/"Rango" (día a día),
+// ("Desde" / "Hasta"), sin calendario de días ni toggle de modo. 2026-08-20 — primero se probó con toggle "Mes"/"Rango" (día a día),
 // pero se pidió sacar la opción de días: acá SOLO se elige mes, nunca un día
 // suelto dentro del mes. Cada select ofrece los últimos `monthsBack` meses
 // (incluye el actual, más reciente al final para leer de izquierda a

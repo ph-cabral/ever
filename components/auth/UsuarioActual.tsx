@@ -5,7 +5,7 @@ import { User } from "lucide-react";
 
 /**
  * Nombre del usuario logueado, para la esquina superior derecha del header
- * de cualquier vista (pedido de Pablo 2026-08-25: "agregá el nombre de quien
+ * de cualquier vista (2026-08-25: "agregá el nombre de quien
  * está logueado arriba a la derecha, en todas las vistas").
  *
  * Lee /api/auth/me (misma fuente que usa /login y el home). Si no hay sesión

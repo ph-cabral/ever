@@ -7,7 +7,7 @@
 //
 // Usado por /api/rrhh/asistencia/calendarios (listar) y
 // /api/rrhh/asistencia/rango (crear evento de todo el día al registrar
-// Vacaciones/etc. con rango de fechas) — pedido de Pablo 2026-08-01.
+// Vacaciones/etc. con rango de fechas) — 2026-08-01.
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
@@ -118,7 +118,7 @@ export type CreatedEvent = { id: string; htmlLink: string | null };
 //
 // `attendees` es opcional — invitados puntuales que se suman a este evento
 // además de la gente que ya tiene agregada el calendario base elegido
-// (pedido de Pablo, 2026-08-03). Se manda con `sendUpdates=all` para que
+// (2026-08-03). Se manda con `sendUpdates=all` para que
 // Google les mande la invitación por mail (si no se manda ese query param,
 // Google crea el evento pero no notifica a nadie).
 export async function createAllDayEvent(opts: {

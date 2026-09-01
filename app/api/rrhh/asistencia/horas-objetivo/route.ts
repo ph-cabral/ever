@@ -6,8 +6,7 @@ export const dynamic = "force-dynamic";
 // Horas objetivo por mes (asistencia.horas_objetivo, ver
 // sql/asistencia_horas_objetivo.sql). Un solo número por mes (ej. 300) contra
 // el que se compara el total de horas RRHH acumuladas de cada empleado en
-// /rrhh (pestaña Ausentismo), para marcar quién cumplió y quién no. Pedido de
-// Pablo 2026-07-31.
+// /rrhh (pestaña Ausentismo), para marcar quién cumplió y quién no (2026-07-31).
 
 // GET ?ym=YYYY-MM -> { horas: number | null }
 export async function GET(req: NextRequest) {

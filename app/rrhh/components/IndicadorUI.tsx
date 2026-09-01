@@ -30,8 +30,7 @@ const nombreMes = (ym: string): string => {
 
 // Selector de mes con spinner de carga. Antes era un <input type="month">
 // nativo: al clickear en el medio del control (en vez del pequeño ícono de
-// calendario del borde) no desplegaba nada, lo que parecía roto (reportado
-// por Pablo 2026-08-01). Un <select> real siempre abre el desplegable del
+// calendario del borde) no desplegaba nada, lo que parecía roto (reportado 2026-08-01). Un <select> real siempre abre el desplegable del
 // navegador con cualquier click.
 export function MesSelect({
   ym,

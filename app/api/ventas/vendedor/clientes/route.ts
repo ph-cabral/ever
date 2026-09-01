@@ -9,7 +9,7 @@ export const maxDuration = 30;
 
 // Proxy → FastAPI indicadores-api: búsqueda de clientes (Magnus) por código
 // o nombre (substring) — alimenta el autocomplete del filtro de
-// /ventas/vendedor (pedido de Pablo 2026-08-14). Sin `q`, no busca nada (evita
+// /ventas/vendedor (2026-08-14). Sin `q`, no busca nada (evita
 // traer el padrón completo por accidente).
 //
 // Acceso por vendedor (mismo pedido, 2026-08-14): un usuario no-admin NUNCA

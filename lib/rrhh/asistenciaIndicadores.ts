@@ -82,7 +82,7 @@ export async function fetchHorarios(): Promise<{
 // trabajar ese día. Esto hace que cualquier hora trabajada un feriado cuente
 // 100% como extra (rrhhMin = min(neto, 0) = 0, extra = neto - 0 = neto) —
 // mismo mecanismo que ya existía para un sábado sin horario asignado (tope_sab
-// = 0 en "Estándar"). Pedido de Pablo, 2026-07-29: marcar quién trabajó un
+// = 0 en "Estándar"). 2026-07-29: marcar quién trabajó un
 // sábado o feriado sin tener ese día asignado, y contarlo como hora extra.
 export function buildTopeResolver(
   tipos: HorarioTipo[],
@@ -121,7 +121,7 @@ const todayLocal = (): string => {
 // Estado auto cuando no hay uno guardado en BD. Si el día es feriado (botón
 // "Feriados" en /rrhh/asistencia) y no hay fichaje, no cuenta como falta.
 // Con 1 solo fichaje (sin egreso): "Presente" si es hoy (puede seguir
-// trabajando), "Revisar" si es un día anterior (pedido de Pablo 2026-07-29).
+// trabajando), "Revisar" si es un día anterior (2026-07-29).
 export const calcEstado = (
   r: ResumenRow,
 ): "Normal" | "Ausente" | "Revisar" | "Presente" | "Feriado" => {
@@ -259,7 +259,7 @@ export function computeIndicadores(
 
 // Total de horas RRHH (con tope diario aplicado) acumuladas por empleado en
 // el período — para comparar contra el objetivo mensual de horas
-// (asistencia.horas_objetivo, pestaña Ausentismo). Pedido de Pablo 2026-07-31.
+// (asistencia.horas_objetivo, pestaña Ausentismo) (2026-07-31).
 export type HorasEmpleado = {
   employee_no: string;
   employee_name: string | null;

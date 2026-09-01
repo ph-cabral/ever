@@ -112,7 +112,7 @@ def _detectar_columnas(cols: list[str]) -> dict:
 # NroMovVenta+NroRenglon), que es el número pensado para reconciliar contra
 # lo facturado/preparado.
 #
-# CONFIRMADO 2026-07-13 (Pablo + muestra de Ven_PedImpresoCP): un pedido NO
+# CONFIRMADO 2026-07-13 (muestra de Ven_PedImpresoCP): un pedido NO
 # se controla 2 veces — lo controla y cierra UNA sola persona. CodControlador1
 # y CodControlador2 vienen SIEMPRE con el mismo valor (el sistema duplica el
 # mismo código en los 2 campos; FechaCierre/HoraCierre = FechaControl/

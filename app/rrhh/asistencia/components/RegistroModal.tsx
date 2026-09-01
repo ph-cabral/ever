@@ -1,7 +1,7 @@
 "use client";
 
 // Botón + modal que reemplaza al viejo Picker de Estado/Novedad en
-// /rrhh/asistencia — pedido de Pablo (2026-08-01).
+// /rrhh/asistencia — (2026-08-01).
 //
 // El botón muestra el nombre arriba y el número (días/horas) abajo, si hay.
 // Al hacer click se abre un modal con las opciones en grilla ("ladrillos").
@@ -94,15 +94,14 @@ export function RegistroButton({
   const [rangeEnd, setRangeEnd] = useState<string | null>(null);
   // Sólo para tipo "novedad": a diferencia de estado (que es el día entero,
   // sólo importa cuántos días), una novedad son horas puntuales dentro de
-  // cada día del rango (ej. "Est. Med." 2 hs/día durante 5 días) — pedido de
-  // Pablo (2026-08-02).
+  // cada día del rango (ej. "Est. Med." 2 hs/día durante 5 días) — (2026-08-02).
   const [horasDia, setHorasDia] = useState("");
 
   // Calendarios de Google (paso final del flujo con calendario).
   const [calendarios, setCalendarios] = useState<Calendario[] | null>(null);
   const [calendariosError, setCalendariosError] = useState<string | null>(null);
   const [calendarioId, setCalendarioId] = useState("");
-  // Invitados puntuales del evento — pedido de Pablo (2026-08-03): además del
+  // Invitados puntuales del evento — (2026-08-03): además del
   // calendario base (que ya tiene agregada a la gente que siempre lo ve), a
   // veces hace falta sumar a alguien puntual a ese registro. Se eligen como
   // pills fijas contra la libreta de asistencia.email_registrado (ver
@@ -114,7 +113,7 @@ export function RegistroButton({
   const [invitadoInput, setInvitadoInput] = useState("");
   const [emailsRegistrados, setEmailsRegistrados] = useState<EmailRegistrado[] | null>(null);
   // Modal chico para sumar un email nuevo a la libreta (asistencia.email_
-  // registrado) sin salir del registro — pedido de Pablo (2026-08-03): el
+  // registrado) sin salir del registro — (2026-08-03): el
   // "+" de abajo antes sumaba directo como invitado puntual de ESTE evento;
   // ahora guarda en la libreta y aparece como pill fijo (desmarcado) para
   // marcar acá o en cualquier registro futuro.

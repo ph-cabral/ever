@@ -8,7 +8,7 @@ export const maxDuration = 30;
 
 // Proxy → FastAPI indicadores-api: líneas del catálogo (StkFer_ArtParamet.
 // Nivel1) con cantidad de artículos en cada una. Para el datalist del input
-// "línea" de /compras/consumo (pedido de Pablo 2026-08-12) — así se ve en la
+// "línea" de /compras/consumo (2026-08-12) — así se ve en la
 // propia vista cuántos artículos hay por línea, sin adivinar de antemano si
 // conviene dropdown o texto libre. Sin parámetros, catálogo completo.
 export async function GET() {

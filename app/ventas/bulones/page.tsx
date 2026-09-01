@@ -18,7 +18,7 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /ventas/bulones — la MISMA vista que /ventas/vendedor, acotada a la línea
-// BULONERÍA (pedido de Pablo 2026-08-26: "una vista igual a la de
+// BULONERÍA (2026-08-26: "una vista igual a la de
 // ventas/vendedores pero con agregados"). Tres diferencias, y sólo tres:
 //
 //   1. Todo sale filtrado por la línea BULONERÍA (lo hace el back, ver
@@ -113,7 +113,7 @@ interface RespClientesPorVendedor extends RespMatriz {
 
 interface RespPatronesPorCliente extends RespMatriz {
   cliente: { codigo: number; nombre: string | null };
-  // El agregado propio de esta vista (pedido de Pablo 2026-08-26): quién
+  // El agregado propio de esta vista (2026-08-26): quién
   // tiene asignado a ese cliente. Sale del maestro de Magnus (Vendedor por
   // Defecto), no del comprobante. `null` = mostrador / sin vendedor fijo.
   vendedorAsignado: { codigo: number; nombre: string | null } | null;
@@ -184,7 +184,7 @@ interface RespTopVendedores {
 }
 
 // Las tres pestañas del ranking del pie. "vendedores" es la nueva (va a la
-// DERECHA de las otras dos, pedido de Pablo).
+// DERECHA de las otras dos).
 type TopVista = "clientes" | "patrones" | "vendedores";
 type Modo = "unidades" | "pesos";
 type Periodo = "ytd" | "meses";
@@ -670,7 +670,7 @@ export default function VentasBulonesPage() {
           reacomodando. Mismo patrón que /ventas/vendedor — al agregar algo
           nuevo, darle su `md:order-N` o se rompe la alineación. El switch
           ahora tiene TRES botones (Clientes | Patrón | Vendedor), con
-          Vendedor a la derecha (pedido de Pablo 2026-08-26). */}
+          Vendedor a la derecha (2026-08-26). */}
       <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 px-4 md:px-8 py-3">
         <div className="grid grid-cols-2 items-center gap-x-3 gap-y-2 md:flex md:flex-wrap md:gap-4">
           <div className="flex items-center gap-3 min-w-0 md:order-1">
@@ -752,7 +752,7 @@ export default function VentasBulonesPage() {
                           {tituloNivel}
                         </h3>
                         <p className="text-zinc-500 text-xs mt-0.5">{subtituloNivel}</p>
-                        {/* Vendedor asignado al cliente (pedido de Pablo
+                        {/* Vendedor asignado al cliente (
                             2026-08-26). Sale del maestro de Magnus, no del
                             comprobante — es el "Vendedor por Defecto".
                             Clientes de mostrador no tienen ninguno. */}
@@ -1140,7 +1140,7 @@ export default function VentasBulonesPage() {
                                   <tr key={r.key} className="border-t border-zinc-800/60 transition-colors">
                                     {/* Texto plano, NO botón: en esta vista
                                         el modal es de un solo nivel, no hay
-                                        drill-down (pedido de Pablo
+                                        drill-down (
                                         2026-08-26). */}
                                     <td
                                       className={`px-3 py-2 text-zinc-100 whitespace-nowrap cursor-default ${celda(rowIdx, COL_ETIQ, rowCrece)}`}
@@ -1372,7 +1372,7 @@ export default function VentasBulonesPage() {
                   <thead className="bg-[#1A1A1A] text-zinc-400">
                     <tr>
                       {/* Columna del índice angosta y con el número chico
-                          (pedido de Pablo 2026-08-26: "que sea más chica y
+                          (2026-08-26: "que sea más chica y
                           reducir el tamaño del número, para tener más
                           espacio para los nombres"). `w-8` + padding
                           mínimo: el ancho sobrante se lo lleva la columna

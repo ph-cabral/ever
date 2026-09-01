@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // Proxy → FastAPI indicadores-api: top clientes por MONTO ($) en un rango
-// de meses (default: últimos 12 — pedido de Pablo 2026-08-18), para el
+// de meses (default: últimos 12 — 2026-08-18), para el
 // ranking debajo de la tabla de /ventas/vendedor. Ver fetch_top_clientes en
 // ventas.py. `desde`/`hasta` ("YYYY-MM") pasan directo del front — el rango
 // en sí (y su default) lo resuelve el back, acá solo se reenvían si vienen.

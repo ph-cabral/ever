@@ -5,7 +5,7 @@ import { getSession } from "@/lib/auth/session";
 export const dynamic = "force-dynamic";
 
 // Libreta de emails para /rrhh/asistencia (asistencia.email_registrado, ver
-// sql/asistencia_emails_registrados.sql) — pedido de Pablo (2026-08-03):
+// sql/asistencia_emails_registrados.sql) — (2026-08-03):
 // panel para administrarla desde page.tsx + fuente del autocompletado de
 // "invitados" en RegistroModal.tsx (step "calendario"). Sin gating de
 // ADMIN, mismo criterio que /api/rrhh/asistencia/feriados.

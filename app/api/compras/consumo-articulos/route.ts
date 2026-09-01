@@ -8,11 +8,10 @@ export const maxDuration = 90;
 
 // Proxy → FastAPI indicadores-api: consumo mensual de los artículos que
 // matchean código (q) y/o línea (linea) en un rango de MESES (YYYY-MM) +
-// stock por depósito. Para el botón "Tabla" de /compras/consumo (pedido de
-// Pablo 2026-08-11) — mismo patrón que consumo-articulo (singular).
+// stock por depósito. Para el botón "Tabla" de /compras/consumo (2026-08-11) — mismo patrón que consumo-articulo (singular).
 //
 // q y linea se combinan por AND cuando vienen los dos, pero NINGUNO es
-// obligatorio por separado — hace falta AL MENOS UNO (pedido de Pablo
+// obligatorio por separado — hace falta AL MENOS UNO (
 // 2026-08-12): sin filtro esto agregaría TODO el catálogo, el mismo
 // escenario que ya tiró abajo el proceso una vez (ver NOTA rendimiento en
 // fetch_consumo_articulos, indicadores-api/compras.py). Se corta acá mismo,

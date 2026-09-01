@@ -29,8 +29,7 @@ export async function PATCH(
   if (typeof body?.activo === "boolean") data.activo = body.activo;
   if (body?.rol === "ADMIN" || body?.rol === "USUARIO") data.rol = body.rol;
 
-  // Vendedor asignado (Magnus, Ped_Usu_Arma) — para /ventas/vendedor (pedido
-  // de Pablo 2026-08-14). `null` desasigna (el usuario vuelve a ver 0
+  // Vendedor asignado (Magnus, Ped_Usu_Arma) — para /ventas/vendedor (2026-08-14). `null` desasigna (el usuario vuelve a ver 0
   // clientes en esa vista hasta que se le asigne otro).
   if ("vendedorCodigo" in body) {
     if (body.vendedorCodigo === null) {

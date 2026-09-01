@@ -8,7 +8,7 @@ export const maxDuration = 60;
 
 // Proxy → FastAPI indicadores-api: unidades y $ (a precio de VENTA, no de OC)
 // de las Órdenes de Compra hechas en un rango de fechas libre — selector
-// independiente del mes del funnel de /compras. Pedido de Pablo 2026-08-04.
+// independiente del mes del funnel de /compras (2026-08-04).
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const desde = sp.get("desde");

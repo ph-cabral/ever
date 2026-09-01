@@ -8,7 +8,7 @@ export const maxDuration = 60;
 
 // Proxy → FastAPI indicadores-api: consumo mensual de UN artículo en un rango
 // de MESES (YYYY-MM) + stock por depósito (1/2/3). Para /compras/consumo
-// (pedido de Pablo 2026-08-11). Mismo patrón que compras-valorizado.
+// (2026-08-11). Mismo patrón que compras-valorizado.
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const codigo = sp.get("codigo")?.trim();

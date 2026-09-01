@@ -54,7 +54,6 @@ export const SCHEMA_TAREA: { titleKey: string; fields: CampoDef[] } = {
   fields: [
     { k: "fecha", l: "Fecha de alta", t: "date", auto: true },
     { k: "descripcion", l: "Tarea", t: "textarea" },
-    { k: "responsable", l: "Responsable", t: "text" },
     { k: "importancia", l: "Importancia", t: "select", opciones: ["Alta", "Media", "Baja"] },
   ],
 };

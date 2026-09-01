@@ -7,8 +7,7 @@ const API_URL =
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Proxy -> FastAPI indicadores-api (/ventas/bulones/clientes-por-patron) para /ventas/bulones (pedido de
-// Pablo 2026-08-26). Gemelo de la ruta equivalente de /api/ventas/vendedor:
+// Proxy -> FastAPI indicadores-api (/ventas/bulones/clientes-por-patron) para /ventas/bulones (2026-08-26). Gemelo de la ruta equivalente de /api/ventas/vendedor:
 // mismo contrato y MISMA resolución de acceso por vendedor (admin = toda la
 // empresa; no-admin = sólo su cartera, resuelto server-side y nunca tomado
 // del query string). Lo único distinto es que el backend acota todo a la

@@ -1,5 +1,5 @@
 // "Mis accesos" — accesos directos que cada usuario marca con la estrella en la
-// sidebar de /compras (pedido de Pablo 2026-08-26).
+// sidebar de /compras (2026-08-26).
 //
 // GET    -> { accesos, catalogo }  accesos = lo marcado por el usuario logueado
 //                                  catalogo = todo lo que PUEDE marcar, ya

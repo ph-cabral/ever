@@ -20,7 +20,7 @@ export const maxDuration = 60;
 //      contar (cada renglón cuenta una sola vez, en su día de aparición).
 //   4. Por artículo, "faltan" (lo que se MUESTRA) se ACUMULA día a día y NUNCA
 //      se resetea ni se le resta la OC/stock: faltan[día] = faltan[día-1] +
-//      nuevoDelDia, bruto, siempre (pedido 2026-07-28, Pablo — antes se
+//      nuevoDelDia, bruto, siempre (pedido 2026-07-28 — antes se
 //      pisaba a 0 el día que la cobertura alcanzaba, y la vista dejaba de
 //      mostrar el acumulado real). Aparte, y SOLO para decidir el color de
 //      fondo de la fila (estado), se calcula una cobertura interna contra DOS
@@ -420,7 +420,7 @@ export async function GET(req: NextRequest) {
   //    · faltan (por día, MOSTRADO) = acumulado bruto de todo lo que sigue sin
   //      existencia hasta ESE día (faltanAcum[día] = faltanAcum[día-1] +
   //      nuevoDelDia), SIEMPRE, sin excepción — nunca se pisa a 0 aunque la OC
-  //      o el stock ya lo cubran (pedido 2026-07-28, Pablo).
+  //      o el stock ya lo cubran (pedido 2026-07-28).
   //    · Para el ESTADO (color de fondo) se calcula, aparte, una cobertura
   //      interna: la OC cubre el acumulado primero (cubierto = min(acumulado,
   //      ocTotal)); lo que la OC no llega a cubrir, se neta contra el stock
@@ -528,7 +528,7 @@ export async function GET(req: NextRequest) {
     const stock = stockMap.get(cod) ?? 0;
     // acumuladoBruto: lo que se MUESTRA en "faltan" — suma nuevoDelDia día a
     // día y NUNCA se resetea, ni aunque la OC/stock cubran todo (pedido
-    // 2026-07-28, Pablo). acumulado: cobertura INTERNA (solo para estado/color
+    // 2026-07-28). acumulado: cobertura INTERNA (solo para estado/color
     // de fila), esa sí se resetea cuando OC+stock alcanzan a cubrir todo.
     let acumuladoBruto = 0;
     let acumulado = 0;
@@ -600,7 +600,7 @@ export async function GET(req: NextRequest) {
         b.ocs = oc.NroOCs ?? [];
         if (!b.Proveedor && oc.Proveedor) b.Proveedor = oc.Proveedor;
       }
-      // 4 estados (2026-07-27, pedido explícito de Pablo):
+      // 4 estados (2026-07-27, pedido explícito):
       //   · descNetoStock<=0 (OC+stock cubren TODO)     → "completo" (verde).
       //     Si además resueltoPorStock (el STOCK SOLO ya alcanzaba, sin
       //     necesitar la OC), el filtro de más abajo lo saca de la

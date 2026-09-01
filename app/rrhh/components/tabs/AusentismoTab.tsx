@@ -41,7 +41,7 @@ export default function AusentismoTab() {
   // Horas objetivo del mes (asistencia.horas_objetivo) — un número único que
   // representa cuántas horas laborales corresponden en el mes (ej. 300),
   // contra el que se compara el total trabajado (RRHH, con tope) de cada
-  // empleado. Pedido de Pablo 2026-07-31.
+  // empleado (2026-07-31).
   const [objetivo, setObjetivo] = useState<string>("");
   const [savingObjetivo, setSavingObjetivo] = useState(false);
 

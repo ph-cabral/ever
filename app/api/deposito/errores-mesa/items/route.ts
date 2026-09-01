@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 // Proxy → FastAPI indicadores-api: alta en lote del widget de Mesa de Control
-// (REDISEÑO 2026-08-04, a pedido de Pablo) — botón "Finalizar" manda
+// (REDISEÑO 2026-08-04) — botón "Finalizar" manda
 // {nroPedido, nroOperario, items:[{codArticulo, detalleError}, ...]} y se
 // inserta 1 fila de deposito.errores_mesa POR ARTÍCULO (cada uno con su
 // propio error). Ver insert_error_mesa_items en errores_mesa.py. Reemplaza

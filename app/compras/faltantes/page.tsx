@@ -7,6 +7,7 @@ import {
   Download, Trash2, X, Globe, Search, ArrowRight,
 } from "lucide-react";
 import { exportarFaltantesCompras } from "@/lib/compras/exportFaltantes";
+import { origenArticulo, type OrigenArticulo } from "@/lib/compras/origenArticulo";
 import { exportarFaltantesExistencia } from "@/lib/deposito/exportFaltantesExistencia";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { DateRangeField } from "@/components/ui/date-range-field";
@@ -15,7 +16,7 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/faltantes — faltantes "sin existencia" por (artículo, día).
 //   "Faltan" y "En OC" se muestran BRUTOS, sin restarse entre sí (pedido
-//   2026-07-28, Pablo) — la resta contra OC/stock se sigue calculando, pero
+//   2026-07-28) — la resta contra OC/stock se sigue calculando, pero
 //   solo por dentro, para decidir el color de fondo de cada fila (ver estado).
 //
 //   · Rango "Desde/Hasta": default hoy/hoy. Ampliar "Desde" hacia atrás para ver
@@ -33,7 +34,7 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 //     el reverso. Ahí queda hasta que la OC "por llegar" cubre el faltante del
 //     artículo (descubierto llega a 0) — sale sola, sin acción manual.
 //
-//   Color de fila por estado del DÍA (4 reglas, 2026-07-27 — Pablo):
+//   Color de fila por estado del DÍA (4 reglas, 2026-07-27):
 //     · (sin fila) → el STOCK SOLO (sin la OC) cubrió el acumulado en algún
 //       momento: no es problema de compras, el backend directamente NO manda
 //       ese bucket (resueltoPorStock, ver faltantes-consumo/route.ts punto
@@ -66,8 +67,12 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
 type Estado = "completo" | "incompleto" | "sin_orden" | "entregado";
 type Filtro = "todos" | Estado;
-// Origen del proveedor (r.importacion): cicla Todos → Importados → Nacionales.
-type Origen = "importados" | "nacionales";
+// Origen del artículo (r.tipoArticulo, Magnus): el botón cicla
+// Nacionales (Nacional + Original) → Importados → Otros (sin tipo cargado o
+// tipo desconocido; se saltea si no hay ninguno). Fábrica (tipo Fabril o
+// proveedor EVER WEAR S.A. INDUSTRIAL) NO se muestra acá: vive en
+// /fabrica/faltantes. Ver lib/compras/origenArticulo.ts.
+type Origen = "importados" | "nacionales" | "otros";
 
 // Fila RETIRADA de la tabla porque el stock cubrió el faltante (backend, punto
 // 4c: llegan en `cubiertos`, aparte de `rows`). Sirve para ver QUÉ salió y
@@ -106,7 +111,7 @@ interface Row {
   ocTotal: number;
   fechaEntrega: string | null;
   importacion: boolean;
-  tipoArticulo: string | null; // "Nacional"/"Importado"/"Fabrica" (Magnus) — fuente real del filtro Importados/Nacionales
+  tipoArticulo: string | null; // "Nacional"/"Importado"/"Original"/"Fabrica" (Magnus) — fuente del filtro de origen (ver lib/compras/origenArticulo.ts)
   ocs: string[];
   estado: Estado;
   extraordinario: boolean;
@@ -149,25 +154,11 @@ const DESDE_DEFAULT = "2026-06-26";
 // marcar extraordinario/comprar (preparado.faltante_extraordinario).
 const rowKey = (r: Pick<Row, "CodArticulo" | "fecha">) => `${r.CodArticulo}__${r.fecha}`;
 
-// Clasificación Importados/Nacionales/Fábrica para el filtro de origen. Usa
-// r.tipoArticulo (Magnus StkFer_Articulos.NacionalImportado, real y por
-// artículo) en vez de r.importacion (heurística por fecha de OC pactada —
-// clasificaba mal proveedores chinos con fecha cargada como "Nacional"; se
-// deja esa heurística intacta para no tocar el query que también usa
-// /compras/metricas). Mismo patrón de normalización/nombre que
-// PROVEEDOR_OBJETIVO en app/api/compras/metricas/route.ts.
-const PROVEEDOR_FABRICA = "ever wear s.a. industrial";
-const normProv = (s: string) =>
-  s.toLowerCase().normalize("NFD").replace(new RegExp("[\\u0300-\\u036f]", "g"), "").trim();
-const esFabrica = (p: string | null) => !!p && normProv(p).includes(PROVEEDOR_FABRICA);
-const origenDe = (r: Row): "importados" | "nacionales" | "fabrica" => {
-  if (esFabrica(r.Proveedor)) return "fabrica";
-  // Sin proveedor identificado → se cuenta como importado (pedido explícito).
-  if (!r.Proveedor) return "importados";
-  if (r.tipoArticulo === "Nacional") return "nacionales";
-  // "Importado" real, o TipoArticulo vacío/desconocido → importados (default conservador).
-  return "importados";
-};
+// Clasificación de origen: única fuente en lib/compras/origenArticulo.ts,
+// compartida con /fabrica/faltantes para que las dos vistas partan el mismo
+// universo (Nacional+Original acá, Importado del otro lado del botón, Fabril
+// solo en fábrica, y "Otros" para lo que no cae en ninguna).
+const origenDe = (r: Row): OrigenArticulo => origenArticulo(r);
 
 const FILTROS: { key: Filtro; label: string }[] = [
   { key: "todos", label: "Todos" },
@@ -182,7 +173,7 @@ const rowCls: Record<Estado, string> = {
   entregado: "bg-emerald-500/10 hover:bg-emerald-500/[0.16]",
   incompleto: "bg-red-500/10 hover:bg-red-500/[0.16]",
   // sin_orden = no hay NINGUNA OC pendiente (cub=0) y el stock tampoco cubre
-  // el faltante. Reglas 2026-07-27 (Pablo): sin color — el rojo es solo para
+  // el faltante. Reglas 2026-07-27: sin color — el rojo es solo para
   // "incompleto" (hay una OC cargada pero no alcanza). Antes (mismo día,
   // versión intermedia) era rojo igual que "incompleto"; antes de eso había
   // sido neutro — vuelve a serlo, ahora ya explícito y no por accidente.
@@ -544,7 +535,7 @@ export default function ComprasFaltantesPage() {
   const [error, setError] = useState<string | null>(null);
   const [ocWarn, setOcWarn] = useState(false);
   const [ocDesde, setOcDesde] = useState<string | null>(null);
-  const [origen, setOrigen] = useState<Origen>("nacionales"); // filtro por origen del proveedor (importacion) — default Nacionales, se intercala con el botón
+  const [origen, setOrigen] = useState<Origen>("nacionales"); // filtro por origen del artículo (tipoArticulo) — default Nacionales (Nacional + Original), cicla con el botón
   const [flipped, setFlipped] = useState(false); // girar la tarjeta → ver extraordinarios
   const [leaving, setLeaving] = useState<Record<string, "left" | "right">>({}); // filas saliendo (animación)
   const [provAbierto, setProvAbierto] = useState<string | null>(null); // acordeón: solo un proveedor abierto a la vez; todos cerrados al entrar
@@ -718,12 +709,27 @@ export default function ComprasFaltantesPage() {
     }, EXIT_MS);
   }, []);
 
-  // Alterna el filtro de origen: Importados ↔ Nacionales.
+  // Cuántas filas caen en "Otros" (ni Nacional/Original ni Importado ni
+  // Fábrica): si no hay ninguna, el botón sigue siendo el toggle de siempre
+  // (Nacionales ↔ Importados) y esa tercera solapa ni aparece.
+  const hayOtros = useMemo(
+    () => rows.some((r) => origenDe(r) === "otros"),
+    [rows],
+  );
+  // Cicla el filtro de origen: Nacionales → Importados → Otros (solo si hay).
   const ciclarOrigen = useCallback(() => {
-    setOrigen((o) => (o === "importados" ? "nacionales" : "importados"));
-  }, []);
-  // "importados"/"nacionales" excluyen Fábrica (EVER WEAR S.A. INDUSTRIAL no
-  // es ni uno ni otro — ver origenDe).
+    setOrigen((o) => {
+      if (o === "nacionales") return "importados";
+      if (o === "importados") return hayOtros ? "otros" : "nacionales";
+      return "nacionales";
+    });
+  }, [hayOtros]);
+  // Si "Otros" queda vacío tras recargar, no dejar la vista clavada ahí.
+  useEffect(() => {
+    if (origen === "otros" && !hayOtros) setOrigen("nacionales");
+  }, [origen, hayOtros]);
+  // Ningún lado muestra Fábrica (tipo Fabril o EVER WEAR S.A. INDUSTRIAL):
+  // eso se trabaja en /fabrica/faltantes — ver origenArticulo.
   const pasaOrigen = useCallback((r: Row) => origenDe(r) === origen, [origen]);
 
   // Tabla principal: nunca muestra lo marcado extraordinario.
@@ -1107,15 +1113,25 @@ export default function ComprasFaltantesPage() {
 
           <button
             onClick={ciclarOrigen}
-            title="Filtra por origen del proveedor — click para alternar: Importados / Nacionales"
+            title={
+              hayOtros
+                ? "Filtra por origen del artículo — click para alternar: Nacionales (Nacional + Original) / Importados / Otros"
+                : "Filtra por origen del artículo — click para alternar: Nacionales (Nacional + Original) / Importados"
+            }
             className={`chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium ${
               origen === "importados"
                 ? "bg-amber-500/15 border-amber-400 text-amber-300"
-                : "bg-sky-500/15 border-sky-400 text-sky-300"
+                : origen === "otros"
+                  ? "bg-violet-500/15 border-violet-400 text-violet-300"
+                  : "bg-sky-500/15 border-sky-400 text-sky-300"
             }`}
           >
             <Globe size={14} />
-            {origen === "importados" ? "Importados" : "Nacionales"}
+            {origen === "importados"
+              ? "Importados"
+              : origen === "otros"
+                ? "Otros"
+                : "Nacionales"}
           </button>
 
           <button

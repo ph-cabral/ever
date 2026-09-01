@@ -1,7 +1,7 @@
 """
 Ventas de BULONERÍA (Magnus, SOLO LECTURA) — para /ventas/bulones.
 
-Pedido de Pablo 2026-08-26: "una vista igual a /ventas/vendedor pero con
+ 2026-08-26: "una vista igual a /ventas/vendedor pero con
 agregados". Las diferencias con ventas.py son TRES y sólo tres:
 
   1. TODO está filtrado a la línea BULONERÍA (Stk_Nivel1.Detalle LIKE
@@ -375,7 +375,7 @@ GROUP BY v.VendedorCodigo, LTRIM(RTRIM(v.VendedorNombre))
 # (idéntico contrato que fetch_clientes_por_linea de ventas.py). Cambia sólo
 # qué identifica la fila.
 #
-# En esta vista el modal es de UN SOLO NIVEL (pedido de Pablo 2026-08-26:
+# En esta vista el modal es de UN SOLO NIVEL (2026-08-26:
 # "acá solo se abrirá un modal, no puede ir otro modal más"): las filas del
 # modal NO son clickeables, así que cada una de estas funciones se llama
 # desde el ranking del pie y nada más.
@@ -528,7 +528,7 @@ SELECT c.CodCliente AS Clave, LTRIM(RTRIM(c.Cliente_Nombre)) AS Nombre,
 def fetch_patrones_por_cliente(cod_cliente: int, vendedor: int | None = None,
                                limit: int = 1_000_000, forzar: bool = False) -> dict:
     """Ranking de códigos patrón de bulonería que compró UN cliente, más el
-    VENDEDOR ASIGNADO a ese cliente (pedido de Pablo 2026-08-26: "en la
+    VENDEDOR ASIGNADO a ese cliente (2026-08-26: "en la
     vista de clientes … arriba agregar el vendedor asignado a ese cliente").
 
     `vendedor`: si se pasa (no-admin) y el cliente no es de su cartera, se

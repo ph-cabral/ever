@@ -12,8 +12,7 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 // "WMS" (ex /deposito/wms, migrada acá como componente) y "Mesas" (Mesas de
 // Control). /deposito/wms redirige acá y ya no aparece en el menú.
 //
-// "Mesas" tiene 2 sub-vistas propias (agregado 2026-07-31, a pedido de
-// Pablo): "Resumen" (la Mesa de Control de siempre, agregado mensual) y
+// "Mesas" tiene 2 sub-vistas propias (agregado 2026-07-31): "Resumen" (la Mesa de Control de siempre, agregado mensual) y
 // "Pedidos asignados" (detalle por pedido, deposito.control_asignacion — ver
 // pedidosAsignados.tsx).
 // ──────────────────────────────────────────────────────────────────────────────

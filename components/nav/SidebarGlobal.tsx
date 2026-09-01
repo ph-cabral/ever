@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { ChevronRight, Star, Plus, X, Search, GripVertical, Home } from "lucide-react";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Sidebar GLOBAL de la app (pedido de Pablo 2026-08-27: antes vivía sólo en
+// Sidebar GLOBAL de la app (2026-08-27: antes vivía sólo en
 // /compras). Se monta en app/layout.tsx, así que aparece en TODAS las vistas.
 //
 // Se abre por hover: está escondida fuera de pantalla y aparece cuando el mouse

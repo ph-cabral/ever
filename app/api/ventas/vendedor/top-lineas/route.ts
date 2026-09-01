@@ -9,7 +9,7 @@ export const maxDuration = 60;
 
 // Proxy → FastAPI indicadores-api: top líneas por UNIDADES compradas en un
 // rango de meses (default: últimos 12), para el ranking debajo de la tabla
-// de /ventas/vendedor (pedido de Pablo 2026-08-18: "agregamos vista de
+// de /ventas/vendedor (2026-08-18: "agregamos vista de
 // líneas, al igual que el top, traemos el total de líneas y acá dejamos ver
 // solo unidades compradas"). Gemelo de top-clientes/route.ts — mismo
 // contrato, misma resolución de acceso; lo único que cambia es la métrica

@@ -11,7 +11,7 @@ export const maxDuration = 60;
 // artículo, con el mismo desglose año/mes y las mismas dos métricas
 // ($/unidades) que la tabla línea×año del modo "cliente" — para el modal de
 // /ventas/vendedor al hacer click en una línea del ranking "Top 10 líneas"
-// (pedido de Pablo 2026-08-18: "en caso de línea debe verse en la tabla los
+// (2026-08-18: "en caso de línea debe verse en la tabla los
 // clientes, de mayor a menor en gasto"; ampliado 2026-08-20 con los toggles
 // $/Unidades y por mes/por año). Ver fetch_clientes_por_linea en ventas.py.
 //

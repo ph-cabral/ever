@@ -19,7 +19,7 @@ VendedorNombre, Estado_Desc).
   vendedores no-admin veía CERO clientes y parecía "no tiene vendedor
   asignado".
 
-DOS CRITERIOS, unidos (decisión de Pablo 2026-08-27):
+DOS CRITERIOS, unidos (decisión 2026-08-27):
 
   1. ZONA (el dato declarado) — Clientes.Clasif_VendZona → Vendedor_Zona.
      Vendedor (que es el NOMBRE del vendedor, char(30)) → Vendedores.

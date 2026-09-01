@@ -552,7 +552,7 @@ def fetch_compras_valorizado(desde: str, hasta: str, incluir_fabril: bool = Fals
 
 
 # ── Consumo mensual de UN artículo + stock por depósito (/compras/consumo) ────
-# Vista pedida por Pablo 2026-08-11: cod. artículo + rango de MESES →
+# Vista pedida 2026-08-11: cod. artículo + rango de MESES →
 # vendido por mes, total, promedio (total / meses del rango, incluidos los de
 # venta 0), máximo, mínimo > 0, total/máximo, total/mínimo, y stock por
 # depósito (1/2/3, EVERWEAR.Stk_ArticSucursalDeposito — mismo criterio que
@@ -713,7 +713,7 @@ def fetch_consumo_articulo(codigo: str, desde: str, hasta: str):
 
 
 # ── Consumo mensual de TODOS los artículos + stock (vista "Tabla") ───────────
-# Pedido de Pablo 2026-08-11 (mismo día que fetch_consumo_articulo, arriba):
+# 2026-08-11 (mismo día que fetch_consumo_articulo, arriba):
 # botón en /compras/consumo para alternar de "un artículo" a una TABLA con
 # todos los artículos del rango, una fila por artículo, paginada de a 20 y
 # ordenable por Código/Stock/Vendido/Promedio/Máximo/Mínimo en el front.
@@ -724,7 +724,7 @@ def fetch_consumo_articulo(codigo: str, desde: str, hasta: str):
 # el rango O con stock actual > 0 en algún depósito (evita listar SKUs de
 # baja sin stock ni movimiento).
 #
-# NOTA rendimiento (2026-08-12, timeout real reportado por Pablo): traer CADA
+# NOTA rendimiento (2026-08-12, timeout real reportado): traer CADA
 # renglón de pedido de TODA la empresa para sumar en Python era demasiado
 # lento (>45s, nunca llegaba a responder). Se mueve el SUM a SQL Server,
 # agrupando por (artículo, año, mes, CompCodigo, Estado) — el filtrado
@@ -786,7 +786,7 @@ WHERE LTRIM(RTRIM(n1.Detalle)) LIKE ?
 """
 
 # Líneas del catálogo con cantidad de artículos en cada una — para el
-# datalist del input "línea" de /compras/consumo (pedido de Pablo
+# datalist del input "línea" de /compras/consumo (
 # 2026-08-12): así se ve en la propia vista cuántos artículos hay por línea,
 # sin tener que adivinar de antemano si conviene dropdown o texto libre.
 SQL_LINEAS_COUNT = """
@@ -839,8 +839,7 @@ def fetch_consumo_articulos(
     (1+2+3), uno por artículo — ORDENADO Y PAGINADO EN EL SERVIDOR (de a
     `page_size`, default 20).
 
-    `export=True` (para el botón "Exportar Excel" de /compras/consumo, pedido
-    de Pablo 2026-08-12) devuelve TODOS los artículos que matchean el filtro
+    `export=True` (para el botón "Exportar Excel" de /compras/consumo, 2026-08-12) devuelve TODOS los artículos que matchean el filtro
     de una sola vez, sin paginar — y exige `linea` (no alcanza con `q`): sin
     esa exigencia, exportar por código de forma amplia podría volcar a Excel
     una porción enorme del catálogo por accidente. El nombre de cada artículo
@@ -850,7 +849,7 @@ def fetch_consumo_articulos(
 
     `q` (código, substring) y `linea` (StkFer_ArtParamet.Nivel1, substring) se
     combinan con AND cuando vienen los dos, pero ninguno es obligatorio por
-    separado — CON UNA SALVEDAD (pedido de Pablo 2026-08-12): hace falta AL
+    separado — CON UNA SALVEDAD (2026-08-12): hace falta AL
     MENOS UNO de los dos. Sin ningún filtro esto agregaría en SQL las ventas y
     el stock de TODO el catálogo — exactamente el escenario que ya tiró abajo
     el proceso una vez (ver NOTA rendimiento más abajo) — así que se corta
@@ -1042,7 +1041,7 @@ def fetch_consumo_articulos(
 
 
 # ── Línea (Stk_Nivel1) de una lista puntual de artículos ─────────────────────
-# Para /compras (dashboard, sección "Faltantes por línea", pedido de Pablo
+# Para /compras (dashboard, sección "Faltantes por línea",
 # 2026-08-26): los faltantes del mes salen del Postgres propio como lista de
 # CodArticulo, y hay que agruparlos por LÍNEA. Misma resolución de línea que
 # SQL_CODIGOS_POR_LINEA (StkFer_ArtParamet.Nivel1 → Stk_Nivel1.Detalle), pero

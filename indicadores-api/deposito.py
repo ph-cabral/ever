@@ -223,7 +223,7 @@ def fetch_ingresados(desde, hasta):
 # backorders con faltante) y (b) aun ensanchando ambas cosas, quedaba PLANO
 # todo el día — un backlog reconstruido así es, en la práctica, casi el mismo
 # número ("total abierto ahora") para cualquier hora salvo que entren/cierren
-# pedidos justo en esa ventana, no una serie de tiempo real. A pedido de Pablo:
+# pedidos justo en esa ventana, no una serie de tiempo real:
 # en vez de reconstruir el pasado, "Abiertos" ahora sale de FOTOS reales
 # tomadas cada PEDIDOS_ABIERTOS_SNAPSHOT_INTERVALO_MIN min (ver
 # guardar_snapshot_abiertos + el loop en main.py) contra
@@ -385,7 +385,7 @@ def guardar_snapshot_wms_estados() -> dict:
     pedidos esperando que llegue la mercadería), para poder restarlas de
     Disponibles y mostrarlas aparte en el gráfico de movimiento.
 
-    Pablo, 2026-07-24: "terminadas" (Cumplido) sale de un COUNT en vivo contra
+    2026-07-24: "terminadas" (Cumplido) sale de un COUNT en vivo contra
     WMS con READ UNCOMMITTED, tomado cada 15 min — NO es un acumulador. Cumplido
     es un estado terminal que en el negocio nunca vuelve para atrás, pero una
     foto que cruza una tanda grande de OT pasando a Cumplido a la vez puede leer
@@ -1544,7 +1544,7 @@ def fetch_ot_diferencias(desde=None, hasta=None):
             "Importe":      round(precio * pedida, 2),
             # Comprobante Magnus del pedido (cab.CompCodigo) — campo agregado
             # 2026-07-31 para que el export de /deposito/faltantes/historico
-            # pueda excluir códigos puntuales (70/75, pedido de Pablo) sin
+            # pueda excluir códigos puntuales (70/75) sin
             # tocar el filtrado de _es_valido de acá arriba.
             "CompCodigo":   meta.get("CompCodigo"),
         })

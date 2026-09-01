@@ -1,5 +1,5 @@
 """
-Cola de asignación de pedidos — widget de Mesa de Control (a pedido de Pablo,
+Cola de asignación de pedidos — widget de Mesa de Control (
 2026-07-29). Reemplaza el input manual de "Nro Pedido" del widget por un
 botón "Asignar": en vez de tipear el pedido a mano, el operario reclama el
 próximo pedido de una cola armada con el cruce:
@@ -31,7 +31,7 @@ maneja el volumen.
 Tabla: deposito.control_asignacion (ver ever/sql/deposito_control_asignacion.sql
 — correr ANTES de deployar este módulo).
 
-ORDEN de la cola (cambiado 2026-08-03, a pedido de Pablo): "prioridad"
+ORDEN de la cola (cambiado 2026-08-03): "prioridad"
 ascendente y, dentro de cada prioridad, fecha ascendente (más viejo primero)
 — la idea es vaciar todos los atrasados de prioridad 1 hasta ponerse al día
 y recién ahí pasar a prioridad 2, también de más viejo a más nuevo.
@@ -44,14 +44,14 @@ ANTES (hasta 2026-08-03) ordenaba por "nroPedido" ascendente, empate por
 fecha descendente — se dejó de usar por pedido explícito de contaduría/mesa
 de control.
 
-CONCURRENCIA (pedido explícito de Pablo: nunca asignar el mismo pedido a 2
+CONCURRENCIA (pedido explícito: nunca asignar el mismo pedido a 2
 operarios, van a ser muchos usando el widget a la vez): el reclamo es un
 único UPDATE atómico con "SELECT ... FOR UPDATE SKIP LOCKED" (ver
 asignar_siguiente) — 2 operarios apretando "Asignar" al mismo tiempo, incluso
 en la misma fracción de segundo, siempre terminan con filas distintas. No
 hace falta lockear la tabla entera ni coordinar nada del lado de la app.
 
-UN PEDIDO POR OPERARIO A LA VEZ (a pedido de Pablo, 2026-07-31): si vuelven a
+UN PEDIDO POR OPERARIO A LA VEZ (2026-07-31): si vuelven a
 apretar "Asignar" mientras su pedido anterior TODAVÍA no cerró en Magnus, NO
 se les entrega uno nuevo — se les devuelve el mismo de siempre (mismo
 nroPedido, misma fila). Solo cuando ese pedido está Cerrado (FechaCierre > 0
@@ -59,7 +59,7 @@ en VenFer_PedidoCabecera, ver _fetch_pedido_cerrado) el próximo click sí
 reclama uno nuevo de la cola. Ver _fetch_asignacion_activa +
 _fetch_pedido_cerrado, usados al principio de asignar_siguiente.
 
-CODCLIENTE (a pedido de Pablo, mismo día): el cuadro grande del widget ahora
+CODCLIENTE (mismo día): el cuadro grande del widget ahora
 también muestra el número de cliente, no solo el nombre — se suma
 `CodCliente` (VenFer_PedidoCabecera, mismo campo del JOIN contra
 MAGNUS_SITD.dbo.Clientes que ya se usaba para el nombre) en todo el camino:
@@ -68,7 +68,7 @@ SQL_MAGNUS_ABIERTOS_TODOS -> fetch_pedidos_cumplidos_abiertos -> refrescar_cola
 ever/sql/deposito_control_asignacion.sql, correr antes de deployar) ->
 _fetch_asignacion_activa / asignar_siguiente. Sin verificar en vivo.
 
-FIX 2026-08-03 (a pedido de Pablo, reportado en vivo): la cola traía pedidos
+FIX 2026-08-03 (reportado en vivo): la cola traía pedidos
 que WMS todavía no marca Cumplido. Causa: `SQL_WMS_CUMPLIDOS_POR_PEDIDO`
 filtraba `OTEstado = 2` directo en el SQL — si un pedido tenía una OT vieja
 ya Cumplida y una MÁS NUEVA sin terminar (repick/corrección tras un error),
@@ -78,7 +78,7 @@ Python se elige la de mayor OTId (más reciente, mismo criterio que usa
 `deposito.py`); el pedido solo cuenta como Cumplido si ESA está en
 OTEstado=2. Sin verificar en vivo — falta rebuild indicadores-api.
 
-FIX 2026-08-05 (a pedido de Pablo, cambio de criterio): el lado WMS del
+FIX 2026-08-05 (cambio de criterio): el lado WMS del
 cruce deja de ser "Cumplido" (OTEstado=2) — pasa a ser "el pedido tiene al
 menos 1 renglón de su OT de Picking parado en la ubicación PLAYA_PEDIDOS"
 (OTItem.OTItemUbicacionCodigo, confirmado por diagnóstico en vivo contra
@@ -88,14 +88,14 @@ SQL_WMS_PLAYA_PEDIDOS / fetch_pedidos_en_playa_pedidos (nuevas) y
 refrescar_cola (ahora llama a la nueva función). La query/función vieja
 ("Cumplido") se deja intacta, sin usar, en
 SQL_WMS_OT_POR_PEDIDO_LEGACY_CUMPLIDO / fetch_pedidos_cumplidos_abiertos_legacy
-— pedido explícito de Pablo de no perderla. Ojo: la columna correcta para ir
+— pedido explícito de no perderla. Ojo: la columna correcta para ir
 de OT a Magnus sigue siendo OT.OTNroMovVenta (constante OT_COL_PEDIDO en
 deposito.py) — en el diagnóstico se probó por error OT.OTPedidoId primero,
 que también existe pero es un ID compuesto interno de WMS (ej.
 "MAGEW-738058-0-0-334695"), no el NroMovVenta de Magnus. Sin verificar en
 vivo — falta rebuild indicadores-api.
 
-FIX 2026-08-24 (reportado en vivo por Pablo: la cola asignó el pedido 757536
+FIX 2026-08-24 (reportado en vivo: la cola asignó el pedido 757536
 con su OT 144356 todavía "En Proceso"): PLAYA_PEDIDOS solo NO alcanza. El
 armador va dejando renglones en playa MIENTRAS pickea, así que el pedido
 aparecía en la cola con el picking a medio hacer. El lado WMS pasa a exigir
@@ -109,7 +109,7 @@ siempre sobre una OT vieja Cumplida. Solo afecta a los pedidos NO acopio; el
 camino de acopio (70/75) no toca WMS. Sin verificar en vivo — falta rebuild
 indicadores-api.
 
-FIX 2026-08-24, 2da vuelta del día (reportado en vivo por Pablo: la cola le
+FIX 2026-08-24, 2da vuelta del día (reportado en vivo: la cola le
 asignó el 757555, ya FACTURADO). La causa NO era Facturado: era que
 `TMP_TiempoDePedidos` —el universo entero de esta cola— es una FOTO que llena
 SP_TiempoPedidos_Cargar, no el estado en vivo. El 757555 estaba EstadoPedido=4
@@ -145,7 +145,7 @@ WMS pasa a ser opcional: solo resuelve el NOMBRE del armador.
 Sin verificar en vivo — falta rebuild indicadores-api.
 
 ACOPIO 70/75 — LA UNIDAD DE CONTROL ES LA VUELTA, NO EL PEDIDO
-(2026-08-21, a pedido de Pablo; cierra el problema que venía dando vueltas
+(2026-08-21; cierra el problema que venía dando vueltas
 desde el FIX 2026-08-04 y el FIX 2026-08-18 de más arriba).
 
 El bug de diseño: un acopio queda `EstadoPedido = 2` (Abierto) DURANTE MESES
@@ -196,7 +196,7 @@ FIX 2026-08-21 (aparte, latente): `SQL_MAGNUS_ABIERTOS_TODOS` no traía
 cada refresco. Se agrega la columna al SELECT y al dict de salida de las dos
 funciones que la usan. Venía roto desde el alta de codCliente (2026-07-31).
 
-CompCodigo 410 (2026-08-25, a pedido de Pablo: "agregá los 410, que no se
+CompCodigo 410 (2026-08-25: "agregá los 410, que no se
 retiren y ponelos primero que todo sin importar prioridad"): el 410
 (PED.NF.CEN, "pedido no facturable de centro") vuelve a la whitelist de
 `SQL_MAGNUS_LISTOS_PARA_CONTROL` — revierte la decisión del 2026-08-24 de
@@ -207,7 +207,7 @@ ever/sql/deposito_control_asignacion.sql, CORRER ANTES DE DEPLOYAR — sin ella
 el INSERT de refrescar_cola falla). Filas viejas: "compCodigo" NULL, se
 comportan como no-410. Sin verificar en vivo.
 
-AFINIDAD POR CLIENTE (2026-08-25, a pedido de Pablo: "los 2 pedidos de MAGAL
+AFINIDAD POR CLIENTE (2026-08-25: "los 2 pedidos de MAGAL
 que se los pase a la misma persona, uno detrás del otro"): `asignar_siguiente`
 ordena AHORA primero por "es del mismo cliente que el último pedido que
 reclamó ESE operario" y recién después por prioridad/fecha. La ventana está en
@@ -231,7 +231,7 @@ from errores_mesa import fetch_operario_nombre, _col_observaciones_ot, BASE_DATE
 # Ajustable sin tocar el resto de la lógica.
 MAGNUS_ABIERTOS_LIMIT = 3000
 
-# AFINIDAD POR CLIENTE (2026-08-25, a pedido de Pablo): ventana hacia atrás en
+# AFINIDAD POR CLIENTE (2026-08-25): ventana hacia atrás en
 # la que se mira el ÚLTIMO pedido que reclamó el operario para tratar de darle
 # otro del MISMO cliente. Fuera de esta ventana (arrancó otro turno, volvió al
 # otro día) la afinidad no aplica y el orden es el de siempre.
@@ -239,7 +239,7 @@ AFINIDAD_CLIENTE_HORAS = 12
 
 
 # ── Magnus: TODOS los pedidos Abiertos (fecha/tipo/cliente) — universo base ──
-# FIX 2026-07-31 (a pedido de Pablo, tras diagnóstico en vivo): la versión
+# FIX 2026-07-31 (tras diagnóstico en vivo): la versión
 # original filtraba "Abierto" vía VenFer_PedidoCabecera.EstadoPedido -> JOIN
 # Pedido_Estados.Ped_EstadoDescripcion. Esa fuente ya se había detectado rota
 # el 2026-07-23 en deposito.py (fetch_pedidos_hora / "Abiertos ahora": ver
@@ -267,7 +267,7 @@ LEFT JOIN MAGNUS_SITD.dbo.Ven_CodComprobante cc  ON cab.CompCodigo   = cc.CompCo
 LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente   = cli.CodCliente
 WHERE LTRIM(RTRIM(t.Estado)) = 'Abierto'
   AND cab.EstadoPedido = 2
-  -- FIX 2026-08-24, 2da vuelta del día (reportado en vivo por Pablo: la cola
+  -- FIX 2026-08-24, 2da vuelta del día (reportado en vivo: la cola
   -- le asignó el pedido 757555, que en Magnus ya estaba FACTURADO). Causa
   -- real: `TMP_TiempoDePedidos` NO es el estado en vivo, es una foto que
   -- llena SP_TiempoPedidos_Cargar cada tanto. El 757555 tenía
@@ -300,15 +300,14 @@ WHERE LTRIM(RTRIM(t.Estado)) = 'Abierto'
         -- SQL_MAGNUS_ACOPIO_ESPERA_CONTROL. El criterio "70 solo Prioridad
         -- 1/3" del FIX 2026-08-18 queda DESCARTADO (era un workaround de que
         -- el pedido de acopio no cierra nunca) — ver docstring del módulo.
-        -- FIX 2026-08-04 (a pedido
-        -- de Pablo): antes era NOT IN (70) — dejaba pasar Factura Directa
+        -- FIX 2026-08-04: antes era NOT IN (70) — dejaba pasar Factura Directa
         -- (107/1107/1207/170/207/47/7) a la cola del widget de errores-mesa.
         -- Whitelist explícita, solo para esta cola: Pedido Mayorista (10),
         -- Pedido Mayorista Mostradores (100), Pedido Móvil (210), Pedido Web
         -- (310). Acota mucho más que antes (ya no solo excluye acopios) —
         -- este criterio es EXCLUSIVO de esta cola, no tocar las demás
         -- queries de "Abiertos" del proyecto (deposito.py, etc.).
-        -- FIX 2026-08-18 (a pedido de Pablo, dato confirmado por él): acopio
+        -- FIX 2026-08-18 (dato confirmado por él): acopio
         -- (CompCodigo=70) vuelve a esta cola, pero SOLO Prioridad 1 y 3. El
         -- resto de las prioridades de acopio se entregan de a poco durante
         -- varios meses (una OT de Picking nueva por cada tanda que llega) y
@@ -317,12 +316,11 @@ WHERE LTRIM(RTRIM(t.Estado)) = 'Abierto'
         -- contra 8 pedidos cod.70 con 4 a 10 OT de Picking cada uno a lo
         -- largo de varios meses: Ven_PedImpresoCP (Mesa de Control) da 0
         -- filas en los 8, o sea el control de Magnus no se usa para esas
-        -- prioridades. Prioridad 1/3 quedan afuera de ese patrón (dato de
-        -- Pablo) y sí pueden entrar a la cola con el mismo criterio
+        -- prioridades. Prioridad 1/3 quedan afuera de ese patrón (dato) y sí pueden entrar a la cola con el mismo criterio
         -- Abierto+Cumplido que el resto de los tipos de pedido.
       )
 ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
--- 2026-08-03 (a pedido de Pablo): prioridad ASC (1 = más urgente) y, dentro
+-- 2026-08-03: prioridad ASC (1 = más urgente) y, dentro
 -- de cada prioridad, fecha ASC (más viejo primero) — vaciar los atrasados de
 -- prioridad 1 hasta ponerse al día antes de pasar a prioridad 2. Antes era
 -- NroMovVenta ASC. Sin Prioridad cargada -> 999, al final de la cola.
@@ -339,8 +337,7 @@ ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
 # LEFT JOIN MAGNUS_SITD.dbo.Clientes           cli ON cab.CodCliente   = cli.CodCliente
 # WHERE LTRIM(RTRIM(t.Estado)) = 'Abierto'
 #   AND (
-#         cab.CompCodigo IN (10, 75, 100, 210, 310)  -- FIX 2026-08-04 (a pedido
-#         -- de Pablo): antes era NOT IN (70) — dejaba pasar Factura Directa
+#         cab.CompCodigo IN (10, 75, 100, 210, 310)  -- FIX 2026-08-04: antes era NOT IN (70) — dejaba pasar Factura Directa
 #         -- (107/1107/1207/170/207/47/7) a la cola del widget de errores-mesa.
 #         -- Whitelist explícita, solo para esta cola: Pedido Mayorista (10),
 #         -- Pedido Mayorista Mostradores (100), Pedido Móvil (210), Pedido Web
@@ -348,7 +345,7 @@ ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
 #         -- este criterio es EXCLUSIVO de esta cola, no tocar las demás
 #         -- queries de "Abiertos" del proyecto (deposito.py, etc.).
 #         OR (cab.CompCodigo = 70 AND cab.Prioridad IN (1, 3))
-#         -- FIX 2026-08-18 (a pedido de Pablo, dato confirmado por él): acopio
+#         -- FIX 2026-08-18 (dato confirmado por él): acopio
 #         -- (CompCodigo=70) vuelve a esta cola, pero SOLO Prioridad 1 y 3. El
 #         -- resto de las prioridades de acopio se entregan de a poco durante
 #         -- varios meses (una OT de Picking nueva por cada tanda que llega) y
@@ -357,19 +354,18 @@ ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
 #         -- contra 8 pedidos cod.70 con 4 a 10 OT de Picking cada uno a lo
 #         -- largo de varios meses: Ven_PedImpresoCP (Mesa de Control) da 0
 #         -- filas en los 8, o sea el control de Magnus no se usa para esas
-#         -- prioridades. Prioridad 1/3 quedan afuera de ese patrón (dato de
-#         -- Pablo) y sí pueden entrar a la cola con el mismo criterio
+#         -- prioridades. Prioridad 1/3 quedan afuera de ese patrón (dato) y sí pueden entrar a la cola con el mismo criterio
 #         -- Abierto+Cumplido que el resto de los tipos de pedido.
 #       )
 # ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
-# -- 2026-08-03 (a pedido de Pablo): prioridad ASC (1 = más urgente) y, dentro
+# -- 2026-08-03: prioridad ASC (1 = más urgente) y, dentro
 # -- de cada prioridad, fecha ASC (más viejo primero) — vaciar los atrasados de
 # -- prioridad 1 hasta ponerse al día antes de pasar a prioridad 2. Antes era
 # -- NroMovVenta ASC. Sin Prioridad cargada -> 999, al final de la cola.
 
 # ── WMS: de esos pedidos puntuales, TODAS sus OT de Picking (no solo las ────
 # Cumplidas) — para poder quedarnos con la MÁS RECIENTE y recién ahí decidir
-# si el pedido está Cumplido. FIX 2026-08-03 (a pedido de Pablo, reportado en
+# si el pedido está Cumplido. FIX 2026-08-03 (reportado en
 # vivo: la cola traía pedidos que WMS no marca Cumplido): antes esta query
 # filtraba OTEstado=2 directo en SQL, así que si un pedido tenía una OT vieja
 # Cumplida y una MÁS NUEVA todavía sin terminar (repick/corrección), la vieja
@@ -379,8 +375,7 @@ ORDER BY COALESCE(cab.Prioridad, 999) ASC, cab.FechaPedido ASC
 # ORDER BY OT.OTId DESC) — el pedido solo cuenta como Cumplido si ESA es
 # OTEstado=2.
 #
-# LEGACY (a partir de 2026-08-05, ver SQL_WMS_PLAYA_PEDIDOS más abajo): a
-# pedido de Pablo, el criterio "Cumplido" se reemplazó por "está físicamente
+# LEGACY (a partir de 2026-08-05, ver SQL_WMS_PLAYA_PEDIDOS más abajo): el criterio "Cumplido" se reemplazó por "está físicamente
 # parado en la ubicación PLAYA_PEDIDOS" — refrescar_cola ya NO llama a
 # fetch_pedidos_cumplidos_abiertos. Se deja el código acá sin tocar (no se
 # borra) por si hace falta volver atrás o comparar.
@@ -401,7 +396,7 @@ WHERE Codot.CodotProcesoNegocio = 4          -- Picking
 
 
 # ── WMS: pedidos con al menos 1 renglón de la OT de Picking parado en la ────
-# ubicación PLAYA_PEDIDOS (a pedido de Pablo, 2026-08-05). Reemplaza el
+# ubicación PLAYA_PEDIDOS (2026-08-05). Reemplaza el
 # criterio "Cumplido" de arriba: la señal de "listo para Mesa de Control" ya
 # no es el estado de la OT, es la ubicación física del pedido en WMS.
 # Columna confirmada por diagnóstico en vivo: OTItem.OTItemUbicacionCodigo
@@ -411,7 +406,7 @@ WHERE Codot.CodotProcesoNegocio = 4          -- Picking
 # ir de OT a VenFer_PedidoCabecera.NroMovVenta; OT.OTPedidoId es OTRA columna,
 # con un ID compuesto tipo "MAGEW-738058-0-0-334695", no sirve para este
 # cruce).
-# FIX 2026-08-24 (reportado en vivo por Pablo: la cola asignó el pedido 757536
+# FIX 2026-08-24 (reportado en vivo: la cola asignó el pedido 757536
 # con su OT 144356 en "En Proceso" y Fin Picking 00:00:00). Estar parado en
 # PLAYA_PEDIDOS NO alcanza: el armador deja renglones en playa MIENTRAS sigue
 # pickeando, así que hay renglones en playa con la OT todavía En Proceso. El
@@ -479,7 +474,7 @@ def fetch_pedidos_cumplidos_abiertos_legacy(limit: int = MAGNUS_ABIERTOS_LIMIT) 
                 "cliente": (cliente or "").strip() or None,
                 # FIX 2026-08-21: faltaba y refrescar_cola lo insertaba igual.
                 "codCliente": int(cod_cliente) if cod_cliente is not None else None,
-                # Orden de la cola (a pedido de Pablo, 2026-08-03) — ver
+                # Orden de la cola (2026-08-03) — ver
                 # SQL_MAGNUS_ABIERTOS_TODOS. None = sin prioridad cargada.
                 "prioridad": int(prioridad) if prioridad is not None else None,
             }
@@ -640,7 +635,7 @@ WHERE cab.EstadoPedido = 2
   -- Misma whitelist de siempre (ver SQL_MAGNUS_ABIERTOS_TODOS para el porqué
   -- de cada código) MÁS el 410.
   --
-  -- CAMBIO 2026-08-25 (Pablo, revierte la decisión del 2026-08-24): CompCodigo
+  -- CAMBIO 2026-08-25 (revierte la decisión del 2026-08-24): CompCodigo
   -- 410 (PED.NF.CEN, "pedido no facturable de centro") ENTRA a la cola —
   -- "agregá los 410, que no se retiren". Antes quedaba afuera de la whitelist
   -- y era la única diferencia entre esta query y la pantalla Armar Pedidos de
@@ -744,12 +739,11 @@ def fetch_pedidos_en_playa_pedidos(limit: int = MAGNUS_ABIERTOS_LIMIT) -> list[d
     La reemplaza fetch_pedidos_listos_para_control: su filtro de
     'PLAYA_PEDIDOS' dejaba afuera casi todo (ver el comentario largo arriba).
     Se deja intacta, sin usar, igual que fetch_pedidos_cumplidos_abiertos_legacy
-    — pedido explícito de Pablo de no perder los criterios viejos.
+    — pedido explícito de no perder los criterios viejos.
 
     Cruce Abierto(Magnus) ∩ "está en la ubicación PLAYA_PEDIDOS" (WMS,
     OTItem.OTItemUbicacionCodigo) por NroMovVenta. Reemplaza el criterio
-    "Cumplido" (ver fetch_pedidos_cumplidos_abiertos_legacy) — a pedido de
-    Pablo, 2026-08-05: la señal de "listo para Mesa de Control" pasa a ser
+    "Cumplido" (ver fetch_pedidos_cumplidos_abiertos_legacy) — 2026-08-05: la señal de "listo para Mesa de Control" pasa a ser
     la ubicación física del pedido en WMS, no el estado de la OT. Mismo
     armado que la función legacy (arranca por TODOS los Abiertos de Magnus y
     filtra puntual contra WMS por esos NroMovVenta, en lotes de 1000) —
@@ -1073,7 +1067,7 @@ def refrescar_cola(limit: int = MAGNUS_ABIERTOS_LIMIT) -> int:
     agregaron. Se llama al reclamar (asignar_siguiente), no hace falta un
     loop/cron aparte.
 
-    FIX 2026-08-05 (a pedido de Pablo): pasó a usar
+    FIX 2026-08-05: pasó a usar
     fetch_pedidos_en_playa_pedidos en vez de fetch_pedidos_cumplidos_abiertos
     (criterio "Cumplido" en WMS) — ver esa función y
     fetch_pedidos_cumplidos_abiertos_legacy (se deja sin usar, sin borrar).
@@ -1254,7 +1248,7 @@ def asignar_siguiente(nro_operario: int) -> dict:
     ascendente — vacía los atrasados de cada prioridad antes de pasar a la
     siguiente (ver nota de ORDEN en el docstring del módulo).
 
-    410 PRIMERO DE TODO (2026-08-25, a pedido de Pablo): antes que la afinidad
+    410 PRIMERO DE TODO (2026-08-25): antes que la afinidad
     y antes que la prioridad, la cola entrega los CompCodigo 410 (PED.NF.CEN,
     "pedido no facturable de centro"). Son los que no tienen que irse sin
     pasar por mesa, así que van al frente sin importar prioridad ni fecha.
@@ -1263,7 +1257,7 @@ def asignar_siguiente(nro_operario: int) -> dict:
     ever/sql/deposito_control_asignacion.sql) — en las filas viejas, cargadas
     antes de ese ALTER, viene NULL y se comportan como no-410.
 
-    AFINIDAD POR CLIENTE (2026-08-25, a pedido de Pablo): después de eso,
+    AFINIDAD POR CLIENTE (2026-08-25): después de eso,
     la cola prefiere un pedido del MISMO cliente que el último que reclamó
     ESE operario (`cod_cliente_afin`, dentro de AFINIDAD_CLIENTE_HORAS). Los 2
     pedidos de un mismo cliente le caen a la misma persona uno detrás del
@@ -1370,7 +1364,7 @@ def asignar_siguiente(nro_operario: int) -> dict:
 
 
 # ── Historial: "Pedidos asignados" (vista /deposito/deposito → Mesas) ────────
-# A pedido de Pablo (2026-07-31, mismo día que se armó la cola): el "próximo
+# (2026-07-31, mismo día que se armó la cola): el "próximo
 # paso" anotado en deposito_control_asignacion.sql ("listar qué se le asignó
 # a X controlador") — vista de detalle, 1 fila por pedido YA reclamado
 # ("asignadoEn" IS NOT NULL), para ver qué hizo cada operario.
@@ -1441,7 +1435,7 @@ def fetch_pedidos_asignados(desde: str | None = None, hasta: str | None = None) 
         if r.get("horaCierre") is not None:
             r["horaCierre"] = r["horaCierre"].isoformat()
 
-    # Excluye acopios (a pedido de Pablo, 2026-08-03: CompCodigo 70 y 75 —
+    # Excluye acopios (2026-08-03: CompCodigo 70 y 75 —
     # mismo criterio que SQL_MAGNUS_ABIERTOS_TODOS). Esa exclusión en la cola solo
     # frena pedidos NUEVOS al refrescar — pedidos que ya habían quedado
     # guardados en deposito.control_asignacion (de antes del fix, o insertados
@@ -1451,7 +1445,7 @@ def fetch_pedidos_asignados(desde: str | None = None, hasta: str | None = None) 
     # ni "Desglose por operario" ni "Detalle por pedido" (ambos salen de
     # `rows`) lo cuentan — ej. pedido 748595 (CompCodigo 70, Flores Marcos).
     #
-    # FIX 2026-08-18 (a pedido de Pablo): CompCodigo 70 deja de excluirse
+    # FIX 2026-08-18: CompCodigo 70 deja de excluirse
     # entero — ahora entra al historial si Prioridad IN (1, 3), mismo
     # criterio que SQL_MAGNUS_ABIERTOS_TODOS (ver ese comentario para el
     # motivo). CompCodigo 75 se sigue excluyendo siempre, sin cambios. Por
