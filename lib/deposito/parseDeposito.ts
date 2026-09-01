@@ -47,10 +47,23 @@ const REUB = new Set(["Libre + Reposicion", "Re-Ubicacion"]);
 function sumBy<T>(rows: T[], f: (r: T) => number): number {
   return rows.reduce<number>((s, r) => s + (f(r) || 0), 0);
 }
-function cleanProc(p: string): string {
+export function cleanProc(p: string): string {
   const x = (p ?? "").replace(/[?�]/g, "o").trim();
   if (x === "Libre" || x === "Reposicion") return "Libre + Reposicion";
   return x;
+}
+
+// Reglas de negocio del reporte de produccion: que fila del WMS cuenta como
+// productividad de un operario (excluye gerentes/no-operativos y las reub. de
+// ciertos operarios). Se exporta para que otras vistas (p. ej. /deposito/pedidos)
+// recorten EXACTAMENTE igual que /deposito y los numeros cierren entre pantallas.
+export function esFilaProductiva(operarioRaw: unknown, procRaw: unknown): boolean {
+  const operario = String(operarioRaw ?? "").trim();
+  if (!operario || GERENTES.has(operario.toLowerCase())) return false;
+  const proceso = cleanProc(String(procRaw ?? ""));
+  if (!proceso) return false;
+  if (REUB.has(proceso) && EXCLUIR_REUB.has(operario.toLowerCase())) return false;
+  return true;
 }
 function toInt(s: string | undefined): number {
   if (s == null) return 0;
@@ -89,10 +102,8 @@ function acumular(
   const fecha = parseFecha(fechaRaw == null ? undefined : String(fechaRaw));
   if (!fecha) return false;
   const operario = String(operarioRaw ?? "").trim();
-  if (!operario || GERENTES.has(operario.toLowerCase())) return false;
   const proceso = cleanProc(String(procRaw ?? ""));
-  if (!proceso) return false;
-  if (REUB.has(proceso) && EXCLUIR_REUB.has(operario.toLowerCase())) return false;
+  if (!esFilaProductiva(operario, proceso)) return false;
 
   const mm = String(fecha.getMonth() + 1).padStart(2, "0");
   const mes = `${fecha.getFullYear()}-${mm}`;

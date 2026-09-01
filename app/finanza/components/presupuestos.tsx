@@ -18,6 +18,8 @@ import {
   fmtShort,
   fmtMes,
   MatrixTable,
+  BarrasH,
+  type BarraH,
   type MatRow,
 } from "./ui";
 
@@ -76,12 +78,43 @@ const COLOR_ESTADO: Record<number, string> = {
   5: "#71717a", // eliminada
 };
 
+// Etiquetas cortas: el nombre del comprobante en Magnus no entra en un eje
+// ("INGRESO INDUSTRIA A COMERCIAL", "ORDEN DE COMPRA SISTEMAS IT"). Se mapea
+// por CÓDIGO de comprobante (estable); si aparece uno nuevo cae al nombre
+// recortado.
+const AREA_CORTA: Record<number, string> = {
+  70: "OC Nacionales",
+  74: "RRHH",
+  75: "OC Impo",
+  76: "OC Industria",
+  77: "Marketing",
+  78: "Sistemas IT",
+  80: "Ing.Ind.Comercial",
+};
+const EST_CORTO: Record<number, string> = {
+  0: "S/conf.",
+  1: "Pend.",
+  2: "Cumpl.",
+  3: "Parcial",
+  5: "Elim.",
+};
+const ESTADO_LABEL: Record<number, string> = {
+  0: "Sin confirmar",
+  1: "Pendiente",
+  2: "Cumplida",
+  3: "Cumpl. parcial",
+  5: "Eliminada",
+};
+
 const mesActual = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
 const clip = (s: string, n = 22) => (s.length > n ? s.slice(0, n) + "…" : s);
 const est = (a: AreaAcum, cod: number) => a.estados.find((e) => e.estado === cod);
+const areaCorta = (a: AreaAcum) =>
+  AREA_CORTA[a.codigo] ??
+  clip(a.area.replace(/^ORDEN\s+(DE\s+)?COMPRA/i, "OC").trim(), 18);
 const pct = (parte: number, total: number) =>
   total > 0 ? (parte / total) * 100 : 0;
 
@@ -124,19 +157,31 @@ export function PresupuestosTab() {
     const parcial = porEstado.get(EST_PARCIAL);
 
     const donut = d.porEstado.map((e) => ({
-      name: `${e.nombre} (${fmtNum(e.items)})`,
+      name: `${ESTADO_LABEL[e.estado] ?? e.nombre} (${fmtNum(e.items)})`,
       value: e.items,
       color: COLOR_ESTADO[e.estado] ?? PALETTE[e.estado % PALETTE.length],
     }));
 
-    // Barras: una por área × estado, apiladas — es la lectura del mockup
-    // ("cumplido vs pendiente" dentro de cada área) en un solo gráfico.
-    const barras = d.areas.map((a) => ({
-      area: clip(a.area, 20),
-      Cumplida: est(a, EST_CUMPLIDA)?.importe ?? 0,
-      Pendiente: est(a, EST_PENDIENTE)?.importe ?? 0,
-      Parcial: est(a, EST_PARCIAL)?.importe ?? 0,
-    }));
+    // Barras: una por ÁREA × ESTADO, de mayor a menor importe. Cada fila dice
+    // el área y el estado, así se lee sin leyenda; antes era una sola barra
+    // apilada por área con una serie por estado.
+    const barras: BarraH[] = d.areas
+      .flatMap((a) =>
+        [EST_CUMPLIDA, EST_PENDIENTE, EST_PARCIAL].flatMap((cod) => {
+          const e = est(a, cod);
+          if (!e || e.importe <= 0) return [];
+          return [
+            {
+              label: `${areaCorta(a)} ${EST_CORTO[cod]}`,
+              value: e.importe,
+              color: COLOR_ESTADO[cod],
+              hint: `${a.area} · ${e.nombre}: ${fmtArs(e.importe)} · ${fmtNum(e.items)} items`,
+            },
+          ];
+        }),
+      )
+      .sort((x, y) => y.value - x.value)
+      .slice(0, 12);
 
     const rows: MatRow[] = d.areas.map((a) => {
       const p = est(a, EST_PENDIENTE);
@@ -291,18 +336,8 @@ export function PresupuestosTab() {
                 fmt={(n) => fmtNum(n)}
               />
             </Panel>
-            <Panel title="Importe por área" accent="($)">
-              <ChartBar
-                data={vista.barras}
-                xKey="area"
-                horizontal
-                height={280}
-                series={[
-                  { key: "Cumplida", name: "Cumplida", color: COLOR_ESTADO[2], stackId: "a" },
-                  { key: "Pendiente", name: "Pendiente", color: COLOR_ESTADO[1], stackId: "a" },
-                  { key: "Parcial", name: "Parcial", color: COLOR_ESTADO[3], stackId: "a" },
-                ]}
-              />
+            <Panel title="Importe por área" accent="($ · top 12 área/estado)">
+              <BarrasH data={vista.barras} labelWidth={150} />
             </Panel>
           </div>
 

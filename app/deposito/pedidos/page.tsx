@@ -15,10 +15,13 @@ import {
 import { InicioButton } from "@/components/ui/InicioButton";
 import { DateRangeField } from "@/components/ui/date-range-field";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
+import { esFilaProductiva } from "@/lib/deposito/parseDeposito";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Pedidos preparados — REAL (WMS Picking) vs Ingresados (pedidos registrados).
-//   Preparado (OT) = filas de Picking de /api/deposito/wms (1 fila = 1 OT)
+//   Preparado (OT) = filas de Picking de /api/deposito/wms con todos=true
+//                    (MISMA consulta y MISMO recorte que /deposito -> los items
+//                    y el ranking cierran con el tab Picking de esa vista)
 //   Ingresados     = pedidos registrados/día de /api/deposito/ingresados
 //   Controlado     = 3ª barra, lista para cuando exista la fuente (ver TODO)
 //   % Eficiencia   = preparado / ingresado
@@ -227,12 +230,19 @@ export default function PedidosPreparadosPage() {
       const errs: string[] = [];
       try {
         const [wRes, iRes] = await Promise.all([
-          fetch(`/api/deposito/wms?desde=${desde}&hasta=${hasta}`, { cache: "no-store" }),
+          fetch(`/api/deposito/wms?desde=${desde}&hasta=${hasta}&todos=true`, { cache: "no-store" }),
           fetch(`/api/deposito/ingresados?desde=${desde}&hasta=${hasta}`, { cache: "no-store" }),
         ]);
         const wj = (await wRes.json().catch(() => ({}))) as { rows?: Row[]; error?: string };
         if (!wRes.ok) throw new Error(wj.error || `WMS HTTP ${wRes.status}`);
-        if (!cancel) setRows((wj.rows ?? []).filter((x) => String(x["PROCESO"] ?? "") === "Picking"));
+        if (!cancel)
+          setRows(
+            (wj.rows ?? []).filter(
+              (x) =>
+                String(x["PROCESO"] ?? "") === "Picking" &&
+                esFilaProductiva(x["OPERARIO"], x["PROCESO"]),
+            ),
+          );
         const ij = (await iRes.json().catch(() => ({}))) as { rows?: Row[]; error?: string };
         if (!iRes.ok) errs.push("Ingresados: " + (ij.error || `HTTP ${iRes.status}`));
         else if (!cancel) setIngRows(ij.rows ?? []);
