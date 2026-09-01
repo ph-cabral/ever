@@ -20,8 +20,10 @@ import {
   BarrasH,
   RangoMeses,
   BarraPresupuesto,
+  TiraMeses,
   type BarraH,
   type MatRow,
+  type CeldaMes,
 } from "./ui";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -49,7 +51,13 @@ import {
 //   · SECCIÓN "Ejecución del presupuesto": lo ejecutado contra el APROBADO que
 //     se carga a mano (/api/finanza/presupuestos/aprobados). Ahí la barra
 //     entera es el 100% del presupuesto del área y se rellena con las OC del
-//     período sin importar su estado.
+//     período sin importar su estado. Cada fila son TRES renglones pegados:
+//     la barra, la tira del rango partida mes a mes con lo gastado en cada uno
+//     (`serieMes` del área) y el presupuesto que se está usando — antes los
+//     presupuestos iban en una tabla al pie y no se sabía cuál era el de cada
+//     barra. Si un área tiene varios presupuestos solapando el filtro manda el
+//     de MAYOR COBERTURA (el que cubre más de los meses mirados); los otros se
+//     listan pero no cuentan.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Acum = {
@@ -64,7 +72,16 @@ type Acum = {
   importeUsd: number;
 };
 type EstadoAcum = Acum & { estado: number; nombre: string };
-type AreaAcum = Acum & { codigo: number; area: string; estados: EstadoAcum[] };
+type MesAcum = Acum & { mes: string };
+// `serieMes` = un casillero por mes del filtro (incluso los meses sin OC), lo
+// que dibuja la tira debajo de la barra. Opcional para no romper si la vista
+// queda apuntando a una API vieja.
+type AreaAcum = Acum & {
+  codigo: number;
+  area: string;
+  estados: EstadoAcum[];
+  serieMes?: MesAcum[];
+};
 export type OcPorArea = {
   desde: string;
   hasta: string;
@@ -288,30 +305,81 @@ export function PresupuestosTab() {
   // Ejecución del presupuesto: una fila por área, mezclando las que tienen OC
   // con las que sólo tienen presupuesto cargado (un área que aprobó plata y no
   // gastó nada tiene que verse, justamente).
+  //
+  // Cuando un área tiene MÁS DE UN presupuesto solapando el filtro (el anual
+  // viejo y uno nuevo que arranca a mitad del rango, típicamente) manda el de
+  // MAYOR COBERTURA: el que cubre más meses de los que se están mirando. Con 5
+  // meses en pantalla y un presupuesto nuevo que sólo pisa 1, la barra se mide
+  // contra el que pisa los otros 4. Sumar los dos daba un aprobado que no
+  // existe en ningún mes; los demás quedan listados abajo, pero no cuentan.
   const ejecucion = useMemo(() => {
-    const aprobadoPorArea = new Map<number, { monto: number; nombre: string }>();
+    const mesesFiltro = (d?.meses ?? []).map((m) => m.mes);
+
+    const porArea = new Map<number, PresupAprobado[]>();
     for (const p of aprobados) {
       if (p.mesesPeriodo <= 0) continue;
-      const acc = aprobadoPorArea.get(p.codigoArea);
-      if (acc) acc.monto += p.montoPeriodo;
-      else aprobadoPorArea.set(p.codigoArea, { monto: p.montoPeriodo, nombre: p.area });
+      const l = porArea.get(p.codigoArea);
+      if (l) l.push(p);
+      else porArea.set(p.codigoArea, [p]);
     }
-    const filas = new Map<
-      number,
-      { codigo: number; area: string; ejecutado: number; aprobado: number }
-    >();
+    // Más meses cubiertos primero; a igual cobertura gana el más reciente.
+    for (const l of porArea.values())
+      l.sort(
+        (a, b) =>
+          b.mesesPeriodo - a.mesesPeriodo || b.mesDesde.localeCompare(a.mesDesde),
+      );
+
+    type Fila = {
+      codigo: number;
+      area: string;
+      ejecutado: number;
+      aprobado: number;
+      /** El de mayor cobertura: el único que mide la barra. */
+      presupuesto: PresupAprobado | null;
+      /** Los otros del mismo área que caen en el filtro (informativos). */
+      otros: PresupAprobado[];
+      meses: CeldaMes[];
+    };
+
+    const celdas = (serie: MesAcum[] | undefined, p: PresupAprobado | null): CeldaMes[] => {
+      const gasto = new Map((serie ?? []).map((m) => [m.mes, m.importe]));
+      return mesesFiltro.map((mes) => ({
+        mes,
+        importe: gasto.get(mes) ?? 0,
+        // Sin presupuesto no hay ventana contra qué contrastar: todos parejos.
+        dentro: !p || (mes >= p.mesDesde && mes <= p.mesHasta),
+      }));
+    };
+
+    const filas = new Map<number, Fila>();
     for (const a of d?.areas ?? []) {
+      const lista = porArea.get(a.codigo) ?? [];
+      const elegido = lista[0] ?? null;
       filas.set(a.codigo, {
         codigo: a.codigo,
         area: a.area,
         ejecutado: a.importe,
-        aprobado: aprobadoPorArea.get(a.codigo)?.monto ?? 0,
+        aprobado: elegido?.montoPeriodo ?? 0,
+        presupuesto: elegido,
+        otros: lista.slice(1),
+        meses: celdas(a.serieMes, elegido),
       });
     }
-    for (const [cod, v] of aprobadoPorArea) {
-      if (!filas.has(cod))
-        filas.set(cod, { codigo: cod, area: v.nombre, ejecutado: 0, aprobado: v.monto });
+    // Áreas que presupuestaron y no gastaron un peso en el período.
+    for (const [cod, lista] of porArea) {
+      if (filas.has(cod)) continue;
+      const elegido = lista[0];
+      filas.set(cod, {
+        codigo: cod,
+        area: elegido.area,
+        ejecutado: 0,
+        aprobado: elegido.montoPeriodo,
+        presupuesto: elegido,
+        otros: lista.slice(1),
+        meses: celdas(undefined, elegido),
+      });
     }
+
     const lista = [...filas.values()].sort(
       (x, y) => (y.aprobado || y.ejecutado) - (x.aprobado || x.ejecutado),
     );
@@ -483,8 +551,11 @@ export function PresupuestosTab() {
 
           <p className="text-[11px] text-zinc-600 mb-3">
             La barra es el 100 % del presupuesto aprobado del área y se rellena
-            con las OC del período, cumplidas o no. Los presupuestos que abarcan
-            varios meses se prorratean por mes.
+            con las OC del período, cumplidas o no. Abajo de cada barra, el
+            rango partido mes a mes con lo gastado en cada uno (encendidos los
+            meses que cubre el presupuesto) y el presupuesto que se está usando.
+            Si un área tiene varios presupuestos en el rango, manda el que cubre
+            más meses de los mirados; los otros quedan listados sin contar.
             {ejecucion.totalAprobado > 0 && (
               <>
                 {" "}
@@ -512,50 +583,59 @@ export function PresupuestosTab() {
 
           <div className="mt-1">
             {ejecucion.lista.map((f) => (
-              <BarraPresupuesto
-                key={f.codigo}
-                label={f.area}
-                ejecutado={f.ejecutado}
-                aprobado={f.aprobado}
-                referencia={ejecucion.referencia}
-                fmt={(n) => fmtShort(n)}
-              />
-            ))}
-          </div>
-
-          {aprobados.length > 0 && (
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-[11px]">
-                <thead>
-                  <tr className="text-zinc-500 text-left">
-                    <th className="py-1 pr-3 font-normal">Presupuesto cargado</th>
-                    <th className="py-1 pr-3 font-normal">Período</th>
-                    <th className="py-1 pr-3 font-normal text-right">Aprobado</th>
-                    <th className="py-1 pr-3 font-normal text-right">
-                      En el filtro
-                    </th>
-                    <th className="py-1 font-normal" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {aprobados.map((p) => (
-                    <tr key={p.id} className="border-t border-zinc-900">
-                      <td className="py-1 pr-3 text-zinc-300">
-                        {p.area}
+              <div key={f.codigo} className="mb-3">
+                <BarraPresupuesto
+                  label={f.area}
+                  ejecutado={f.ejecutado}
+                  aprobado={f.aprobado}
+                  referencia={ejecucion.referencia}
+                  fmt={(n) => fmtShort(n)}
+                />
+                {f.meses.length > 1 && (
+                  <TiraMeses meses={f.meses} fmt={(n) => fmtShort(n)} />
+                )}
+                {/* El presupuesto va PEGADO a su barra, no en una tabla aparte
+                    al pie: con varias áreas cargadas había que ir y volver
+                    para saber cuál era el de cada barra. */}
+                {f.presupuesto && (
+                  <div className="ml-[198px] mt-1 space-y-0.5">
+                    {[f.presupuesto, ...f.otros].map((p, i) => (
+                      <div
+                        key={p.id}
+                        className={`flex items-center gap-2 text-[10px] ${
+                          i === 0 ? "text-zinc-400" : "text-zinc-600"
+                        }`}
+                      >
+                        <span
+                          className={
+                            i === 0 ? "text-yellow-400/70" : "text-zinc-700"
+                          }
+                        >
+                          ▸
+                        </span>
+                        <span className="tabular-nums">{rotulo(p)}</span>
+                        <span className="text-zinc-700">·</span>
+                        <span className="tabular-nums">
+                          {fmtArs(p.monto)} aprobado
+                        </span>
+                        <span className="text-zinc-700">·</span>
+                        <span
+                          className={`tabular-nums ${
+                            i === 0 ? "text-yellow-400/80" : ""
+                          }`}
+                        >
+                          {p.mesesPeriodo === p.meses
+                            ? "entra completo en el filtro"
+                            : `${fmtArs(p.montoPeriodo)} en el filtro (${p.mesesPeriodo}/${p.meses} meses)`}
+                        </span>
                         {p.nota && (
-                          <span className="text-zinc-600"> — {p.nota}</span>
+                          <span className="text-zinc-600 truncate">— {p.nota}</span>
                         )}
-                      </td>
-                      <td className="py-1 pr-3 text-zinc-500">{rotulo(p)}</td>
-                      <td className="py-1 pr-3 text-right tabular-nums text-zinc-300">
-                        {fmtArs(p.monto)}
-                      </td>
-                      <td className="py-1 pr-3 text-right tabular-nums text-yellow-400/80">
-                        {p.mesesPeriodo === p.meses
-                          ? "completo"
-                          : `${fmtArs(p.montoPeriodo)} (${p.mesesPeriodo}/${p.meses} meses)`}
-                      </td>
-                      <td className="py-1 text-right">
+                        {i > 0 && (
+                          <span className="rounded border border-zinc-800 px-1 text-[9px] text-zinc-600">
+                            menor cobertura · no se usa
+                          </span>
+                        )}
                         {esAdmin && (
                           <button
                             title="Borrar presupuesto"
@@ -566,18 +646,18 @@ export function PresupuestosTab() {
                               );
                               cargar(desde, hasta);
                             }}
-                            className="text-zinc-600 hover:text-red-400"
+                            className="text-zinc-700 hover:text-red-400"
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={11} />
                           </button>
                         )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
 
           {vista.d.meses.length > 1 && (
             <>

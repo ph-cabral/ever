@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { Calendar, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   ResponsiveContainer,
   BarChart,
@@ -858,16 +859,29 @@ function Empty({ h }: { h: number }) {
   );
 }
 
-// ─── RangoMeses — desde/hasta de MESES en un solo control ────────────────────
-// (2026-09-01) un solo input para el rango en vez de dos cajas
-// "Desde" y "Hasta" separadas. `<input type="month">` no sabe hacer rangos, así
-// que son dos campos SIN borde propio metidos adentro de un mismo recuadro con
-// una flecha en el medio: para el que lo usa es una sola caja, y se sigue
-// apoyando en el date picker nativo del navegador (nada de calendario propio).
+// ─── RangoMeses — desde/hasta de MESES en UN control que se abre de un click ─
+// (2026-09-01) el control es un BOTÓN: se hace click en cualquier
+// parte de la caja y baja el calendario de meses. Antes eran dos
+// `<input type="month">` y el date picker nativo sólo abría desde el iconito
+// del costado, así que había que apuntarle a un cuadradito de 10 px y encima
+// abrirlo dos veces (una por punta del rango).
 //
-// El foco de cualquiera de los dos campos enciende el borde del recuadro
-// entero (focus-within), y cada campo acota al otro con min/max para que no se
-// pueda armar un rango invertido.
+// El picker es propio (nada de `type=month`) porque el nativo no sabe hacer
+// rangos: la grilla es de 12 meses de un año, el 1er click fija la punta y el
+// 2º cierra el rango (en cualquier orden: si el 2º es anterior se dan vuelta
+// solos). Los atajos de abajo cubren el 90 % de los usos con un click.
+const MESES_CORTOS = [
+  "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+  "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
+];
+/** 'YYYY-MM' del mes actual + desplazamiento en meses. */
+const ymOffset = (n: number) => {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+
 export function RangoMeses({
   desde,
   hasta,
@@ -883,37 +897,177 @@ export function RangoMeses({
   min?: string;
   max?: string;
 }) {
-  const campo =
-    "bg-transparent border-0 outline-none text-[12px] text-zinc-200 " +
-    "[color-scheme:dark] px-0 py-0 w-[112px]";
+  const [abierto, setAbierto] = React.useState(false);
+  const [anio, setAnio] = React.useState(
+    () => Number((desde || hasta || "").slice(0, 4)) || new Date().getFullYear(),
+  );
+  // Punta ya elegida de un rango a medio armar (null = el próximo click
+  // arranca uno nuevo).
+  const [ancla, setAncla] = React.useState<string | null>(null);
+  const caja = React.useRef<HTMLDivElement>(null);
+
+  // Cerrar con click afuera o Escape: el popover es absoluto y si no queda
+  // colgado tapando la tabla de abajo.
+  React.useEffect(() => {
+    if (!abierto) return;
+    const fuera = (e: MouseEvent) => {
+      if (caja.current && !caja.current.contains(e.target as Node)) {
+        setAbierto(false);
+        setAncla(null);
+      }
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setAbierto(false);
+        setAncla(null);
+      }
+    };
+    document.addEventListener("mousedown", fuera);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", fuera);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [abierto]);
+
+  const abrir = () => {
+    setAnio(Number((desde || hasta || "").slice(0, 4)) || new Date().getFullYear());
+    setAncla(null);
+    setAbierto((v) => !v);
+  };
+
+  // 'YYYY-MM' compara bien como string: no hace falta pasar por Date.
+  const fuera = (ym: string) => (!!min && ym < min) || (!!max && ym > max);
+
+  const elegir = (ym: string) => {
+    if (fuera(ym)) return;
+    if (!ancla) {
+      // 1er click: rango de un solo mes, y queda esperando la otra punta.
+      setAncla(ym);
+      onChange(ym, ym);
+      return;
+    }
+    const [a, b] = ancla <= ym ? [ancla, ym] : [ym, ancla];
+    onChange(a, b);
+    setAncla(null);
+    setAbierto(false);
+  };
+
+  const atajo = (dsd: string, hst: string) => {
+    onChange(dsd, hst);
+    setAncla(null);
+    setAbierto(false);
+  };
+
+  const rotulo =
+    desde && hasta
+      ? desde === hasta
+        ? fmtMes(desde)
+        : `${fmtMes(desde)} → ${fmtMes(hasta)}`
+      : "Elegir meses";
+
   return (
-    <label className="text-[11px] uppercase tracking-wider text-zinc-500">
-      {label}
-      <span
-        className="mt-1 flex items-center gap-1.5 bg-[#171717] border border-zinc-800
-                   rounded-md px-2.5 py-1.5 focus-within:border-yellow-400/60"
-      >
-        <input
-          type="month"
-          value={desde}
-          min={min}
-          max={hasta || max}
-          onChange={(e) => e.target.value && onChange(e.target.value, hasta)}
-          className={campo}
-          aria-label="Mes desde"
-        />
-        <span className="text-zinc-600 select-none">→</span>
-        <input
-          type="month"
-          value={hasta}
-          min={desde || min}
-          max={max}
-          onChange={(e) => e.target.value && onChange(desde, e.target.value)}
-          className={campo}
-          aria-label="Mes hasta"
-        />
+    <div ref={caja} className="relative">
+      <span className="block text-[11px] uppercase tracking-wider text-zinc-500">
+        {label}
       </span>
-    </label>
+      <button
+        type="button"
+        onClick={abrir}
+        className={`mt-1 flex w-full items-center gap-2 bg-[#171717] border rounded-md
+                    px-2.5 py-1.5 text-[12px] text-zinc-200 min-w-[190px]
+                    ${abierto ? "border-yellow-400/60" : "border-zinc-800 hover:border-zinc-700"}`}
+      >
+        <Calendar size={13} className="text-zinc-500 shrink-0" />
+        <span className="flex-1 text-left tabular-nums">{rotulo}</span>
+        <ChevronRight
+          size={13}
+          className={`text-zinc-600 transition-transform ${abierto ? "rotate-90" : ""}`}
+        />
+      </button>
+
+      {abierto && (
+        <div
+          className="absolute right-0 z-40 mt-1 w-[268px] rounded-lg border border-zinc-800
+                     bg-[#141414] p-2.5 shadow-xl shadow-black/60"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <button
+              type="button"
+              onClick={() => setAnio((a) => a - 1)}
+              className="p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800"
+              aria-label="Año anterior"
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <span className="text-[12px] font-semibold text-zinc-200 tabular-nums">
+              {anio}
+            </span>
+            <button
+              type="button"
+              onClick={() => setAnio((a) => a + 1)}
+              className="p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800"
+              aria-label="Año siguiente"
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-1">
+            {MESES_CORTOS.map((nombre, i) => {
+              const ym = `${anio}-${String(i + 1).padStart(2, "0")}`;
+              const bloqueado = fuera(ym);
+              const punta = ym === desde || ym === hasta || ym === ancla;
+              const dentro = !!desde && !!hasta && ym > desde && ym < hasta;
+              return (
+                <button
+                  key={ym}
+                  type="button"
+                  disabled={bloqueado}
+                  onClick={() => elegir(ym)}
+                  className={`rounded py-1.5 text-[12px] transition-colors ${
+                    bloqueado
+                      ? "text-zinc-700 cursor-not-allowed"
+                      : punta
+                        ? "bg-yellow-400 text-black font-semibold"
+                        : dentro
+                          ? "bg-yellow-400/15 text-yellow-300"
+                          : "text-zinc-300 hover:bg-zinc-800"
+                  }`}
+                >
+                  {nombre}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-2 pt-2 border-t border-zinc-800 flex flex-wrap gap-1">
+            {[
+              { t: "Este mes", d: ymOffset(0), h: ymOffset(0) },
+              { t: "Últimos 3", d: ymOffset(-2), h: ymOffset(0) },
+              { t: "Últimos 6", d: ymOffset(-5), h: ymOffset(0) },
+              { t: "Este año", d: `${new Date().getFullYear()}-01`, h: ymOffset(0) },
+            ].map((a) => (
+              <button
+                key={a.t}
+                type="button"
+                onClick={() => atajo(a.d, a.h)}
+                className="rounded border border-zinc-800 px-2 py-0.5 text-[10px] text-zinc-400
+                           hover:border-yellow-400/50 hover:text-yellow-400"
+              >
+                {a.t}
+              </button>
+            ))}
+          </div>
+
+          <p className="mt-2 text-[10px] text-zinc-600 leading-tight">
+            {ancla
+              ? `Desde ${fmtMes(ancla)} — elegí el mes de cierre.`
+              : "Un click abre el rango, el segundo lo cierra."}
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1007,6 +1161,84 @@ export function BarraPresupuesto({
       >
         {conPresupuesto ? `${pct.toLocaleString("es-AR", { maximumFractionDigits: 0 })}%` : "—"}
       </div>
+    </div>
+  );
+}
+
+// ─── TiraMeses — el rango partido mes a mes, debajo de la barra ──────────────
+// (2026-09-01) la barra de presupuesto contesta "cuánto del año
+// me comí", pero no CUÁNDO. La tira va justo abajo, alineada con la barra
+// (mismos anchos de columna), partida en un casillero por mes del filtro y con
+// lo gastado en cada uno.
+//
+// Los meses que caen adentro del presupuesto elegido se dibujan encendidos y
+// los de afuera apagados: así se ve de una si el gasto cayó dentro de la
+// ventana presupuestada o en meses que ese presupuesto no cubre.
+//
+// El relleno de cada casillero es proporcional al mes MÁS CARO de la fila (no
+// al presupuesto): dentro de un área lo que importa es qué mes se disparó, y
+// si se comparara contra el aprobado los meses flacos quedarían todos en cero.
+export type CeldaMes = { mes: string; importe: number; dentro: boolean };
+
+export function TiraMeses({
+  meses,
+  fmt,
+  labelMin = 190,
+  colMonto = 130,
+  colPct = 46,
+}: {
+  meses: CeldaMes[];
+  fmt: (n: number) => string;
+  labelMin?: number;
+  colMonto?: number;
+  colPct?: number;
+}) {
+  if (meses.length === 0) return null;
+  const tope = Math.max(0, ...meses.map((m) => m.importe));
+  return (
+    <div className="flex items-stretch gap-2 -mt-1 mb-1.5">
+      <div style={{ minWidth: labelMin }} />
+      <div className="flex-1 flex gap-px overflow-hidden rounded">
+        {meses.map((m) => {
+          const pct = tope > 0 ? (m.importe / tope) * 100 : 0;
+          return (
+            <div
+              key={m.mes}
+              title={`${fmtMes(m.mes)}: ${fmt(m.importe)}${m.dentro ? "" : " (fuera del presupuesto)"}`}
+              className={`relative flex-1 min-w-0 overflow-hidden px-1 py-[3px] text-center ${
+                m.dentro ? "bg-[#1c1c1c]" : "bg-[#151515]"
+              }`}
+            >
+              <div
+                className={`absolute inset-x-0 bottom-0 ${
+                  m.dentro ? "bg-yellow-400/20" : "bg-zinc-700/25"
+                }`}
+                style={{ height: `${Math.max(pct > 0 ? 6 : 0, pct)}%` }}
+              />
+              <div
+                className={`relative text-[9px] leading-tight truncate ${
+                  m.dentro ? "text-zinc-500" : "text-zinc-700"
+                }`}
+              >
+                {fmtMes(m.mes)}
+              </div>
+              <div
+                className={`relative text-[10px] leading-tight tabular-nums truncate ${
+                  m.importe > 0
+                    ? m.dentro
+                      ? "text-zinc-200"
+                      : "text-zinc-500"
+                    : "text-zinc-700"
+                }`}
+              >
+                {m.importe > 0 ? fmt(m.importe) : "—"}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ minWidth: colMonto }} />
+      <div style={{ minWidth: colPct }} />
     </div>
   );
 }

@@ -1,11 +1,44 @@
+# Contexto de build de Dockerfile.prod. Todo lo que NO haga falta para
+# `npm ci` + `npm run build` sale de aca: cada archivo del contexto se
+# transfiere y se vuelve a copiar en `COPY . .` en CADA deploy.
+#
+# (2026-09-01) el deploy se clavaba ~25 min en el paso
+# `COPY . .`: en el server, adentro del propio directorio del proyecto
+# (~/projects/vicki_web) viven los VOLUMENES bind-mount de produccion
+# (employees/, img_sorteo/, documentos/) que crecen sin techo con fotos y
+# adjuntos de RRHH. Estan en .gitignore, asi que no se ven en la copia de
+# desarrollo, pero en el server son parte del contexto y se copiaban enteros
+# adentro de la imagen en cada build. Nunca sacar esas tres lineas.
+#
+# Ojo con los finales de linea: este archivo tiene que quedar en LF.
+
+# dependencias y salidas de build (se regeneran adentro de la imagen)
 node_modules
 .next
+out
+build
+dist
+*.tsbuildinfo
+
+# datos de produccion montados como volumen (ver docker-compose.prod.yml)
+employees
+img_sorteo
+documentos
+
+# repo, CI y config de editor
 .git
-*.log
-Dockerfile*
-docker-compose*node_modules
-.next
-.git
-*.log
+.github
+.vscode
+.idea
+
+# el propio docker y los envs
 Dockerfile*
 docker-compose*
+.env*
+
+# cosas que no participan del build
+sql
+workers
+*.md
+*.log
+_tmp_*

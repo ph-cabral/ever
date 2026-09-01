@@ -45,6 +45,12 @@ Plata
 
 Rendimiento
 -----------
+Como el `GROUP BY` ya abre por MES, cada área devuelve además `serieMes`: un
+casillero por mes del rango (incluso los meses sin OC) con lo gastado en ese
+mes. Sale gratis — es otra pasada sobre las mismas filas en Python, no una
+segunda consulta — y es lo que dibuja la tira de meses debajo de la barra de
+presupuesto.
+
 Una sola consulta AGREGADA en SQL: `GROUP BY` mes × comprobante × estado. No
 se traen renglones a Python (el rango 2026-01..08 son 9.572 renglones y
 devolvería ~100 filas). El único filtro sobre la tabla grande es
@@ -273,9 +279,18 @@ def fetch_oc_por_area(desde: str | None = None,
         if a is None:
             nombre = comprobantes.get(f["comp"]) or f"COMPROBANTE {f['comp']}"
             a = areas[f["comp"]] = {
-                "codigo": f["comp"], "area": nombre, "estados": {}, **_acum(),
+                "codigo": f["comp"], "area": nombre, "estados": {},
+                # Un casillero por mes del rango, SIEMPRE los mismos y en
+                # orden: la vista dibuja la tira de meses debajo de la barra
+                # de presupuesto y necesita el mes vacío también (un mes sin
+                # OC es información, no una fila que falta).
+                "serieMes": {ym: _acum() for ym, _, _ in meses},
+                **_acum(),
             }
         _sumar(a, f)
+        sm = a["serieMes"].get(f["mes"])
+        if sm is not None:
+            _sumar(sm, f)
         e = a["estados"].get(f["estado"])
         if e is None:
             e = a["estados"][f["estado"]] = {
@@ -328,6 +343,10 @@ def fetch_oc_por_area(desde: str | None = None,
                         (_redondear(e) for e in a["estados"].values()),
                         key=lambda x: x["estado"],
                     ),
+                    "serieMes": [
+                        _redondear({"mes": ym, **a["serieMes"][ym]})
+                        for ym, _, _ in meses
+                    ],
                 })
                 for a in areas.values()
             ),
