@@ -5,7 +5,7 @@
 //
 // Fuente: r.tipoArticulo = Magnus StkFer_Articulos.NacionalImportado →
 // Stk_TiposArticulos.Descripcion (dato real por artículo). Valores observados:
-// "Nacional", "Importado", "Original", "Fabril" — este último llega como
+// "Nacional", "Importado", "Original", "Fabril" — el último llega como
 // "Fabrica" desde /deposito/faltantes (indicadores-api/deposito.py lo renombra),
 // por eso se aceptan las dos formas.
 //
@@ -16,14 +16,23 @@
 // Reparto:
 //   fabrica    → tipo Fabril/Fabrica, o proveedor EVER WEAR S.A. INDUSTRIAL.
 //                Solo se ve en /fabrica/faltantes.
-//   nacionales → tipo Nacional u Original (lado "Nacionales" del botón).
+//   nacionales → tipo Nacional (lado "Nacionales" del botón).
 //   importados → tipo Importado (lado "Importados" del botón).
+//   original   → tipo Original. NO se muestra en ninguna vista de faltantes
+//                (2026-09-01): queda clasificado aparte, no mezclado en
+//                "otros", para poder volver a mostrarlo con una línea si
+//                alguna vez hace falta.
 //   otros      → sin tipo cargado o tipo desconocido. Antes caían en
 //                "importados" por default y ensuciaban ese lado; ahora tienen
 //                su propia solapa para que nada quede fuera de la vista.
 // ──────────────────────────────────────────────────────────────────────────────
 
-export type OrigenArticulo = "nacionales" | "importados" | "fabrica" | "otros";
+export type OrigenArticulo =
+  | "nacionales"
+  | "importados"
+  | "fabrica"
+  | "original"
+  | "otros";
 
 export interface ArticuloOrigen {
   Proveedor: string | null;
@@ -48,7 +57,8 @@ export function origenArticulo(r: ArticuloOrigen): OrigenArticulo {
   // sigue siendo de fábrica y se trabaja en /fabrica/faltantes.
   if (tipo === "fabril" || tipo === "fabrica") return "fabrica";
   if (esProveedorFabrica(r.Proveedor)) return "fabrica";
-  if (tipo === "nacional" || tipo === "original") return "nacionales";
+  if (tipo === "original") return "original";
+  if (tipo === "nacional") return "nacionales";
   if (tipo === "importado") return "importados";
   return "otros";
 }

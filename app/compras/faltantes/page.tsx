@@ -68,10 +68,11 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 type Estado = "completo" | "incompleto" | "sin_orden" | "entregado";
 type Filtro = "todos" | Estado;
 // Origen del artículo (r.tipoArticulo, Magnus): el botón cicla
-// Nacionales (Nacional + Original) → Importados → Otros (sin tipo cargado o
-// tipo desconocido; se saltea si no hay ninguno). Fábrica (tipo Fabril o
-// proveedor EVER WEAR S.A. INDUSTRIAL) NO se muestra acá: vive en
-// /fabrica/faltantes. Ver lib/compras/origenArticulo.ts.
+// Nacionales → Importados → Otros (sin tipo cargado o tipo desconocido; se
+// saltea si no hay ninguno). NO se muestran acá: Fábrica (tipo Fabril o
+// proveedor EVER WEAR S.A. INDUSTRIAL), que vive en /fabrica/faltantes, ni
+// los de tipo Original, que quedan fuera de la vista.
+// Ver lib/compras/origenArticulo.ts.
 type Origen = "importados" | "nacionales" | "otros";
 
 // Fila RETIRADA de la tabla porque el stock cubrió el faltante (backend, punto
@@ -155,9 +156,10 @@ const DESDE_DEFAULT = "2026-06-26";
 const rowKey = (r: Pick<Row, "CodArticulo" | "fecha">) => `${r.CodArticulo}__${r.fecha}`;
 
 // Clasificación de origen: única fuente en lib/compras/origenArticulo.ts,
-// compartida con /fabrica/faltantes para que las dos vistas partan el mismo
-// universo (Nacional+Original acá, Importado del otro lado del botón, Fabril
-// solo en fábrica, y "Otros" para lo que no cae en ninguna).
+// compartida con /fabrica/faltantes (Nacional acá, Importado del otro lado del
+// botón, Fabril solo en fábrica, Original fuera de toda vista, y "Otros" para
+// lo que no cae en ninguna). Como pasaOrigen compara contra el filtro activo
+// —que nunca vale "fabrica" ni "original"— esas dos quedan excluidas solas.
 const origenDe = (r: Row): OrigenArticulo => origenArticulo(r);
 
 const FILTROS: { key: Filtro; label: string }[] = [
@@ -535,7 +537,7 @@ export default function ComprasFaltantesPage() {
   const [error, setError] = useState<string | null>(null);
   const [ocWarn, setOcWarn] = useState(false);
   const [ocDesde, setOcDesde] = useState<string | null>(null);
-  const [origen, setOrigen] = useState<Origen>("nacionales"); // filtro por origen del artículo (tipoArticulo) — default Nacionales (Nacional + Original), cicla con el botón
+  const [origen, setOrigen] = useState<Origen>("nacionales"); // filtro por origen del artículo (tipoArticulo) — default Nacionales, cicla con el botón
   const [flipped, setFlipped] = useState(false); // girar la tarjeta → ver extraordinarios
   const [leaving, setLeaving] = useState<Record<string, "left" | "right">>({}); // filas saliendo (animación)
   const [provAbierto, setProvAbierto] = useState<string | null>(null); // acordeón: solo un proveedor abierto a la vez; todos cerrados al entrar
@@ -709,8 +711,8 @@ export default function ComprasFaltantesPage() {
     }, EXIT_MS);
   }, []);
 
-  // Cuántas filas caen en "Otros" (ni Nacional/Original ni Importado ni
-  // Fábrica): si no hay ninguna, el botón sigue siendo el toggle de siempre
+  // Cuántas filas caen en "Otros" (ni Nacional ni Importado ni Fábrica ni
+  // Original): si no hay ninguna, el botón sigue siendo el toggle de siempre
   // (Nacionales ↔ Importados) y esa tercera solapa ni aparece.
   const hayOtros = useMemo(
     () => rows.some((r) => origenDe(r) === "otros"),
@@ -728,8 +730,8 @@ export default function ComprasFaltantesPage() {
   useEffect(() => {
     if (origen === "otros" && !hayOtros) setOrigen("nacionales");
   }, [origen, hayOtros]);
-  // Ningún lado muestra Fábrica (tipo Fabril o EVER WEAR S.A. INDUSTRIAL):
-  // eso se trabaja en /fabrica/faltantes — ver origenArticulo.
+  // Ningún lado muestra Fábrica (tipo Fabril o EVER WEAR S.A. INDUSTRIAL —
+  // eso se trabaja en /fabrica/faltantes) ni los de tipo Original.
   const pasaOrigen = useCallback((r: Row) => origenDe(r) === origen, [origen]);
 
   // Tabla principal: nunca muestra lo marcado extraordinario.
@@ -1115,8 +1117,8 @@ export default function ComprasFaltantesPage() {
             onClick={ciclarOrigen}
             title={
               hayOtros
-                ? "Filtra por origen del artículo — click para alternar: Nacionales (Nacional + Original) / Importados / Otros"
-                : "Filtra por origen del artículo — click para alternar: Nacionales (Nacional + Original) / Importados"
+                ? "Filtra por origen del artículo — click para alternar: Nacionales / Importados / Otros"
+                : "Filtra por origen del artículo — click para alternar: Nacionales / Importados"
             }
             className={`chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium ${
               origen === "importados"
