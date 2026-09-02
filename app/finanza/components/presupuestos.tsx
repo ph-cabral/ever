@@ -50,8 +50,14 @@ import {
 //     donut y en la tabla).
 //   · SECCIÓN "Ejecución del presupuesto": lo ejecutado contra el APROBADO que
 //     se carga a mano (/api/finanza/presupuestos/aprobados). Ahí la barra
-//     entera es el 100% del presupuesto del área y se rellena con las OC del
-//     período sin importar su estado. Cada fila son TRES renglones pegados:
+//     entera es el 100% del presupuesto COMPLETO del área (NO prorrateado) y se
+//     rellena con TODO lo gastado dentro del período de ese presupuesto, sin
+//     importar el estado de las OC ni qué meses estén filtrados: la pregunta
+//     que contesta es "cómo viene el gasto contra el total aprobado", y
+//     recortar el filtro no puede cambiar esa respuesta. Para eso, cuando el
+//     presupuesto se pasa del filtro se pide una segunda vez /oc-por-area
+//     sobre el rango de los presupuestos (una consulta agregada más, no una
+//     por área). Cada fila son TRES renglones pegados:
 //     la barra, la tira del rango partida mes a mes con lo gastado en cada uno
 //     (`serieMes` del área) y el presupuesto que se está usando — antes los
 //     presupuestos iban en una tabla al pie y no se sabía cuál era el de cada
@@ -94,8 +100,9 @@ export type OcPorArea = {
   meses: (Acum & { mes: string })[];
 };
 
-// Presupuesto aprobado (Postgres, cargado a mano). `montoPeriodo` ya viene
-// PRORRATEADO por la API a los meses que caen dentro del filtro.
+// Presupuesto aprobado (Postgres, cargado a mano). `montoPeriodo` es el
+// prorrateo a los meses del filtro: quedó como DATO INFORMATIVO al pie de la
+// barra — lo que mide la barra es `monto`, el presupuesto completo.
 type PresupAprobado = {
   id: number;
   codigoArea: number;
@@ -168,6 +175,31 @@ const rotulo = (p: PresupAprobado) =>
     ? fmtMes(p.mesDesde)
     : `${fmtMes(p.mesDesde)} → ${fmtMes(p.mesHasta)}`;
 
+const idxMes = (ym: string) =>
+  Number(ym.slice(0, 4)) * 12 + Number(ym.slice(5, 7)) - 1;
+// Techo de la ventana que se pide aparte para medir las barras: un presupuesto
+// no pasa de 36 meses, pero varios encadenados sí podrían — y no vale barrer
+// años de OC para dibujar una barra.
+const MAX_MESES_SERIE = 60;
+/**
+ * Ventana que hay que leer para medir las barras: la unión de los períodos de
+ * los presupuestos que caen en el filtro. Devuelve `null` cuando el filtro ya
+ * la cubre (o cuando se va de MAX_MESES_SERIE) y entonces no se pide nada.
+ */
+function rangoPresupuestos(apr: PresupAprobado[], dsd: string, hst: string) {
+  let desde = "";
+  let hasta = "";
+  for (const p of apr) {
+    if (p.mesesPeriodo <= 0) continue;
+    if (!desde || p.mesDesde < desde) desde = p.mesDesde;
+    if (!hasta || p.mesHasta > hasta) hasta = p.mesHasta;
+  }
+  if (!desde || !hasta) return null;
+  if (desde >= dsd && hasta <= hst) return null;
+  if (idxMes(hasta) - idxMes(desde) + 1 > MAX_MESES_SERIE) return null;
+  return { desde, hasta };
+}
+
 export function PresupuestosTab() {
   const [desde, setDesde] = useState(mesActual);
   const [hasta, setHasta] = useState(mesActual);
@@ -175,6 +207,10 @@ export function PresupuestosTab() {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aprobados, setAprobados] = useState<PresupAprobado[]>([]);
+  // OC de TODO el período de los presupuestos que entran en el filtro (no sólo
+  // de los meses mirados): es contra eso que se llena la barra del 100 %.
+  // `null` = el filtro ya cubre esos meses y alcanza con `d`.
+  const [ocPresup, setOcPresup] = useState<OcPorArea | null>(null);
   const [esAdmin, setEsAdmin] = useState(false);
   const [modal, setModal] = useState(false);
 
@@ -194,10 +230,34 @@ export function PresupuestosTab() {
       setD(json as OcPorArea);
       // Que falte la tabla de presupuestos no puede voltear la vista de OC.
       const jsonApr = resApr.ok ? await resApr.json().catch(() => null) : null;
-      setAprobados(jsonApr?.presupuestos ?? []);
+      const apr: PresupAprobado[] = jsonApr?.presupuestos ?? [];
+      setAprobados(apr);
+
+      // La barra mide contra el 100 % del presupuesto, así que lo gastado tiene
+      // que ser el de TODO el período del presupuesto y no el de los meses
+      // filtrados (recortando el filtro bajaba el % y parecía que se gastó
+      // menos de lo que se gastó). Se pide UNA sola vez sobre la unión de los
+      // períodos que entran en el filtro y después cada área se recorta con su
+      // propio rango: es la misma consulta agregada de siempre (GROUP BY mes ×
+      // comprobante × estado), no una por área. Si el filtro ya cubre todo, no
+      // se pide nada.
+      const rango = rangoPresupuestos(apr, dsd, hst);
+      if (!rango) {
+        setOcPresup(null);
+      } else {
+        const resP = await fetch(
+          `/api/finanza/presupuestos?${new URLSearchParams(rango)}`,
+          { cache: "no-store" },
+        );
+        // Que falle el rango largo no puede voltear la vista: se cae al filtro.
+        setOcPresup(
+          resP.ok ? ((await resP.json().catch(() => null)) as OcPorArea | null) : null,
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error inesperado");
       setD(null);
+      setOcPresup(null);
     } finally {
       setCargando(false);
     }
@@ -315,6 +375,27 @@ export function PresupuestosTab() {
   const ejecucion = useMemo(() => {
     const mesesFiltro = (d?.meses ?? []).map((m) => m.mes);
 
+    // Serie mensual con la que se MIDE LA BARRA: la del rango largo si hizo
+    // falta pedirlo, y si no la del filtro (que ya cubre los presupuestos).
+    const fuente = ocPresup ?? d;
+    const serieLarga = new Map<number, MesAcum[]>(
+      (fuente?.areas ?? []).map((a) => [a.codigo, a.serieMes ?? []]),
+    );
+    const haySerie = [...serieLarga.values()].some((s) => s.length > 0);
+    /** Gastado dentro del período del presupuesto, mire los meses que mire el filtro. */
+    const gastoDelPresupuesto = (
+      codigo: number,
+      p: PresupAprobado,
+      enFiltro: number,
+    ) => {
+      // API vieja sin `serieMes`: no hay con qué recortar, queda lo del filtro.
+      if (!haySerie) return enFiltro;
+      let total = 0;
+      for (const m of serieLarga.get(codigo) ?? [])
+        if (m.mes >= p.mesDesde && m.mes <= p.mesHasta) total += m.importe;
+      return total;
+    };
+
     const porArea = new Map<number, PresupAprobado[]>();
     for (const p of aprobados) {
       if (p.mesesPeriodo <= 0) continue;
@@ -332,7 +413,11 @@ export function PresupuestosTab() {
     type Fila = {
       codigo: number;
       area: string;
+      /** Lo que llena la barra: gastado en TODO el período del presupuesto. */
       ejecutado: number;
+      /** Sólo los meses filtrados (tira de meses y áreas sin presupuesto). */
+      ejecutadoFiltro: number;
+      /** El presupuesto COMPLETO, sin prorratear. */
       aprobado: number;
       /** El de mayor cobertura: el único que mide la barra. */
       presupuesto: PresupAprobado | null;
@@ -358,8 +443,11 @@ export function PresupuestosTab() {
       filas.set(a.codigo, {
         codigo: a.codigo,
         area: a.area,
-        ejecutado: a.importe,
-        aprobado: elegido?.montoPeriodo ?? 0,
+        ejecutado: elegido
+          ? gastoDelPresupuesto(a.codigo, elegido, a.importe)
+          : a.importe,
+        ejecutadoFiltro: a.importe,
+        aprobado: elegido?.monto ?? 0,
         presupuesto: elegido,
         otros: lista.slice(1),
         meses: celdas(a.serieMes, elegido),
@@ -369,11 +457,14 @@ export function PresupuestosTab() {
     for (const [cod, lista] of porArea) {
       if (filas.has(cod)) continue;
       const elegido = lista[0];
+      // Sin OC en el filtro, pero puede haber gastado en otros meses del
+      // presupuesto: eso igual llena la barra.
       filas.set(cod, {
         codigo: cod,
         area: elegido.area,
-        ejecutado: 0,
-        aprobado: elegido.montoPeriodo,
+        ejecutado: gastoDelPresupuesto(cod, elegido, 0),
+        ejecutadoFiltro: 0,
+        aprobado: elegido.monto,
         presupuesto: elegido,
         otros: lista.slice(1),
         meses: celdas(undefined, elegido),
@@ -384,10 +475,20 @@ export function PresupuestosTab() {
       (x, y) => (y.aprobado || y.ejecutado) - (x.aprobado || x.ejecutado),
     );
     const totalAprobado = lista.reduce((s, f) => s + f.aprobado, 0);
-    const totalEjecutado = lista.reduce((s, f) => s + f.ejecutado, 0);
-    const referencia = Math.max(0, ...lista.map((f) => f.ejecutado));
+    // El total que se compara contra el aprobado cuenta SÓLO las áreas con
+    // presupuesto: sumarle las que no tienen daba un porcentaje contra una base
+    // que no existe.
+    const totalEjecutado = lista.reduce(
+      (s, f) => s + (f.aprobado > 0 ? f.ejecutado : 0),
+      0,
+    );
+    // Las áreas sin presupuesto se dibujan relativas entre ellas, con lo del filtro.
+    const referencia = Math.max(
+      0,
+      ...lista.filter((f) => f.aprobado <= 0).map((f) => f.ejecutadoFiltro),
+    );
     return { lista, totalAprobado, totalEjecutado, referencia };
-  }, [d, aprobados]);
+  }, [d, aprobados, ocPresup]);
 
   return (
     <div>
@@ -468,7 +569,7 @@ export function PresupuestosTab() {
               value={fmtShort(vista.r.importe)}
               sub={
                 ejecucion.totalAprobado > 0
-                  ? `${fmtShort(ejecucion.totalAprobado)} presupuestado`
+                  ? `${fmtShort(ejecucion.totalAprobado)} presupuestado (total aprobado)`
                   : vista.r.importeUsd > 0
                     ? `incluye ${fmtShort(vista.r.importeUsd)} de OC en U$S`
                     : "valor total comprometido"
@@ -550,12 +651,15 @@ export function PresupuestosTab() {
           </div>
 
           <p className="text-[11px] text-zinc-600 mb-3">
-            La barra es el 100 % del presupuesto aprobado del área y se rellena
-            con las OC del período, cumplidas o no. Abajo de cada barra, el
-            rango partido mes a mes con lo gastado en cada uno (encendidos los
-            meses que cubre el presupuesto) y el presupuesto que se está usando.
-            Si un área tiene varios presupuestos en el rango, manda el que cubre
-            más meses de los mirados; los otros quedan listados sin contar.
+            La barra es el 100 % del presupuesto COMPLETO del área y se rellena
+            con todo lo gastado dentro del período de ese presupuesto, cumplido
+            o no, sin importar qué meses estén filtrados: recortar el filtro no
+            baja el consumo. Abajo de cada barra, el rango filtrado partido mes
+            a mes con lo gastado en cada uno (encendidos los meses que cubre el
+            presupuesto) y el presupuesto que se está usando, con cuánto de él
+            cae en los meses mirados. Si un área tiene varios presupuestos en el
+            rango, manda el que cubre más meses de los mirados; los otros quedan
+            listados sin contar.
             {ejecucion.totalAprobado > 0 && (
               <>
                 {" "}
@@ -619,11 +723,22 @@ export function PresupuestosTab() {
                           {fmtArs(p.monto)} aprobado
                         </span>
                         <span className="text-zinc-700">·</span>
-                        <span
-                          className={`tabular-nums ${
-                            i === 0 ? "text-yellow-400/80" : ""
-                          }`}
-                        >
+                        {i === 0 && (
+                          <>
+                            <span className="tabular-nums text-yellow-400/80">
+                              {fmtArs(f.ejecutado)} gastado en el período (
+                              {((f.ejecutado / p.monto) * 100).toLocaleString(
+                                "es-AR",
+                                { maximumFractionDigits: 0 },
+                              )}{" "}
+                              %)
+                            </span>
+                            <span className="text-zinc-700">·</span>
+                          </>
+                        )}
+                        {/* El prorrateo ya NO mide la barra: queda como dato de
+                            cuánto del presupuesto cae en los meses mirados. */}
+                        <span className="tabular-nums text-zinc-500">
                           {p.mesesPeriodo === p.meses
                             ? "entra completo en el filtro"
                             : `${fmtArs(p.montoPeriodo)} en el filtro (${p.mesesPeriodo}/${p.meses} meses)`}

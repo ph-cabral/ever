@@ -8,7 +8,9 @@
 //   GET    ?desde=YYYY-MM&hasta=YYYY-MM
 //          -> { desde, hasta, presupuestos: [...] } con `montoPeriodo`
 //             ya PRORRATEADO a los meses del filtro (ver `prorratear`).
-//             Sin rango devuelve todos (para el listado del modal).
+//             OJO: el prorrateo es DATO INFORMATIVO — la barra de la pantalla
+//             se mide contra `monto` (el presupuesto completo), no contra
+//             `montoPeriodo`. Sin rango devuelve todos (para el modal).
 //   POST   { codigoArea, area, mesDesde, mesHasta, montoMillones, nota? }
 //          -> upsert por (área + período). El monto entra en MILLONES y se
 //             guarda en PESOS: la pantalla no tiene que escribir los ceros.
