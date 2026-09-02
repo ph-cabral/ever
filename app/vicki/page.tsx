@@ -5,6 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
+import {
+  CvBarra,
+  claveCandidato,
+  type Candidato,
+} from "@/components/vicki/CvBarra";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -149,6 +154,12 @@ export default function VickiPage() {
   const [showUpload, setShowUpload] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [namePick, setNamePick] = useState<string[]>([]);
+  // Barra de CVs: `candidatos` acumula lo que fue apareciendo en la charla y
+  // `recomendados` marca los de la última respuesta. `descartados` son los que
+  // se tiraron al tacho (salen de la barra y de las próximas búsquedas).
+  const [candidatos, setCandidatos] = useState<Candidato[]>([]);
+  const [recomendados, setRecomendados] = useState<Set<string>>(new Set());
+  const [descartados, setDescartados] = useState<Candidato[]>([]);
   const endRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -171,6 +182,35 @@ export default function VickiPage() {
           content: m.content,
         }));
         setMessages(hist);
+
+        // Reconstruir la barra de CVs: cada mensaje "ai" de búsqueda guardó
+        // sus candidatos en metadata. Se recorre al revés para que los de la
+        // última respuesta queden primeros y marcados como recomendados.
+        const vistos = new Set<string>();
+        const acum: Candidato[] = [];
+        let ultimos: Candidato[] = [];
+        for (const m of [...(data.history ?? [])].reverse()) {
+          const cands: Candidato[] = m?.metadata?.candidatos ?? [];
+          if (!cands.length) continue;
+          if (!ultimos.length) ultimos = cands;
+          for (const c of cands) {
+            const k = claveCandidato(c);
+            if (vistos.has(k)) continue;
+            vistos.add(k);
+            acum.push(c);
+          }
+        }
+        const ids: number[] = data.descartados ?? [];
+        const fuera = new Set(ids);
+        setCandidatos(acum.filter((c) => !(c.candidato_id != null && fuera.has(c.candidato_id))));
+        setDescartados(acum.filter((c) => c.candidato_id != null && fuera.has(c.candidato_id)));
+        setRecomendados(
+          new Set(
+            ultimos
+              .filter((c) => !(c.candidato_id != null && fuera.has(c.candidato_id)))
+              .map(claveCandidato),
+          ),
+        );
       } catch {}
     })();
   }, []);
@@ -209,6 +249,57 @@ export default function VickiPage() {
       : "Nombre y apellido del empleado…"
     : "Escribí tu mensaje… (ej: /crea empleado)";
 
+  // Los nuevos van primero (son los de la última respuesta) y se deduplica
+  // contra lo que ya estaba: el mismo candidato puede volver a salir en varias
+  // búsquedas de la misma conversación.
+  function mergeCandidatos(nuevos: Candidato[]) {
+    if (!nuevos?.length) {
+      setRecomendados(new Set());
+      return;
+    }
+    setRecomendados(new Set(nuevos.map(claveCandidato)));
+    setCandidatos((prev) => {
+      const claves = new Set(nuevos.map(claveCandidato));
+      return [...nuevos, ...prev.filter((c) => !claves.has(claveCandidato(c)))];
+    });
+  }
+
+  function quitarDeBarra(c: Candidato) {
+    const clave = claveCandidato(c);
+    setCandidatos((prev) => prev.filter((x) => claveCandidato(x) !== clave));
+    setRecomendados((prev) => {
+      const s = new Set(prev);
+      s.delete(clave);
+      return s;
+    });
+  }
+
+  async function descartar(c: Candidato) {
+    quitarDeBarra(c);
+    setDescartados((prev) => [c, ...prev.filter((x) => claveCandidato(x) !== claveCandidato(c))]);
+    // sin candidato_id (puntos viejos de Qdrant sin esa metadata) no se puede
+    // persistir el descarte: se oculta solo en esta pantalla
+    if (c.candidato_id == null) return;
+    try {
+      await fetch(`/api/vicki/descartes/${SESSION_ID}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidato_id: c.candidato_id }),
+      });
+    } catch {}
+  }
+
+  async function recuperar(c: Candidato) {
+    setDescartados((prev) => prev.filter((x) => claveCandidato(x) !== claveCandidato(c)));
+    setCandidatos((prev) => [c, ...prev.filter((x) => claveCandidato(x) !== claveCandidato(c))]);
+    if (c.candidato_id == null) return;
+    try {
+      await fetch(`/api/vicki/descartes/${SESSION_ID}/${c.candidato_id}`, {
+        method: "DELETE",
+      });
+    } catch {}
+  }
+
   async function send(message: string) {
     if (!message.trim() || loading) return;
     const userMsg: Msg = { role: "user", content: message };
@@ -235,6 +326,7 @@ export default function VickiPage() {
       const data = await r.json();
       const answer = data.response ?? `Error: ${data.error ?? "desconocido"}`;
       setMessages((prev) => [...prev, { role: "assistant", content: answer }]);
+      mergeCandidatos(data.candidatos ?? []);
 
       if (/Empleado \*\*\d+\*\*/.test(answer) || answer.startsWith("✅")) {
         setGender("");
@@ -369,13 +461,16 @@ export default function VickiPage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
+    <div className="h-screen bg-zinc-950 text-zinc-100 flex flex-col">
       <header className="border-b border-zinc-800 px-6 py-4 flex items-center gap-3">
         <InicioButton className="text-zinc-400 hover:text-white transition-colors p-1.5" />
         <h1 className="text-lg font-semibold">Vicki — Selección de Personal</h1>
         <UsuarioActual className="ml-auto" />
       </header>
 
+      {/* chat a la izquierda, barra de CVs a la derecha (solo escritorio) */}
+      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-w-0 flex-col">
       <main className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto max-w-2xl flex flex-col gap-4">
           {messages.length === 0 && (
@@ -554,6 +649,16 @@ export default function VickiPage() {
           </div>
         </form>
       </footer>
+      </div>
+
+      <CvBarra
+        candidatos={candidatos}
+        recomendados={recomendados}
+        descartados={descartados}
+        onDescartar={descartar}
+        onRecuperar={recuperar}
+      />
+      </div>
     </div>
   );
 }

@@ -27,7 +27,6 @@ import {
   fmtMes,
   MatrixTable,
   BarrasH,
-  RangoMeses,
   BarraPresupuesto,
   TiraMeses,
   type BarraH,
@@ -46,8 +45,17 @@ import {
 // (/api/finanza/presupuestos → indicadores-api /compras/oc-por-area).
 //
 // Por eso es la ÚNICA pestaña de /finanza que anda sin Excel cargado: se pide
-// sola al montar y tiene su propio selector de MESES (no de días: una OC se
-// mira por mes). Default = mes en curso, en un solo control de rango.
+// sola al montar.
+//
+// EJERCICIO ANUAL (2026-09-02). Los presupuestos son ANUALES, así que la
+// pantalla dejó de tener un rango libre de meses y pasó a tener un selector de
+// AÑO: el filtro es siempre enero→diciembre del año elegido y arranca en el año
+// EN CURSO, o sea mostrando los presupuestos vigentes. El selector ofrece los
+// años anteriores que tengan algún presupuesto cargado (más el actual), que
+// salen de leer la tabla de aprobados sin rango — son pocas filas.
+// Consecuencia buena: como el presupuesto anual entra entero en el filtro, ya
+// no hace falta la segunda consulta del rango largo (`rangoPresupuestos`
+// devuelve null) y la pantalla queda en una sola pasada.
 //
 // Los importes están PESIFICADOS a la cotización de cada OC (las de impo van
 // en U$S; un total que mezcla monedas no significa nada). Las OC CANCELADAS
@@ -170,10 +178,12 @@ const AREAS_CATALOGO: { codigo: number; nombre: string }[] = [
   { codigo: 80, nombre: "INGRESO INDUSTRIA A COMERCIAL" },
 ];
 
-const mesActual = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-};
+// Ejercicio = año calendario. El filtro de la pantalla es siempre ene→dic.
+const anioActual = () => new Date().getFullYear();
+const eneroDe = (a: number) => `${a}-01`;
+const diciembreDe = (a: number) => `${a}-12`;
+const anioDe = (ym: string) => Number(ym.slice(0, 4));
+
 const clip = (s: string, n = 22) => (s.length > n ? s.slice(0, n) + "…" : s);
 const est = (a: AreaAcum, cod: number) => a.estados.find((e) => e.estado === cod);
 const areaCorta = (codigo: number, nombre: string) =>
@@ -210,8 +220,14 @@ function rangoPresupuestos(apr: PresupAprobado[], dsd: string, hst: string) {
 }
 
 export function PresupuestosTab() {
-  const [desde, setDesde] = useState(mesActual);
-  const [hasta, setHasta] = useState(mesActual);
+  // Ejercicio en curso por defecto. `desde`/`hasta` se derivan: la pantalla ya
+  // no tiene rango libre de meses.
+  const [anio, setAnio] = useState(anioActual);
+  const desde = eneroDe(anio);
+  const hasta = diciembreDe(anio);
+  // Años ofrecidos en el selector: los que tienen algún presupuesto cargado,
+  // más el actual. Salen de leer la tabla de aprobados SIN rango (pocas filas).
+  const [anios, setAnios] = useState<number[]>(() => [anioActual()]);
   const [d, setD] = useState<OcPorArea | null>(null);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -222,10 +238,17 @@ export function PresupuestosTab() {
   const [ocPresup, setOcPresup] = useState<OcPorArea | null>(null);
   const [esAdmin, setEsAdmin] = useState(false);
   const [modal, setModal] = useState(false);
-  // Área cuyo detalle de OC se está mirando (modal). null = cerrado.
-  const [detalle, setDetalle] = useState<{ codigo: number; area: string } | null>(
-    null,
-  );
+  // Área cuyo detalle de OC se está mirando (modal). null = cerrado. Lleva su
+  // propio rango: el del PRESUPUESTO de esa fila (no el filtro de pantalla),
+  // que es la pregunta que contesta el modal — "qué OC entran en este
+  // presupuesto". Sin presupuesto cargado cae al año filtrado.
+  const [detalle, setDetalle] = useState<{
+    codigo: number;
+    area: string;
+    desde: string;
+    hasta: string;
+    periodo: string | null;
+  } | null>(null);
 
   const cargar = useCallback(async (dsd: string, hst: string) => {
     setCargando(true);
@@ -279,6 +302,33 @@ export function PresupuestosTab() {
   useEffect(() => {
     cargar(desde, hasta);
   }, [cargar, desde, hasta]);
+
+  // Años con presupuesto cargado, para el selector. Se pide UNA vez al montar
+  // (sin rango = todos los presupuestos, que son unas pocas filas de Postgres)
+  // y se recalcula sólo al crear/borrar uno. Un año sin presupuestos no se
+  // ofrece: no habría nada que mirar.
+  const cargarAnios = useCallback(async () => {
+    try {
+      const r = await fetch("/api/finanza/presupuestos/aprobados", {
+        cache: "no-store",
+      });
+      if (!r.ok) return;
+      const j = await r.json().catch(() => null);
+      const lista: PresupAprobado[] = j?.presupuestos ?? [];
+      const set = new Set<number>([anioActual()]);
+      for (const p of lista) {
+        set.add(anioDe(p.mesDesde));
+        set.add(anioDe(p.mesHasta));
+      }
+      setAnios([...set].sort((a, b) => b - a));
+    } catch {
+      /* el selector se queda con el año actual: no vale voltear la vista */
+    }
+  }, []);
+
+  useEffect(() => {
+    cargarAnios();
+  }, [cargarAnios]);
 
   // El alta/baja de presupuestos es sólo ADMIN (lo vuelve a chequear la API;
   // esto es nada más para no mostrar botones que van a dar 403).
@@ -508,17 +558,24 @@ export function PresupuestosTab() {
       <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
         <PageTitle
           title="Presupuestos / Órdenes de Compra"
-          sub="Por área (tipo de comprobante) y estado — datos en vivo de Magnus, importes pesificados a la cotización de cada OC"
+          sub="Presupuestos anuales por área (tipo de comprobante) — datos en vivo de Magnus, importes pesificados a la cotización de cada OC"
         />
         <div className="flex items-end gap-2 pb-1">
-          <RangoMeses
-            desde={desde}
-            hasta={hasta}
-            onChange={(dsd, hst) => {
-              setDesde(dsd);
-              setHasta(hst);
-            }}
-          />
+          <label className="flex flex-col text-[10px] uppercase tracking-wider text-zinc-500">
+            Ejercicio
+            <select
+              value={anio}
+              onChange={(e) => setAnio(Number(e.target.value))}
+              className="mt-1 bg-[#171717] border border-zinc-800 rounded-md px-2.5 py-1.5 text-[12px] text-zinc-200 focus:border-yellow-400/60 outline-none tabular-nums"
+            >
+              {anios.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                  {a === anioActual() ? " (en curso)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             onClick={() => cargar(desde, hasta)}
             disabled={cargando}
@@ -664,15 +721,14 @@ export function PresupuestosTab() {
           </div>
 
           <p className="text-[11px] text-zinc-600 mb-3">
-            La barra es el 100 % del presupuesto COMPLETO del área y se rellena
-            con todo lo gastado dentro del período de ese presupuesto, cumplido
-            o no, sin importar qué meses estén filtrados: recortar el filtro no
-            baja el consumo. Abajo de cada barra, el rango filtrado partido mes
-            a mes con lo gastado en cada uno (encendidos los meses que cubre el
-            presupuesto) y el presupuesto que se está usando, con cuánto de él
-            cae en los meses mirados. Si un área tiene varios presupuestos en el
-            rango, manda el que cubre más meses de los mirados; los otros quedan
-            listados sin contar.
+            La barra es el 100 % del presupuesto anual del área y se rellena con
+            todo lo gastado dentro de su período, cumplido o no. Abajo de cada
+            barra, el ejercicio partido mes a mes con lo gastado en cada uno
+            (encendidos los meses que cubre el presupuesto) y el presupuesto que
+            se está usando. Click en la fila: se abren las órdenes de compra que
+            entran en el período de ese presupuesto. Si un área tiene varios
+            presupuestos en el año, manda el que cubre más meses; los otros
+            quedan listados sin contar.
             {ejecucion.totalAprobado > 0 && (
               <>
                 {" "}
@@ -690,7 +746,8 @@ export function PresupuestosTab() {
           {ejecucion.totalAprobado === 0 && (
             <div className="mb-3">
               <Alert tone="neutral">
-                Todavía no hay presupuestos aprobados cargados para este período
+                Todavía no hay presupuestos aprobados cargados para el ejercicio{" "}
+                {anio}
                 {esAdmin
                   ? ": creá uno con “Crear presupuesto” y las barras pasan a medir el consumo."
                   : ". Las barras muestran el importe relativo de cada área."}
@@ -699,21 +756,40 @@ export function PresupuestosTab() {
           )}
 
           <div className="mt-1">
-            {ejecucion.lista.map((f) => (
-              // Toda la fila abre el detalle de OC del área (modal con las OC
-              // del filtro agrupadas por mes). Es un div y no un <button>
-              // porque adentro hay botones propios (borrar presupuesto), que
-              // cortan la propagación.
-              <div
+            {ejecucion.lista.map((f) => {
+              // El modal se abre con el RANGO DEL PRESUPUESTO de la fila: la
+              // pregunta al clickear una barra es "qué OC entran en este
+              // presupuesto", no "qué OC hay en el filtro". Sin presupuesto
+              // cargado no hay período asignado y queda el año mirado.
+              const dsd = f.presupuesto?.mesDesde ?? desde;
+              const hst = f.presupuesto?.mesHasta ?? hasta;
+              const abrir = () =>
+                setDetalle({
+                  codigo: f.codigo,
+                  area: f.area,
+                  desde: dsd,
+                  hasta: hst,
+                  periodo: f.presupuesto ? rotulo(f.presupuesto) : null,
+                });
+              return (
+                // Toda la fila abre el detalle de OC del área (modal con las OC
+                // del período del presupuesto, agrupadas por mes). Es un div y
+                // no un <button> porque adentro hay botones propios (borrar
+                // presupuesto), que cortan la propagación.
+                <div
                 key={f.codigo}
                 role="button"
                 tabIndex={0}
-                title={`Ver las órdenes de compra de ${f.area}`}
-                onClick={() => setDetalle({ codigo: f.codigo, area: f.area })}
+                title={
+                  f.presupuesto
+                    ? `Ver las órdenes de compra de ${f.area} en el período del presupuesto (${rotulo(f.presupuesto)})`
+                    : `Ver las órdenes de compra de ${f.area}`
+                }
+                onClick={abrir}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    setDetalle({ codigo: f.codigo, area: f.area });
+                    abrir();
                   }
                 }}
                 className="mb-3 rounded-md px-2 py-1 -mx-2 cursor-pointer hover:bg-[#141414] focus:outline-none focus:ring-1 focus:ring-yellow-400/40"
@@ -791,6 +867,7 @@ export function PresupuestosTab() {
                                 { method: "DELETE" },
                               );
                               cargar(desde, hasta);
+                              cargarAnios();
                             }}
                             className="text-zinc-700 hover:text-red-400"
                           >
@@ -801,8 +878,9 @@ export function PresupuestosTab() {
                     ))}
                   </div>
                 )}
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
 
           {vista.d.meses.length > 1 && (
@@ -863,20 +941,22 @@ export function PresupuestosTab() {
         <ModalDetalleOC
           codigo={detalle.codigo}
           area={detalle.area}
-          desde={desde}
-          hasta={hasta}
+          desde={detalle.desde}
+          hasta={detalle.hasta}
+          periodo={detalle.periodo}
           onCerrar={() => setDetalle(null)}
         />
       )}
 
       {modal && (
         <ModalPresupuesto
-          desde={desde}
-          hasta={hasta}
+          anio={anio}
+          anios={anios}
           onCerrar={() => setModal(false)}
           onGuardado={() => {
             setModal(false);
             cargar(desde, hasta);
+            cargarAnios();
           }}
         />
       )}
@@ -886,9 +966,12 @@ export function PresupuestosTab() {
 
 // ─── Detalle de OC del área (modal por acordeones de mes) ────────────────────
 // Se abre al hacer click en cualquier fila de "Ejecución del presupuesto"
-// (2026-09-02). Trae las OC del área en los MESES FILTRADOS — el mismo rango
-// que muestra la tira de meses de la fila, no el período completo del
-// presupuesto — una fila por OC (cabecera), agrupadas en acordeones por mes
+// (2026-09-02). Trae las OC del área en el PERÍODO DEL PRESUPUESTO de esa fila
+// — el mismo rango contra el que se mide la barra, no el filtro de pantalla:
+// clickear una barra pregunta "qué OC entran en este presupuesto", así que el
+// total del modal tiene que cerrar con el "gastado en el período" de la barra.
+// Si el área no tiene presupuesto cargado no hay período asignado y queda el
+// ejercicio mirado. Una fila por OC (cabecera), agrupadas en acordeones por mes
 // como en /compras/faltantes: uno solo abierto a la vez, y arranca abierto el
 // primer mes CON OC (que es el más nuevo: la API devuelve los meses al revés).
 //
@@ -947,12 +1030,15 @@ function ModalDetalleOC({
   area,
   desde,
   hasta,
+  periodo,
   onCerrar,
 }: {
   codigo: number;
   area: string;
   desde: string;
   hasta: string;
+  /** Rótulo del presupuesto que definió el rango. null = no tiene. */
+  periodo: string | null;
   onCerrar: () => void;
 }) {
   const [data, setData] = useState<OcDetalle | null>(null);
@@ -1014,7 +1100,8 @@ function ModalDetalleOC({
               {area}
             </h3>
             <p className="text-[11px] text-zinc-500 mt-0.5">
-              Órdenes de compra de {fmtMes(desde)}
+              {periodo ? "Período del presupuesto: " : "Órdenes de compra de "}
+              {fmtMes(desde)}
               {desde === hasta ? "" : ` → ${fmtMes(hasta)}`}
               {data && (
                 <>
@@ -1062,7 +1149,7 @@ function ModalDetalleOC({
               <Alert tone="amber">
                 <AlertTriangle size={14} className="mt-px shrink-0" />
                 Se muestran las primeras {fmtNum(data.maximo)} órdenes del
-                período. Achicá el rango de meses para verlas todas.
+                período del presupuesto.
               </Alert>
             </div>
           )}
@@ -1196,22 +1283,33 @@ function ModalDetalleOC({
 
 // ─── Alta de presupuesto aprobado ────────────────────────────────────────────
 // El monto se carga en MILLONES a propósito (no hay que escribir los ceros); la
-// API lo multiplica antes de guardar. El período usa el mismo control de rango
-// que el filtro de arriba: un solo input para los dos meses.
+// API lo multiplica antes de guardar. El período NO se elige mes a mes: los
+// presupuestos son ANUALES, así que se elige el EJERCICIO y se guarda
+// enero→diciembre de ese año. (La API sigue aceptando rangos libres — los
+// presupuestos viejos cargados a mano se siguen leyendo igual.) Se ofrece el
+// año en curso, el siguiente y los que ya tienen algo cargado.
 function ModalPresupuesto({
-  desde,
-  hasta,
+  anio,
+  anios,
   onCerrar,
   onGuardado,
 }: {
-  desde: string;
-  hasta: string;
+  anio: number;
+  anios: number[];
   onCerrar: () => void;
   onGuardado: () => void;
 }) {
   const [codigo, setCodigo] = useState(AREAS_CATALOGO[0].codigo);
-  const [mesDesde, setMesDesde] = useState(desde);
-  const [mesHasta, setMesHasta] = useState(hasta);
+  const [ejercicio, setEjercicio] = useState(anio);
+  const mesDesde = eneroDe(ejercicio);
+  const mesHasta = diciembreDe(ejercicio);
+  const opciones = useMemo(
+    () =>
+      [...new Set([...anios, anioActual(), anioActual() + 1, anio])].sort(
+        (a, b) => b - a,
+      ),
+    [anios, anio],
+  );
   const [millones, setMillones] = useState("");
   const [nota, setNota] = useState("");
   const [guardando, setGuardando] = useState(false);
@@ -1280,17 +1378,23 @@ function ModalPresupuesto({
           </select>
         </label>
 
-        <div className="mb-3">
-          <RangoMeses
-            label="Período"
-            desde={mesDesde}
-            hasta={mesHasta}
-            onChange={(dsd, hst) => {
-              setMesDesde(dsd);
-              setMesHasta(hst);
-            }}
-          />
-        </div>
+        <label className="block text-[11px] uppercase tracking-wider text-zinc-500 mb-1">
+          Ejercicio (anual)
+          <select
+            value={ejercicio}
+            onChange={(e) => setEjercicio(Number(e.target.value))}
+            className="block w-full mt-1 bg-[#111] border border-zinc-800 rounded-md px-2.5 py-1.5 text-[12px] text-zinc-200 focus:border-yellow-400/60 outline-none tabular-nums"
+          >
+            {opciones.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="text-[10px] text-zinc-600 mb-3">
+          Se guarda para todo el año: {fmtMes(mesDesde)} → {fmtMes(mesHasta)}.
+        </p>
 
         <label className="block text-[11px] uppercase tracking-wider text-zinc-500 mb-1">
           Monto aprobado (en millones)
