@@ -63,6 +63,9 @@ img_sorteo/
 !public/**/*.jpg
 !public/**/*.jpeg
 !public/**/*.svg
+!app/icon.png
+!app/apple-icon.png
+!assets/**/*.png
 
 # basura de compilacion / pruebas (ver limpieza 2026-08-15)
 *.tmp
