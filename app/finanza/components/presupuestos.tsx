@@ -1,7 +1,16 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Loader2, AlertTriangle, Plus, Trash2, X } from "lucide-react";
+import {
+  RefreshCw,
+  Loader2,
+  AlertTriangle,
+  Plus,
+  Trash2,
+  X,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import {
   PageTitle,
   SectionTitle,
@@ -213,6 +222,10 @@ export function PresupuestosTab() {
   const [ocPresup, setOcPresup] = useState<OcPorArea | null>(null);
   const [esAdmin, setEsAdmin] = useState(false);
   const [modal, setModal] = useState(false);
+  // Área cuyo detalle de OC se está mirando (modal). null = cerrado.
+  const [detalle, setDetalle] = useState<{ codigo: number; area: string } | null>(
+    null,
+  );
 
   const cargar = useCallback(async (dsd: string, hst: string) => {
     setCargando(true);
@@ -687,7 +700,24 @@ export function PresupuestosTab() {
 
           <div className="mt-1">
             {ejecucion.lista.map((f) => (
-              <div key={f.codigo} className="mb-3">
+              // Toda la fila abre el detalle de OC del área (modal con las OC
+              // del filtro agrupadas por mes). Es un div y no un <button>
+              // porque adentro hay botones propios (borrar presupuesto), que
+              // cortan la propagación.
+              <div
+                key={f.codigo}
+                role="button"
+                tabIndex={0}
+                title={`Ver las órdenes de compra de ${f.area}`}
+                onClick={() => setDetalle({ codigo: f.codigo, area: f.area })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setDetalle({ codigo: f.codigo, area: f.area });
+                  }
+                }}
+                className="mb-3 rounded-md px-2 py-1 -mx-2 cursor-pointer hover:bg-[#141414] focus:outline-none focus:ring-1 focus:ring-yellow-400/40"
+              >
                 <BarraPresupuesto
                   label={f.area}
                   ejecutado={f.ejecutado}
@@ -754,7 +784,8 @@ export function PresupuestosTab() {
                         {esAdmin && (
                           <button
                             title="Borrar presupuesto"
-                            onClick={async () => {
+                            onClick={async (e) => {
+                              e.stopPropagation();
                               await fetch(
                                 `/api/finanza/presupuestos/aprobados?id=${p.id}`,
                                 { method: "DELETE" },
@@ -828,6 +859,16 @@ export function PresupuestosTab() {
         </>
       )}
 
+      {detalle && (
+        <ModalDetalleOC
+          codigo={detalle.codigo}
+          area={detalle.area}
+          desde={desde}
+          hasta={hasta}
+          onCerrar={() => setDetalle(null)}
+        />
+      )}
+
       {modal && (
         <ModalPresupuesto
           desde={desde}
@@ -839,6 +880,316 @@ export function PresupuestosTab() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Detalle de OC del área (modal por acordeones de mes) ────────────────────
+// Se abre al hacer click en cualquier fila de "Ejecución del presupuesto"
+// (2026-09-02). Trae las OC del área en los MESES FILTRADOS — el mismo rango
+// que muestra la tira de meses de la fila, no el período completo del
+// presupuesto — una fila por OC (cabecera), agrupadas en acordeones por mes
+// como en /compras/faltantes: uno solo abierto a la vez, y arranca abierto el
+// primer mes CON OC (que es el más nuevo: la API devuelve los meses al revés).
+//
+// El recorte es el mismo del agregado (canceladas afuera, importes pesificados
+// a la cotización de cada OC), así lo que suma el modal cierra con la tira de
+// meses de la fila.
+//
+// Cierre: click en el fondo, botón X o Escape.
+
+type OcDetalleFila = {
+  oc: number;
+  mes: string;
+  numero: string;
+  fecha: string | null;
+  estado: number;
+  estadoNombre: string;
+  proveedor: string | null;
+  comprador: string | null;
+  observacion: string | null;
+  pedidoProveedor: string | null;
+  moneda: number;
+  cotizacion: number;
+  items: number;
+  importe: number;
+  importeCumplido: number;
+  importePendiente: number;
+  importeMonOrig: number;
+};
+type OcDetalleMes = {
+  mes: string;
+  ocs: number;
+  items: number;
+  importe: number;
+  importeCumplido: number;
+  importePendiente: number;
+  ordenes: OcDetalleFila[];
+};
+type OcDetalle = {
+  codigo: number;
+  desde: string;
+  hasta: string;
+  truncado: boolean;
+  maximo: number;
+  resumen: { ocs: number; items: number; importe: number };
+  meses: OcDetalleMes[];
+};
+
+const fmtFecha = (iso: string | null) => {
+  if (!iso) return "—";
+  const [a, m, d] = iso.split("-");
+  return `${d}/${m}/${a}`;
+};
+
+function ModalDetalleOC({
+  codigo,
+  area,
+  desde,
+  hasta,
+  onCerrar,
+}: {
+  codigo: number;
+  area: string;
+  desde: string;
+  hasta: string;
+  onCerrar: () => void;
+}) {
+  const [data, setData] = useState<OcDetalle | null>(null);
+  const [cargando, setCargando] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [abierto, setAbierto] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCerrar();
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [onCerrar]);
+
+  useEffect(() => {
+    let vivo = true;
+    setCargando(true);
+    setErr(null);
+    const qs = new URLSearchParams({ codigo: String(codigo), desde, hasta });
+    fetch(`/api/finanza/presupuestos/detalle?${qs}`, { cache: "no-store" })
+      .then(async (r) => {
+        const j = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(j?.error ?? "No se pudo traer el detalle");
+        return j as OcDetalle;
+      })
+      .then((j) => {
+        if (!vivo) return;
+        setData(j);
+        // Arranca abierto el primer mes con OC (el más nuevo del rango).
+        setAbierto(j.meses.find((m) => m.ocs > 0)?.mes ?? null);
+      })
+      .catch((e) => {
+        if (vivo) setErr(e instanceof Error ? e.message : "Error inesperado");
+      })
+      .finally(() => {
+        if (vivo) setCargando(false);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [codigo, desde, hasta]);
+
+  // Los meses sin una sola OC no ocupan un acordeón vacío.
+  const meses = (data?.meses ?? []).filter((m) => m.ocs > 0);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4 overflow-y-auto"
+      onClick={onCerrar}
+    >
+      <div
+        className="w-full max-w-5xl my-6 bg-[#171717] border border-zinc-800 rounded-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-zinc-800">
+          <div className="min-w-0">
+            <h3 className="text-yellow-400 font-semibold text-sm uppercase tracking-wide truncate">
+              {area}
+            </h3>
+            <p className="text-[11px] text-zinc-500 mt-0.5">
+              Órdenes de compra de {fmtMes(desde)}
+              {desde === hasta ? "" : ` → ${fmtMes(hasta)}`}
+              {data && (
+                <>
+                  {" · "}
+                  {fmtNum(data.resumen.ocs)} OC · {fmtNum(data.resumen.items)}{" "}
+                  items ·{" "}
+                  <span className="text-zinc-300">
+                    {fmtArs(data.resumen.importe)}
+                  </span>
+                </>
+              )}
+            </p>
+          </div>
+          <button
+            onClick={onCerrar}
+            className="text-zinc-600 hover:text-zinc-300 shrink-0"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-5">
+          {err && (
+            <Alert tone="red">
+              <AlertTriangle size={14} className="mt-px shrink-0" />
+              {err}
+            </Alert>
+          )}
+
+          {cargando && (
+            <div className="flex items-center justify-center gap-3 py-16 text-zinc-600 text-sm">
+              <Loader2 size={16} className="animate-spin text-yellow-400" />
+              Consultando órdenes de compra…
+            </div>
+          )}
+
+          {!cargando && !err && meses.length === 0 && (
+            <div className="py-16 text-center text-sm text-zinc-500">
+              Esta área no tiene órdenes de compra en el período.
+            </div>
+          )}
+
+          {data?.truncado && (
+            <div className="mb-3">
+              <Alert tone="amber">
+                <AlertTriangle size={14} className="mt-px shrink-0" />
+                Se muestran las primeras {fmtNum(data.maximo)} órdenes del
+                período. Achicá el rango de meses para verlas todas.
+              </Alert>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            {meses.map((m) => {
+              const open = abierto === m.mes;
+              return (
+                <div
+                  key={m.mes}
+                  className="rounded-xl border border-zinc-800 overflow-hidden"
+                >
+                  {/* Acordeón: click abre este mes y cierra el resto. */}
+                  <button
+                    type="button"
+                    onClick={() => setAbierto((x) => (x === m.mes ? null : m.mes))}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-2.5 bg-[#1A1A1A] text-left hover:bg-[#222] transition-colors"
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      {open ? (
+                        <ChevronDown size={15} className="text-zinc-500 shrink-0" />
+                      ) : (
+                        <ChevronRight size={15} className="text-zinc-500 shrink-0" />
+                      )}
+                      <span className="font-medium text-zinc-100 truncate">
+                        {fmtMes(m.mes)}
+                      </span>
+                      <span className="text-[11px] text-zinc-500 shrink-0">
+                        {fmtNum(m.ocs)} OC · {fmtNum(m.items)} items
+                      </span>
+                    </span>
+                    <span className="text-sm tabular-nums text-zinc-300 shrink-0">
+                      {fmtArs(m.importe)}
+                    </span>
+                  </button>
+
+                  {open && (
+                    <div className="border-t border-zinc-800 overflow-x-auto">
+                      <table className="w-full text-[11px]">
+                        <thead>
+                          <tr className="text-zinc-500 uppercase tracking-wider text-[10px] bg-[#141414]">
+                            <th className="text-left font-medium px-3 py-2">Fecha</th>
+                            <th className="text-left font-medium px-3 py-2">
+                              Nº movimiento
+                            </th>
+                            <th className="text-left font-medium px-3 py-2">
+                              Proveedor
+                            </th>
+                            <th className="text-left font-medium px-3 py-2">Estado</th>
+                            <th className="text-right font-medium px-3 py-2">Monto</th>
+                            <th className="text-left font-medium px-3 py-2">
+                              Detalle / observación
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {m.ordenes.map((o) => (
+                            <tr
+                              key={o.oc}
+                              className="border-t border-zinc-900 hover:bg-[#1b1b1b]"
+                            >
+                              <td className="px-3 py-1.5 tabular-nums text-zinc-400 whitespace-nowrap">
+                                {fmtFecha(o.fecha)}
+                              </td>
+                              <td className="px-3 py-1.5 tabular-nums text-zinc-200 whitespace-nowrap">
+                                {o.numero}
+                              </td>
+                              <td
+                                className="px-3 py-1.5 text-zinc-300 max-w-[220px] truncate"
+                                title={o.proveedor ?? ""}
+                              >
+                                {o.proveedor ?? "—"}
+                              </td>
+                              <td className="px-3 py-1.5 whitespace-nowrap">
+                                <span
+                                  style={{
+                                    color: COLOR_ESTADO[o.estado] ?? "#a1a1aa",
+                                  }}
+                                >
+                                  {ESTADO_LABEL[o.estado] ?? o.estadoNombre}
+                                </span>
+                              </td>
+                              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-100 whitespace-nowrap">
+                                {fmtArs(o.importe)}
+                                {/* Las OC de impo se cargan en U$S: se muestra
+                                    el pesificado y, al lado, el original. */}
+                                {o.moneda !== 1 && o.cotizacion > 1 && (
+                                  <span className="block text-[9px] text-zinc-600">
+                                    U$S {fmtNum(o.importeMonOrig)} @{" "}
+                                    {fmtNum(o.cotizacion)}
+                                  </span>
+                                )}
+                              </td>
+                              <td
+                                className="px-3 py-1.5 text-zinc-400 max-w-[320px] truncate"
+                                title={o.observacion ?? ""}
+                              >
+                                {o.observacion ??
+                                  (o.pedidoProveedor
+                                    ? `Pedido prov. ${o.pedidoProveedor}`
+                                    : "—")}
+                                {o.comprador && (
+                                  <span className="text-zinc-600">
+                                    {" "}
+                                    · {o.comprador}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <p className="text-[10px] text-zinc-600 mt-4 leading-relaxed">
+            Una fila por orden de compra. Monto = suma de los renglones
+            (unidades pedidas × precio neto de bonificaciones), pesificado a la
+            cotización de la OC. Las OC canceladas quedan afuera, igual que en
+            los totales de la pantalla.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

@@ -22,7 +22,7 @@ from compras import (
     fetch_consumo_articulo, fetch_consumo_articulos, fetch_lineas,
     fetch_lineas_por_articulos,
 )
-from oc_areas import fetch_oc_por_area
+from oc_areas import fetch_oc_por_area, fetch_oc_detalle_area
 from ingresos import fetch_remitos_ingreso
 from ventas import (
     fetch_pedidos_mes, fetch_ventas_por_linea, fetch_vendedores,
@@ -603,6 +603,26 @@ def compras_oc_por_area(
     de cada OC. Las canceladas van aparte, fuera de los totales."""
     try:
         return fetch_oc_por_area(desde, hasta, forzar=bool(forzar))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+# ── Compras: DETALLE de las OC de un área (modal de /finanza) ───────────────
+# Una fila por OC (cabecera) del área, agrupadas por mes: número de movimiento,
+# fecha, importe pesificado y observación. Ver oc_areas.fetch_oc_detalle_area.
+@app.get("/compras/oc-detalle-area")
+def compras_oc_detalle_area(
+    codigo: int = Query(...),
+    desde: str | None = Query(default=None),
+    hasta: str | None = Query(default=None),
+    forzar: int = Query(default=0),
+):
+    """OC del área `codigo` (tipo de comprobante) en [desde, hasta] (meses
+    'YYYY-MM'), una fila por OC y agrupadas por mes. Canceladas afuera, mismo
+    criterio que /compras/oc-por-area para que los totales cierren."""
+    try:
+        return fetch_oc_detalle_area(codigo, desde, hasta, forzar=bool(forzar))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

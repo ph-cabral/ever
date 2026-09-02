@@ -362,3 +362,218 @@ def fetch_oc_por_area(desde: str | None = None,
     }
     _CACHE[key] = (time.monotonic(), resp)
     return resp
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DETALLE de las OC de UN área (2026-09-02)
+#
+# Alimenta el modal que se abre al hacer click en una fila de "Ejecución del
+# presupuesto" en /finanza → Presupuestos. Una fila POR OC (cabecera), no por
+# renglón: número de movimiento (CompCentro-CompNumero), fecha, importe
+# pesificado y la observación de la cabecera. Los renglones sólo se agregan
+# para calcular el importe, no se devuelven.
+#
+# Mismo recorte que el agregado de arriba (así los totales cierran con la
+# barra): `cab.FecMovim` CRUDO contra enteros Magnus en el WHERE, canceladas
+# afuera, importes pesificados a la cotización de cada OC. El área
+# (`CompCodigo`) también va en el WHERE — es lo que hace que esta consulta sea
+# chica: un mes de un área son decenas de OC, no las ~1.500 del mes entero.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Techo de filas: un área con muchos meses abiertos no puede tirarle 10.000 OC
+# al navegador. Se avisa con `truncado` en la respuesta.
+MAX_OC_DETALLE = 3000
+
+SQL_DETALLE = """
+WITH reng AS (
+    SELECT cab.NroOrdCompra AS OC,
+           {case_mes}       AS Mes,
+           cab.CompCentro   AS Centro,
+           cab.CompNumero   AS Numero,
+           cab.FecMovim     AS Fecha,
+           cab.Estado       AS Estado,
+           cab.CodProveed   AS Prov,
+           cab.CodComprador AS Comprador,
+           cab.Moneda       AS Moneda,
+           CASE WHEN ISNULL(cab.Cotizacion, 0) > 0
+                THEN CAST(cab.Cotizacion AS float) ELSE 1.0 END AS Cot,
+           CAST(ISNULL(r.Unidades, 0) AS float)          AS Pedida,
+           CAST(ISNULL(r.UnidadesCumplidas, 0) AS float) AS Cumplida,
+           {pnet} AS PNet
+    FROM EVERWEAR.dbo.Com_OrdCompRenglones r WITH (NOLOCK)
+    INNER JOIN EVERWEAR.dbo.Com_OrdCompCabecera cab WITH (NOLOCK)
+            ON cab.NroOrdCompra = r.NroOrdCompra
+    WHERE cab.FecMovim BETWEEN ? AND ?
+      AND cab.CompCodigo = ?
+      AND cab.Estado <> {cancelada}
+)
+SELECT TOP {tope}
+       OC, Mes, Centro, Numero, Fecha, Estado, Prov, Comprador, Moneda,
+       MAX(Cot)                                 AS Cot,
+       COUNT(*)                                 AS Items,
+       SUM(Pedida)                              AS UnidPedidas,
+       SUM(Cumplida)                            AS UnidCumplidas,
+       SUM(Pedida * PNet)                       AS ImporteOrig,
+       SUM(Pedida * PNet * Cot)                 AS Importe,
+       SUM(Cumplida * PNet * Cot)               AS ImporteCumplido,
+       SUM((Pedida - Cumplida) * PNet * Cot)    AS ImportePendiente
+FROM reng
+GROUP BY OC, Mes, Centro, Numero, Fecha, Estado, Prov, Comprador, Moneda
+ORDER BY Fecha DESC, Numero DESC
+"""
+
+# La observación es char(255) y no conviene arrastrarla por el GROUP BY (se
+# compara y ordena 255 caracteres por renglón): se trae aparte, sólo para las
+# OC que quedaron, en una consulta por clave primaria.
+SQL_OBS = """
+SELECT NroOrdCompra, Observaciones, NroPedidoProveedor
+FROM EVERWEAR.dbo.Com_OrdCompCabecera WITH (NOLOCK)
+WHERE NroOrdCompra IN ({ids})
+"""
+
+SQL_PROVEEDORES = """
+SELECT CodProveed, RazonSocial, NombreComercial
+FROM EVERWEAR.dbo.Com_Proveedores WITH (NOLOCK)
+WHERE CodProveed IN ({ids})
+"""
+
+# Tope de la cláusula IN: si hubiera más OC/proveedores que esto se parte en
+# tandas (SQL Server tolera muchos más, pero el parser se pone lento).
+_LOTE = 900
+
+
+def _lotes(seq, n=_LOTE):
+    seq = list(seq)
+    for i in range(0, len(seq), n):
+        yield seq[i:i + n]
+
+
+def _fecha_iso(dias) -> str | None:
+    """Entero Magnus (días desde 1800-12-28) → 'YYYY-MM-DD'."""
+    if dias is None:
+        return None
+    try:
+        return (BASE_DATE + timedelta(days=int(dias))).isoformat()
+    except (ValueError, OverflowError):
+        return None
+
+
+def fetch_oc_detalle_area(codigo: int,
+                          desde: str | None = None,
+                          hasta: str | None = None,
+                          forzar: bool = False) -> dict:
+    """OC (una por cabecera) de un área en el rango de meses, agrupadas por mes.
+
+    Devuelve `{"meses": [{mes, ocs, importe, ordenes: [...]}, ...]}` ya ordenado
+    de mes más nuevo a más viejo y, dentro de cada mes, de OC más nueva a más
+    vieja: el modal dibuja acordeones por mes y no tiene que reordenar nada.
+    """
+    codigo = int(codigo)
+    d_ym, h_ym, meses = _rango(desde, hasta)
+    key = ("oc_detalle", codigo, d_ym, h_ym)
+    if not forzar:
+        hit = _CACHE.get(key)
+        if hit is not None and (time.monotonic() - hit[0]) < _TTL_SEG:
+            return hit[1]
+
+    d1, d2 = meses[0][1], meses[-1][2]
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(
+            SQL_DETALLE.format(
+                case_mes=_case_mes(meses), pnet=_PNET,
+                cancelada=ESTADO_CANCELADA, tope=MAX_OC_DETALLE + 1,
+            ),
+            (d1, d2, codigo),
+        )
+        filas = [
+            {
+                "oc": int(f[0] or 0),
+                "mes": _txt(f[1]) or "?",
+                "numero": f"{int(f[2] or 0):04d}-{int(f[3] or 0):08d}",
+                "fecha": _fecha_iso(f[4]),
+                "estado": int(f[5] or 0),
+                "estadoNombre": ESTADO_OC.get(int(f[5] or 0), f"ESTADO {int(f[5] or 0)}"),
+                "codProveedor": int(f[6] or 0),
+                "codComprador": int(f[7] or 0),
+                "moneda": int(f[8] or 0),
+                "cotizacion": _r2(f[9]),
+                "items": int(f[10] or 0),
+                "unidadesPedidas": _r2(f[11]),
+                "unidadesCumplidas": _r2(f[12]),
+                "importeMonOrig": _r2(f[13]),
+                "importe": _r2(f[14]),
+                "importeCumplido": _r2(f[15]),
+                "importePendiente": _r2(f[16]),
+            }
+            for f in cur.fetchall()
+        ]
+        truncado = len(filas) > MAX_OC_DETALLE
+        if truncado:
+            filas = filas[:MAX_OC_DETALLE]
+
+        obs: dict[int, tuple[str | None, str | None]] = {}
+        provs: dict[int, str | None] = {}
+        compradores: dict[int, str | None] = {}
+        if filas:
+            for lote in _lotes({f["oc"] for f in filas}):
+                cur.execute(SQL_OBS.format(ids=",".join(str(i) for i in lote)))
+                for nro, o, ped in cur.fetchall():
+                    obs[int(nro or 0)] = (_txt(o), _txt(ped))
+            codigos_prov = {f["codProveedor"] for f in filas if f["codProveedor"]}
+            for lote in _lotes(codigos_prov):
+                cur.execute(SQL_PROVEEDORES.format(ids=",".join(str(i) for i in lote)))
+                for cod, razon, comercial in cur.fetchall():
+                    provs[int(cod or 0)] = _txt(razon) or _txt(comercial)
+            cur.execute(SQL_COMPRADORES)
+            compradores = {int(k or 0): _txt(v) for k, v in cur.fetchall()}
+    finally:
+        conn.close()
+
+    por_mes: dict[str, dict] = {
+        ym: {"mes": ym, "ocs": 0, "items": 0, "importe": 0.0,
+             "importeCumplido": 0.0, "importePendiente": 0.0, "ordenes": []}
+        for ym, _, _ in meses
+    }
+    total = {"ocs": 0, "items": 0, "importe": 0.0,
+             "importeCumplido": 0.0, "importePendiente": 0.0}
+    for f in filas:
+        o, ped = obs.get(f["oc"], (None, None))
+        f["observacion"] = o
+        f["pedidoProveedor"] = ped
+        f["proveedor"] = provs.get(f["codProveedor"]) or (
+            f"PROVEEDOR {f['codProveedor']}" if f["codProveedor"] else None
+        )
+        f["comprador"] = compradores.get(f["codComprador"])
+        m = por_mes.get(f["mes"])
+        if m is None:
+            continue
+        m["ordenes"].append(f)
+        m["ocs"] += 1
+        m["items"] += f["items"]
+        m["importe"] += f["importe"]
+        m["importeCumplido"] += f["importeCumplido"]
+        m["importePendiente"] += f["importePendiente"]
+        total["ocs"] += 1
+        total["items"] += f["items"]
+        total["importe"] += f["importe"]
+        total["importeCumplido"] += f["importeCumplido"]
+        total["importePendiente"] += f["importePendiente"]
+
+    resp = {
+        "codigo": codigo,
+        "desde": f"{d_ym[0]:04d}-{d_ym[1]:02d}",
+        "hasta": f"{h_ym[0]:04d}-{h_ym[1]:02d}",
+        "truncado": truncado,
+        "maximo": MAX_OC_DETALLE,
+        "resumen": _redondear(total),
+        # Meses de más nuevo a más viejo: el acordeón se abre por el último.
+        # Los meses sin OC igual van (un mes sin compras es información).
+        "meses": [
+            _redondear(por_mes[ym]) for ym, _, _ in reversed(meses)
+        ],
+    }
+    _CACHE[key] = (time.monotonic(), resp)
+    return resp
