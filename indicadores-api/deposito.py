@@ -1271,14 +1271,22 @@ WHERE Codot.CodotProcesoNegocio = 4
 """
 
 # Estado/cliente/vendedor del pedido (Magnus) para enriquecer y excluir descartados.
+# ClienteNombre sale del mismo LEFT JOIN a MAGNUS_SITD.Clientes que ya usan las
+# queries de faltantes (SQL_FALTANTES*): la fuente WMS (OT) solo tiene el codigo
+# de cliente, asi que sin esto /deposito/faltantes propaga un numero y las vistas
+# que se alimentan de ahi (preparado.faltante_wms -> /ventas/faltantes "En
+# stock") muestran el codigo en lugar del nombre. Es una columna mas en la misma
+# consulta chunkeada: no agrega roundtrips.
 SQL_PEDIDOS_INFO = """
 SELECT cab.NroMovVenta, cab.CodCliente,
        est.Ped_EstadoDescripcion AS Estado,
        uv.Usu_Arma_Nombre        AS Vendedor,
-       cab.CompCodigo            AS CompCodigo
+       cab.CompCodigo            AS CompCodigo,
+       LTRIM(RTRIM(cli.Cliente_Nombre)) AS ClienteNombre
 FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
 LEFT JOIN MAGNUS_SITD.dbo.Pedido_Estados est ON cab.EstadoPedido = est.Ped_Estado
 LEFT JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma   uv  ON cab.Vendedor     = uv.Usu_Arma_Codigo
+LEFT JOIN MAGNUS_SITD.dbo.Clientes       cli ON cli.CodCliente   = cab.CodCliente
 WHERE cab.NroMovVenta IN ({ph})
 """
 
@@ -1325,6 +1333,7 @@ def _info_pedidos(pedidos):
                     "Estado":  _txt(r[2]),
                     "Vendedor": _txt(r[3]),
                     "CompCodigo": _int(r[4]),
+                    "ClienteNombre": _txt(r[5]) or None,
                 }
         return out
     finally:
@@ -1377,6 +1386,7 @@ def fetch_faltantes_ot(desde=None, hasta=None):
             "Fecha":          _iso(o.get("Fecha")),
             "Operario":       _txt(o.get("Operario")),
             "Cliente":        meta.get("Cliente"),
+            "ClienteNombre":  meta.get("ClienteNombre"),
             "Vendedor":       _txt(meta.get("Vendedor")),
             "EstadoPedido":   _txt(estado),
             "ItemsTotal":     _int(o.get("ItemsTotal")) or 0,
@@ -1554,6 +1564,7 @@ def fetch_ot_diferencias(desde=None, hasta=None):
             "Fecha":        _iso(f.get("Fecha")),
             "Operario":     _txt(f.get("Operario")),
             "Cliente":      meta.get("Cliente"),
+            "ClienteNombre": meta.get("ClienteNombre"),
             "Vendedor":     _txt(meta.get("Vendedor")),
             "Renglon":      _int(f.get("Renglon")),
             "Ubicacion":    _txt(f.get("Ubicacion")),

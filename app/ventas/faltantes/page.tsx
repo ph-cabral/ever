@@ -46,6 +46,7 @@ interface Item {
   CantPend: number;
   Cliente: number | string | null;
   ClienteNombre: string | null;
+  Vendedor: string | null; // vendedor de la cabecera del pedido (solo se muestra al admin)
   Importe: number;
   Fecha: string | null; // fecha del faltante (snapshot Ven_PedRenPendientes)
   fechaArribo: string | null;
@@ -63,6 +64,7 @@ interface ItemListo {
   CantPend: number;
   Cliente: number | string | null;
   ClienteNombre: string | null;
+  Vendedor: string | null;
   Importe: number;
   Fecha: string | null;
   fechaArribo: string | null;
@@ -87,6 +89,7 @@ interface Grupo {
   key: string;
   cliente: number | string | null;
   clienteNombre: string | null;
+  vendedor: string | null;
   pedido: number;
   items: Item[];
   importe: number;
@@ -102,6 +105,7 @@ function agrupar(items: Item[]): Grupo[] {
         key: k,
         cliente: it.Cliente,
         clienteNombre: it.ClienteNombre,
+        vendedor: it.Vendedor,
         pedido: it.NroPedOrigen,
         items: [],
         importe: 0,
@@ -111,6 +115,7 @@ function agrupar(items: Item[]): Grupo[] {
     g.items.push(it);
     g.importe += it.Importe || 0;
     if (!g.clienteNombre && it.ClienteNombre) g.clienteNombre = it.ClienteNombre;
+    if (!g.vendedor && it.Vendedor) g.vendedor = it.Vendedor;
   }
   return [...m.values()]
     .map((g) => ({ ...g, items: [...g.items].sort((x, y) => y.Importe - x.Importe) }))
@@ -121,6 +126,7 @@ interface GrupoListo {
   key: string;
   cliente: number | string | null;
   clienteNombre: string | null;
+  vendedor: string | null;
   pedido: number;
   items: ItemListo[];
   importe: number;
@@ -136,6 +142,7 @@ function agruparListos(items: ItemListo[]): GrupoListo[] {
         key: k,
         cliente: it.Cliente,
         clienteNombre: it.ClienteNombre,
+        vendedor: it.Vendedor,
         pedido: it.NroPedOrigen,
         items: [],
         importe: 0,
@@ -145,6 +152,7 @@ function agruparListos(items: ItemListo[]): GrupoListo[] {
     g.items.push(it);
     g.importe += it.Importe || 0;
     if (!g.clienteNombre && it.ClienteNombre) g.clienteNombre = it.ClienteNombre;
+    if (!g.vendedor && it.Vendedor) g.vendedor = it.Vendedor;
   }
   return [...m.values()]
     .map((g) => ({ ...g, items: [...g.items].sort((x, y) => y.Importe - x.Importe) }))
@@ -565,7 +573,7 @@ export default function VentasFaltantesPage() {
                             <GrupoCard
                               key={g.key}
                               g={g}
-                              soloCliente={!esAdmin}
+                              mostrarVendedor={esAdmin}
                               extra
                               onDecidir={decidir}
                               onIrrelevante={marcarIrrelevante}
@@ -582,7 +590,7 @@ export default function VentasFaltantesPage() {
                             <GrupoCard
                               key={g.key}
                               g={g}
-                              soloCliente={!esAdmin}
+                              mostrarVendedor={esAdmin}
                               onDecidir={decidir}
                               onIrrelevante={marcarIrrelevante}
                               onDuplicado={marcarDuplicado}
@@ -612,7 +620,7 @@ export default function VentasFaltantesPage() {
                         <GrupoCard
                           key={g.key}
                           g={g}
-                          soloCliente={!esAdmin}
+                          mostrarVendedor={esAdmin}
                           vendidoMode
                           onDecidir={decidirVendidoTabla1}
                           onIrrelevante={marcarIrrelevante}
@@ -635,7 +643,7 @@ export default function VentasFaltantesPage() {
                   <GrupoCardListo
                     key={g.key}
                     g={g}
-                    soloCliente={!esAdmin}
+                    mostrarVendedor={esAdmin}
                     onDecidir={decidirVendido}
                     leaving={leaving}
                   />
@@ -650,13 +658,12 @@ export default function VentasFaltantesPage() {
 }
 
 function GrupoCard({
-  g, extra, vendidoMode, soloCliente, onDecidir, onIrrelevante, onDuplicado, leaving = {},
+  g, extra, vendidoMode, mostrarVendedor, onDecidir, onIrrelevante, onDuplicado, leaving = {},
 }: {
   g: Grupo;
   extra?: boolean;
-  /** Vista de vendedor: el encabezado muestra solo el cliente (sin N° de
-   *  factura/pedido ni cantidad de artículos). */
-  soloCliente?: boolean;
+  /** Solo la vista de admin muestra el vendedor del pedido. */
+  mostrarVendedor?: boolean;
   vendidoMode?: boolean;
   onDecidir: (it: Item, quiere: boolean) => void;
   onIrrelevante?: (it: Item) => void;
@@ -672,18 +679,15 @@ function GrupoCard({
       <div className={`flex items-center gap-4 px-4 py-3 border-b ${
         extra ? "bg-red-500/[0.08] border-red-900/40" : "bg-[#1A1A1A] border-zinc-800"
       }`}>
+        {/* Encabezado: cliente y, solo para admin, el vendedor del pedido. El
+            N° de factura/pedido y la cantidad de artículos no se muestran. */}
         <div
           className={`flex-1 grid gap-x-6 gap-y-1 min-w-0 ${
-            soloCliente ? "grid-cols-1" : "grid-cols-2 md:grid-cols-3"
+            mostrarVendedor ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"
           }`}
         >
           <Campo label="Cliente" value={g.clienteNombre || g.cliente || "—"} />
-          {!soloCliente && (
-            <>
-              <Campo label="Factura / Pedido" value={<span className="font-mono text-yellow-400">{g.pedido}</span>} />
-              <Campo label="Artículos" value={`${g.items.length}`} />
-            </>
-          )}
+          {mostrarVendedor && <Campo label="Vendedor" value={g.vendedor || "—"} />}
         </div>
         <div className="shrink-0 text-right hidden sm:block">
           <div className="text-sm tabular-nums text-zinc-200">${fmtNum(g.importe)}</div>
@@ -780,29 +784,25 @@ function GrupoCard({
 }
 
 function GrupoCardListo({
-  g, soloCliente, onDecidir, leaving = {},
+  g, mostrarVendedor, onDecidir, leaving = {},
 }: {
   g: GrupoListo;
-  /** Ver GrupoCard: vista de vendedor, encabezado solo con el cliente. */
-  soloCliente?: boolean;
+  /** Ver GrupoCard. */
+  mostrarVendedor?: boolean;
   onDecidir: (it: ItemListo, vendido: boolean) => void;
   leaving?: Record<string, "left" | "right">;
 }) {
   return (
     <div className="rounded-xl border border-green-900/50 bg-green-500/[0.05] overflow-hidden">
       <div className="flex items-center gap-4 px-4 py-3 border-b bg-green-500/[0.08] border-green-900/40">
+        {/* Ver GrupoCard: cliente y, solo para admin, el vendedor. */}
         <div
           className={`flex-1 grid gap-x-6 gap-y-1 min-w-0 ${
-            soloCliente ? "grid-cols-1" : "grid-cols-2 md:grid-cols-3"
+            mostrarVendedor ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"
           }`}
         >
-          {/* <Campo label="Cliente" value={g.clienteNombre || g.cliente || "—"} />
-          {!soloCliente && (
-            <>
-              <Campo label="Factura / Pedido" value={<span className="font-mono text-yellow-400">{g.pedido}</span>} />
-              <Campo label="Artículos" value={`${g.items.length}`} />
-            </>
-          )} */}
+          <Campo label="Cliente" value={g.clienteNombre || g.cliente || "—"} />
+          {mostrarVendedor && <Campo label="Vendedor" value={g.vendedor || "—"} />}
         </div>
         <div className="shrink-0 text-right hidden sm:block">
           <div className="text-sm tabular-nums text-zinc-200">${fmtNum(g.importe)}</div>

@@ -62,8 +62,26 @@ interface FaltanteRow {
   CantPend: number;
   Cliente: number | string | null;
   ClienteNombre: string | null;
+  // Vendedor de la cabecera del pedido (Ped_Usu_Arma). Solo para mostrar en la
+  // vista de admin — el recorte por usuario va por cartera, no por este campo.
+  Vendedor: string | null;
   Importe: number;
   Fecha: string | null;
+}
+
+// Fila cruda de preparado.faltante_wms (fallback de "En stock" cuando el
+// renglón ya no matchea en Magnus).
+interface WmsRow {
+  nroPedOrigen: number | null;
+  nroRengOrigen: number;
+  codArticulo: string;
+  nombre: string;
+  cliente: string;
+  clienteNombre: string | null;
+  vendedor: string | null;
+  cantPedida: unknown;
+  importe: unknown;
+  fecha: Date;
 }
 
 export async function GET() {
@@ -191,24 +209,28 @@ export async function GET() {
       // ya no lo tiene pendiente. preparado.faltante_wms la persiste
       // automático GET /api/deposito/faltantes. Best-effort: la tabla puede
       // no existir aún en algún ambiente.
-      prisma.$queryRaw<
-        {
-          nroPedOrigen: number | null;
-          nroRengOrigen: number;
-          codArticulo: string;
-          nombre: string;
-          cliente: string;
-          cantPedida: unknown;
-          importe: unknown;
-          fecha: Date;
-        }[]
-      >`
-        SELECT DISTINCT ON ("nroPedOrigen", "codArticulo")
-               "nroPedOrigen", "nroRengOrigen", "codArticulo", nombre, cliente,
-               "cantPedida", importe, fecha
-        FROM preparado.faltante_wms
-        ORDER BY "nroPedOrigen", "codArticulo", "updatedAt" DESC
-      `.catch(() => []),
+      (async (): Promise<WmsRow[]> => {
+        try {
+          return await prisma.$queryRaw<WmsRow[]>`
+            SELECT DISTINCT ON ("nroPedOrigen", "codArticulo")
+                   "nroPedOrigen", "nroRengOrigen", "codArticulo", nombre, cliente,
+                   "clienteNombre", vendedor, "cantPedida", importe, fecha
+            FROM preparado.faltante_wms
+            ORDER BY "nroPedOrigen", "codArticulo", "updatedAt" DESC
+          `;
+        } catch {
+          // Ambiente sin la columna "clienteNombre" todavía
+          // (sql/deposito_faltante_wms_cliente_nombre.sql): se sigue sirviendo
+          // el resto — el nombre cae al fallback de más abajo.
+          return await prisma.$queryRaw<WmsRow[]>`
+            SELECT DISTINCT ON ("nroPedOrigen", "codArticulo")
+                   "nroPedOrigen", "nroRengOrigen", "codArticulo", nombre, cliente,
+                   NULL::text AS "clienteNombre", vendedor, "cantPedida", importe, fecha
+            FROM preparado.faltante_wms
+            ORDER BY "nroPedOrigen", "codArticulo", "updatedAt" DESC
+          `.catch(() => [] as WmsRow[]);
+        }
+      })(),
     ]);
 
     // Última marca de existencia por renglón (existRows viene asc por fecha,
@@ -335,6 +357,8 @@ export async function GET() {
         codArticulo: string;
         nombre: string;
         cliente: string;
+        clienteNombre: string | null;
+        vendedor: string | null;
         cantPedida: number;
         importe: number;
         fecha: string;
@@ -349,6 +373,8 @@ export async function GET() {
         codArticulo: cod,
         nombre: r.nombre ?? "",
         cliente: r.cliente ?? "",
+        clienteNombre: r.clienteNombre || null,
+        vendedor: r.vendedor || null,
         cantPedida: Number(r.cantPedida ?? 0),
         importe: Number(r.importe ?? 0),
         fecha:
@@ -474,6 +500,15 @@ export async function GET() {
       })
       .filter((r) => r.clienteQuiere === null);
 
+    // Código de cliente → nombre, con lo que ya vino de Magnus en esta misma
+    // respuesta (sin consultas extra). Solo se usa como fallback abajo.
+    const nombrePorCliente = new Map<string, string>();
+    for (const r of rowsTodos) {
+      const cod = String(r.Cliente ?? "").trim();
+      const nom = (r.ClienteNombre ?? "").trim();
+      if (cod && nom && !nombrePorCliente.has(cod)) nombrePorCliente.set(cod, nom);
+    }
+
     const enStockDeWms: typeof enStockDeRows = [];
     for (const [key, ex] of existLatest) {
       if (ex !== true || conKeysConRow.has(key)) continue;
@@ -492,7 +527,14 @@ export async function GET() {
         Nombre: w.nombre,
         CantPend: w.cantPedida,
         Cliente: w.cliente || null,
-        ClienteNombre: w.cliente || null,
+        // El nombre viene de faltante_wms (lo resuelve indicadores-api contra
+        // Magnus). Para las filas persistidas ANTES de que existiera esa
+        // columna se cae al nombre que ya trajo cualquier renglón del mismo
+        // cliente en esta misma respuesta, y recién en última instancia al
+        // código — que es lo que se veía antes en TODAS estas tarjetas.
+        ClienteNombre:
+          w.clienteNombre || nombrePorCliente.get(String(w.cliente ?? "").trim()) || w.cliente || null,
+        Vendedor: w.vendedor || null,
         Importe: w.importe,
         Fecha: w.fecha,
         fechaArribo: "EN_STOCK" as const,

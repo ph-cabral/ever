@@ -28,6 +28,9 @@ interface OtDifRow {
   Fecha: string | null;
   Operario: string;
   Cliente: string | number | null;
+  // Nombre del cliente (join Magnus en indicadores-api). La fuente WMS solo
+  // trae el código; sin esto la vista muestra un número.
+  ClienteNombre: string | null;
   Vendedor: string;
   Ubicacion: string;
   CodArticulo: string;
@@ -79,14 +82,16 @@ export async function GET(req: NextRequest) {
     try {
       const values = raw.map(
         (r) =>
-          Prisma.sql`(${r.Fecha}::date, ${r.OTId}, ${r.Renglon}, ${r.NroMovVenta}, ${r.Renglon}, ${r.Operario}, ${String(r.Cliente ?? "")}, ${r.Vendedor}, ${r.Ubicacion}, ${r.CodArticulo}, ${r.Nombre ?? ""}, ${r.CantPedida}, ${r.CantCumplida}, ${r.Diferencia}, ${r.Importe ?? 0}, now())`,
+          Prisma.sql`(${r.Fecha}::date, ${r.OTId}, ${r.Renglon}, ${r.NroMovVenta}, ${r.Renglon}, ${r.Operario}, ${String(r.Cliente ?? "")}, ${r.ClienteNombre ?? null}, ${r.Vendedor}, ${r.Ubicacion}, ${r.CodArticulo}, ${r.Nombre ?? ""}, ${r.CantPedida}, ${r.CantCumplida}, ${r.Diferencia}, ${r.Importe ?? 0}, now())`,
       );
       await prisma.$executeRaw`
         INSERT INTO preparado.faltante_wms
-          (fecha, "otId", renglon, "nroPedOrigen", "nroRengOrigen", operario, cliente, vendedor, ubicacion, "codArticulo", nombre, "cantPedida", "cantCumplida", diferencia, importe, "updatedAt")
+          (fecha, "otId", renglon, "nroPedOrigen", "nroRengOrigen", operario, cliente, "clienteNombre", vendedor, ubicacion, "codArticulo", nombre, "cantPedida", "cantCumplida", diferencia, importe, "updatedAt")
         VALUES ${Prisma.join(values)}
         ON CONFLICT ("otId", renglon) DO UPDATE SET
           nombre         = EXCLUDED.nombre,
+          -- se refresca para que las filas ya persistidas sin nombre lo tomen
+          "clienteNombre" = COALESCE(EXCLUDED."clienteNombre", preparado.faltante_wms."clienteNombre"),
           "cantPedida"   = EXCLUDED."cantPedida",
           "cantCumplida" = EXCLUDED."cantCumplida",
           diferencia     = EXCLUDED.diferencia,
@@ -108,6 +113,7 @@ export async function GET(req: NextRequest) {
       Nombre: r.Nombre ?? "",
       CantPend: r.Diferencia,
       Cliente: r.Cliente,
+      ClienteNombre: r.ClienteNombre ?? null,
       Importe: r.Importe ?? 0, // aproximado — ver comentario arriba
       TipoArticulo: null as string | null,
       Preparador: r.Operario,
