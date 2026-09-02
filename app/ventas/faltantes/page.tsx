@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck,
-  Check, X, RotateCw, Download, Trash2, Copy,
+  Check, X, RotateCw, Download, Trash2, Copy, Users,
 } from "lucide-react";
 import { exportarFaltantesVentas } from "@/lib/ventas/exportFaltantes";
 import { InicioButton } from "@/components/ui/InicioButton";
@@ -159,6 +159,13 @@ function agruparListos(items: ItemListo[]): GrupoListo[] {
     .sort((a, b) => b.importe - a.importe);
 }
 
+// Opción del filtro de vendedor del header (solo admin) — misma lista y mismo
+// endpoint que /ventas/vendedor: /api/ventas/vendedor/vendedores.
+interface VendedorOpcion {
+  codigo: number;
+  nombre: string | null;
+}
+
 export default function VentasFaltantesPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [listos, setListos] = useState<ItemListo[]>([]);
@@ -172,6 +179,13 @@ export default function VentasFaltantesPage() {
   // recortada mientras carga.
   const [esAdmin, setEsAdmin] = useState(true);
   const [sinVendedor, setSinVendedor] = useState(false);
+  // ── Filtro de vendedor (solo ADMIN) ──────────────────────────────────────
+  // Mismo criterio y mismo endpoint que el selector de /ventas/vendedor: las
+  // personas habilitadas en Magnus que además tienen usuario activo con legajo
+  // ACTIVO (lib/ventas/vendedoresActivos.ts). La ruta es admin-only, así que un
+  // 403 simplemente deja la vista sin filtro. "" = todos.
+  const [vendedores, setVendedores] = useState<VendedorOpcion[]>([]);
+  const [vendedorSel, setVendedorSel] = useState("");
   const [leaving, setLeaving] = useState<Record<string, "left" | "right">>({}); // filas saliendo (animación)
 
   // Anima las filas (una o varias, ej. extraordinario = todo el artículo) hacia
@@ -194,11 +208,26 @@ export default function VentasFaltantesPage() {
     }, EXIT_MS);
   }, []);
 
+  useEffect(() => {
+    let vivo = true;
+    fetch("/api/ventas/vendedor/vendedores", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (vivo && j) setVendedores(Array.isArray(j.vendedores) ? j.vendedores : []);
+      })
+      .catch(() => {});
+    return () => {
+      vivo = false;
+    };
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/ventas/faltantes", { cache: "no-store" });
+      // El back ignora `vendedor` si quien pide no es admin (vendedorParam).
+      const qs = vendedorSel ? `?vendedor=${encodeURIComponent(vendedorSel)}` : "";
+      const res = await fetch(`/api/ventas/faltantes${qs}`, { cache: "no-store" });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       setItems(j.rows ?? []);
@@ -213,7 +242,7 @@ export default function VentasFaltantesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [vendedorSel]);
 
   useEffect(() => {
     load();
@@ -480,6 +509,28 @@ export default function VentasFaltantesPage() {
               <b className="text-green-400">{tot.listos}</b> listos ·{" "}
               <b className="text-zinc-200">${fmtNum(tot.importe)}</b>
             </span>
+          )}
+          {/* Filtro de vendedor — SOLO ADMIN. Acota la vista a la CARTERA de
+              ese vendedor (mismo criterio que ve él cuando entra), server-side.
+              No se renderiza si /api/ventas/vendedor/vendedores contestó 403:
+              ese usuario ya está acotado a su propio vendedor. */}
+          {esAdmin && vendedores.length > 0 && (
+            <div className="hidden md:flex items-center gap-2">
+              <Users size={14} className="text-yellow-400 shrink-0" />
+              <select
+                value={vendedorSel}
+                onChange={(e) => setVendedorSel(e.target.value)}
+                title="Ver los faltantes de la cartera de un vendedor"
+                className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-yellow-400 max-w-[200px]"
+              >
+                <option value="">Todos los vendedores</option>
+                {vendedores.map((v) => (
+                  <option key={v.codigo} value={String(v.codigo)}>
+                    {v.nombre ?? `Vendedor ${v.codigo}`}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
           <button
             onClick={() => setFlipped((v) => !v)}

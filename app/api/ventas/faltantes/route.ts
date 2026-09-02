@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { resolverAccesoVendedor } from "@/lib/ventas/vendedorAcceso";
+import { resolverAccesoVendedor, vendedorParam } from "@/lib/ventas/vendedorAcceso";
 import { fetchCarteraClientes } from "@/lib/ventas/cartera";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +37,9 @@ const OC_DESDE = "2026-06-26";
 //   decisión de comprar se toma acá mismo (ver decidir() en el page.tsx) y
 //   apenas se decide, la fila deja de calificar por la vía extraordinario.
 //
-//   RECORTE POR VENDEDOR: un usuario ADMIN ve todo; uno que no lo es ve solo
+//   RECORTE POR VENDEDOR: un usuario ADMIN ve todo (y puede acotarse a la
+//   cartera de UN vendedor con `?vendedor=<codigo>`, el selector del header);
+//   uno que no es admin ve solo
 //   los faltantes de SUS clientes (cartera del vendedor asignado en
 //   /admin/usuarios — mismo criterio zona ∪ historial que /ventas/vendedor,
 //   definido en cartera.py). Se recorta lo antes posible, sobre `rows`, para
@@ -84,12 +86,16 @@ interface WmsRow {
   fecha: Date;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const acceso = await resolverAccesoVendedor();
   if (!acceso.ok)
     return NextResponse.json({ error: acceso.error }, { status: acceso.status });
   const soloVendedor = !acceso.isAdmin;
-  const vendedorCodigo = acceso.isAdmin ? null : acceso.vendedorCodigo;
+  // `vendedorParam` resuelve los dos casos de una: el no-admin queda pegado a
+  // SU vendedorCodigo (no puede elegir) y el admin usa el `?vendedor=` del
+  // selector del header — vacío = toda la empresa, como siempre. Para el admin
+  // es comodidad de lectura, no seguridad: ya puede ver todo.
+  const vendedorCodigo = vendedorParam(new URL(req.url).searchParams, acceso);
   if (soloVendedor && !vendedorCodigo)
     return NextResponse.json({
       fecha: null,
@@ -103,8 +109,8 @@ export async function GET() {
     // Cartera del vendedor logueado en paralelo con la consulta pesada de
     // faltantes: no suma latencia. Si falla, queda vacía → cero filas (nunca
     // se cae del lado de mostrar clientes ajenos).
-    const carteraPromise: Promise<Set<number> | null> = soloVendedor
-      ? fetchCarteraClientes(vendedorCodigo as number).catch((e) => {
+    const carteraPromise: Promise<Set<number> | null> = vendedorCodigo
+      ? fetchCarteraClientes(Number(vendedorCodigo)).catch((e) => {
           console.error("GET /api/ventas/faltantes cartera", e);
           return new Set<number>();
         })
