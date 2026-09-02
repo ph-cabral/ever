@@ -745,7 +745,14 @@ export default function VentasBulonesPage() {
               className="w-full max-w-6xl max-h-[calc(100dvh-1.5rem)] md:max-h-[92dvh] rounded-xl border border-zinc-800 bg-[#111111] flex flex-col overflow-hidden shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="shrink-0 bg-[#1A1A1A] border-b border-zinc-800 px-5 py-4 space-y-4 max-h-[45dvh] overflow-y-auto">
+              {/* El header scrollea (max-h + overflow-y-auto), pero eso recorta el
+                  dropdown de sugerencias, que es absolute. Mientras la lista está
+                  abierta se libera el overflow para que se vea completa. */}
+              <div
+                className={`shrink-0 bg-[#1A1A1A] border-b border-zinc-800 px-5 py-4 space-y-4 ${
+                  mostrarSug ? "overflow-visible" : "max-h-[45dvh] overflow-y-auto"
+                }`}
+              >
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     {nivel && (

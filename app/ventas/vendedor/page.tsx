@@ -363,7 +363,8 @@ export default function VentasVendedorPage() {
   // estado con el ranking de la página.
   const [topVista, setTopVista] = useState<TopVista>("clientes");
   // Métrica del ranking del pie cuando la vista es "líneas" (2026-08-26). En vista "clientes" no aplica: ahí siempre es $.
-  const [topMetricaLineas, setTopMetricaLineas] = useState<Modo>("unidades");
+  // Arranca en $ (2026-09-02); "Unidades" queda a un click.
+  const [topMetricaLineas, setTopMetricaLineas] = useState<Modo>("pesos");
   const modo: Modo = topVista === "clientes" ? "pesos" : topMetricaLineas;
   const [desglosado, setDesglosado] = useState(false);
 
