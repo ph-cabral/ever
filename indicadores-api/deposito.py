@@ -176,14 +176,30 @@ def fetch_tiempo():
 _BASE_PEDIDO = date(1800, 12, 28)
 
 
+# Comprobantes que cuentan como "pedido ingresado" al deposito (/deposito/pedidos):
+# el universo tiene que ser el mismo que el que puede generar una OT de picking.
+#  - FACTURABLES: ademas del comprobante se exige factura (CodComprobante_Factura),
+#    que es lo que descarta pedidos que nunca se concretaron.
+#  - SIN_FACTURA: 75 (acopio, Facturado = 0 por circuito) y 410 (PED.NF.CEN, pedido
+#    no facturable de centro). Nunca tienen CodComprobante_Factura, asi que exigirla
+#    los dejaba siempre afuera aunque si se preparan y suman OT.
+CODIGOS_INGRESADOS_FACTURABLES = (10, 70, 100, 210, 310)
+CODIGOS_INGRESADOS_SIN_FACTURA = (75, 410)
+
+# CROSS APPLY (VALUES ...) calcula codigo y factura una sola vez por fila
+# (la tabla es grande y estas expresiones no son sargables).
 SQL_INGRESADOS = """
 SELECT TRY_CONVERT(date, LTRIM(RTRIM(t.FechaRegistracionPedido)), 103) AS f,
        COUNT(*) AS pedidos
 FROM dbo.TMP_TiempoDePedidos t
+CROSS APPLY (VALUES (
+    TRY_CAST(LEFT(t.CodComprobante, CHARINDEX(' ', t.CodComprobante + ' ') - 1) AS INT),
+    LTRIM(RTRIM(ISNULL(t.CodComprobante_Factura, 'SinCodigo')))
+)) c(cod, fac)
 WHERE TRY_CONVERT(date, LTRIM(RTRIM(t.FechaRegistracionPedido)), 103) BETWEEN ? AND ?
-  AND TRY_CAST(LEFT(t.CodComprobante, CHARINDEX(' ', t.CodComprobante + ' ') - 1) AS INT) IN (10, 70, 100, 210, 310)
   AND LTRIM(RTRIM(t.Estado)) IN ('Abierto', 'Cerrado', 'Facturado')
-  AND LTRIM(RTRIM(ISNULL(t.CodComprobante_Factura, 'SinCodigo'))) <> 'SinCodigo'
+  AND (   (c.cod IN ({cod_fact}) AND c.fac <> 'SinCodigo')
+       OR  c.cod IN ({cod_sin_fact}) )
 GROUP BY TRY_CONVERT(date, LTRIM(RTRIM(t.FechaRegistracionPedido)), 103)
 ORDER BY f
 """
@@ -195,7 +211,13 @@ def fetch_ingresados(desde, hasta):
     try:
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd;")
-        cur.execute(SQL_INGRESADOS, (desde, hasta))
+        cur.execute(
+            SQL_INGRESADOS.format(
+                cod_fact=",".join(map(str, CODIGOS_INGRESADOS_FACTURABLES)),
+                cod_sin_fact=",".join(map(str, CODIGOS_INGRESADOS_SIN_FACTURA)),
+            ),
+            (desde, hasta),
+        )
         out = []
         for f, pedidos in cur.fetchall():
             if f is None:

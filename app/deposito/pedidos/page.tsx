@@ -23,6 +23,8 @@ import { esFilaProductiva } from "@/lib/deposito/parseDeposito";
 //                    (MISMA consulta y MISMO recorte que /deposito -> los items
 //                    y el ranking cierran con el tab Picking de esa vista)
 //   Ingresados     = pedidos registrados/día de /api/deposito/ingresados
+//                    (comprobantes 10/70/100/210/310 con factura + 75 y 410, que
+//                    por circuito nunca se facturan pero sí generan OT)
 //   Controlado     = 3ª barra, lista para cuando exista la fuente (ver TODO)
 //   % Eficiencia   = preparado / ingresado
 // Día / Semana (lun→dom ISO) / Mes · Comparativa / Individual.
@@ -500,8 +502,9 @@ export default function PedidosPreparadosPage() {
         )}
 
         <p className="text-[11px] text-zinc-600 mt-6 leading-relaxed">
-          Preparado (OT) = WMS Picking (1 fila = 1 OT). Ingresados = pedidos registrados/día (Magnus, mismo filtro de comprobantes
-          que Indicadores). Controlado: 3ª barra lista para cuando se defina la fuente. Semanas lunes→domingo (ISO). SQL en vivo.
+          Preparado (OT) = WMS Picking (1 fila = 1 OT). Ingresados = pedidos registrados/día (Magnus, comprobantes 10, 70, 75, 100,
+          210, 310 y 410 — los 75 y 410 no se facturan, por eso no se les exige factura). Controlado: 3ª barra lista para cuando se
+          defina la fuente. Semanas lunes→domingo (ISO). SQL en vivo.
         </p>
       </main>
     </div>
