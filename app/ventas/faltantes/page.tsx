@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck,
-  Check, X, RotateCw, Download, Trash2, Copy, Users,
+  Check, X, Download, Trash2, Copy, Users, Clock,
 } from "lucide-react";
 import { exportarFaltantesVentas } from "@/lib/ventas/exportFaltantes";
 import { InicioButton } from "@/components/ui/InicioButton";
@@ -28,7 +28,8 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 //   Toda la agregación (existencia + fecha de arribo + extraordinario de
 //   compras) se resuelve en el backend: GET /api/ventas/faltantes.
 //
-//   Toggle "Ingresados" (header, flipped=true): misma lista de arriba,
+//   Selector de vista (header): "Sin ingresar" (flipped=false, cara de
+//   adelante) / "Ingresados" (flipped=true, reverso). Ingresados = misma lista,
 //   filtrada a los que YA tienen fechaArribo (gruposConArribo, vendidoMode).
 //   Acción (✓ vendido / ✗ no vendido): cualquiera de las dos respuestas
 //   guarda "vendido" en faltante_control y retira la fila (optimista).
@@ -532,26 +533,47 @@ export default function VentasFaltantesPage() {
               </select>
             </div>
           )}
-          <button
-            onClick={() => setFlipped((v) => !v)}
-            title="Ver ingresados (con fecha de arribo) — gira la tabla"
-            className={`chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium ${
-              conArribo.length > 0
-                ? "bg-green-500/15 border-green-400 text-green-300"
-                : "border-zinc-700 text-zinc-400 hover:border-zinc-500"
-            }`}
-          >
-            <RotateCw
-              size={14}
-              className={`transition-transform duration-500 ${flipped ? "rotate-180" : ""}`}
-            />
-            Ingresados
-            {conArribo.length > 0 && (
-              <span className="bg-green-500 text-white rounded-full px-1.5 text-[10px] leading-4 tabular-nums">
+          {/* Selector de vista. Antes era UN solo botón "Ingresados" que giraba la
+              tarjeta: no se entendía qué se estaba mirando ni cuál era la otra
+              cara. Ahora las dos vistas están a la vista con su contador y la
+              activa queda resaltada (amarillo = sin ingresar, verde = ingresados). */}
+          <div className="flex items-center rounded-md border border-zinc-700 overflow-hidden text-xs font-medium">
+            <button
+              onClick={() => setFlipped(false)}
+              title="Faltantes que todavía NO ingresaron"
+              className={`flex items-center gap-2 px-3 py-1.5 transition-colors ${
+                !flipped ? "bg-yellow-400/15 text-yellow-300" : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <Clock size={14} />
+              Sin ingresar
+              <span
+                className={`rounded-full px-1.5 text-[10px] leading-4 tabular-nums ${
+                  !flipped ? "bg-yellow-400 text-black" : "bg-zinc-700 text-zinc-300"
+                }`}
+              >
+                {extraordinarios.length + normales.length}
+              </span>
+            </button>
+            <div className="w-px self-stretch bg-zinc-700" />
+            <button
+              onClick={() => setFlipped(true)}
+              title="Faltantes que YA ingresaron (tienen fecha de arribo)"
+              className={`flex items-center gap-2 px-3 py-1.5 transition-colors ${
+                flipped ? "bg-green-500/15 text-green-300" : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <PackageCheck size={14} />
+              Ingresados
+              <span
+                className={`rounded-full px-1.5 text-[10px] leading-4 tabular-nums ${
+                  flipped ? "bg-green-500 text-white" : "bg-zinc-700 text-zinc-300"
+                }`}
+              >
                 {conArribo.length}
               </span>
-            )}
-          </button>
+            </button>
+          </div>
           <button
             onClick={exportar}
             disabled={!hay}
@@ -611,6 +633,9 @@ export default function VentasFaltantesPage() {
                     flipped ? "pointer-events-none" : ""
                   }`}
                 >
+                  <h2 className="flex items-center gap-2 text-sm font-medium text-yellow-400 uppercase tracking-wide mb-3">
+                    <Clock size={16} /> Sin ingresar (todavía no llegaron)
+                  </h2>
                   {gruposExtra.length === 0 && gruposNormales.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 gap-2 text-center text-zinc-500 text-sm">
                       <PackageCheck size={28} className="text-zinc-700" />
@@ -660,6 +685,9 @@ export default function VentasFaltantesPage() {
                     !flipped ? "pointer-events-none" : ""
                   }`}
                 >
+                  <h2 className="flex items-center gap-2 text-sm font-medium text-green-400 uppercase tracking-wide mb-3">
+                    <PackageCheck size={16} /> Ingresados (ya llegaron)
+                  </h2>
                   {gruposConArribo.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 gap-2 text-center text-zinc-500 text-sm">
                       <PackageCheck size={28} className="text-zinc-700" />

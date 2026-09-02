@@ -85,9 +85,13 @@ DETALLE_ERROR_OPCIONES = [
 # widgets/errores-calidad-widget/errores_calidad.py. Igual que la de arriba:
 # agregar/sacar ítems acá, sin tocar el widget.
 DETALLE_ERROR_OPCIONES_CALIDAD = [
-    "Error de embalaje",
-    "Error de cantidad",
-    "Error de producto",
+    "Producto no conforme",
+    "Faltantes",
+    "Error en cantidad y producto",
+    "Error en cantidad",
+    "Error en producto",
+    "Sin identificación",
+    "Error en embalaje",
 ]
 
 # ── Lookup (solo lectura) ─────────────────────────────────────────────────────
