@@ -677,13 +677,13 @@ function GrupoCard({
             soloCliente ? "grid-cols-1" : "grid-cols-2 md:grid-cols-3"
           }`}
         >
-          {/* <Campo label="Cliente" value={g.clienteNombre || g.cliente || "—"} />
+          <Campo label="Cliente" value={g.clienteNombre || g.cliente || "—"} />
           {!soloCliente && (
             <>
               <Campo label="Factura / Pedido" value={<span className="font-mono text-yellow-400">{g.pedido}</span>} />
               <Campo label="Artículos" value={`${g.items.length}`} />
             </>
-          )} */}
+          )}
         </div>
         <div className="shrink-0 text-right hidden sm:block">
           <div className="text-sm tabular-nums text-zinc-200">${fmtNum(g.importe)}</div>
