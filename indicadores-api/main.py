@@ -54,6 +54,7 @@ from finanza import (
     fetch_ajuste_manual_list,
 )
 from clientes import fetch_cliente, fetch_clientes_search
+from cartera import fetch_cartera_codigos
 from mesa_control import (
     fetch_mesa_control, fetch_mesa_control_diag,
     fetch_mesa_control_sp_definicion, fetch_mesa_control_tablas_diag,
@@ -887,6 +888,22 @@ def ventas_vendedor_clientes_por_linea(
         return fetch_clientes_por_linea(linea, vendedor=vendedor, limit=limit)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+
+@app.get("/ventas/vendedor/cartera")
+def ventas_vendedor_cartera(
+    vendedor: int = Query(..., description="VendedorCodigo (maestro Vendedores)"),
+):
+    """CodCliente de la cartera de un vendedor (zona ∪ historial) — mismo
+    criterio que el resto de /ventas/vendedor, definido una sola vez en
+    cartera.py. Lo usa /ventas/faltantes para recortar los faltantes a los
+    clientes del vendedor logueado (el recorte no se puede hacer con el JOIN
+    de cartera porque esos renglones vienen de otra consulta)."""
+    try:
+        clientes = fetch_cartera_codigos(vendedor)
+        return {"vendedor": vendedor, "total": len(clientes), "clientes": clientes}
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { resolverAccesoVendedor } from "@/lib/ventas/vendedorAcceso";
+import { fetchCarteraClientes } from "@/lib/ventas/cartera";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -35,6 +37,15 @@ const OC_DESDE = "2026-06-26";
 //   decisión de comprar se toma acá mismo (ver decidir() en el page.tsx) y
 //   apenas se decide, la fila deja de calificar por la vía extraordinario.
 //
+//   RECORTE POR VENDEDOR: un usuario ADMIN ve todo; uno que no lo es ve solo
+//   los faltantes de SUS clientes (cartera del vendedor asignado en
+//   /admin/usuarios — mismo criterio zona ∪ historial que /ventas/vendedor,
+//   definido en cartera.py). Se recorta lo antes posible, sobre `rows`, para
+//   que todo el resto del armado trabaje sobre el subconjunto chico. Un
+//   no-admin sin vendedorCodigo asignado ve CERO (nunca "todos"), y la
+//   respuesta trae `isAdmin`/`sinVendedor` para que la vista sepa en qué modo
+//   está.
+//
 //   Tabla 2 ("listos", rows→listos) — regla de entrada (3 requisitos):
 //     1) fechaArribo cargada (faltante_control)
 //     2) clienteQuiere === true (faltante_control)
@@ -56,7 +67,30 @@ interface FaltanteRow {
 }
 
 export async function GET() {
+  const acceso = await resolverAccesoVendedor();
+  if (!acceso.ok)
+    return NextResponse.json({ error: acceso.error }, { status: acceso.status });
+  const soloVendedor = !acceso.isAdmin;
+  const vendedorCodigo = acceso.isAdmin ? null : acceso.vendedorCodigo;
+  if (soloVendedor && !vendedorCodigo)
+    return NextResponse.json({
+      fecha: null,
+      rows: [],
+      listos: [],
+      isAdmin: false,
+      sinVendedor: true,
+    });
+
   try {
+    // Cartera del vendedor logueado en paralelo con la consulta pesada de
+    // faltantes: no suma latencia. Si falla, queda vacía → cero filas (nunca
+    // se cae del lado de mostrar clientes ajenos).
+    const carteraPromise: Promise<Set<number> | null> = soloVendedor
+      ? fetchCarteraClientes(vendedorCodigo as number).catch((e) => {
+          console.error("GET /api/ventas/faltantes cartera", e);
+          return new Set<number>();
+        })
+      : Promise.resolve(null);
     // Rango HISTÓRICO desde el ancla, NO el último snapshot: un renglón
     // faltante sale de Ven_PedRenPendientes apenas el pedido se factura
     // (vive ~1 día), así que con el snapshot del día se perdían todos los
@@ -77,9 +111,16 @@ export async function GET() {
       );
     }
     const fj = await res.json();
-    const rows: FaltanteRow[] = fj.rows ?? [];
+    const rowsTodos: FaltanteRow[] = fj.rows ?? [];
     const fecha: string | null = fj.fecha ?? null;
-    if (!fecha) return NextResponse.json({ fecha: null, rows: [] });
+    if (!fecha)
+      return NextResponse.json({ fecha: null, rows: [], listos: [], isAdmin: !soloVendedor });
+
+    // Recorte por cartera (no-admin). `Cliente` es el CodCliente de Magnus.
+    const cartera = await carteraPromise;
+    const rows: FaltanteRow[] = cartera
+      ? rowsTodos.filter((r) => cartera.has(Number(r.Cliente)))
+      : rowsTodos;
 
     const [existRows, ctrlRows, extraRows, ingresosJson, ocJson, wmsRows] = await Promise.all([
       // faltante_existencia SÍ tiene modelo Prisma (columnas reales snake_case,
@@ -438,6 +479,9 @@ export async function GET() {
       if (ex !== true || conKeysConRow.has(key)) continue;
       const w = wmsLatest.get(key);
       if (!w) continue; // ni Magnus ni faltante_wms lo tienen — no hay con qué mostrarlo
+      // faltante_wms.cliente guarda el CodCliente (texto) — mismo recorte por
+      // cartera que `rows`, que esta rama no atraviesa.
+      if (cartera && !cartera.has(Number(w.cliente))) continue;
       const c = ctrl.get(`${w.nroPedOrigen}-${w.nroRengOrigen}`);
       if (c?.irrelevante || c?.duplicado) continue;
       if ((c?.clienteQuiere ?? null) !== null) continue;
@@ -461,7 +505,12 @@ export async function GET() {
 
     const enStock = [...enStockDeRows, ...enStockDeWms];
 
-    return NextResponse.json({ fecha, rows: [...out, ...enStock], listos });
+    return NextResponse.json({
+      fecha,
+      rows: [...out, ...enStock],
+      listos,
+      isAdmin: !soloVendedor,
+    });
   } catch (error) {
     console.error("GET /api/ventas/faltantes", error);
     return NextResponse.json(

@@ -113,3 +113,45 @@ def cliente_es_de_vendedor(cod_cliente: int, vendedor: int) -> bool:
         return bool(row and row[0])
     finally:
         conn.close()
+
+
+# Códigos de cliente de la cartera de UN vendedor, en una sola consulta.
+#
+# Mismo criterio que SQL_JOIN_CARTERA (zona ∪ historial de los últimos
+# CARTERA_MESES meses) pero devolviendo la lista de CodCliente en vez de
+# usarse como JOIN. Lo consume /ventas/faltantes, que necesita recortar a la
+# cartera un set de renglones que ya vienen de otra consulta (Magnus +
+# preparado), donde no hay dónde enchufar el JOIN.
+#
+# Consume dos parámetros, los dos el mismo código de vendedor — usar
+# params_cartera().
+SQL_CARTERA_CODIGOS = f"""
+SELECT c2.CodCliente
+FROM MAGNUS_SITD.dbo.Clientes c2
+JOIN MAGNUS_SITD.dbo.Vendedor_Zona vz
+  ON vz.Clasif_VendZona = c2.Clasif_VendZona
+JOIN MAGNUS_SITD.dbo.Vendedores v
+  ON LTRIM(RTRIM(v.VendedorNombre)) = LTRIM(RTRIM(vz.Vendedor))
+WHERE v.VendedorCodigo = ?
+UNION
+SELECT DISTINCT vch.CodCliente
+FROM Ven_CompCabecera vch
+WHERE vch.vendedor = ?
+  AND vch.FecMovim >= {_DIA_CORTE}
+"""
+
+
+def fetch_cartera_codigos(vendedor: int) -> list[int]:
+    """CodCliente de la cartera del vendedor (zona ∪ historial). Lista vacía
+    si el vendedor no tiene clientes — nunca None, así quien la consuma no
+    puede confundir "sin cartera" con "sin restricción"."""
+    from db import get_connection
+
+    conn = get_connection("EVERWEAR")
+    try:
+        cur = conn.cursor()
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        cur.execute(SQL_CARTERA_CODIGOS, params_cartera(vendedor))
+        return [int(r[0]) for r in cur.fetchall() if r[0] is not None]
+    finally:
+        conn.close()

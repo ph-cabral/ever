@@ -11,7 +11,6 @@ import {
   Trophy,
   ArrowLeft,
   X,
-  ListChevronsUpDown,
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
@@ -878,13 +877,16 @@ export default function VentasVendedorPage() {
       )}
 
       {/* Header en 3 filas en el teléfono y 1 sola en la computadora (2026-08-25). En mobile es un grid de 2 columnas:
-            fila 1 → logo            | qué se está viendo (clientes/líneas)
-            fila 2 → "Buscar cliente"| switch Clientes|Líneas
+            fila 1 → logo            | "Buscar cliente"
+            fila 2 → switch Clientes|Líneas, a la derecha, ocupando el ancho
             fila 3 → el vendedor, a la derecha, ocupando el ancho
-          En `md` pasa a flex y el `order-*` reacomoda: logo, buscar, qué se
-          ve, switch, y el vendedor empujado a la derecha con ml-auto. Por eso
-          el orden del DOM no coincide con el de escritorio — al agregar algo
-          nuevo, darle su `md:order-N`. */}
+          En `md` pasa a flex y el `order-*` reacomoda: logo, buscar, switch,
+          y el vendedor empujado a la derecha con ml-auto. Por eso el orden
+          del DOM no coincide con el de escritorio — al agregar algo nuevo,
+          darle su `md:order-N`.
+          2026-09-02: se sacó el título "clientes/líneas" con su ícono — el
+          botón dividido ya marca en amarillo cuál está activo, el título
+          repetía esa misma información. */}
       <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 px-4 md:px-8 py-3">
         <div className="grid grid-cols-2 items-center gap-x-3 gap-y-2 md:flex md:flex-wrap md:gap-4">
           <div className="flex items-center gap-3 min-w-0 md:order-1">
@@ -894,11 +896,6 @@ export default function VentasVendedorPage() {
               <span className="text-xs md:text-sm tracking-[3px] font-normal">S.A.</span>
             </span>
           </div>
-
-          <h2 className="justify-self-end text-yellow-400 font-bold text-base md:text-lg uppercase tracking-wide flex items-center gap-2 whitespace-nowrap md:order-3">
-            {topVista === "clientes" ? <Users size={18} /> : <ListChevronsUpDown size={18} />}
-            {topVista === "clientes" ? "clientes" : "líneas"}
-          </h2>
 
           <button
             type="button"
@@ -915,7 +912,7 @@ export default function VentasVendedorPage() {
               vista actual, confuso porque no se sabía si el texto era el
               estado o la acción. Mismo patrón visual que el YTD/Meses del
               modal: el activo va en amarillo sólido. */}
-          <div className="justify-self-end inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700 md:order-4">
+          <div className="col-span-2 justify-self-end inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700 md:col-auto md:order-3">
             {(["clientes", "lineas"] as TopVista[]).map((v) => (
               <button
                 key={v}
@@ -944,7 +941,7 @@ export default function VentasVendedorPage() {
               cargado (podía no pertenecer a la cartera del nuevo vendedor) y
               recarga los rankings. */}
           {esAdmin && (
-            <div className="col-span-2 flex items-center gap-2 md:col-auto md:order-5">
+            <div className="col-span-2 flex items-center gap-2 md:col-auto md:order-4">
               <Users size={14} className="text-yellow-400 shrink-0" />
               <select
                 value={vendedorSel}
@@ -984,7 +981,7 @@ export default function VentasVendedorPage() {
               /api/auth/me acá. En esta pantalla el usuario logueado ES el
               vendedor: lo que ve está acotado a SU vendedorCodigo (ver
               lib/ventas/vendedorAcceso.ts). */}
-          <UsuarioActual className="col-span-2 justify-self-end md:col-auto md:order-6 md:ml-auto" />
+          <UsuarioActual className="col-span-2 justify-self-end md:col-auto md:order-5 md:ml-auto" />
         </div>
       </header>
 

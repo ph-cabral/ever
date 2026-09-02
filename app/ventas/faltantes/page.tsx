@@ -158,6 +158,12 @@ export default function VentasFaltantesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flipped, setFlipped] = useState(false); // header: foco solo extraordinarios
+  // Modo de la vista, lo decide el backend con la sesión (nunca el navegador):
+  // admin = todo + contadores + N° de pedido; vendedor = solo sus clientes,
+  // encabezado limpio. Arranca en admin para no parpadear con la vista
+  // recortada mientras carga.
+  const [esAdmin, setEsAdmin] = useState(true);
+  const [sinVendedor, setSinVendedor] = useState(false);
   const [leaving, setLeaving] = useState<Record<string, "left" | "right">>({}); // filas saliendo (animación)
 
   // Anima las filas (una o varias, ej. extraordinario = todo el artículo) hacia
@@ -190,6 +196,8 @@ export default function VentasFaltantesPage() {
       setItems(j.rows ?? []);
       setListos(j.listos ?? []);
       setFecha(j.fecha ?? null);
+      setEsAdmin(j.isAdmin !== false);
+      setSinVendedor(!!j.sinVendedor);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al cargar");
       setItems([]);
@@ -452,17 +460,19 @@ export default function VentasFaltantesPage() {
             EVER WEAR <span className="text-sm tracking-[3px] font-normal">S.A.</span>
           </span>
           <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
-          <span className="hidden md:inline text-zinc-500 text-sm">
-            Faltantes de ventas · {fmtAr(fecha)}
+          <span className="text-lg md:text-2xl font-extrabold uppercase tracking-[0.2em] text-white whitespace-nowrap">
+            Faltantes
           </span>
         </div>
         <div className="flex items-center gap-4 text-sm">
-          <span className="hidden sm:inline text-zinc-400">
-            <b className="text-yellow-400">{tot.art}</b> art. ·{" "}
-            <b className="text-red-400">{tot.extra}</b> extraord. ·{" "}
-            <b className="text-green-400">{tot.listos}</b> listos ·{" "}
-            <b className="text-zinc-200">${fmtNum(tot.importe)}</b>
-          </span>
+          {esAdmin && (
+            <span className="hidden sm:inline text-zinc-400">
+              <b className="text-yellow-400">{tot.art}</b> art. ·{" "}
+              <b className="text-red-400">{tot.extra}</b> extraord. ·{" "}
+              <b className="text-green-400">{tot.listos}</b> listos ·{" "}
+              <b className="text-zinc-200">${fmtNum(tot.importe)}</b>
+            </span>
+          )}
           <button
             onClick={() => setFlipped((v) => !v)}
             title="Ver ingresados (con fecha de arribo) — gira la tabla"
@@ -512,8 +522,17 @@ export default function VentasFaltantesPage() {
               <PackageCheck size={44} className="text-zinc-700" />
             )}
             <p className="text-zinc-400 font-medium">
-              {loading ? "Consultando la base…" : "No hay faltantes pendientes."}
+              {loading
+                ? "Consultando la base…"
+                : sinVendedor
+                  ? "Todavía no tenés un vendedor asignado."
+                  : "No hay faltantes pendientes."}
             </p>
+            {!loading && sinVendedor && (
+              <p className="text-zinc-600 text-sm">
+                Pedile a un administrador que te asigne el vendedor en Administración → Usuarios.
+              </p>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-6">
@@ -546,6 +565,7 @@ export default function VentasFaltantesPage() {
                             <GrupoCard
                               key={g.key}
                               g={g}
+                              soloCliente={!esAdmin}
                               extra
                               onDecidir={decidir}
                               onIrrelevante={marcarIrrelevante}
@@ -562,6 +582,7 @@ export default function VentasFaltantesPage() {
                             <GrupoCard
                               key={g.key}
                               g={g}
+                              soloCliente={!esAdmin}
                               onDecidir={decidir}
                               onIrrelevante={marcarIrrelevante}
                               onDuplicado={marcarDuplicado}
@@ -591,6 +612,7 @@ export default function VentasFaltantesPage() {
                         <GrupoCard
                           key={g.key}
                           g={g}
+                          soloCliente={!esAdmin}
                           vendidoMode
                           onDecidir={decidirVendidoTabla1}
                           onIrrelevante={marcarIrrelevante}
@@ -610,7 +632,13 @@ export default function VentasFaltantesPage() {
                   <PackageCheck size={16} /> Listos para vender (ya ingresaron)
                 </h2>
                 {gruposListos.map((g) => (
-                  <GrupoCardListo key={g.key} g={g} onDecidir={decidirVendido} leaving={leaving} />
+                  <GrupoCardListo
+                    key={g.key}
+                    g={g}
+                    soloCliente={!esAdmin}
+                    onDecidir={decidirVendido}
+                    leaving={leaving}
+                  />
                 ))}
               </section>
             )}
@@ -622,10 +650,13 @@ export default function VentasFaltantesPage() {
 }
 
 function GrupoCard({
-  g, extra, vendidoMode, onDecidir, onIrrelevante, onDuplicado, leaving = {},
+  g, extra, vendidoMode, soloCliente, onDecidir, onIrrelevante, onDuplicado, leaving = {},
 }: {
   g: Grupo;
   extra?: boolean;
+  /** Vista de vendedor: el encabezado muestra solo el cliente (sin N° de
+   *  factura/pedido ni cantidad de artículos). */
+  soloCliente?: boolean;
   vendidoMode?: boolean;
   onDecidir: (it: Item, quiere: boolean) => void;
   onIrrelevante?: (it: Item) => void;
@@ -641,10 +672,18 @@ function GrupoCard({
       <div className={`flex items-center gap-4 px-4 py-3 border-b ${
         extra ? "bg-red-500/[0.08] border-red-900/40" : "bg-[#1A1A1A] border-zinc-800"
       }`}>
-        <div className="flex-1 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1 min-w-0">
+        <div
+          className={`flex-1 grid gap-x-6 gap-y-1 min-w-0 ${
+            soloCliente ? "grid-cols-1" : "grid-cols-2 md:grid-cols-3"
+          }`}
+        >
           <Campo label="Cliente" value={g.clienteNombre || g.cliente || "—"} />
-          <Campo label="Factura / Pedido" value={<span className="font-mono text-yellow-400">{g.pedido}</span>} />
-          <Campo label="Artículos" value={`${g.items.length}`} />
+          {!soloCliente && (
+            <>
+              <Campo label="Factura / Pedido" value={<span className="font-mono text-yellow-400">{g.pedido}</span>} />
+              <Campo label="Artículos" value={`${g.items.length}`} />
+            </>
+          )}
         </div>
         <div className="shrink-0 text-right hidden sm:block">
           <div className="text-sm tabular-nums text-zinc-200">${fmtNum(g.importe)}</div>
@@ -741,19 +780,29 @@ function GrupoCard({
 }
 
 function GrupoCardListo({
-  g, onDecidir, leaving = {},
+  g, soloCliente, onDecidir, leaving = {},
 }: {
   g: GrupoListo;
+  /** Ver GrupoCard: vista de vendedor, encabezado solo con el cliente. */
+  soloCliente?: boolean;
   onDecidir: (it: ItemListo, vendido: boolean) => void;
   leaving?: Record<string, "left" | "right">;
 }) {
   return (
     <div className="rounded-xl border border-green-900/50 bg-green-500/[0.05] overflow-hidden">
       <div className="flex items-center gap-4 px-4 py-3 border-b bg-green-500/[0.08] border-green-900/40">
-        <div className="flex-1 grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1 min-w-0">
+        <div
+          className={`flex-1 grid gap-x-6 gap-y-1 min-w-0 ${
+            soloCliente ? "grid-cols-1" : "grid-cols-2 md:grid-cols-3"
+          }`}
+        >
           <Campo label="Cliente" value={g.clienteNombre || g.cliente || "—"} />
-          <Campo label="Factura / Pedido" value={<span className="font-mono text-yellow-400">{g.pedido}</span>} />
-          <Campo label="Artículos" value={`${g.items.length}`} />
+          {!soloCliente && (
+            <>
+              <Campo label="Factura / Pedido" value={<span className="font-mono text-yellow-400">{g.pedido}</span>} />
+              <Campo label="Artículos" value={`${g.items.length}`} />
+            </>
+          )}
         </div>
         <div className="shrink-0 text-right hidden sm:block">
           <div className="text-sm tabular-nums text-zinc-200">${fmtNum(g.importe)}</div>
