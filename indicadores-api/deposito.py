@@ -907,7 +907,15 @@ SELECT
     t.Descripcion   AS TipoArticulo,
     gp.Nombre       AS Preparador,
     pr.RazonSocial  AS Proveedor,
-    uv.Usu_Arma_Nombre AS Vendedor
+    -- Maestro correcto de vendedores = MAGNUS_SITD.dbo.Vendedores (mismo que
+    -- usa /ventas/bulones y cartera.py). Ped_Usu_Arma es OTRO maestro con el
+    -- mismo rango de codigos y personas distintas: queda solo como respaldo y
+    -- se descarta si lo que trae es un numero (codigo suelto, no un nombre).
+    COALESCE(
+        NULLIF(LTRIM(RTRIM(vend.VendedorNombre)), ''),
+        NULLIF(CASE WHEN LTRIM(RTRIM(uv.Usu_Arma_Nombre)) LIKE '%[^0-9]%'
+                    THEN LTRIM(RTRIM(uv.Usu_Arma_Nombre)) END, '')
+    ) AS Vendedor
 FROM EVERWEAR.dbo.[Ven_PedRenPendientes] p
 OUTER APPLY (
     -- Ubicación asignada de picking = numérica con guión (rack). Excluye depósito
@@ -928,6 +936,7 @@ LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoRengPreparacion] prep ON prep.NroMovVenta =
 LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]          gp ON gp.Numero       = prep.CodPreparador
 LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoCabecera] cab ON cab.NroMovVenta = p.NroPedOrigen
 LEFT JOIN MAGNUS_SITD.dbo.[Ped_Usu_Arma]       uv ON cab.Vendedor    = uv.Usu_Arma_Codigo
+LEFT JOIN MAGNUS_SITD.dbo.[Vendedores]         vend ON vend.VendedorCodigo = cab.Vendedor
 LEFT JOIN MAGNUS_SITD.dbo.[Clientes]           cli ON cli.CodCliente = p.CodCliente
 WHERE p.FecRegistracion = (
     SELECT MAX(FecRegistracion)
@@ -981,7 +990,15 @@ SELECT
     t.Descripcion   AS TipoArticulo,
     gp.Nombre       AS Preparador,
     pr.RazonSocial  AS Proveedor,
-    uv.Usu_Arma_Nombre AS Vendedor
+    -- Maestro correcto de vendedores = MAGNUS_SITD.dbo.Vendedores (mismo que
+    -- usa /ventas/bulones y cartera.py). Ped_Usu_Arma es OTRO maestro con el
+    -- mismo rango de codigos y personas distintas: queda solo como respaldo y
+    -- se descarta si lo que trae es un numero (codigo suelto, no un nombre).
+    COALESCE(
+        NULLIF(LTRIM(RTRIM(vend.VendedorNombre)), ''),
+        NULLIF(CASE WHEN LTRIM(RTRIM(uv.Usu_Arma_Nombre)) LIKE '%[^0-9]%'
+                    THEN LTRIM(RTRIM(uv.Usu_Arma_Nombre)) END, '')
+    ) AS Vendedor
 FROM base b
 OUTER APPLY (
     -- Ubicación asignada de picking = numérica con guión (rack). Excluye depósito
@@ -1002,6 +1019,7 @@ LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoRengPreparacion] prep ON prep.NroMovVenta =
 LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]          gp ON gp.Numero       = prep.CodPreparador
 LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoCabecera] cab ON cab.NroMovVenta = b.NroPedOrigen
 LEFT JOIN MAGNUS_SITD.dbo.[Ped_Usu_Arma]       uv ON cab.Vendedor    = uv.Usu_Arma_Codigo
+LEFT JOIN MAGNUS_SITD.dbo.[Vendedores]         vend ON vend.VendedorCodigo = cab.Vendedor
 LEFT JOIN MAGNUS_SITD.dbo.[Clientes]           cli ON cli.CodCliente = b.CodCliente
 WHERE b.rn = 1
   -- Solo lo que sigue pendiente en la foto más nueva del rango: si un renglón se
@@ -1062,7 +1080,15 @@ SELECT
     t.Descripcion   AS TipoArticulo,
     gp.Nombre       AS Preparador,
     pr.RazonSocial  AS Proveedor,
-    uv.Usu_Arma_Nombre AS Vendedor
+    -- Maestro correcto de vendedores = MAGNUS_SITD.dbo.Vendedores (mismo que
+    -- usa /ventas/bulones y cartera.py). Ped_Usu_Arma es OTRO maestro con el
+    -- mismo rango de codigos y personas distintas: queda solo como respaldo y
+    -- se descarta si lo que trae es un numero (codigo suelto, no un nombre).
+    COALESCE(
+        NULLIF(LTRIM(RTRIM(vend.VendedorNombre)), ''),
+        NULLIF(CASE WHEN LTRIM(RTRIM(uv.Usu_Arma_Nombre)) LIKE '%[^0-9]%'
+                    THEN LTRIM(RTRIM(uv.Usu_Arma_Nombre)) END, '')
+    ) AS Vendedor
 FROM base b
 OUTER APPLY (
     -- Ubicación asignada de picking = numérica con guión (rack). Excluye depósito
@@ -1083,6 +1109,7 @@ LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoRengPreparacion] prep ON prep.NroMovVenta =
 LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]          gp ON gp.Numero       = prep.CodPreparador
 LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoCabecera] cab ON cab.NroMovVenta = b.NroPedOrigen
 LEFT JOIN MAGNUS_SITD.dbo.[Ped_Usu_Arma]       uv ON cab.Vendedor    = uv.Usu_Arma_Codigo
+LEFT JOIN MAGNUS_SITD.dbo.[Vendedores]         vend ON vend.VendedorCodigo = cab.Vendedor
 LEFT JOIN MAGNUS_SITD.dbo.[Clientes]           cli ON cli.CodCliente = b.CodCliente
 WHERE b.rn = 1
 ORDER BY PrimerDia, u.ubicacion, b.NroPedOrigen, b.NroRengOrigen
@@ -1280,12 +1307,17 @@ WHERE Codot.CodotProcesoNegocio = 4
 SQL_PEDIDOS_INFO = """
 SELECT cab.NroMovVenta, cab.CodCliente,
        est.Ped_EstadoDescripcion AS Estado,
-       uv.Usu_Arma_Nombre        AS Vendedor,
+       COALESCE(
+           NULLIF(LTRIM(RTRIM(vend.VendedorNombre)), ''),
+           NULLIF(CASE WHEN LTRIM(RTRIM(uv.Usu_Arma_Nombre)) LIKE '%[^0-9]%'
+                       THEN LTRIM(RTRIM(uv.Usu_Arma_Nombre)) END, '')
+       )                         AS Vendedor,
        cab.CompCodigo            AS CompCodigo,
        LTRIM(RTRIM(cli.Cliente_Nombre)) AS ClienteNombre
 FROM EVERWEAR.dbo.VenFer_PedidoCabecera cab
 LEFT JOIN MAGNUS_SITD.dbo.Pedido_Estados est ON cab.EstadoPedido = est.Ped_Estado
 LEFT JOIN MAGNUS_SITD.dbo.Ped_Usu_Arma   uv  ON cab.Vendedor     = uv.Usu_Arma_Codigo
+LEFT JOIN MAGNUS_SITD.dbo.Vendedores    vend ON vend.VendedorCodigo = cab.Vendedor
 LEFT JOIN MAGNUS_SITD.dbo.Clientes       cli ON cli.CodCliente   = cab.CodCliente
 WHERE cab.NroMovVenta IN ({ph})
 """

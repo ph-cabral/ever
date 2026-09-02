@@ -90,8 +90,10 @@ export async function GET(req: NextRequest) {
         VALUES ${Prisma.join(values)}
         ON CONFLICT ("otId", renglon) DO UPDATE SET
           nombre         = EXCLUDED.nombre,
-          -- se refresca para que las filas ya persistidas sin nombre lo tomen
+          -- se refrescan para que las filas ya persistidas tomen el nombre de
+          -- cliente y el vendedor resueltos ahora en indicadores-api
           "clienteNombre" = COALESCE(EXCLUDED."clienteNombre", preparado.faltante_wms."clienteNombre"),
+          vendedor       = COALESCE(NULLIF(EXCLUDED.vendedor, ''), preparado.faltante_wms.vendedor),
           "cantPedida"   = EXCLUDED."cantPedida",
           "cantCumplida" = EXCLUDED."cantCumplida",
           diferencia     = EXCLUDED.diferencia,

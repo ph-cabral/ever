@@ -534,7 +534,11 @@ export async function GET() {
         // código — que es lo que se veía antes en TODAS estas tarjetas.
         ClienteNombre:
           w.clienteNombre || nombrePorCliente.get(String(w.cliente ?? "").trim()) || w.cliente || null,
-        Vendedor: w.vendedor || null,
+        // Las filas persistidas antes de que indicadores-api resolviera el
+        // vendedor contra MAGNUS_SITD.dbo.Vendedores pueden traer el CÓDIGO;
+        // un valor puramente numérico no es un nombre → se muestra "—" hasta
+        // que la próxima pasada de /deposito/faltantes lo actualice.
+        Vendedor: /^\d+$/.test((w.vendedor ?? "").trim()) ? null : w.vendedor || null,
         Importe: w.importe,
         Fecha: w.fecha,
         fechaArribo: "EN_STOCK" as const,
