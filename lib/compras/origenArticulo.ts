@@ -14,7 +14,12 @@
 // intacta para /compras/metricas.
 //
 // Reparto:
-//   fabrica    → tipo Fabril/Fabrica, o proveedor EVER WEAR S.A. INDUSTRIAL.
+//   fabrica    → tipo Fabril/Fabrica. El proveedor EVER WEAR S.A. INDUSTRIAL
+//                solo manda cuando el artículo NO tiene tipo cargado (o el
+//                tipo es desconocido): desde 2026-09-03 el tipo decide
+//                SIEMPRE, así que un artículo de tipo Nacional comprado a
+//                EVER WEAR (merchandising: FAJAANCHA, FAJAANGOSTA) es
+//                nacional y lo trabaja compras, no fábrica.
 //                Solo se ve en /fabrica/faltantes.
 //   nacionales → tipo Nacional (lado "Nacionales" del botón).
 //   importados → tipo Importado (lado "Importados" del botón).
@@ -53,12 +58,18 @@ export const esProveedorFabrica = (p: string | null) =>
 
 export function origenArticulo(r: ArticuloOrigen): OrigenArticulo {
   const tipo = norm(r.tipoArticulo || "");
-  // El tipo manda sobre el proveedor: un artículo Fabril comprado a un tercero
-  // sigue siendo de fábrica y se trabaja en /fabrica/faltantes.
+  // El TIPO manda siempre, en las dos direcciones:
+  //  · un artículo Fabril comprado a un tercero sigue siendo de fábrica;
+  //  · un artículo Nacional/Importado/Original comprado a EVER WEAR S.A.
+  //    INDUSTRIAL sigue siendo de compras (2026-09-03: eran los 2 de
+  //    merchandising que faltaban en el lado Nacionales — el reporte del mes
+  //    da 405 nacionales en agosto 2026 y la vista daba 403).
   if (tipo === "fabril" || tipo === "fabrica") return "fabrica";
-  if (esProveedorFabrica(r.Proveedor)) return "fabrica";
   if (tipo === "original") return "original";
   if (tipo === "nacional") return "nacionales";
   if (tipo === "importado") return "importados";
+  // Sin tipo cargado (o tipo desconocido): recién acá decide el proveedor, así
+  // lo de producción interna no se cuela en compras por no tener tipo.
+  if (esProveedorFabrica(r.Proveedor)) return "fabrica";
   return "otros";
 }

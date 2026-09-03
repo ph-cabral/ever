@@ -78,9 +78,10 @@ type Estado = "completo" | "incompleto" | "sin_orden" | "entregado";
 type Filtro = "todos" | Estado;
 // Origen del artículo (r.tipoArticulo, Magnus): el botón cicla
 // Nacionales → Importados → Otros (sin tipo cargado o tipo desconocido; se
-// saltea si no hay ninguno). NO se muestran acá: Fábrica (tipo Fabril o
-// proveedor EVER WEAR S.A. INDUSTRIAL), que vive en /fabrica/faltantes, ni
-// los de tipo Original, que quedan fuera de la vista.
+// saltea si no hay ninguno). NO se muestran acá: Fábrica (tipo Fabril, o
+// proveedor EVER WEAR S.A. INDUSTRIAL cuando el artículo no tiene tipo
+// cargado), que vive en /fabrica/faltantes, ni los de tipo Original, que
+// quedan fuera de la vista.
 // Ver lib/compras/origenArticulo.ts.
 type Origen = "importados" | "nacionales" | "otros";
 
@@ -783,8 +784,9 @@ export default function ComprasFaltantesPage() {
   useEffect(() => {
     if (origen === "otros" && !hayOtros) setOrigen("nacionales");
   }, [origen, hayOtros]);
-  // Ningún lado muestra Fábrica (tipo Fabril o EVER WEAR S.A. INDUSTRIAL —
-  // eso se trabaja en /fabrica/faltantes) ni los de tipo Original.
+  // Ningún lado muestra Fábrica (tipo Fabril, o EVER WEAR S.A. INDUSTRIAL sin
+  // tipo cargado — eso se trabaja en /fabrica/faltantes) ni los de tipo
+  // Original. Un artículo de tipo Nacional comprado a EVER WEAR sí entra acá.
   const pasaOrigen = useCallback((r: Row) => origenDe(r) === origen, [origen]);
 
   // Tabla principal: nunca muestra lo marcado extraordinario.

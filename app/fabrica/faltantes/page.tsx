@@ -65,6 +65,9 @@ interface Row {
 // Universo de esta vista: todo lo de fábrica. Ya no es solo el proveedor
 // EVER WEAR S.A. INDUSTRIAL — también entra el artículo de tipo Fabril
 // (Magnus StkFer_Articulos.NacionalImportado) aunque venga con otro proveedor.
+// Al revés también: desde 2026-09-03 el tipo decide siempre, así que lo
+// comprado a EVER WEAR con tipo Nacional/Importado/Original NO es de fábrica
+// (el proveedor solo clasifica cuando el artículo no tiene tipo cargado).
 // Esos mismos artículos quedan FUERA de /compras/faltantes, así que el
 // criterio es uno solo y vive en lib/compras/origenArticulo.ts.
 const esDeFabrica = (r: { Proveedor: string | null; tipoArticulo?: string | null }) =>
@@ -688,7 +691,7 @@ export default function FabricaFaltantesPage() {
             <p className="text-zinc-400 font-medium">
               {loading
                 ? "Consultando la base…"
-                : "No hay faltantes de EVER WEAR S.A. INDUSTRIAL."}
+                : "No hay faltantes de fábrica."}
             </p>
           </div>
         ) : (
