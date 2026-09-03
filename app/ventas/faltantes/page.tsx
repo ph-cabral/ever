@@ -2,9 +2,8 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageCheck,
-  Check, X, Download, Trash2, Copy, Users, Clock,
+  Check, X, Trash2, Copy, Users, Clock,
 } from "lucide-react";
-import { exportarFaltantesVentas } from "@/lib/ventas/exportFaltantes";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
@@ -460,17 +459,23 @@ export default function VentasFaltantesPage() {
   const conArribo = useMemo(() => items.filter((it) => it.fechaArribo), [items]);
   const gruposConArribo = useMemo(() => agrupar(conArribo), [conArribo]);
 
-  const itemsVisibles = flipped ? conArribo : items;
-  const exportar = useCallback(
-    () => exportarFaltantesVentas(itemsVisibles, listos),
-    [itemsVisibles, listos],
-  );
-
-  const tot = useMemo(() => {
-    let importe = 0;
-    for (const it of items) importe += it.Importe || 0;
-    return { art: items.length, extra: extraordinarios.length, listos: listos.length, importe };
-  }, [items, extraordinarios, listos]);
+  // Totales POR CARA (antes era un solo total en el header, lejos de la tabla
+  // que estabas mirando). Cada título lleva la cantidad de renglones y el
+  // importe de lo que esa cara muestra, así el número siempre coincide con
+  // las filas de abajo.
+  const totales = useMemo(() => {
+    const sum = (arr: { Importe: number }[]) => arr.reduce((a, it) => a + (it.Importe || 0), 0);
+    const sinIngresar = [...extraordinarios, ...normales];
+    return {
+      sin: {
+        art: sinIngresar.length,
+        extra: extraordinarios.length,
+        importe: sum(sinIngresar),
+      },
+      ing: { art: conArribo.length, importe: sum(conArribo) },
+      listos: { art: listos.length, importe: sum(listos) },
+    };
+  }, [extraordinarios, normales, conArribo, listos]);
 
   const hay = items.length > 0 || listos.length > 0;
 
@@ -503,14 +508,6 @@ export default function VentasFaltantesPage() {
           </span>
         </div>
         <div className="flex items-center gap-4 text-sm">
-          {esAdmin && (
-            <span className="hidden sm:inline text-zinc-400">
-              <b className="text-yellow-400">{tot.art}</b> art. ·{" "}
-              <b className="text-red-400">{tot.extra}</b> extraord. ·{" "}
-              <b className="text-green-400">{tot.listos}</b> listos ·{" "}
-              <b className="text-zinc-200">${fmtNum(tot.importe)}</b>
-            </span>
-          )}
           {/* Filtro de vendedor — SOLO ADMIN. Acota la vista a la CARTERA de
               ese vendedor (mismo criterio que ve él cuando entra), server-side.
               No se renderiza si /api/ventas/vendedor/vendedores contestó 403:
@@ -575,14 +572,6 @@ export default function VentasFaltantesPage() {
             </button>
           </div>
           <button
-            onClick={exportar}
-            disabled={!hay}
-            title="Exportar a Excel lo que se ve en la tabla"
-            className="chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-yellow-400 hover:text-yellow-400 text-xs font-medium disabled:opacity-40 disabled:hover:scale-100 disabled:hover:translate-y-0"
-          >
-            <Download size={14} /> Excel
-          </button>
-          <button
             onClick={load}
             title="Refrescar"
             disabled={loading}
@@ -633,8 +622,21 @@ export default function VentasFaltantesPage() {
                     flipped ? "pointer-events-none" : ""
                   }`}
                 >
-                  <h2 className="flex items-center gap-2 text-sm font-medium text-yellow-400 uppercase tracking-wide mb-3">
-                    <Clock size={16} /> Sin ingresar (todavía no llegaron)
+                  <h2 className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-medium text-yellow-400 uppercase tracking-wide mb-3">
+                    <span className="flex items-center gap-2">
+                      <Clock size={16} /> Sin ingresar (todavía no llegaron)
+                    </span>
+                    <span className="normal-case tracking-normal text-zinc-400 font-normal">
+                      <b className="text-yellow-400 tabular-nums">{totales.sin.art}</b> art.
+                      {totales.sin.extra > 0 && (
+                        <>
+                          {" · "}
+                          <b className="text-red-400 tabular-nums">{totales.sin.extra}</b> extraord.
+                        </>
+                      )}
+                      {" · "}
+                      <b className="text-zinc-200 tabular-nums">${fmtNum(totales.sin.importe)}</b>
+                    </span>
                   </h2>
                   {gruposExtra.length === 0 && gruposNormales.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 gap-2 text-center text-zinc-500 text-sm">
@@ -685,8 +687,14 @@ export default function VentasFaltantesPage() {
                     !flipped ? "pointer-events-none" : ""
                   }`}
                 >
-                  <h2 className="flex items-center gap-2 text-sm font-medium text-green-400 uppercase tracking-wide mb-3">
-                    <PackageCheck size={16} /> Ingresados (ya llegaron)
+                  <h2 className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-medium text-green-400 uppercase tracking-wide mb-3">
+                    <span className="flex items-center gap-2">
+                      <PackageCheck size={16} /> Ingresados (ya llegaron)
+                    </span>
+                    <span className="normal-case tracking-normal text-zinc-400 font-normal">
+                      <b className="text-green-400 tabular-nums">{totales.ing.art}</b> art. ·{" "}
+                      <b className="text-zinc-200 tabular-nums">${fmtNum(totales.ing.importe)}</b>
+                    </span>
                   </h2>
                   {gruposConArribo.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 gap-2 text-center text-zinc-500 text-sm">
@@ -715,8 +723,14 @@ export default function VentasFaltantesPage() {
 
             {gruposListos.length > 0 && (
               <section className="flex flex-col gap-3">
-                <h2 className="flex items-center gap-2 text-sm font-medium text-green-400 uppercase tracking-wide">
-                  <PackageCheck size={16} /> Listos para vender (ya ingresaron)
+                <h2 className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-medium text-green-400 uppercase tracking-wide">
+                  <span className="flex items-center gap-2">
+                    <PackageCheck size={16} /> Listos para vender (ya ingresaron)
+                  </span>
+                  <span className="normal-case tracking-normal text-zinc-400 font-normal">
+                    <b className="text-green-400 tabular-nums">{totales.listos.art}</b> art. ·{" "}
+                    <b className="text-zinc-200 tabular-nums">${fmtNum(totales.listos.importe)}</b>
+                  </span>
                 </h2>
                 {gruposListos.map((g) => (
                   <GrupoCardListo
