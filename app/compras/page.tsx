@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageX, ShoppingCart, PackageCheck, BarChart3,
-  Package, Wallet, Download,
+  Package, Wallet, Download, Globe,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { InicioButton } from "@/components/ui/InicioButton";
@@ -10,6 +10,10 @@ import KpiCard from "@/app/rrhh/components/KpiCard";
 import BarChartCard from "@/app/rrhh/components/charts/BarChartCard";
 import PieChartCard from "@/app/rrhh/components/charts/PieChartCard";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
+
+// Los 3 orígenes que se trabajan en compras (Fábrica y Original tienen su
+// propia vista / no se compran) — ver lib/compras/origenArticulo.ts.
+type OrigenCompras = "nacionales" | "importados" | "otros";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/metricas — funnel mensual en ITEMS (artículos distintos) Y
@@ -25,7 +29,13 @@ interface Columna {
   total: number;       // items = artículos distintos
   unidades: number;    // unidades de esa etapa (faltantes / pedidas en OC / ingresadas)
   importe: number;     // $ de esa etapa (unidades × precio de venta del artículo)
-  articulos: string[];
+}
+// Un funnel por origen: la API los calcula todos de una (mismos 3 sets, en
+// memoria), así el selector de origen cambia la vista SIN volver a consultar.
+interface Funnel {
+  faltantesUnidades: number;
+  faltantesImporte: number;
+  columnas: Columna[];
 }
 interface Grupo {
   key: string;
@@ -39,19 +49,21 @@ interface Resp {
   ocWarn: boolean;
   ingresoWarn: boolean;
   clasifWarn: boolean;
-  pedidosMesWarn: boolean;
-  faltantesUnidades: number;
-  faltantesImporte: number;
-  pedidosMesUnidades: number;
-  pedidosMesImporte: number;
-  pctUnidades: number | null;
-  pctImporte: number | null;
+  // false = indicadores-api no informó el estado del artículo (columna no
+  // detectada en StkFer_Articulos): NO se filtró por Habilitado.
+  estadoArticuloDisponible: boolean;
+  // Unidades descartadas por venir de pedidos cancelados o sin estado.
+  unidadesDescartadas: number;
   // Toda la OC del mes (sin recortar por faltantes) — denominador de la card
   // "Con OC ese mes", que por el funnel solo cuenta los artículos faltantes.
   ocTotalItems: number;
   ocTotalUnidades: number;
-  columnas: Columna[];
-  torta: Grupo[];
+  origenDefault: string;
+  // Faltantes del mes clasificados por origen real del artículo: alimenta la
+  // torta y los badges del selector.
+  origenes: Grupo[];
+  // nacionales | importados | otros | todos
+  funnels: Record<string, Funnel>;
 }
 
 // /compras/compras-valorizado — mismo mes que el selector de arriba:
@@ -71,11 +83,38 @@ interface RangoResp {
 // queden asociadas visualmente. Antes todas las barras salían del mismo
 // amarillo (t.primary), sin distinguirse entre sí.
 const FUNNEL_COLORS = ["#FB923C", "#60A5FA", "#4ADE80"];
-// Paleta de la torta (origen) — antes t.palette son 8 tonos de amarillo/ámbar
-// casi indistinguibles entre sí para solo 3 categorías. Importados/Nacionales
-// en los mismos tonos que el funnel (blue/green) + violeta para Fábrica
-// (categoría "aparte", no es ni importado ni nacional).
-const ORIGEN_COLORS = ["#60A5FA", "#4ADE80", "#C084FC"];
+// Paleta de la torta (origen). Va por CLAVE, no por posición: la torta filtra
+// las categorías en cero y con un array posicional los colores se corrían.
+// Nacionales/Importados en los mismos tonos que el selector (sky/amber) para
+// que chip y porción se asocien de una.
+const ORIGEN_COLOR: Record<string, string> = {
+  nacionales: "#4ADE80",
+  importados: "#60A5FA",
+  fabrica: "#C084FC",
+  original: "#F472B6",
+  otros: "#A1A1AA",
+};
+
+// Estilo del chip de origen, mismo criterio que /compras/faltantes.
+const ORIGEN_CHIP: Record<string, string> = {
+  nacionales: "bg-sky-500/15 border-sky-400 text-sky-300",
+  importados: "bg-amber-500/15 border-amber-400 text-amber-300",
+  otros: "bg-violet-500/15 border-violet-400 text-violet-300",
+};
+// Etiqueta del origen en el Excel, con los nombres de Magnus (así el archivo
+// se puede cruzar contra el reporte del sector sin traducir nada).
+const ORIGEN_EXCEL: Record<string, string> = {
+  nacionales: "Nacional",
+  importados: "Importado",
+  fabrica: "Fabril",
+  original: "Original",
+  otros: "",
+};
+const ORIGEN_TITULO: Record<string, string> = {
+  nacionales: "Nacionales",
+  importados: "Importados",
+  otros: "Otros",
+};
 
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }).format(n || 0);
@@ -128,6 +167,7 @@ interface FilaLinea {
   monto: number;
 }
 interface GrupoLineas {
+  label?: string;
   lineas: FilaLinea[];
   total: { items: number; cantFaltante: number; cantComprada: number; monto: number };
 }
@@ -138,14 +178,22 @@ interface FaltLineaResp {
   ocWarn: boolean;
   clasifWarn: boolean;
   lineaWarn: boolean;
+  estadoArticuloDisponible: boolean;
+  // fabrica / original / sinRenglon / noHabilitado: por qué quedó afuera cada
+  // artículo marcado que no entra en ninguna de las 3 tablas.
+  excluidos: Record<string, number>;
   excluidosFabrica: number;
   articulosFaltantes: number;
   importados: GrupoLineas;
   nacionales: GrupoLineas;
+  otros: GrupoLineas;
 }
 
 export default function ComprasMetricasPage() {
   const [mes, setMes] = useState(mesActual);
+  // Origen del artículo. Toda la vista (cards, funnel y tabla por línea) habla
+  // del origen elegido; arranca en Nacionales, que es el grueso de compras.
+  const [origen, setOrigen] = useState<OrigenCompras>("nacionales");
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -233,29 +281,67 @@ export default function ComprasMetricasPage() {
     loadFaltLinea(mes);
   }, [mes, loadFaltLinea]);
 
-  const chartData = useMemo(
-    () => (data?.columnas ?? []).map((c) => ({ name: c.label, value: c.total })),
+  // Funnel del origen elegido — ya viene calculado en la respuesta, cambiar de
+  // origen no dispara ninguna consulta.
+  const funnel = useMemo(() => data?.funnels?.[origen], [data, origen]);
+
+  // "Otros" (artículo sin tipo cargado en Magnus) solo aparece si hay alguno,
+  // igual que en /compras/faltantes: en el caso normal el chip es un toggle de
+  // dos posiciones.
+  const hayOtros = useMemo(
+    () => (data?.origenes ?? []).some((g) => g.key === "otros" && g.total > 0),
     [data],
   );
+  const ciclarOrigen = useCallback(() => {
+    setOrigen((o) => {
+      if (o === "nacionales") return "importados";
+      if (o === "importados") return hayOtros ? "otros" : "nacionales";
+      return "nacionales";
+    });
+  }, [hayOtros]);
+  // Si "Otros" queda vacío tras cambiar de mes, no dejar la vista clavada ahí.
+  useEffect(() => {
+    if (origen === "otros" && !hayOtros) setOrigen("nacionales");
+  }, [origen, hayOtros]);
 
-  const pieData = useMemo(
-    () => (data?.torta ?? []).filter((g) => g.total > 0).map((g) => ({ name: g.label, value: g.total })),
+  const itemsOrigen = useMemo(
+    () => (data?.origenes ?? []).find((g) => g.key === origen)?.total ?? 0,
+    [data, origen],
+  );
+
+  const chartData = useMemo(
+    () => (funnel?.columnas ?? []).map((c) => ({ name: c.label, value: c.total })),
+    [funnel],
+  );
+
+  // La torta muestra TODOS los orígenes del mes (incluidos Fábrica y Original,
+  // que compras no trabaja) para que se vea de dónde sale el recorte.
+  const pieVisible = useMemo(
+    () => (data?.origenes ?? []).filter((g) => g.total > 0),
     [data],
+  );
+  const pieData = useMemo(
+    () => pieVisible.map((g) => ({ name: g.label, value: g.total })),
+    [pieVisible],
+  );
+  const pieColors = useMemo(
+    () => pieVisible.map((g) => ORIGEN_COLOR[g.key] ?? "#A1A1AA"),
+    [pieVisible],
   );
 
   const col = useCallback(
-    (key: string) => data?.columnas.find((c) => c.key === key)?.total ?? 0,
-    [data],
+    (key: string) => funnel?.columnas.find((c) => c.key === key)?.total ?? 0,
+    [funnel],
   );
   // Unidades de la etapa (mismo recorte del funnel que los items).
   const unid = useCallback(
-    (key: string) => data?.columnas.find((c) => c.key === key)?.unidades ?? 0,
-    [data],
+    (key: string) => funnel?.columnas.find((c) => c.key === key)?.unidades ?? 0,
+    [funnel],
   );
   // $ de la etapa (unidades × precio de venta del artículo, lo calcula la API).
   const imp = useCallback(
-    (key: string) => data?.columnas.find((c) => c.key === key)?.importe ?? 0,
-    [data],
+    (key: string) => funnel?.columnas.find((c) => c.key === key)?.importe ?? 0,
+    [funnel],
   );
 
   // Export a Excel: una fila por artículo del mes con faltante / OC (y sus
@@ -279,6 +365,8 @@ export default function ComprasMetricasPage() {
           codArticulo: string;
           nombre: string | null;
           proveedor: string | null;
+          origen: string | null;
+          estadoArticulo: string | null;
           esFaltante: boolean;
           cantFaltante: number;
           cantOC: number;
@@ -291,6 +379,8 @@ export default function ComprasMetricasPage() {
           "Código": r.codArticulo,
           "Artículo": r.nombre || "",
           Proveedor: r.proveedor || "",
+          "Origen": ORIGEN_EXCEL[r.origen ?? ""] ?? "",
+          "Estado": r.estadoArticulo || "",
           "¿Faltante?": r.esFaltante ? "Sí" : "No",
           "Cant. faltante": r.cantFaltante,
           "Cant. en OC": r.cantOC,
@@ -366,6 +456,21 @@ export default function ComprasMetricasPage() {
             className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-xs text-zinc-200 outline-none [color-scheme:dark] focus:border-yellow-400"
           />
           <button
+            onClick={ciclarOrigen}
+            title={
+              hayOtros
+                ? "Origen del artículo — click para alternar: Nacionales / Importados / Otros"
+                : "Origen del artículo — click para alternar: Nacionales / Importados"
+            }
+            className={`chip-anim flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium ${
+              ORIGEN_CHIP[origen] ?? ORIGEN_CHIP.nacionales
+            }`}
+          >
+            <Globe size={14} />
+            {ORIGEN_TITULO[origen] ?? origen}
+            <span className="tabular-nums opacity-70">{fmtNum(itemsOrigen)}</span>
+          </button>
+          <button
             onClick={exportar}
             title="Exportar a Excel: artículo por artículo, faltante / OC / ingreso del mes"
             disabled={exportando}
@@ -390,7 +495,15 @@ export default function ComprasMetricasPage() {
         <div>
           <h1 className="text-yellow-400 font-bold text-xl uppercase tracking-wide flex items-center gap-2">
             <BarChart3 size={20} /> Faltantes, OC e ingresos
+            <span className="text-zinc-500 font-normal normal-case tracking-normal text-base">
+              · {ORIGEN_TITULO[origen] ?? origen}
+            </span>
           </h1>
+          <p className="text-zinc-500 text-sm mt-1">
+            Artículos habilitados marcados sin existencia en {fmtMesLabel(mes)}, sin los renglones
+            de pedidos cancelados. El origen sale del tipo de artículo de Magnus — mismo criterio
+            que Compras → Faltantes.
+          </p>
         </div>
 
         {(data?.ocWarn || data?.ingresoWarn) && (
@@ -406,7 +519,13 @@ export default function ComprasMetricasPage() {
         {data?.clasifWarn && (
           <div className="flex items-center gap-1.5 text-xs text-amber-400/80">
             <AlertTriangle size={13} />
-            No se pudo clasificar proveedor/importación para algunos artículos — la torta puede estar incompleta
+            No se pudo leer el origen de los artículos — el recorte por Nacional/Importado no se aplicó
+          </div>
+        )}
+        {data && !data.clasifWarn && !data.estadoArticuloDisponible && (
+          <div className="flex items-center gap-1.5 text-xs text-amber-400/80">
+            <AlertTriangle size={13} />
+            No se pudo leer el estado del artículo — entran también Suspendidos y de Baja
           </div>
         )}
 
@@ -468,7 +587,7 @@ export default function ComprasMetricasPage() {
                 title={`Faltantes por origen — ${fmtMesLabel(mes)}`}
                 data={pieData}
                 height={340}
-                colors={ORIGEN_COLORS}
+                colors={pieColors}
               />
             ) : (
               <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
@@ -543,10 +662,11 @@ export default function ComprasMetricasPage() {
             </h2>
             <p className="text-zinc-500 text-sm mt-1">
               Artículos marcados como faltantes en <b>Depósito → Faltantes</b> durante{" "}
-              {fmtMesLabel(mes)}, separados en Importados y Nacionales y agrupados por línea. La
-              cantidad faltante es la que marcó el operario; la comprada son las unidades de OC
-              hechas ese mismo mes para esos mismos artículos, valorizadas a precio de VENTA.
-              Los artículos de EVER WEAR INDUSTRIAL quedan fuera (se fabrican, no se compran).
+              {fmtMesLabel(mes)}, agrupados por línea, con el mismo recorte que las cards de
+              arriba (origen {ORIGEN_TITULO[origen] ?? origen}, habilitados, sin pedidos
+              cancelados). La cantidad faltante es la que marcó el operario; la comprada son las
+              unidades de OC hechas ese mismo mes para esos mismos artículos, valorizadas a precio
+              de VENTA. Lo de fábrica y los Original no se muestran acá.
             </p>
           </div>
 
@@ -562,24 +682,25 @@ export default function ComprasMetricasPage() {
           )}
           {faltLinea?.clasifWarn && (
             <div className="flex items-center gap-1.5 text-xs text-amber-400/80">
-              <AlertTriangle size={13} /> No se pudo clasificar proveedor/importación de todos los artículos
+              <AlertTriangle size={13} /> No se pudo leer el origen ni la línea de los artículos — figuran como “SIN LÍNEA”
             </div>
           )}
-          {faltLinea?.lineaWarn && (
-            <div className="flex items-center gap-1.5 text-xs text-amber-400/80">
-              <AlertTriangle size={13} /> No se pudo resolver la línea de los artículos — figuran como “SIN LÍNEA”
-            </div>
-          )}
-          {!!faltLinea?.excluidosFabrica && (
+          {!!faltLinea?.excluidos && (
             <div className="flex items-center gap-1.5 text-xs text-zinc-500">
-              <AlertTriangle size={13} /> {faltLinea.excluidosFabrica} artículo(s) de EVER WEAR INDUSTRIAL excluidos
+              <AlertTriangle size={13} /> Fuera de estas tablas:{" "}
+              {fmtNum(faltLinea.excluidos.fabrica ?? 0)} de fábrica ·{" "}
+              {fmtNum(faltLinea.excluidos.original ?? 0)} Original ·{" "}
+              {fmtNum(faltLinea.excluidos.noHabilitado ?? 0)} no habilitados o solo por pedidos
+              cancelados · {fmtNum(faltLinea.excluidos.sinRenglon ?? 0)} sin renglón vivo en Magnus
             </div>
           )}
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-            <TablaLineas titulo="Importados" grupo={faltLinea?.importados} loading={faltLineaLoading} accent="#60A5FA" />
-            <TablaLineas titulo="Nacionales" grupo={faltLinea?.nacionales} loading={faltLineaLoading} accent="#4ADE80" />
-          </div>
+          <TablaLineas
+            titulo={ORIGEN_TITULO[origen] ?? origen}
+            grupo={faltLinea?.[origen]}
+            loading={faltLineaLoading}
+            accent={ORIGEN_COLOR[origen] ?? "#A1A1AA"}
+          />
         </div>
       </main>
     </div>

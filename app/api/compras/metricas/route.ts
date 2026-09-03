@@ -1,5 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import {
+  agruparFaltantesMes,
+  codigosPorOrigen,
+  ORIGEN_LABEL,
+  type FilaFaltanteApi,
+  type FaltantesMes,
+  type OrigenFunnel,
+} from "@/lib/compras/faltantesMes";
+import type { OrigenArticulo } from "@/lib/compras/origenArticulo";
 
 const API_URL =
   process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
@@ -8,15 +17,13 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// /compras/metricas — funnel MENSUAL de un mes calendario, en ARTÍCULOS
-// distintos (items), no en unidades:
+// /compras — funnel MENSUAL de un mes calendario, en ARTÍCULOS distintos
+// (items), no en unidades, calculado POR ORIGEN del artículo.
 //
 //   Columna 1 "Faltantes": CodArticulo distintos marcados "sin existencia"
 //     (preparado.faltante_existencia, existencia=false) con fecha dentro del
-//     mes. Misma fuente/origen que /deposito/faltantes (ver memoria
-//     ever-faltante-flujo-completo) — simplificación: no se resuelve "última
-//     marca por renglón" como en /compras/faltantes, alcanza con que haya
-//     existido AL MENOS una marca "sin existencia" ese mes para ese artículo.
+//     mes, QUE ADEMÁS tengan renglón vivo en Magnus ese mes y pasen el recorte
+//     de lib/compras/faltantesMes.ts (habilitados, sin pedidos cancelados).
 //
 //   Columna 2 "Con OC": de los artículos de la columna 1, cuántos tuvieron
 //     al menos un renglón de Orden de Compra HECHO ese mismo mes (indicadores-
@@ -27,58 +34,41 @@ export const maxDuration = 60;
 //     un remito de ingreso x OC ya concretado ese mismo mes (indicadores-api
 //     GET /compras/ingresos, por FecComprobante).
 //
-//   Cada columna informa items (artículos distintos) Y unidades:
-//     · Faltantes  -> CantPend de los renglones sin existencia del mes
-//       (GET /deposito/faltantes, mismo fetch que ya se hace para la torta).
-//     · Con OC     -> Cantidad de los renglones de OC del mes, solo de los
-//       artículos de la columna (GET /compras/ordenes-mes → `unidades`).
-//     · Ingresados -> CantidadIngresada de los remitos del mes, solo de los
-//       artículos de la columna (GET /compras/ingresos → CantidadIngresada).
-//   Las unidades siguen el mismo recorte del funnel que los items (col2 ⊆ col1,
-//   col3 ⊆ col2), así las tres columnas hablan del mismo conjunto y no cuesta
-//   ninguna consulta extra: los 3 endpoints ya se llamaban.
-//   Cada columna informa también `importe` ($ a precio de VENTA): unidades de
-//   la etapa × precio unitario del artículo, con el precio derivado del mismo
-//   fetch de /deposito/faltantes (Importe/CantPend). Sin consultas extra.
+//   Es un funnel estricto: col2 ⊆ col1, col3 ⊆ col2.
 //
-//   ocTotalItems/ocTotalUnidades (2026-08-31): el set B COMPLETO, sin recortar
-//   por faltantes — o sea toda la OC del mes. Es el denominador de la columna 2
-//   ("135 de 701 items"): el recorte del funnel hacía parecer que faltaban OC
-//   cuando en realidad la card solo contaba las de artículos faltantes.
+//   Cada columna informa items, unidades y $ (a precio de VENTA: unidades de la
+//   etapa × precio unitario del artículo, derivado del mismo fetch de
+//   /deposito/faltantes — Importe/CantPend por renglón, ver deposito.py). No
+//   cuesta ninguna consulta extra.
 //
-//   Es un funnel estricto (decisión del usuario): col2 ⊆ col1, col3 ⊆ col2.
-//   Los sets B y C (Magnus, indicadores-api) son best-effort: si alguno no
-//   responde, la columna correspondiente (y las que dependen de ella) se
-//   informan en `warn` mas no rompen la vista.
+// RECORTE (2026-09-03) — la vista contaba de más y no cerraba con el reporte de
+// Magnus. Ahora los tres criterios de detalle_mes_extraccion.py se aplican acá,
+// en lib/compras/faltantesMes.ts (ver el comentario de ese archivo):
+//   · ORIGEN real del artículo (Stk_TiposArticulos) vía lib/compras/
+//     origenArticulo.ts, el mismo criterio que /compras/faltantes y
+//     /fabrica/faltantes. Reemplaza a la heurística `Importacion` de
+//     /compras/ordenes-pendientes, que clasificaba mal y obligaba a un fetch
+//     más (ese endpoint ya no se consulta desde acá).
+//   · Solo artículos HABILITADOS.
+//   · Sin renglones de pedidos cancelados o sin estado en Magnus.
 //
-//   Gráfico de torta (decisión del usuario): clasifica el mismo set A
-//   (Faltantes del mes) en 3 grupos — Importados / Nacionales / EVER WEAR
-//   INDUSTRIAL (proveedor propio, se saca de los otros 2 grupos). Reusa
-//   exactamente las mismas 2 fuentes y la misma precedencia que ya usa
-//   /api/compras/faltantes-consumo para Proveedor/Importación por artículo:
-//     · Proveedor: primero Magnus "faltantes" viejo (GET /deposito/faltantes,
-//       fetch_faltantes), fallback a la OC "por llegar" (GET
-//       /compras/ordenes-pendientes) si el primero no trae proveedor.
-//     · Importación: SOLO sale de /compras/ordenes-pendientes (no hay otra
-//       fuente) — default false (Nacional) si el artículo no tiene OC
-//       asociada, mismo default que ya usa faltantes-consumo.
+//   El funnel se calcula para CADA origen (nacionales / importados / otros) más
+//   "todos", todo en memoria sobre los mismos 3 sets: el selector de la vista
+//   cambia de origen SIN volver a pegarle a Magnus.
 //
-//   Totales unidades/$ + % (agregado 2026-07-28): además del conteo en
-//   items, se informa faltantesUnidades/faltantesImporte (suma de
-//   CantPend/Importe por renglón del set A completo, mismo dato que ya trae
-//   /deposito/faltantes para la torta — no cuesta una llamada extra) y
-//   pctUnidades/pctImporte = qué % representan sobre TODO lo pedido ese mes
-//   (indicadores-api GET /ventas/pedidos-mes, best-effort → pedidosMesWarn).
-//   pctUnidades/pctImporte quedan en null si el denominador no está disponible
-//   o es 0 (no se puede dividir por cero / no informar un % falso).
+//   ocTotalItems/ocTotalUnidades: el set B COMPLETO, sin recortar por faltantes
+//   — o sea toda la OC del mes. Es el denominador de la columna 2 ("135 de 701
+//   items"): el recorte del funnel hacía parecer que faltaban OC cuando en
+//   realidad la card solo contaba las de artículos faltantes.
+//
+//   `origenes` clasifica el mismo set A recortado en las 5 categorías de
+//   origenArticulo (Nacionales / Importados / Fábrica / Original / Otros) y
+//   alimenta la torta y los badges del selector.
+//
+//   Los 3 fetches a Magnus salen EN PARALELO (antes eran secuenciales, 4
+//   roundtrips uno atrás del otro) y son best-effort: si alguno no responde, la
+//   columna correspondiente se informa en `warn` pero no rompe la vista.
 // ──────────────────────────────────────────────────────────────────────────────
-
-const PROVEEDOR_OBJETIVO = "ever wear s.a. industrial";
-// Mismo patrón que app/fabrica/faltantes/page.tsx: normaliza acentos/mayúsculas
-// antes de comparar (Magnus no es consistente con el formato del proveedor).
-const norm = (s: string) =>
-  s.toLowerCase().normalize("NFD").replace(new RegExp("[\\u0300-\\u036f]", "g"), "").trim();
-const esProveedorObjetivo = (p: string | null) => !!p && norm(p).includes(PROVEEDOR_OBJETIVO);
 
 async function getJson(url: string) {
   const res = await fetch(url, {
@@ -105,31 +95,89 @@ function mesRange(mes: string | null) {
   return { mes: `${yStr}-${mStr}`, desde, hasta };
 }
 
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
 // Suma las unidades de un map solo para los artículos de la columna (el
 // funnel ya viene recortado: col2 ⊆ col1, col3 ⊆ col2).
 const sumUnid = (arts: string[], map: Map<string, number>) =>
-  Math.round(arts.reduce((a, c) => a + (map.get(c) ?? 0), 0) * 100) / 100;
+  r2(arts.reduce((a, c) => a + (map.get(c) ?? 0), 0));
 
 // $ de una etapa = unidades de esa etapa × precio unitario del artículo. El
 // precio sale del mismo fetch de /deposito/faltantes que ya se hace (Importe =
 // PrecioVenta × CantPend por renglón, ver deposito.py), así que no cuesta
-// ninguna consulta extra: precioUnit = Σ Importe / Σ CantPend por artículo.
-// Se valoriza a precio de VENTA, igual que la card "$ faltantes" original.
+// ninguna consulta extra. Se valoriza a precio de VENTA.
 const sumImporte = (
   arts: string[],
   unidMap: Map<string, number>,
   precioMap: Map<string, number>,
-) =>
-  Math.round(
-    arts.reduce((a, c) => a + (unidMap.get(c) ?? 0) * (precioMap.get(c) ?? 0), 0) * 100,
-  ) / 100;
+) => r2(arts.reduce((a, c) => a + (unidMap.get(c) ?? 0) * (precioMap.get(c) ?? 0), 0));
+
+interface Columna {
+  key: string;
+  label: string;
+  total: number;
+  unidades: number;
+  importe: number;
+}
+interface Funnel {
+  faltantesUnidades: number;
+  faltantesImporte: number;
+  columnas: Columna[];
+}
+
+/** Funnel completo de un origen. Todo en memoria: no consulta nada. */
+function armarFunnel(
+  origen: OrigenFunnel,
+  faltMes: FaltantesMes,
+  setA: Set<string>,
+  setB: Set<string>,
+  setC: Set<string>,
+  ocUnidMap: Map<string, number>,
+  ingUnidMap: Map<string, number>,
+  precioUnitMap: Map<string, number>,
+): Funnel {
+  const faltantes = codigosPorOrigen(faltMes, setA, origen);
+  const conOC = faltantes.filter((c) => setB.has(c));
+  const ingresados = conOC.filter((c) => setC.has(c));
+
+  let unidades = 0;
+  let importe = 0;
+  for (const cod of faltantes) {
+    const a = faltMes.articulos.get(cod);
+    if (!a) continue;
+    unidades += a.unidades;
+    importe += a.importe;
+  }
+
+  return {
+    faltantesUnidades: r2(unidades),
+    faltantesImporte: r2(importe),
+    columnas: [
+      { key: "faltantes", label: "Faltantes", total: faltantes.length, unidades: r2(unidades), importe: r2(importe) },
+      {
+        key: "conOC",
+        label: "Con OC",
+        total: conOC.length,
+        unidades: sumUnid(conOC, ocUnidMap),
+        importe: sumImporte(conOC, ocUnidMap, precioUnitMap),
+      },
+      {
+        key: "ingresados",
+        label: "Ingresados",
+        total: ingresados.length,
+        unidades: sumUnid(ingresados, ingUnidMap),
+        importe: sumImporte(ingresados, ingUnidMap, precioUnitMap),
+      },
+    ],
+  };
+}
 
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const { mes, desde, hasta } = mesRange(sp.get("mes"));
 
   // 1) Set A: artículos faltantes del mes (Postgres propio — rápido, no
-  // depende de Magnus).
+  // depende de Magnus). Si esto falla no hay vista posible.
   let marks: { codArticulo: string | null }[] = [];
   try {
     marks = await prisma.faltante_existencia.findMany({
@@ -150,33 +198,37 @@ export async function GET(req: NextRequest) {
     marks.map((m) => (m.codArticulo ?? "").trim()).filter(Boolean),
   );
 
-  // 2) Set B: artículos con OC hecha en el mes (Magnus, best-effort).
-  let setB = new Set<string>();
+  // 2) Los 3 fetches a Magnus, EN PARALELO (best-effort cada uno):
+  //    · ordenes-mes      → set B (OC hecha ese mes) + unidades pedidas
+  //    · ingresos         → set C (remito x OC concretado ese mes)
+  //    · deposito/faltantes → origen, estado, unidades e importe por artículo
+  const q = encodeURIComponent;
+  const [ocRes, ingRes, faltRes] = await Promise.allSettled([
+    getJson(`${API_URL}/compras/ordenes-mes?desde=${q(desde)}&hasta=${q(hasta)}`),
+    getJson(`${API_URL}/compras/ingresos?desde=${q(desde)}&hasta=${q(hasta)}`),
+    getJson(`${API_URL}/deposito/faltantes?desde=${q(desde)}&hasta=${q(hasta)}&historico=1`),
+  ]);
+
+  // Set B: artículos con OC hecha en el mes.
+  const setB = new Set<string>();
   const ocUnidMap = new Map<string, number>();
-  let ocWarn = false;
-  try {
-    const ocJson = await getJson(
-      `${API_URL}/compras/ordenes-mes?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`,
-    );
-    setB = new Set((ocJson.articulos ?? []) as string[]);
+  const ocWarn = ocRes.status !== "fulfilled";
+  if (ocRes.status === "fulfilled") {
+    const ocJson = ocRes.value;
+    for (const cod of (ocJson.articulos ?? []) as string[]) setB.add(cod);
     for (const [cod, u] of Object.entries((ocJson.unidades ?? {}) as Record<string, number>)) {
       ocUnidMap.set(cod, Number(u) || 0);
     }
-  } catch (e) {
-    ocWarn = true;
-    console.error("GET /api/compras/metricas — ordenes-mes", e);
+  } else {
+    console.error("GET /api/compras/metricas — ordenes-mes", ocRes.reason);
   }
 
-  // 3) Set C: artículos con remito de ingreso x OC concretado en el mes
-  // (Magnus, best-effort).
+  // Set C: artículos con remito de ingreso x OC concretado en el mes.
   const setC = new Set<string>();
   const ingUnidMap = new Map<string, number>();
-  let ingresoWarn = false;
-  try {
-    const ingJson = await getJson(
-      `${API_URL}/compras/ingresos?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`,
-    );
-    for (const r of (ingJson.rows ?? []) as {
+  const ingresoWarn = ingRes.status !== "fulfilled";
+  if (ingRes.status === "fulfilled") {
+    for (const r of (ingRes.value.rows ?? []) as {
       CodArticulo: string;
       CantidadIngresada?: number;
     }[]) {
@@ -185,126 +237,46 @@ export async function GET(req: NextRequest) {
       setC.add(cod);
       ingUnidMap.set(cod, (ingUnidMap.get(cod) ?? 0) + (Number(r.CantidadIngresada) || 0));
     }
-  } catch (e) {
-    ingresoWarn = true;
-    console.error("GET /api/compras/metricas — ingresos", e);
+  } else {
+    console.error("GET /api/compras/metricas — ingresos", ingRes.reason);
   }
 
-  // Denominador de la columna 2: TODA la OC del mes, sin recortar por faltantes
-  // (setB completo). Sirve para leer la card como "X de Y items": Y es lo que
-  // sale del reporte de OC del mes de Magnus, X lo que además era faltante.
-  // No cuesta ninguna consulta extra: setB/ocUnidMap ya están armados.
-  const ocTotalItems = setB.size;
+  // 3) Origen / estado / unidades por artículo — el recorte del mes.
+  const clasifWarn = faltRes.status !== "fulfilled";
+  if (clasifWarn) {
+    console.error("GET /api/compras/metricas — deposito/faltantes", faltRes.reason);
+  }
+  const faltMes = agruparFaltantesMes(
+    clasifWarn ? [] : ((faltRes.value.rows ?? []) as FilaFaltanteApi[]),
+  );
+
+  // Precio unitario por artículo (venta), para valorizar las etapas 2 y 3 sin
+  // pedirle nada más a Magnus.
+  const precioUnitMap = new Map<string, number>();
+  for (const a of faltMes.articulos.values()) {
+    if (a.unidades > 0) precioUnitMap.set(a.cod, a.importe / a.unidades);
+  }
+
+  // Denominador de la columna 2: TODA la OC del mes, sin recortar por faltantes.
   let ocTotalUnidades = 0;
   for (const u of ocUnidMap.values()) ocTotalUnidades += u;
-  ocTotalUnidades = Math.round(ocTotalUnidades * 100) / 100;
 
-  // Funnel estricto: col2 ⊆ col1 (∩ setB), col3 ⊆ col2 (∩ setC).
-  const faltantes = [...setA].sort();
-  const conOC = faltantes.filter((c) => setB.has(c));
-  const ingresados = conOC.filter((c) => setC.has(c));
-
-  // 4) Torta: clasifica el set A (Faltantes) en Importados/Nacionales/EVER
-  // WEAR INDUSTRIAL. Proveedor: Magnus faltantes viejo (best-effort) con
-  // fallback a la OC pendiente; Importación: solo de la OC pendiente.
-  // faltUnidMap/faltImporteMap: mismo fetch de arriba (deposito/faltantes),
-  // reusado también para sumar unidades ($ y cantidad) de los faltantes del
-  // mes — CantPend/Importe ya vienen calculados por renglón desde
-  // fetch_faltantes (indicadores-api/deposito.py). Si esta llamada falla,
-  // clasifWarn ya avisa (afecta torta Y estos 2 totales).
-  const faltProveedorMap = new Map<string, string | null>();
-  const faltUnidMap = new Map<string, number>();
-  const faltImporteMap = new Map<string, number>();
-  let clasifWarn = false;
-  try {
-    const faltJson = await getJson(
-      `${API_URL}/deposito/faltantes?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}&historico=1`,
-    );
-    for (const r of (faltJson.rows ?? []) as {
-      CodArticulo: string;
-      Proveedor: string | null;
-      CantPend?: number;
-      Importe?: number;
-    }[]) {
-      const cod = (r.CodArticulo ?? "").trim();
-      if (!cod) continue;
-      const prev = faltProveedorMap.get(cod);
-      if (!prev && r.Proveedor) faltProveedorMap.set(cod, r.Proveedor);
-      faltUnidMap.set(cod, (faltUnidMap.get(cod) ?? 0) + (Number(r.CantPend) || 0));
-      faltImporteMap.set(cod, (faltImporteMap.get(cod) ?? 0) + (Number(r.Importe) || 0));
-    }
-  } catch (e) {
-    clasifWarn = true;
-    console.error("GET /api/compras/metricas — deposito/faltantes (proveedor)", e);
+  // 4) Un funnel por origen + "todos". Todo en memoria, sin consultas extra.
+  const claves: OrigenFunnel[] = ["nacionales", "importados", "otros", "todos"];
+  const funnels: Record<string, Funnel> = {};
+  for (const k of claves) {
+    funnels[k] = armarFunnel(k, faltMes, setA, setB, setC, ocUnidMap, ingUnidMap, precioUnitMap);
   }
 
-  // Total de unidades y $ de los faltantes del mes (set A completo, no solo
-  // los clasificados) — suma por artículo desde los maps de arriba.
-  let faltantesUnidades = 0;
-  let faltantesImporte = 0;
-  for (const cod of faltantes) {
-    faltantesUnidades += faltUnidMap.get(cod) ?? 0;
-    faltantesImporte += faltImporteMap.get(cod) ?? 0;
-  }
-  faltantesUnidades = Math.round(faltantesUnidades * 100) / 100;
-  faltantesImporte = Math.round(faltantesImporte * 100) / 100;
-
-  // Precio unitario por artículo (venta) — base para valorizar las etapas 2 y 3
-  // en $ sin pedir nada más a Magnus.
-  const precioUnitMap = new Map<string, number>();
-  for (const [cod, imp] of faltImporteMap) {
-    const u = faltUnidMap.get(cod) ?? 0;
-    if (u > 0) precioUnitMap.set(cod, imp / u);
-  }
-
-  // Denominador del %: total de TODO lo pedido (unidades/$) ese mes, sin
-  // filtrar por artículo (indicadores-api /ventas/pedidos-mes, best-effort —
-  // si falla, el % simplemente no se informa, ver pedidosMesWarn).
-  let pedidosMesUnidades = 0;
-  let pedidosMesImporte = 0;
-  let pedidosMesWarn = false;
-  try {
-    const pedJson = await getJson(
-      `${API_URL}/ventas/pedidos-mes?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`,
-    );
-    pedidosMesUnidades = Number(pedJson.totalUnidades) || 0;
-    pedidosMesImporte = Number(pedJson.totalImporte) || 0;
-  } catch (e) {
-    pedidosMesWarn = true;
-    console.error("GET /api/compras/metricas — ventas/pedidos-mes", e);
-  }
-
-  const pctUnidades =
-    pedidosMesUnidades > 0 ? Math.round((faltantesUnidades / pedidosMesUnidades) * 1000) / 10 : null;
-  const pctImporte =
-    pedidosMesImporte > 0 ? Math.round((faltantesImporte / pedidosMesImporte) * 1000) / 10 : null;
-
-  const ocInfoMap = new Map<string, { Proveedor: string | null; Importacion: boolean }>();
-  try {
-    const ocPendJson = await getJson(`${API_URL}/compras/ordenes-pendientes`);
-    for (const r of (ocPendJson.rows ?? []) as {
-      CodArticulo: string;
-      Proveedor: string | null;
-      Importacion: boolean;
-    }[]) {
-      const cod = (r.CodArticulo ?? "").trim();
-      if (cod) ocInfoMap.set(cod, { Proveedor: r.Proveedor ?? null, Importacion: !!r.Importacion });
-    }
-  } catch (e) {
-    clasifWarn = true;
-    console.error("GET /api/compras/metricas — ordenes-pendientes (proveedor/importacion)", e);
-  }
-
-  let importados = 0;
-  let nacionales = 0;
-  let fabrica = 0;
-  for (const cod of faltantes) {
-    const oc = ocInfoMap.get(cod);
-    const proveedor = faltProveedorMap.get(cod) || oc?.Proveedor || null;
-    if (esProveedorObjetivo(proveedor)) fabrica++;
-    else if (oc?.Importacion) importados++;
-    else nacionales++;
-  }
+  // 5) Torta + badges: el set A recortado, clasificado en las 5 categorías de
+  // origenArticulo (incluye Fábrica y Original, que la vista no trabaja pero
+  // tienen que verse para que nada desaparezca sin explicación).
+  const cats: OrigenArticulo[] = ["nacionales", "importados", "fabrica", "original", "otros"];
+  const origenes = cats.map((k) => ({
+    key: k,
+    label: ORIGEN_LABEL[k],
+    total: codigosPorOrigen(faltMes, setA, k).length,
+  }));
 
   return NextResponse.json({
     mes,
@@ -313,45 +285,14 @@ export async function GET(req: NextRequest) {
     ocWarn,
     ingresoWarn,
     clasifWarn,
-    pedidosMesWarn,
-    faltantesUnidades,
-    faltantesImporte,
-    pedidosMesUnidades,
-    pedidosMesImporte,
-    pctUnidades,
-    pctImporte,
-    ocTotalItems,
-    ocTotalUnidades,
-    columnas: [
-      {
-        key: "faltantes",
-        label: "Faltantes",
-        total: faltantes.length,
-        unidades: faltantesUnidades,
-        importe: faltantesImporte,
-        articulos: faltantes,
-      },
-      {
-        key: "conOC",
-        label: "Con OC",
-        total: conOC.length,
-        unidades: sumUnid(conOC, ocUnidMap),
-        importe: sumImporte(conOC, ocUnidMap, precioUnitMap),
-        articulos: conOC,
-      },
-      {
-        key: "ingresados",
-        label: "Ingresados",
-        total: ingresados.length,
-        unidades: sumUnid(ingresados, ingUnidMap),
-        importe: sumImporte(ingresados, ingUnidMap, precioUnitMap),
-        articulos: ingresados,
-      },
-    ],
-    torta: [
-      { key: "importados", label: "Importados", total: importados },
-      { key: "nacionales", label: "Nacionales", total: nacionales },
-      { key: "fabrica", label: "EVER WEAR INDUSTRIAL", total: fabrica },
-    ],
+    // false = indicadores-api no informó el estado del artículo (columna no
+    // detectada en StkFer_Articulos): NO se filtró por Habilitado.
+    estadoArticuloDisponible: faltMes.estadoDisponible,
+    unidadesDescartadas: r2(faltMes.unidadesDescartadas),
+    ocTotalItems: setB.size,
+    ocTotalUnidades: r2(ocTotalUnidades),
+    origenDefault: "nacionales",
+    origenes,
+    funnels,
   });
 }

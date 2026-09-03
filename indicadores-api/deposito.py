@@ -889,6 +889,56 @@ def fetch_pedidos_hora(fecha: date | None = None):
     return out
 
 
+# ── Estado del artículo (1 Habilitado / 2 Suspendido / 3 Baja) ────────────────
+# El nombre de la columna en StkFer_Articulos no está documentado (no se usaba
+# en ninguna vista hasta ahora), así que se DETECTA por INFORMATION_SCHEMA con
+# la misma lista de candidatos que detalle_mes_extraccion.py y se cachea a
+# nivel proceso: la detección corre UNA vez, no una por request.
+# Si no aparece ninguno, las consultas devuelven NULL en EstadoArticulo y el
+# consumidor no filtra nada (mejor de más que perder filas en silencio).
+_CAND_ESTADO_ART = ("EstadoArticulo", "CodEstado", "Estado", "EstadoArt",
+                    "SituacionArticulo", "Situacion", "Habilitado")
+_ESTADO_ART_DESC = {1: "Habilitado", 2: "Suspendido", 3: "Baja"}
+_SQL_COLS_ART = """
+SELECT COLUMN_NAME
+FROM EVERWEAR.INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'StkFer_Articulos'
+"""
+_col_estado_art: str | None = None
+_col_estado_art_resuelto = False
+
+
+def _col_estado_articulo(cur) -> str | None:
+    """Nombre real de la columna de estado en StkFer_Articulos, o None."""
+    global _col_estado_art, _col_estado_art_resuelto
+    if _col_estado_art_resuelto:
+        return _col_estado_art
+    try:
+        cur.execute(_SQL_COLS_ART)
+        cols = {str(r[0]).strip() for r in cur.fetchall()}
+        _col_estado_art = next((c for c in _CAND_ESTADO_ART if c in cols), None)
+    except Exception:  # noqa: BLE001 - si falla, se sigue sin la columna
+        _col_estado_art = None
+    _col_estado_art_resuelto = True
+    return _col_estado_art
+
+
+def _sql_con_estado_art(sql: str, col: str | None) -> str:
+    """Reemplaza el placeholder --ESTADO_ART-- por la columna detectada."""
+    return sql.replace("--ESTADO_ART--", f"s.[{col}]" if col else "NULL")
+
+
+def _estado_art_desc(v):
+    """1/2/3 (o el texto que traiga la columna) → 'Habilitado'/'Suspendido'/'Baja'."""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return str(v).strip()
+    return _ESTADO_ART_DESC.get(n, f"({n})")
+
+
 # ── Faltantes (renglones pendientes del último día con registro < hoy) ────────
 SQL_FALTANTES = """
 SELECT
@@ -905,6 +955,8 @@ SELECT
     p.PrecioVenta,
     LTRIM(RTRIM(n1.Detalle)) AS Linea,   -- nombre real (Stk_Nivel1), no el codigo
     t.Descripcion   AS TipoArticulo,
+    --ESTADO_ART--   AS EstadoArticulo,   -- 1 Habilitado / 2 Suspendido / 3 Baja (columna detectada, ver _col_estado_articulo)
+    pest.Ped_EstadoDescripcion AS EstadoPedido,
     gp.Nombre       AS Preparador,
     pr.RazonSocial  AS Proveedor,
     -- Maestro correcto de vendedores = MAGNUS_SITD.dbo.Vendedores (mismo que
@@ -937,6 +989,7 @@ LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]          gp ON gp.Numero       = prep.CodP
 LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoCabecera] cab ON cab.NroMovVenta = p.NroPedOrigen
 LEFT JOIN MAGNUS_SITD.dbo.[Ped_Usu_Arma]       uv ON cab.Vendedor    = uv.Usu_Arma_Codigo
 LEFT JOIN MAGNUS_SITD.dbo.[Vendedores]         vend ON vend.VendedorCodigo = cab.Vendedor
+LEFT JOIN MAGNUS_SITD.dbo.[Pedido_Estados]     pest ON pest.Ped_Estado    = cab.EstadoPedido
 LEFT JOIN MAGNUS_SITD.dbo.[Clientes]           cli ON cli.CodCliente = p.CodCliente
 WHERE p.FecRegistracion = (
     SELECT MAX(FecRegistracion)
@@ -988,6 +1041,8 @@ SELECT
     b.PrecioVenta,
     LTRIM(RTRIM(n1.Detalle)) AS Linea,   -- nombre real (Stk_Nivel1), no el codigo
     t.Descripcion   AS TipoArticulo,
+    --ESTADO_ART--   AS EstadoArticulo,   -- 1 Habilitado / 2 Suspendido / 3 Baja (columna detectada, ver _col_estado_articulo)
+    pest.Ped_EstadoDescripcion AS EstadoPedido,
     gp.Nombre       AS Preparador,
     pr.RazonSocial  AS Proveedor,
     -- Maestro correcto de vendedores = MAGNUS_SITD.dbo.Vendedores (mismo que
@@ -1020,6 +1075,7 @@ LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]          gp ON gp.Numero       = prep.CodP
 LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoCabecera] cab ON cab.NroMovVenta = b.NroPedOrigen
 LEFT JOIN MAGNUS_SITD.dbo.[Ped_Usu_Arma]       uv ON cab.Vendedor    = uv.Usu_Arma_Codigo
 LEFT JOIN MAGNUS_SITD.dbo.[Vendedores]         vend ON vend.VendedorCodigo = cab.Vendedor
+LEFT JOIN MAGNUS_SITD.dbo.[Pedido_Estados]     pest ON pest.Ped_Estado    = cab.EstadoPedido
 LEFT JOIN MAGNUS_SITD.dbo.[Clientes]           cli ON cli.CodCliente = b.CodCliente
 WHERE b.rn = 1
   -- Solo lo que sigue pendiente en la foto más nueva del rango: si un renglón se
@@ -1078,6 +1134,8 @@ SELECT
     b.PrecioVenta,
     LTRIM(RTRIM(n1.Detalle)) AS Linea,   -- nombre real (Stk_Nivel1), no el codigo
     t.Descripcion   AS TipoArticulo,
+    --ESTADO_ART--   AS EstadoArticulo,   -- 1 Habilitado / 2 Suspendido / 3 Baja (columna detectada, ver _col_estado_articulo)
+    pest.Ped_EstadoDescripcion AS EstadoPedido,
     gp.Nombre       AS Preparador,
     pr.RazonSocial  AS Proveedor,
     -- Maestro correcto de vendedores = MAGNUS_SITD.dbo.Vendedores (mismo que
@@ -1110,6 +1168,7 @@ LEFT JOIN EVERWEAR.dbo.[Gen_Usuarios]          gp ON gp.Numero       = prep.CodP
 LEFT JOIN EVERWEAR.dbo.[VenFer_PedidoCabecera] cab ON cab.NroMovVenta = b.NroPedOrigen
 LEFT JOIN MAGNUS_SITD.dbo.[Ped_Usu_Arma]       uv ON cab.Vendedor    = uv.Usu_Arma_Codigo
 LEFT JOIN MAGNUS_SITD.dbo.[Vendedores]         vend ON vend.VendedorCodigo = cab.Vendedor
+LEFT JOIN MAGNUS_SITD.dbo.[Pedido_Estados]     pest ON pest.Ped_Estado    = cab.EstadoPedido
 LEFT JOIN MAGNUS_SITD.dbo.[Clientes]           cli ON cli.CodCliente = b.CodCliente
 WHERE b.rn = 1
 ORDER BY PrimerDia, u.ubicacion, b.NroPedOrigen, b.NroRengOrigen
@@ -1181,13 +1240,14 @@ def fetch_faltantes(desde=None, hasta=None, historico=False):
     try:
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
+        col_est = _col_estado_articulo(cur)  # cacheado: 1 sola vez por proceso
         if desde is None and hasta is None:
-            cur.execute(SQL_FALTANTES)
+            cur.execute(_sql_con_estado_art(SQL_FALTANTES, col_est))
         else:
             d_num, h_num = _rango_dias(desde, hasta)
             # params: BETWEEN del CTE (d,h) + BETWEEN de la subconsulta (d,h)
             sql = SQL_FALTANTES_RANGO_HIST if historico else SQL_FALTANTES_RANGO
-            cur.execute(sql, (d_num, h_num, d_num, h_num))
+            cur.execute(_sql_con_estado_art(sql, col_est), (d_num, h_num, d_num, h_num))
         cols = [c[0] for c in cur.description]
         fecha, rows = None, []
         for r in cur.fetchall():
@@ -1210,6 +1270,11 @@ def fetch_faltantes(desde=None, hasta=None, historico=False):
                 "ClienteNombre": _txt(d.get("ClienteNombre")) or None,
                 "Importe":       round(precio * cant, 2),
                 "TipoArticulo":  _txt(d.get("TipoArticulo")).replace("Fabril", "Fabrica"),
+                # Estado del ARTÍCULO (Habilitado/Suspendido/Baja) y del PEDIDO
+                # del renglón: /compras usa los dos para recortar el mes igual
+                # que el reporte de Magnus (habilitados, sin pedidos cancelados).
+                "EstadoArticulo": _estado_art_desc(d.get("EstadoArticulo")),
+                "EstadoPedido":  _txt(d.get("EstadoPedido")) or None,
                 "Preparador":    _txt(d.get("Preparador")),
                 "Linea":         _safe(d.get("Linea")),
                 "Proveedor":     _txt(d.get("Proveedor")),

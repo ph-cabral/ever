@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import {
+  agruparFaltantesMes,
+  pasaRecorte,
+  type FilaFaltanteApi,
+} from "@/lib/compras/faltantesMes";
 
 const API_URL =
   process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
@@ -21,7 +26,13 @@ export const maxDuration = 60;
 // Fuentes: exactamente las mismas que /api/compras/metricas, para que los
 // totales del Excel cierren con las cards:
 //   · Faltantes  → Postgres preparado.faltante_existencia (set A) + CantPend
-//     por artículo de Magnus (GET /deposito/faltantes?historico=1).
+//     por artículo de Magnus (GET /deposito/faltantes?historico=1), con el
+//     MISMO recorte que las cards (lib/compras/faltantesMes.ts): `esFaltante`
+//     solo queda en true para artículos habilitados cuyo faltante no viene
+//     únicamente de pedidos cancelados, y `cantFaltante` no cuenta esos
+//     renglones (van aparte en `cantFaltanteCancelada`). Las filas NO se
+//     borran: se agregan las columnas `origen` y `estadoArticulo` para poder
+//     filtrar en el Excel y ver qué quedó afuera y por qué.
 //   · OC         → GET /compras/ordenes-detalle (mismo recorte que
 //     /compras/ordenes-mes: FecMovim de la cabecera, sin canceladas, sin
 //     Genérico/Fabril) + números de OC, proveedor y descripción.
@@ -62,8 +73,14 @@ interface Fila {
   codArticulo: string;
   nombre: string | null;
   proveedor: string | null;
+  /** nacionales | importados | fabrica | original | otros (origenArticulo). */
+  origen: string | null;
+  /** Habilitado | Suspendido | Baja (o null si Magnus no lo informó). */
+  estadoArticulo: string | null;
   esFaltante: boolean;
   cantFaltante: number;
+  /** CantPend que quedó afuera por pedido cancelado o sin estado. */
+  cantFaltanteCancelada: number;
   cantOC: number;
   nroOCs: string[];
   fechaUltimaOC: string | null;
@@ -115,8 +132,11 @@ export async function GET(req: NextRequest) {
         codArticulo: cod,
         nombre: null,
         proveedor: null,
-        esFaltante: setA.has(cod),
+        origen: null,
+        estadoArticulo: null,
+        esFaltante: false, // se resuelve abajo, con el recorte aplicado
         cantFaltante: 0,
+        cantFaltanteCancelada: 0,
         cantOC: 0,
         nroOCs: [],
         fechaUltimaOC: null,
@@ -134,19 +154,30 @@ export async function GET(req: NextRequest) {
 
   // Faltantes: unidades pendientes + nombre/proveedor (mismo dato que usa la
   // card "Unidades faltantes" — se suma por artículo).
+  const faltRows = faltRes.status === "fulfilled"
+    ? ((faltRes.value.rows ?? []) as (FilaFaltanteApi & { Nombre?: string | null })[])
+    : [];
+  const faltMes = agruparFaltantesMes(faltRows);
   if (faltRes.status === "fulfilled") {
-    for (const r of (faltRes.value.rows ?? []) as {
-      CodArticulo: string;
-      Nombre?: string | null;
-      Proveedor?: string | null;
-      CantPend?: number;
-    }[]) {
+    // Nombre por artículo: no lo agrupa faltantesMes (no lo necesita el funnel).
+    const nombres = new Map<string, string>();
+    for (const r of faltRows) {
       const cod = (r.CodArticulo ?? "").trim();
-      if (!cod || !setA.has(cod)) continue; // solo los faltantes del mes
-      const f = fila(cod);
-      f.cantFaltante += Number(r.CantPend) || 0;
-      if (!f.nombre && r.Nombre) f.nombre = r.Nombre;
-      if (!f.proveedor && r.Proveedor) f.proveedor = r.Proveedor;
+      if (cod && r.Nombre && !nombres.has(cod)) nombres.set(cod, r.Nombre);
+    }
+    for (const a of faltMes.articulos.values()) {
+      if (!setA.has(a.cod)) continue; // solo los marcados por la mesa
+      const f = fila(a.cod);
+      f.cantFaltante += a.unidades;
+      f.cantFaltanteCancelada += a.unidadesCanceladas;
+      f.origen = a.origen;
+      f.estadoArticulo = faltMes.estadoDisponible
+        ? (a.habilitado ? "Habilitado" : "No habilitado")
+        : null;
+      f.esFaltante = pasaRecorte(a, faltMes.estadoDisponible);
+      const nom = nombres.get(a.cod);
+      if (!f.nombre && nom) f.nombre = nom;
+      if (!f.proveedor && a.proveedor) f.proveedor = a.proveedor;
     }
   } else {
     warns.push("No se pudieron leer las unidades faltantes del mes");
@@ -203,6 +234,7 @@ export async function GET(req: NextRequest) {
     .map((f) => ({
       ...f,
       cantFaltante: r2(f.cantFaltante),
+      cantFaltanteCancelada: r2(f.cantFaltanteCancelada),
       cantOC: r2(f.cantOC),
       cantIngresada: r2(f.cantIngresada),
     }))

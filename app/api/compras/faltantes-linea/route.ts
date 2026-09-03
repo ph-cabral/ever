@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import {
+  agruparFaltantesMes,
+  pasaRecorte,
+  ORIGEN_LABEL,
+  type FilaFaltanteApi,
+} from "@/lib/compras/faltantesMes";
+import type { OrigenArticulo } from "@/lib/compras/origenArticulo";
 
 const API_URL =
   process.env.INDICADORES_API_URL ?? "http://indicadores-api:8001";
@@ -8,39 +15,40 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// /compras — sección "Faltantes por línea" (2026-08-26).
+// /compras — sección "Faltantes por línea".
 //
 // Los faltantes de un mes, tal como se marcaron en /deposito/faltantes
-// (preparado.faltante_existencia con existencia=false), separados en dos
-// tablas — IMPORTADOS y NACIONALES — y agrupados por LÍNEA (no por artículo).
-// Por cada línea:
+// (preparado.faltante_existencia con existencia=false), agrupados por LÍNEA
+// (no por artículo) y separados por ORIGEN del artículo. Por cada línea:
 //   · items          → artículos distintos faltantes
 //   · cantFaltante   → suma de faltante_existencia.cantidad, o sea lo que el
 //                      operario marcó como sin existencia (decisión:
-//                      NO el CantPend de Magnus que usa la torta de arriba).
+//                      NO el CantPend de Magnus).
 //   · cantComprada   → unidades de OC hechas ESE MISMO MES para esos mismos
 //                      artículos (/compras/compras-valorizado, por FecMovim).
 //   · monto          → esas unidades valorizadas a precio de VENTA (último
 //                      PrecioVenta visto en Ven_PedRenPendientes), no al costo
 //                      de la OC — mismo criterio que la card "Compras del mes".
 //
-// Origen (Importado / Nacional): misma precedencia que /api/compras/metricas.
-//   · Importación sale SOLO de /compras/ordenes-pendientes; sin OC asociada →
-//     Nacional (mismo default que faltantes-consumo y metricas).
-//   · EVER WEAR S.A. INDUSTRIAL (proveedor propio) se EXCLUYE de la vista
-//     (decisión): no se compra, se fabrica. Se informa cuántos
-//     artículos se excluyeron en `excluidosFabrica`.
+// RECORTE (2026-09-03) — mismo universo que las cards de /compras: se comparte
+// lib/compras/faltantesMes.ts (origen real del artículo por Stk_TiposArticulos,
+// solo Habilitados, sin renglones de pedidos cancelados). Antes el origen salía
+// de la heurística `Importacion` de /compras/ordenes-pendientes, que
+// clasificaba mal y no coincidía con /compras/faltantes.
 //
-// Todo lo de Magnus es best-effort: si una fuente no responde, se avisa por
-// warn y la vista muestra la parte que sí se pudo calcular.
+// Dos consecuencias buenas para la latencia: ya no se consulta
+// /compras/ordenes-pendientes (el origen no lo necesita) ni
+// /compras/lineas-articulos (la línea ya viene en /deposito/faltantes). Quedan
+// 2 fetches y salen EN PARALELO.
+//
+// Los grupos son los 3 del selector de la vista (nacionales / importados /
+// otros). Fábrica y Original no se trabajan en compras: se cuentan aparte en
+// `excluidos` para que nada desaparezca sin explicación.
 // ──────────────────────────────────────────────────────────────────────────────
 
-const PROVEEDOR_OBJETIVO = "ever wear s.a. industrial";
-const norm = (s: string) =>
-  s.toLowerCase().normalize("NFD").replace(new RegExp("[\\u0300-\\u036f]", "g"), "").trim();
-const esProveedorObjetivo = (p: string | null) => !!p && norm(p).includes(PROVEEDOR_OBJETIVO);
-
 const SIN_LINEA = "SIN LÍNEA";
+
+const GRUPOS: OrigenArticulo[] = ["nacionales", "importados", "otros"];
 
 async function getJson(url: string) {
   const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(45000) });
@@ -61,6 +69,8 @@ function mesRange(mes: string | null) {
   const hasta = `${yStr}-${mStr}-${String(ultimoDia).padStart(2, "0")}`;
   return { mes: `${yStr}-${mStr}`, desde, hasta };
 }
+
+const r2 = (n: number) => Math.round(n * 100) / 100;
 
 interface Acum {
   linea: string;
@@ -92,51 +102,29 @@ export async function GET(req: NextRequest) {
     if (!cod) continue;
     faltanteUnid.set(cod, (faltanteUnid.get(cod) ?? 0) + (Number(m.cantidad) || 0));
   }
-  const codigos = [...faltanteUnid.keys()].sort();
 
-  // 2) Proveedor / importación por artículo (Magnus, best-effort).
-  const ocInfoMap = new Map<string, { Proveedor: string | null; Importacion: boolean }>();
-  let clasifWarn = false;
-  try {
-    const ocPendJson = await getJson(`${API_URL}/compras/ordenes-pendientes`);
-    for (const r of (ocPendJson.rows ?? []) as {
-      CodArticulo: string;
-      Proveedor: string | null;
-      Importacion: boolean;
-    }[]) {
-      const cod = (r.CodArticulo ?? "").trim();
-      if (cod) ocInfoMap.set(cod, { Proveedor: r.Proveedor ?? null, Importacion: !!r.Importacion });
-    }
-  } catch (e) {
-    clasifWarn = true;
-    console.error("GET /api/compras/faltantes-linea — ordenes-pendientes", e);
+  // 2) Los 2 fetches a Magnus, en paralelo (best-effort cada uno):
+  //    · deposito/faltantes    → origen, estado, línea por artículo
+  //    · compras-valorizado    → unidades y $ de OC del mes por artículo
+  const q = encodeURIComponent;
+  const [faltRes, valRes] = await Promise.allSettled([
+    getJson(`${API_URL}/deposito/faltantes?desde=${q(desde)}&hasta=${q(hasta)}&historico=1`),
+    getJson(`${API_URL}/compras/compras-valorizado?desde=${q(desde)}&hasta=${q(hasta)}`),
+  ]);
+
+  const clasifWarn = faltRes.status !== "fulfilled";
+  if (clasifWarn) {
+    console.error("GET /api/compras/faltantes-linea — deposito/faltantes", faltRes.reason);
   }
+  const faltMes = agruparFaltantesMes(
+    clasifWarn ? [] : ((faltRes.value.rows ?? []) as FilaFaltanteApi[]),
+  );
 
-  // Proveedor "viejo" de Magnus, para detectar los de fábrica que no tienen OC
-  // pendiente (misma precedencia que /api/compras/metricas).
-  const faltProveedorMap = new Map<string, string | null>();
-  try {
-    const faltJson = await getJson(
-      `${API_URL}/deposito/faltantes?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}&historico=1`,
-    );
-    for (const r of (faltJson.rows ?? []) as { CodArticulo: string; Proveedor: string | null }[]) {
-      const cod = (r.CodArticulo ?? "").trim();
-      if (cod && r.Proveedor && !faltProveedorMap.get(cod)) faltProveedorMap.set(cod, r.Proveedor);
-    }
-  } catch (e) {
-    clasifWarn = true;
-    console.error("GET /api/compras/faltantes-linea — deposito/faltantes", e);
-  }
-
-  // 3) OC del mes por artículo: unidades + $ a precio de venta (best-effort).
   const compradoUnid = new Map<string, number>();
   const compradoMonto = new Map<string, number>();
-  let ocWarn = false;
-  try {
-    const valJson = await getJson(
-      `${API_URL}/compras/compras-valorizado?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`,
-    );
-    for (const r of (valJson.rows ?? []) as {
+  const ocWarn = valRes.status !== "fulfilled";
+  if (valRes.status === "fulfilled") {
+    for (const r of (valRes.value.rows ?? []) as {
       CodArticulo: string;
       Cantidad: number;
       Importe: number;
@@ -146,58 +134,35 @@ export async function GET(req: NextRequest) {
       compradoUnid.set(cod, (compradoUnid.get(cod) ?? 0) + (Number(r.Cantidad) || 0));
       compradoMonto.set(cod, (compradoMonto.get(cod) ?? 0) + (Number(r.Importe) || 0));
     }
-  } catch (e) {
-    ocWarn = true;
-    console.error("GET /api/compras/faltantes-linea — compras-valorizado", e);
+  } else {
+    console.error("GET /api/compras/faltantes-linea — compras-valorizado", valRes.reason);
   }
 
-  // 4) Línea de cada artículo faltante (Magnus, best-effort → SIN LÍNEA).
-  const lineaMap = new Map<string, string>();
-  let lineaWarn = false;
-  if (codigos.length) {
-    try {
-      const res = await fetch(`${API_URL}/compras/lineas-articulos`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ codigos }),
-        cache: "no-store",
-        signal: AbortSignal.timeout(45000),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const j = await res.json();
-      for (const [cod, linea] of Object.entries((j.lineas ?? {}) as Record<string, string>)) {
-        if (linea) lineaMap.set(cod.trim(), linea);
-      }
-    } catch (e) {
-      lineaWarn = true;
-      console.error("GET /api/compras/faltantes-linea — lineas-articulos", e);
-    }
-  }
+  // 3) Agrupar: origen → línea.
+  const grupos = new Map<OrigenArticulo, Map<string, Acum>>(
+    GRUPOS.map((g) => [g, new Map<string, Acum>()]),
+  );
+  const excluidos: Record<string, number> = { fabrica: 0, original: 0, sinRenglon: 0, noHabilitado: 0 };
 
-  // 5) Agrupar: origen → línea.
-  const grupos: Record<"importados" | "nacionales", Map<string, Acum>> = {
-    importados: new Map(),
-    nacionales: new Map(),
-  };
-  let excluidosFabrica = 0;
-
-  for (const cod of codigos) {
-    const oc = ocInfoMap.get(cod);
-    const proveedor = faltProveedorMap.get(cod) || oc?.Proveedor || null;
-    if (esProveedorObjetivo(proveedor)) {
-      excluidosFabrica++;
+  for (const cod of [...faltanteUnid.keys()].sort()) {
+    const a = faltMes.articulos.get(cod);
+    if (!a) {
+      // Marcado en la mesa pero sin renglón vivo en Magnus ese mes.
+      excluidos.sinRenglon++;
       continue;
     }
-    const key = oc?.Importacion ? "importados" : "nacionales";
-    const linea = lineaMap.get(cod) ?? SIN_LINEA;
-    const mapa = grupos[key];
-    const acum = mapa.get(linea) ?? {
-      linea,
-      items: 0,
-      cantFaltante: 0,
-      cantComprada: 0,
-      monto: 0,
-    };
+    if (!pasaRecorte(a, faltMes.estadoDisponible)) {
+      excluidos.noHabilitado++;
+      continue;
+    }
+    const mapa = grupos.get(a.origen);
+    if (!mapa) {
+      // fabrica / original: no se trabajan en compras.
+      excluidos[a.origen] = (excluidos[a.origen] ?? 0) + 1;
+      continue;
+    }
+    const linea = a.linea || SIN_LINEA;
+    const acum = mapa.get(linea) ?? { linea, items: 0, cantFaltante: 0, cantComprada: 0, monto: 0 };
     acum.items += 1;
     acum.cantFaltante += faltanteUnid.get(cod) ?? 0;
     acum.cantComprada += compradoUnid.get(cod) ?? 0;
@@ -210,9 +175,9 @@ export async function GET(req: NextRequest) {
       .map((a) => ({
         linea: a.linea,
         items: a.items,
-        cantFaltante: Math.round(a.cantFaltante * 100) / 100,
-        cantComprada: Math.round(a.cantComprada * 100) / 100,
-        monto: Math.round(a.monto * 100) / 100,
+        cantFaltante: r2(a.cantFaltante),
+        cantComprada: r2(a.cantComprada),
+        monto: r2(a.monto),
       }))
       .sort((a, b) => b.cantFaltante - a.cantFaltante || a.linea.localeCompare(b.linea));
     const total = filas.reduce(
@@ -228,12 +193,16 @@ export async function GET(req: NextRequest) {
       lineas: filas,
       total: {
         items: total.items,
-        cantFaltante: Math.round(total.cantFaltante * 100) / 100,
-        cantComprada: Math.round(total.cantComprada * 100) / 100,
-        monto: Math.round(total.monto * 100) / 100,
+        cantFaltante: r2(total.cantFaltante),
+        cantComprada: r2(total.cantComprada),
+        monto: r2(total.monto),
       },
     };
   };
+
+  const porOrigen = Object.fromEntries(
+    GRUPOS.map((g) => [g, { label: ORIGEN_LABEL[g], ...armar(grupos.get(g)!) }]),
+  );
 
   return NextResponse.json({
     mes,
@@ -241,10 +210,11 @@ export async function GET(req: NextRequest) {
     hasta,
     ocWarn,
     clasifWarn,
-    lineaWarn,
-    excluidosFabrica,
-    articulosFaltantes: codigos.length,
-    importados: armar(grupos.importados),
-    nacionales: armar(grupos.nacionales),
+    lineaWarn: clasifWarn, // la línea viene del mismo fetch que el origen
+    estadoArticuloDisponible: faltMes.estadoDisponible,
+    excluidos,
+    excluidosFabrica: excluidos.fabrica, // compat con la vista anterior
+    articulosFaltantes: faltanteUnid.size,
+    ...porOrigen,
   });
 }
