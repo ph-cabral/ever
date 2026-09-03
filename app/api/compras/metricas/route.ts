@@ -31,8 +31,13 @@ export const maxDuration = 60;
 //     si ya se recibió o sigue pendiente.
 //
 //   Columna 3 "Ingresados": de los artículos de la columna 2, cuántos tuvieron
-//     un remito de ingreso x OC ya concretado ese mismo mes (indicadores-api
+//     un remito de ingreso ya concretado ese mismo mes (indicadores-api
 //     GET /compras/ingresos, por FecComprobante).
+//     2026-09-03: el universo de remitos son TODOS los tipos de comprobante de
+//     ingreso (59 RMTOxCPA.D · 60 RMTOxORD · 61 REM AV S.F · 160 · 590 REM IN
+//     LIL), no solo los que cuelgan de una OC — es el mismo universo del
+//     reporte de remitos del mes de Magnus. Antes se exigía NroOrdCompra <> 0 y
+//     quedaba afuera ~4 de cada 10 renglones de remito del mes.
 //
 //   Es un funnel estricto: col2 ⊆ col1, col3 ⊆ col2.
 //
@@ -223,10 +228,15 @@ export async function GET(req: NextRequest) {
     console.error("GET /api/compras/metricas — ordenes-mes", ocRes.reason);
   }
 
-  // Set C: artículos con remito de ingreso x OC concretado en el mes.
+  // Set C: artículos con remito de ingreso concretado en el mes (todos los
+  // tipos de comprobante de ingreso, ver cabecera).
   const setC = new Set<string>();
   const ingUnidMap = new Map<string, number>();
   const ingresoWarn = ingRes.status !== "fulfilled";
+  // true = indicadores-api no pudo detectar la columna del código de
+  // comprobante en Com_RemitoCabecera → no filtró por tipo de remito.
+  const comprobanteWarn =
+    ingRes.status === "fulfilled" && ingRes.value?.comprobanteWarn === true;
   if (ingRes.status === "fulfilled") {
     for (const r of (ingRes.value.rows ?? []) as {
       CodArticulo: string;
@@ -284,6 +294,7 @@ export async function GET(req: NextRequest) {
     hasta,
     ocWarn,
     ingresoWarn,
+    comprobanteWarn,
     clasifWarn,
     // false = indicadores-api no informó el estado del artículo (columna no
     // detectada en StkFer_Articulos): NO se filtró por Habilitado.

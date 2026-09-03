@@ -36,7 +36,9 @@ export const maxDuration = 60;
 //   · OC         → GET /compras/ordenes-detalle (mismo recorte que
 //     /compras/ordenes-mes: FecMovim de la cabecera, sin canceladas, sin
 //     Genérico/Fabril) + números de OC, proveedor y descripción.
-//   · Ingresos   → GET /compras/ingresos (remitos x OC concretados en el mes)
+//   · Ingresos   → GET /compras/ingresos (remitos de ingreso concretados en el
+//                  mes: TODOS los tipos de comprobante de ingreso 59/60/61/160/
+//                  590, no solo los ligados a una OC — ver ingresos.py)
 //     + números de remito.
 //
 // Las 3 llamadas a Magnus salen EN PARALELO (Promise.all): son independientes

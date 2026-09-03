@@ -19,6 +19,11 @@ interface Row {
   fechaArribo: string | null;
   estado: Estado;
   comprar: boolean | null;
+  // Ingresos por remito del período (ver /compras/faltantes): total del
+  // artículo, no del día. Opcionales por compatibilidad con llamadores viejos.
+  ingresado?: number;
+  remitos?: { nro: string; fecha: string; cant: number }[];
+  ultimoIngreso?: string | null;
 }
 
 const ESTADO_LABEL: Record<Estado, string> = {
@@ -53,6 +58,9 @@ function filaFaltante(r: Row) {
     "Falta OC": r.descubierto,
     Entrega: r.estado === "entregado" ? "Entregado" : r.importacion ? "Importación" : r.fechaEntrega || "",
     Importe: r.importe,
+    Ingresado: r.ingresado ?? 0,
+    "N° de remitos": (r.remitos ?? []).map((m) => m.nro).join(", "),
+    "Último ingreso": r.ultimoIngreso || "",
     Arribo: r.fechaArribo || "",
     Estado: ESTADO_LABEL[r.estado],
   };

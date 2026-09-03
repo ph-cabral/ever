@@ -48,6 +48,9 @@ interface Resp {
   hasta: string;
   ocWarn: boolean;
   ingresoWarn: boolean;
+  // true = no se detectó la columna del código de comprobante en
+  // Com_RemitoCabecera: los ingresos vienen sin filtro por tipo de remito.
+  comprobanteWarn?: boolean;
   clasifWarn: boolean;
   // false = indicadores-api no informó el estado del artículo (columna no
   // detectada en StkFer_Articulos): NO se filtró por Habilitado.
@@ -516,6 +519,12 @@ export default function ComprasMetricasPage() {
                 : "Ingresos no disponible — columna “Ingresados” puede estar incompleta"}
           </div>
         )}
+        {data && !data.ingresoWarn && data.comprobanteWarn && (
+          <div className="flex items-center gap-1.5 text-xs text-amber-400/80">
+            <AlertTriangle size={13} />
+            Ingresos sin filtro por tipo de comprobante — pueden contarse remitos de más
+          </div>
+        )}
         {data?.clasifWarn && (
           <div className="flex items-center gap-1.5 text-xs text-amber-400/80">
             <AlertTriangle size={13} />
@@ -548,7 +557,7 @@ export default function ComprasMetricasPage() {
           <KpiCard
             label="Ingresados ese mes"
             value={<StackedKpi items={`${fmtNum(col("ingresados"))} items`} unidades={`${fmtNum(unid("ingresados"))} u.`} importe={fmtMoney(imp("ingresados"))} />}
-            hint="De esos, ya recibidos en depósito — unidades ingresadas por remito y su $"
+            hint="De esos, ya recibidos en depósito — unidades ingresadas por remito y su $. Cuentan todos los tipos de remito de ingreso (por orden, compra directa, a valorizar sin factura), igual que el reporte de remitos del mes"
             icon={PackageCheck}
             accent="green"
           />

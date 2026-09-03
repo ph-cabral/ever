@@ -52,6 +52,15 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 //       neutro (ver rowCls) para no mezclar "ya hay algo en camino" con
 //       "no hay nada pedido todavía".
 //
+//   Columna "Ingresado" (2026-09-03): unidades que YA entraron por remito en el
+//   período (indicadores-api /compras/ingresos, agregado por artículo). Es un
+//   total del artículo, no del día: se repite en todos los buckets de ese
+//   artículo. El universo son TODOS los tipos de comprobante de ingreso
+//   (59 RMTOxCPA.D · 60 RMTOxORD · 61 REM AV S.F · 160 · 590 REM IN LIL), no
+//   solo los remitos ligados a una OC — mismo universo que el reporte de
+//   remitos del mes de Magnus y que la card "Ingresados" de /compras. El
+//   tooltip lista remito por remito (N° · fecha · cantidad).
+//
 //   Fecha de arribo (columna "Arribo"): se carga acá a nivel artículo+día y se
 //   aplica (fan-out) a todos los renglones de ese bucket en
 //   preparado.faltante_control (/api/compras/faltantes-arribo). Por defecto
@@ -119,6 +128,12 @@ interface Row {
   comprar: boolean | null; // null = pendiente (decide ventas/faltantes)
   fechaArribo: string | null; // más vieja cargada entre los renglones del bucket
   tieneArribo: boolean; // true = TODOS los renglones del bucket ya la tienen
+  // Ingresos por remito del PERÍODO (no del día): total del artículo entre el
+  // ancla del cruce y el "hasta" del rango. Entran todos los tipos de remito
+  // de ingreso (59/60/61/160/590), no solo los que cuelgan de una OC.
+  ingresado: number;
+  remitos: { nro: string; fecha: string; cant: number }[];
+  ultimoIngreso: string | null;
 }
 
 const fmtNum = (n: number) =>
@@ -283,6 +298,7 @@ function Tabla({
             )}
             <th className="px-3 py-2 font-medium whitespace-nowrap">Cliente</th>
             <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Importe</th>
+            <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Ingresado</th>
             <th className="px-3 py-2 font-medium whitespace-nowrap">Arribo</th>
             <th className="px-3 py-2 font-medium"></th>
           </tr>
@@ -365,6 +381,37 @@ function Tabla({
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums text-zinc-300 whitespace-nowrap">
                   ${fmtNum(r.importe)}
+                </td>
+                {/* Ingresado por remito en el período (total del artículo, ver
+                    cabecera). Tooltip = remito por remito. */}
+                <td
+                  className="px-3 py-2 text-right tabular-nums whitespace-nowrap"
+                  title={
+                    r.ingresado > 0
+                      ? "Ingresado por remito en el período (total del artículo)\n" +
+                        r.remitos
+                          .map(
+                            (m) =>
+                              `${m.nro}${m.fecha ? ` · ${fmtAr(m.fecha)}` : ""}${
+                                m.cant ? ` · ${fmtNum(m.cant)} u.` : ""
+                              }`,
+                          )
+                          .join("\n")
+                      : "Sin remitos de ingreso en el período"
+                  }
+                >
+                  {r.ingresado > 0 ? (
+                    <span className="text-sky-300">
+                      {fmtNum(r.ingresado)}
+                      {r.remitos.length > 0 && (
+                        <span className="ml-1 text-[11px] text-zinc-500">
+                          {r.remitos.length} rem.
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="text-zinc-600">—</span>
+                  )}
                 </td>
                 <td className="px-3 py-2">
                   {(() => {
@@ -536,6 +583,8 @@ export default function ComprasFaltantesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ocWarn, setOcWarn] = useState(false);
+  const [ingresoWarn, setIngresoWarn] = useState(false); // no se pudo leer /compras/ingresos
+  const [comprobanteWarn, setComprobanteWarn] = useState(false); // no se detectó la columna de código de comprobante (ver ingresos.py)
   const [ocDesde, setOcDesde] = useState<string | null>(null);
   const [origen, setOrigen] = useState<Origen>("nacionales"); // filtro por origen del artículo (tipoArticulo) — default Nacionales, cicla con el botón
   const [flipped, setFlipped] = useState(false); // girar la tarjeta → ver extraordinarios
@@ -553,6 +602,8 @@ export default function ComprasFaltantesPage() {
     setLoading(true);
     setError(null);
     setOcWarn(false);
+    setIngresoWarn(false);
+    setComprobanteWarn(false);
     try {
       const p = new URLSearchParams();
       p.set("desde", desde);
@@ -568,6 +619,8 @@ export default function ComprasFaltantesPage() {
       setHastaResp(j.hasta ?? null);
       setOcDesde(j.ocDesde ?? null);
       setOcWarn(!!j.ocWarn);
+      setIngresoWarn(!!j.ingresoWarn);
+      setComprobanteWarn(!!j.comprobanteWarn);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al cargar");
       setRows([]);
@@ -1229,6 +1282,18 @@ export default function ComprasFaltantesPage() {
             <span className="flex items-center gap-1.5 text-xs text-amber-400/80 ml-1">
               <AlertTriangle size={13} /> OC no disponible — todo figura sin
               orden
+            </span>
+          )}
+          {ingresoWarn && (
+            <span className="flex items-center gap-1.5 text-xs text-amber-400/80 ml-1">
+              <AlertTriangle size={13} /> Ingresos no disponibles — la columna
+              “Ingresado” queda en cero
+            </span>
+          )}
+          {!ingresoWarn && comprobanteWarn && (
+            <span className="flex items-center gap-1.5 text-xs text-amber-400/80 ml-1">
+              <AlertTriangle size={13} /> Ingresos sin filtro por tipo de
+              comprobante — pueden entrar remitos de más
             </span>
           )}
         </div>

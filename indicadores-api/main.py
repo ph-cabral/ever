@@ -439,19 +439,25 @@ def compras_ordenes_pendientes(
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 
-# ── Compras: remitos de ingreso x OC ya concretados (lo que "ya llegó") ───────
+# ── Compras: remitos de ingreso ya concretados (lo que "ya llegó") ───────────
 @app.get("/compras/ingresos")
 def compras_ingresos(
     desde: str | None = Query(default=None),
     hasta: str | None = Query(default=None),
+    soloOc: int = Query(default=0),
 ):
-    """Remitos de ingreso x OC ya concretados (Com_RemitoCabecera/Renglones),
-    agregado por artículo. Fuente verificada: ingresos_extraccion.py.
-    Para /ventas/faltantes ("Tabla 2"): confirma que un renglón con fecha de
-    arribo YA llegó físicamente. `desde`='YYYY-MM-DD' (default: hoy-60).
-    `hasta`='YYYY-MM-DD' opcional (para /compras/metricas: acotar a un mes)."""
+    """Remitos de ingreso de mercadería ya concretados (Com_RemitoCabecera/
+    Renglones), agregado por artículo. Desde 2026-09-03 entran TODOS los tipos
+    de comprobante de ingreso (CODIGOS_REMITO_INGRESO = 59/60/61/160/590), no
+    solo los ligados a una OC — es el universo del reporte de remitos del mes.
+    `soloOc=1` vuelve al recorte viejo (NroOrdCompra <> 0).
+    Consumidores: /compras (card Ingresados), /compras/faltantes (columna
+    Ingresado) y /ventas/faltantes ("Tabla 2": confirma que un renglón con
+    fecha de arribo YA llegó físicamente).
+    `desde`='YYYY-MM-DD' (default: hoy-60). `hasta`='YYYY-MM-DD' opcional
+    (para /compras/metricas: acotar a un mes calendario)."""
     try:
-        return fetch_remitos_ingreso(desde, hasta)
+        return fetch_remitos_ingreso(desde, hasta, solo_oc=bool(soloOc))
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
 

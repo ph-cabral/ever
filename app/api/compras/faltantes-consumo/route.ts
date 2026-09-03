@@ -76,6 +76,17 @@ interface OcRow {
   Importacion: boolean;
   NroOCs: string[];
 }
+// Remitos de ingreso de mercadería del período (indicadores-api
+// /compras/ingresos), agregados por artículo. Desde 2026-09-03 entran TODOS
+// los tipos de comprobante de ingreso (59/60/61/160/590), no solo los ligados
+// a una OC — ver indicadores-api/ingresos.py.
+interface IngRow {
+  CodArticulo: string;
+  CantidadIngresada: number;
+  FechaUltimoIngreso: string | null;
+  NroRemitos?: string[];
+  Remitos?: { nro: string; fecha: string; cant: number; cod: string | null; prov: string | null }[];
+}
 type Estado = "completo" | "incompleto" | "sin_orden" | "entregado";
 
 interface Bucket {
@@ -171,10 +182,19 @@ export async function GET(req: NextRequest) {
     `${API_URL}/compras/ordenes-pendientes?desde=${encodeURIComponent(ocDesde)}` +
     (fabril ? "&fabril=1" : "");
 
-  // 1) faltantes (obligatorio) + OC (best-effort) en paralelo
-  const [faltRes, ocRes] = await Promise.allSettled([
+  // Ingresos (remitos) del período: desde el ancla del cruce (faltDesde) hasta
+  // el fin del rango consultado — con el rango puesto en un mes cerrado, el
+  // total por artículo cierra con el reporte de remitos de ese mes. Sin
+  // `hasta`, llega hasta hoy.
+  const ingUrl =
+    `${API_URL}/compras/ingresos?desde=${encodeURIComponent(faltDesde)}` +
+    (hastaParam ? `&hasta=${encodeURIComponent(hastaParam)}` : "");
+
+  // 1) faltantes (obligatorio) + OC e ingresos (best-effort) en paralelo
+  const [faltRes, ocRes, ingRes] = await Promise.allSettled([
     getJson(faltUrl),
     getJson(ocUrl),
+    getJson(ingUrl),
   ]);
 
   if (faltRes.status !== "fulfilled") {
@@ -201,6 +221,38 @@ export async function GET(req: NextRequest) {
     }
   } else {
     ocWarn = true;
+  }
+
+  // Ingresos por artículo (cantidad + remitos). Es un total del PERÍODO, por
+  // artículo: se repite igual en todos los días (buckets) de ese artículo, no
+  // se imputa día por día.
+  let ingresoWarn = false;
+  let comprobanteWarn = false;
+  const ingMap = new Map<
+    string,
+    { cant: number; ultimo: string | null; remitos: { nro: string; fecha: string; cant: number }[] }
+  >();
+  if (ingRes.status === "fulfilled") {
+    comprobanteWarn = ingRes.value?.comprobanteWarn === true;
+    for (const r of (ingRes.value.rows ?? []) as IngRow[]) {
+      const cod = String(r.CodArticulo ?? "").trim();
+      if (!cod) continue;
+      const det = (r.Remitos ?? []).map((d) => ({
+        nro: String(d.nro ?? ""),
+        fecha: String(d.fecha ?? ""),
+        cant: Number(d.cant) || 0,
+      }));
+      ingMap.set(cod, {
+        cant: Number(r.CantidadIngresada) || 0,
+        ultimo: r.FechaUltimoIngreso ?? null,
+        remitos: det.length
+          ? det
+          : (r.NroRemitos ?? []).map((n) => ({ nro: String(n), fecha: "", cant: 0 })),
+      });
+    }
+  } else {
+    ingresoWarn = true;
+    console.error("GET /api/compras/faltantes-consumo — ingresos", ingRes.reason);
   }
 
   // rango efectivo (de las filas) para acotar la lectura de marcas
@@ -709,6 +761,11 @@ export async function GET(req: NextRequest) {
         comprar: mark?.comprar ?? null,
         fechaArribo: b.fechaArriboMin,
         tieneArribo: b.renglones > 0 && b.renglonesConArribo === b.renglones,
+        // Ingresos del período por artículo (mismo valor en todos los días de
+        // ese artículo, ver ingMap): unidades recibidas por remito + detalle.
+        ingresado: r2(ingMap.get(b.CodArticulo)?.cant ?? 0),
+        remitos: ingMap.get(b.CodArticulo)?.remitos ?? [],
+        ultimoIngreso: ingMap.get(b.CodArticulo)?.ultimo ?? null,
       };
     });
 
@@ -786,6 +843,10 @@ export async function GET(req: NextRequest) {
     // Filas retiradas por cobertura de stock (ver 4c) — no están en `rows`.
     cubiertos: cubiertosOut,
     ocWarn,
+    ingresoWarn,
+    comprobanteWarn,
+    ingresosDesde: faltDesde,
+    ingresosHasta: hastaParam ?? null,
     consumoWarn,
     extraWarn,
     stockWarn,
