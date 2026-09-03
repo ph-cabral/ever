@@ -1,10 +1,13 @@
 "use client";
 
+import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
 type Props = {
   label: string;
-  value: string | number;
+  // ReactNode y no solo string: permite valores apilados (varias líneas) sin
+  // duplicar el componente.
+  value: ReactNode;
   hint?: string;
   icon?: LucideIcon;
   accent?: "yellow" | "green" | "blue" | "orange" | "zinc";

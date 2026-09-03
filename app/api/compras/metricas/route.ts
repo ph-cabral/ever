@@ -37,6 +37,9 @@ export const maxDuration = 60;
 //   Las unidades siguen el mismo recorte del funnel que los items (col2 ⊆ col1,
 //   col3 ⊆ col2), así las tres columnas hablan del mismo conjunto y no cuesta
 //   ninguna consulta extra: los 3 endpoints ya se llamaban.
+//   Cada columna informa también `importe` ($ a precio de VENTA): unidades de
+//   la etapa × precio unitario del artículo, con el precio derivado del mismo
+//   fetch de /deposito/faltantes (Importe/CantPend). Sin consultas extra.
 //
 //   ocTotalItems/ocTotalUnidades (2026-08-31): el set B COMPLETO, sin recortar
 //   por faltantes — o sea toda la OC del mes. Es el denominador de la columna 2
@@ -106,6 +109,20 @@ function mesRange(mes: string | null) {
 // funnel ya viene recortado: col2 ⊆ col1, col3 ⊆ col2).
 const sumUnid = (arts: string[], map: Map<string, number>) =>
   Math.round(arts.reduce((a, c) => a + (map.get(c) ?? 0), 0) * 100) / 100;
+
+// $ de una etapa = unidades de esa etapa × precio unitario del artículo. El
+// precio sale del mismo fetch de /deposito/faltantes que ya se hace (Importe =
+// PrecioVenta × CantPend por renglón, ver deposito.py), así que no cuesta
+// ninguna consulta extra: precioUnit = Σ Importe / Σ CantPend por artículo.
+// Se valoriza a precio de VENTA, igual que la card "$ faltantes" original.
+const sumImporte = (
+  arts: string[],
+  unidMap: Map<string, number>,
+  precioMap: Map<string, number>,
+) =>
+  Math.round(
+    arts.reduce((a, c) => a + (unidMap.get(c) ?? 0) * (precioMap.get(c) ?? 0), 0) * 100,
+  ) / 100;
 
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
@@ -232,6 +249,14 @@ export async function GET(req: NextRequest) {
   faltantesUnidades = Math.round(faltantesUnidades * 100) / 100;
   faltantesImporte = Math.round(faltantesImporte * 100) / 100;
 
+  // Precio unitario por artículo (venta) — base para valorizar las etapas 2 y 3
+  // en $ sin pedir nada más a Magnus.
+  const precioUnitMap = new Map<string, number>();
+  for (const [cod, imp] of faltImporteMap) {
+    const u = faltUnidMap.get(cod) ?? 0;
+    if (u > 0) precioUnitMap.set(cod, imp / u);
+  }
+
   // Denominador del %: total de TODO lo pedido (unidades/$) ese mes, sin
   // filtrar por artículo (indicadores-api /ventas/pedidos-mes, best-effort —
   // si falla, el % simplemente no se informa, ver pedidosMesWarn).
@@ -303,6 +328,7 @@ export async function GET(req: NextRequest) {
         label: "Faltantes",
         total: faltantes.length,
         unidades: faltantesUnidades,
+        importe: faltantesImporte,
         articulos: faltantes,
       },
       {
@@ -310,6 +336,7 @@ export async function GET(req: NextRequest) {
         label: "Con OC",
         total: conOC.length,
         unidades: sumUnid(conOC, ocUnidMap),
+        importe: sumImporte(conOC, ocUnidMap, precioUnitMap),
         articulos: conOC,
       },
       {
@@ -317,6 +344,7 @@ export async function GET(req: NextRequest) {
         label: "Ingresados",
         total: ingresados.length,
         unidades: sumUnid(ingresados, ingUnidMap),
+        importe: sumImporte(ingresados, ingUnidMap, precioUnitMap),
         articulos: ingresados,
       },
     ],

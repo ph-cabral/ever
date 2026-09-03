@@ -496,53 +496,84 @@ export default function VentasFaltantesPage() {
         </div>
       )}
 
-      <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 flex items-center justify-between px-4 md:px-8 h-16 gap-4">
-        <div className="flex items-center gap-4 min-w-0">
-          <InicioButton />
-          <span className="font-bold text-yellow-400 text-xl md:text-2xl tracking-wide uppercase whitespace-nowrap">
-            EVER WEAR <span className="text-sm tracking-[3px] font-normal">S.A.</span>
-          </span>
-          <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
-          <span className="text-lg md:text-2xl font-extrabold uppercase tracking-[0.2em] text-white whitespace-nowrap">
-            Faltantes
-          </span>
-        </div>
-        <div className="flex items-center gap-4 text-sm">
-          {/* Filtro de vendedor — SOLO ADMIN. Acota la vista a la CARTERA de
-              ese vendedor (mismo criterio que ve él cuando entra), server-side.
-              No se renderiza si /api/ventas/vendedor/vendedores contestó 403:
-              ese usuario ya está acotado a su propio vendedor. */}
-          {esAdmin && vendedores.length > 0 && (
-            <div className="hidden md:flex items-center gap-2">
-              <Users size={14} className="text-yellow-400 shrink-0" />
-              <select
-                value={vendedorSel}
-                onChange={(e) => setVendedorSel(e.target.value)}
-                title="Ver los faltantes de la cartera de un vendedor"
-                className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-yellow-400 max-w-[200px]"
-              >
-                <option value="">Todos los vendedores</option>
-                {vendedores.map((v) => (
-                  <option key={v.codigo} value={String(v.codigo)}>
-                    {v.nombre ?? `Vendedor ${v.codigo}`}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+      {/* Header. En el teléfono se apila en 3 filas (2026-09-03: antes era una
+          sola fila `h-16` y el segmentado se montaba encima del título):
+            fila 1 → logo + FALTANTES, con "refrescar" pegado a la derecha
+            fila 2 → filtro de vendedor (admin) y el usuario a la derecha
+            fila 3 → segmentado Sin ingresar / Ingresados, a todo el ancho
+          En `md` vuelve a ser UNA fila de 64px: el grupo del título lleva
+          `md:mr-auto` (empuja todo lo demás a la derecha) y el `order-*`
+          reacomoda → título, filtro, segmentado, refrescar, usuario. Los dos
+          wrappers de mobile se disuelven con `md:contents`, así sus hijos
+          entran como items del header. Al agregar algo nuevo, darle su
+          `md:order-N`. */}
+      <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 px-4 md:px-8 py-2 md:py-0">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 md:h-16 md:flex-nowrap md:gap-4">
+          <div className="flex items-center gap-2 min-w-0 md:order-1 md:gap-4 md:mr-auto">
+            <InicioButton />
+            <span className="font-bold text-yellow-400 text-sm md:text-2xl tracking-wide uppercase whitespace-nowrap">
+              EVER WEAR{" "}
+              <span className="text-[10px] md:text-sm tracking-[3px] font-normal">S.A.</span>
+            </span>
+            <div className="hidden md:block w-px h-7 bg-yellow-400/30" />
+            <span className="text-sm md:text-2xl font-extrabold uppercase tracking-[0.15em] md:tracking-[0.2em] text-white whitespace-nowrap">
+              Faltantes
+            </span>
+          </div>
+
+          {/* Refrescar. En mobile cierra la fila del título (ml-auto). */}
+          <button
+            onClick={load}
+            title="Refrescar"
+            disabled={loading}
+            className="btn-anim text-zinc-400 hover:text-yellow-400 p-2 ml-auto disabled:opacity-40 disabled:hover:scale-100 disabled:hover:translate-y-0 md:order-4 md:ml-0"
+          >
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+          </button>
+
+          {/* Fila 2 en mobile: filtro de vendedor + usuario. */}
+          <div className="w-full flex items-center gap-2 md:contents">
+            {/* Filtro de vendedor — SOLO ADMIN. Acota la vista a la CARTERA de
+                ese vendedor (mismo criterio que ve él cuando entra), server-side.
+                No se renderiza si /api/ventas/vendedor/vendedores contestó 403:
+                ese usuario ya está acotado a su propio vendedor.
+                2026-09-03: antes era `hidden md:flex` — en el teléfono el admin
+                no podía filtrar. Ahora entra en la fila 2, angosto. */}
+            {esAdmin && vendedores.length > 0 && (
+              <div className="flex items-center gap-2 min-w-0 flex-1 md:flex-none md:order-2">
+                <Users size={14} className="text-yellow-400 shrink-0" />
+                <select
+                  value={vendedorSel}
+                  onChange={(e) => setVendedorSel(e.target.value)}
+                  title="Ver los faltantes de la cartera de un vendedor"
+                  className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-yellow-400 w-full min-w-0 md:w-auto md:max-w-[200px]"
+                >
+                  <option value="">Todos los vendedores</option>
+                  {vendedores.map((v) => (
+                    <option key={v.codigo} value={String(v.codigo)}>
+                      {v.nombre ?? `Vendedor ${v.codigo}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <UsuarioActual className="ml-auto md:order-5 md:ml-0" />
+          </div>
+
           {/* Selector de vista. Antes era UN solo botón "Ingresados" que giraba la
               tarjeta: no se entendía qué se estaba mirando ni cuál era la otra
               cara. Ahora las dos vistas están a la vista con su contador y la
-              activa queda resaltada (amarillo = sin ingresar, verde = ingresados). */}
-          <div className="flex items-center rounded-md border border-zinc-700 overflow-hidden text-xs font-medium">
+              activa queda resaltada (amarillo = sin ingresar, verde = ingresados).
+              En mobile ocupa su propia fila a todo el ancho (mitad y mitad). */}
+          <div className="w-full flex items-center rounded-md border border-zinc-700 overflow-hidden text-xs font-medium md:w-auto md:order-3">
             <button
               onClick={() => setFlipped(false)}
               title="Faltantes que todavía NO ingresaron"
-              className={`flex items-center gap-2 px-3 py-1.5 transition-colors ${
+              className={`flex flex-1 items-center justify-center gap-2 px-3 py-1.5 transition-colors md:flex-none md:justify-start ${
                 !flipped ? "bg-yellow-400/15 text-yellow-300" : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
-              <Clock size={14} />
+              <Clock size={14} className="shrink-0" />
               Sin ingresar
               <span
                 className={`rounded-full px-1.5 text-[10px] leading-4 tabular-nums ${
@@ -556,11 +587,11 @@ export default function VentasFaltantesPage() {
             <button
               onClick={() => setFlipped(true)}
               title="Faltantes que YA ingresaron (tienen fecha de arribo)"
-              className={`flex items-center gap-2 px-3 py-1.5 transition-colors ${
+              className={`flex flex-1 items-center justify-center gap-2 px-3 py-1.5 transition-colors md:flex-none md:justify-start ${
                 flipped ? "bg-green-500/15 text-green-300" : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
-              <PackageCheck size={14} />
+              <PackageCheck size={14} className="shrink-0" />
               Ingresados
               <span
                 className={`rounded-full px-1.5 text-[10px] leading-4 tabular-nums ${
@@ -571,15 +602,6 @@ export default function VentasFaltantesPage() {
               </span>
             </button>
           </div>
-          <button
-            onClick={load}
-            title="Refrescar"
-            disabled={loading}
-            className="btn-anim text-zinc-400 hover:text-yellow-400 p-2 disabled:opacity-40 disabled:hover:scale-100 disabled:hover:translate-y-0"
-          >
-            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-          </button>
-          <UsuarioActual />
         </div>
       </header>
 

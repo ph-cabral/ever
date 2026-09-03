@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Loader2, RefreshCw, AlertTriangle, PackageX, ShoppingCart, PackageCheck, BarChart3,
-  Package, Wallet, Percent, Download,
+  Package, Wallet, Download,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { InicioButton } from "@/components/ui/InicioButton";
@@ -24,6 +24,7 @@ interface Columna {
   label: string;
   total: number;       // items = artículos distintos
   unidades: number;    // unidades de esa etapa (faltantes / pedidas en OC / ingresadas)
+  importe: number;     // $ de esa etapa (unidades × precio de venta del artículo)
   articulos: string[];
 }
 interface Grupo {
@@ -84,7 +85,19 @@ const fmtMoney = (n: number) =>
     currency: "ARS",
     maximumFractionDigits: 0,
   }).format(n || 0);
-const fmtPct = (n: number | null) => (n === null ? "—" : `${fmtNum(n)}%`);
+
+// Valor de KpiCard apilado en 3 líneas (items / unidades / $) — las cards del
+// funnel muestran las 3 magnitudes de la misma etapa una debajo de la otra, en
+// lugar de repartirlas en una segunda fila de cards.
+function StackedKpi({ items, unidades, importe }: { items: string; unidades: string; importe: string }) {
+  return (
+    <span className="block leading-tight tabular-nums">
+      <span className="block">{items}</span>
+      <span className="block text-lg font-semibold opacity-90">{unidades}</span>
+      <span className="block text-lg font-semibold opacity-90">{importe}</span>
+    </span>
+  );
+}
 
 const fmtMesLabel = (mes: string) => {
   const m = /(\d{4})-(\d{2})/.exec(mes);
@@ -237,6 +250,11 @@ export default function ComprasMetricasPage() {
   // Unidades de la etapa (mismo recorte del funnel que los items).
   const unid = useCallback(
     (key: string) => data?.columnas.find((c) => c.key === key)?.unidades ?? 0,
+    [data],
+  );
+  // $ de la etapa (unidades × precio de venta del artículo, lo calcula la API).
+  const imp = useCallback(
+    (key: string) => data?.columnas.find((c) => c.key === key)?.importe ?? 0,
     [data],
   );
 
@@ -396,52 +414,24 @@ export default function ComprasMetricasPage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <KpiCard
             label="Faltantes del mes"
-            value={`${fmtNum(col("faltantes"))} items · ${fmtNum(unid("faltantes"))} u.`}
-            hint="Artículos marcados sin existencia y sus unidades pendientes"
+            value={<StackedKpi items={`${fmtNum(col("faltantes"))} items`} unidades={`${fmtNum(unid("faltantes"))} u.`} importe={fmtMoney(imp("faltantes"))} />}
+            hint="Artículos marcados sin existencia, sus unidades pendientes y cuánto faltó en $ (a precio de venta)"
             icon={PackageX}
             accent="orange"
           />
           <KpiCard
             label="Con OC ese mes"
-            value={`${fmtNum(col("conOC"))} de ${fmtNum(data?.ocTotalItems ?? 0)} items · ${fmtNum(unid("conOC"))} u.`}
-            hint={`De los faltantes, con Orden de Compra — unidades pedidas en esas OC. El total son los ${fmtNum(data?.ocTotalItems ?? 0)} items (${fmtNum(data?.ocTotalUnidades ?? 0)} u.) con OC ese mes, faltantes o no`}
+            value={<StackedKpi items={`${fmtNum(col("conOC"))} de ${fmtNum(data?.ocTotalItems ?? 0)} items`} unidades={`${fmtNum(unid("conOC"))} u.`} importe={fmtMoney(imp("conOC"))} />}
+            hint={`De los faltantes, con Orden de Compra — unidades pedidas en esas OC y su $. El total son los ${fmtNum(data?.ocTotalItems ?? 0)} items (${fmtNum(data?.ocTotalUnidades ?? 0)} u.) con OC ese mes, faltantes o no`}
             icon={ShoppingCart}
             accent="blue"
           />
           <KpiCard
             label="Ingresados ese mes"
-            value={`${fmtNum(col("ingresados"))} items · ${fmtNum(unid("ingresados"))} u.`}
-            hint="De esos, ya recibidos en depósito — unidades ingresadas por remito"
+            value={<StackedKpi items={`${fmtNum(col("ingresados"))} items`} unidades={`${fmtNum(unid("ingresados"))} u.`} importe={fmtMoney(imp("ingresados"))} />}
+            hint="De esos, ya recibidos en depósito — unidades ingresadas por remito y su $"
             icon={PackageCheck}
             accent="green"
-          />
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <KpiCard
-            label="Unidades faltantes"
-            value={fmtNum(data?.faltantesUnidades ?? 0)}
-            hint="Total de unidades de los artículos faltantes del mes"
-            icon={Package}
-            accent="zinc"
-          />
-          <KpiCard
-            label="$ faltantes"
-            value={fmtMoney(data?.faltantesImporte ?? 0)}
-            hint="Total en $ de los artículos faltantes del mes"
-            icon={Wallet}
-            accent="yellow"
-          />
-          <KpiCard
-            label="% del total pedido"
-            value={fmtPct(data?.pctImporte ?? null)}
-            hint={
-              data?.pctUnidades != null
-                ? `En $ · en unidades: ${fmtPct(data.pctUnidades)}`
-                : "Faltantes ($) sobre el total pedido/vendido ese mes"
-            }
-            icon={Percent}
-            accent="orange"
           />
         </div>
 

@@ -878,8 +878,11 @@ export default function VentasVendedorPage() {
 
       {/* Header en 3 filas en el teléfono y 1 sola en la computadora (2026-08-25). En mobile es un grid de 2 columnas:
             fila 1 → logo            | "Buscar cliente"
-            fila 2 → switch Clientes|Líneas, a la derecha, ocupando el ancho
-            fila 3 → el vendedor, a la derecha, ocupando el ancho
+            fila 2 → filtro de vendedor (izq.) + switch Clientes|Líneas (der.)
+            fila 3 → el usuario, a la derecha, ocupando el ancho
+          (2026-09-03: el filtro ocupaba una fila entera para él solo; ahora va
+          angosto al lado del switch. En mobile el orden lo fija `order-*`
+          porque en el DOM el switch viene antes que el filtro.)
           En `md` pasa a flex y el `order-*` reacomoda: logo, buscar, switch,
           y el vendedor empujado a la derecha con ml-auto. Por eso el orden
           del DOM no coincide con el de escritorio — al agregar algo nuevo,
@@ -889,7 +892,7 @@ export default function VentasVendedorPage() {
           repetía esa misma información. */}
       <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b-[3px] border-yellow-400 px-4 md:px-8 py-3">
         <div className="grid grid-cols-2 items-center gap-x-3 gap-y-2 md:flex md:flex-wrap md:gap-4">
-          <div className="flex items-center gap-3 min-w-0 md:order-1">
+          <div className="order-1 flex items-center gap-3 min-w-0 md:order-1">
             <InicioButton />
             <span className="font-bold text-yellow-400 text-base md:text-2xl tracking-wide uppercase whitespace-nowrap">
               EVER WEAR{" "}
@@ -900,7 +903,7 @@ export default function VentasVendedorPage() {
           <button
             type="button"
             onClick={abrirModalBusqueda}
-            className="btn-anim inline-flex items-center justify-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors md:order-2"
+            className="btn-anim order-2 inline-flex items-center justify-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-100 hover:border-yellow-400 transition-colors md:order-2"
           >
             <Search size={14} className="text-yellow-400" />
             Buscar cliente
@@ -912,7 +915,11 @@ export default function VentasVendedorPage() {
               vista actual, confuso porque no se sabía si el texto era el
               estado o la acción. Mismo patrón visual que el YTD/Meses del
               modal: el activo va en amarillo sólido. */}
-          <div className="col-span-2 justify-self-end inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700 md:col-auto md:order-3">
+          <div
+            className={`order-4 justify-self-end inline-flex rounded-md border border-zinc-700 overflow-hidden text-sm divide-x divide-zinc-700 md:col-auto md:order-3 ${
+              esAdmin ? "" : "col-span-2"
+            }`}
+          >
             {(["clientes", "lineas"] as TopVista[]).map((v) => (
               <button
                 key={v}
@@ -923,7 +930,7 @@ export default function VentasVendedorPage() {
                   setTopGrupoAbierto(0);
                 }}
                 title={v === "clientes" ? "Ranking de clientes ($)" : "Ranking de líneas ($ o unidades)"}
-                className={`px-3 py-2 font-semibold transition-colors ${
+                className={`px-2.5 py-2 text-xs font-semibold transition-colors md:px-3 md:text-sm ${
                   topVista === v
                     ? "bg-yellow-400 text-black"
                     : "text-zinc-300 hover:bg-zinc-800"
@@ -941,7 +948,7 @@ export default function VentasVendedorPage() {
               cargado (podía no pertenecer a la cartera del nuevo vendedor) y
               recarga los rankings. */}
           {esAdmin && (
-            <div className="col-span-2 flex items-center gap-2 md:col-auto md:order-4">
+            <div className="order-3 flex min-w-0 items-center gap-2 md:col-auto md:order-4">
               <Users size={14} className="text-yellow-400 shrink-0" />
               <select
                 value={vendedorSel}
@@ -959,7 +966,7 @@ export default function VentasVendedorPage() {
                     : "Ver la cartera de un vendedor"
                 }
                 disabled={vendedores.length === 0}
-                className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-yellow-400 max-w-[220px] w-full md:w-auto disabled:opacity-50"
+                className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-yellow-400 w-full min-w-0 md:text-sm md:w-auto md:max-w-[220px] disabled:opacity-50"
               >
                 <option value="">
                   {vendedores.length === 0
@@ -981,7 +988,7 @@ export default function VentasVendedorPage() {
               /api/auth/me acá. En esta pantalla el usuario logueado ES el
               vendedor: lo que ve está acotado a SU vendedorCodigo (ver
               lib/ventas/vendedorAcceso.ts). */}
-          <UsuarioActual className="col-span-2 justify-self-end md:col-auto md:order-5 md:ml-auto" />
+          <UsuarioActual className="order-5 col-span-2 justify-self-end md:col-auto md:order-5 md:ml-auto" />
         </div>
       </header>
 
