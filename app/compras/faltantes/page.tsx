@@ -12,6 +12,7 @@ import { exportarFaltantesExistencia } from "@/lib/deposito/exportFaltantesExist
 import { InicioButton } from "@/components/ui/InicioButton";
 import { DateRangeField } from "@/components/ui/date-range-field";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
+import { abrirPicker } from "@/components/ui/abrirPicker";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/faltantes — faltantes "sin existencia" por (artículo, día).
@@ -1225,6 +1226,7 @@ export default function ComprasFaltantesPage() {
 
           <input
             type="month"
+            onClick={abrirPicker}
             value={mesExport}
             onChange={(e) => setMesExport(e.target.value)}
             title="Mes del histórico con/sin existencia a exportar"

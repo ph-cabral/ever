@@ -8,6 +8,7 @@ import {
 import { InicioButton } from "@/components/ui/InicioButton";
 import KpiCard from "@/app/rrhh/components/KpiCard";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
+import { abrirPicker } from "@/components/ui/abrirPicker";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/consumo — consumo mensual de UN artículo (
@@ -623,13 +624,14 @@ export default function ComprasConsumoPage() {
                 <input
                   id="mes-desde-t"
                   type="month"
+                  onClick={abrirPicker}
                   value={desde}
                   max={hasta}
                   onChange={(e) => {
                     setDesde(e.target.value || mesLocal(5));
                     setPage(1);
                   }}
-                  className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-2 text-sm text-zinc-200 outline-none [color-scheme:dark] focus:border-yellow-400"
+                  className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-2 text-sm text-zinc-200 outline-none [color-scheme:dark] focus:border-yellow-400 cursor-pointer"
                 />
               </div>
               <div className="flex flex-col gap-1.5">
@@ -639,6 +641,7 @@ export default function ComprasConsumoPage() {
                 <input
                   id="mes-hasta-t"
                   type="month"
+                  onClick={abrirPicker}
                   value={hasta}
                   min={desde}
                   max={mesLocal(0)}
@@ -646,7 +649,7 @@ export default function ComprasConsumoPage() {
                     setHasta(e.target.value || mesLocal(0));
                     setPage(1);
                   }}
-                  className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-2 text-sm text-zinc-200 outline-none [color-scheme:dark] focus:border-yellow-400"
+                  className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-2 text-sm text-zinc-200 outline-none [color-scheme:dark] focus:border-yellow-400 cursor-pointer"
                 />
               </div>
               <div className="flex flex-col gap-1.5">

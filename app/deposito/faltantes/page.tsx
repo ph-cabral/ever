@@ -15,6 +15,7 @@ import {
 import { InicioButton } from "@/components/ui/InicioButton";
 import { exportarFaltantesExistencia } from "@/lib/deposito/exportFaltantesExistencia";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
+import { abrirPicker } from "@/components/ui/abrirPicker";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Faltantes — renglones pendientes del último día con registro (anterior a hoy).
@@ -610,6 +611,7 @@ export default function FaltantesPage() {
             <div className="w-px h-7 bg-yellow-400/30" />
             <input
               type="month"
+              onClick={abrirPicker}
               value={mesExport}
               onChange={(e) => setMesExport(e.target.value)}
               title="Mes a exportar"

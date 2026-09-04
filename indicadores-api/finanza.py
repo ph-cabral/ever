@@ -2,9 +2,13 @@
 Facturación del día (Magnus, SOLO LECTURA).
 
 Para el widget "calculadora de facturación":
-  · ENTRA  → comprobantes con código 11               (suma)
-  · SALE   → comprobantes con código 22, 23, 24 y 25   (resta: NC / devoluciones)
+  · ENTRA  → facturas            (suma)
+  · SALE   → NC / devoluciones   (resta)
   · NETO   → entra − sale.  Se devuelve con IVA y sin IVA (21%).
+
+Se suman las DOS sub empresas de EVER WEAR: MAGNUS (tablas Ven_*) y PRUEBA
+(tablas PRU_Ven_*), cada una con su propio juego de códigos de comprobante.
+El detalle está en el bloque CONFIG de abajo.
 
 Patrón idéntico a compras.py: a Magnus NUNCA se le escribe, sólo se lee en vivo.
 
@@ -41,10 +45,50 @@ COL_FECHA        = "FecMovim"            # entero Magnus (días desde 1800-12-28
 FECHA_ES_ENTERO  = True                  # FecMovim es entero
 COL_IVA          = ""                    # IVA no se toma
 COL_TASA_IVA     = ""                    # TasaIVA vino 0 en toda la tabla; no se usa
-COL_NETO         = "Neto"                # se suma/resta la columna Neto directa (sin cálculo de IVA)
+# Neto sin IVA del comprobante = Neto + NoGravado. El NoGravado NO es un extra
+# opcional: las notas de crédito por concepto (código 25, CRÉDITO INTERNO, y a
+# veces la 24) llevan casi todo el importe ahí y el Neto solo queda en cero —
+# p.ej. PRUEBA abril 2026, cabecera Neto 9.727 contra 6.139.446 de concepto.
+# Con solo Neto el widget restaba de menos y quedaba ~3% por encima del pivot
+# del BI en los meses con crédito interno; con Neto + NoGravado los ocho meses
+# de 2026 dan exactos contra el cubo (diferencia 0-1 peso por redondeo) en las
+# DOS sub empresas. Del lado MAGNUS el cambio suma 1.659.382 en ocho meses
+# sobre 8.840 millones (0,02%; mayo a agosto no se mueven ni un peso).
+# Verificable con verificar_facturacion_subempresas.py, que trae las dos
+# variantes lado a lado.
+COL_NETO         = "(Neto + NoGravado)"
 # ─────────────────────────────────────────────────────────────────────────────
 
 CONFIGURADO = bool(FACT_TABLA and COL_CODIGO and COL_IMPORTE and COL_FECHA)
+
+# ── Sub empresa PRUEBA (tablas PRU_*) ────────────────────────────────────────
+# EVER WEAR factura por DOS sub empresas sobre la misma base. El maestro es
+# MAGNUS_SITD.dbo.SubEmpresas: 1 = MAGNUS (tablas Ven_*) y 2 = PRUEBA (tablas
+# PRU_Ven_*). Los SP que alimentan los pivots del BI vienen en pares
+# (_VEN_01_REAL_Ventas_Hechos / _VEN_02_PRUEBA_Ventas_Hechos, y lo mismo para
+# cobranza, débitos y créditos, flete, faltantes…), y el número de sub empresa
+# va hardcodeado en cada SP: la cabecera NO tiene columna de empresa.
+#
+# PRU_ no es una copia de prueba: son ventas reales con condiciones comerciales
+# distintas, del orden del 3-4% de la facturación. Por eso el widget suma las
+# dos sub empresas.
+#
+# OJO: PRUEBA tiene su PROPIO maestro de comprobantes (PRU_Ven_CodCom) y los
+# mismos números significan otra cosa — 11 = FACTURA CTA.CTE., 15 = DEBITO EN
+# CTA. CTE., y no existen 28/42/43/60. Los códigos NO se copian de COD_SUMA /
+# COD_RESTA, van aparte.
+#
+# Verificado contra el pivot del BI (medida Ventas_Debitos_Creditos, Sub
+# Empresas = PRUEBA, ene-ago 2026): con estos códigos los ocho meses dan
+# exactos, diferencia 0 sobre 452.136.252. Reproducible con
+# prueba_serie_exacta.py.
+PRU_FACT_TABLA = "PRU_Ven_CompCabecera"
+PRU_COD_SUMA   = (1, 2, 11)        # FCT. CONTADO / FCT. CTE.CTE. / FACTURA CTA.CTE.
+PRU_COD_RESTA  = (22, 23, 24, 25)  # devoluciones y notas de crédito
+
+SUB_MAGNUS = "MAGNUS"
+SUB_PRUEBA = "PRUEBA"
+
 
 
 def _safe(value):
@@ -94,14 +138,15 @@ def fetch_facturacion_dia(fecha: str | None = None) -> dict:
         }
 
     # NETO de cada fila (sin IVA), por orden de preferencia:
-    #  1) COL_NETO     → columna de neto gravado puro (excluye NoGravado);
+    #  1) COL_NETO     → neto sin IVA del comprobante = Neto + NoGravado
+    #                    (ver el porqué del NoGravado donde se define);
     #  2) COL_IVA      → Total − IVA  (exacto: saca sólo el IVA real del comprobante;
     #                    si IVA=0, p.ej. bonificaciones, el importe queda entero);
     #  3) COL_TASA_IVA → Total / (1 + tasa)  (la tasa puede venir 21 ó 0.21);
     #  4) si no hay nada, /1.21 plano.
     if COL_NETO:
         neto_expr = COL_NETO
-        metodo = "columna-neto-gravado"
+        metodo = "neto-mas-no-gravado"
     elif COL_IVA:
         neto_expr = f"({COL_IMPORTE} - {COL_IVA})"
         metodo = "total-menos-iva"
@@ -113,36 +158,58 @@ def fetch_facturacion_dia(fecha: str | None = None) -> dict:
         neto_expr = f"({COL_IMPORTE} / {1.0 + IVA_RATE})"
         metodo = "iva-21-plano"
 
-    codes_suma  = ",".join(str(c) for c in COD_SUMA)
-    codes_resta = ",".join(str(c) for c in COD_RESTA)
-    codes_all   = ",".join(str(c) for c in (*COD_SUMA, *COD_RESTA))
+    def _bloque(tabla, cod_suma, cod_resta, etiqueta):
+        """Un SELECT agregado por sub empresa. Van unidos por UNION ALL para
+        resolver las dos en una sola ida a la base (mismo plan que antes, una
+        pasada por tabla filtrando por FecMovim + CompCodigo)."""
+        suma  = ",".join(str(c) for c in cod_suma)
+        resta = ",".join(str(c) for c in cod_resta)
+        todos = ",".join(str(c) for c in (*cod_suma, *cod_resta))
+        return f"""
+        SELECT '{etiqueta}' AS sub_empresa,
+            SUM(CASE WHEN {COL_CODIGO} IN ({suma})  THEN {neto_expr} ELSE 0 END) AS entra,
+            SUM(CASE WHEN {COL_CODIGO} IN ({resta}) THEN {neto_expr} ELSE 0 END) AS sale,
+            COUNT(*) AS cantidad
+        FROM {FACT_DB}.dbo.{tabla}
+        WHERE {COL_CODIGO} IN ({todos})
+          AND {_filtro_fecha_sql('?')}"""
 
-    sql = f"""
-    SELECT
-        SUM(CASE WHEN {COL_CODIGO} IN ({codes_suma})  THEN {COL_IMPORTE} ELSE 0 END) AS entra_con_iva,
-        SUM(CASE WHEN {COL_CODIGO} IN ({codes_resta}) THEN {COL_IMPORTE} ELSE 0 END) AS sale_con_iva,
-        SUM(CASE WHEN {COL_CODIGO} IN ({codes_suma})  THEN {neto_expr} ELSE 0 END) AS entra_neto,
-        SUM(CASE WHEN {COL_CODIGO} IN ({codes_resta}) THEN {neto_expr} ELSE 0 END) AS sale_neto,
-        COUNT(*) AS cantidad
-    FROM {FACT_DB}.dbo.{FACT_TABLA}
-    WHERE {COL_CODIGO} IN ({codes_all})
-      AND {_filtro_fecha_sql('?')}
-    """
+    sql = (_bloque(FACT_TABLA, COD_SUMA, COD_RESTA, SUB_MAGNUS)
+           + "\n        UNION ALL\n"
+           + _bloque(PRU_FACT_TABLA, PRU_COD_SUMA, PRU_COD_RESTA, SUB_PRUEBA))
 
     conn = get_connection(FACT_DB)
     try:
         cur = conn.cursor()
         cur.execute("SET DATEFORMAT ymd; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;")
-        cur.execute(sql, _valor_fecha(dia))
-        row = cur.fetchone()
+        valor = _valor_fecha(dia)
+        cur.execute(sql, valor, valor)   # un ? por bloque del UNION
+        filas = cur.fetchall()
     finally:
         conn.close()
 
-    entra_con_iva = float(_safe(row[0]) or 0) if row else 0.0
-    sale_con_iva  = float(_safe(row[1]) or 0) if row else 0.0
-    entra_neto    = float(_safe(row[2]) or 0) if row else 0.0
-    sale_neto     = float(_safe(row[3]) or 0) if row else 0.0
-    cantidad      = int(row[4]) if row and row[4] is not None else 0
+    # Total = las dos sub empresas sumadas; `por_sub` guarda el desglose para
+    # que el widget pueda mostrarlo sin volver a consultar.
+    entra_neto = sale_neto = 0.0
+    cantidad = 0
+    por_sub = {}
+    for f in filas:
+        etiqueta = (f[0] or "").strip()
+        e_n  = float(_safe(f[1]) or 0)
+        s_n  = float(_safe(f[2]) or 0)
+        cant = int(f[3] or 0)
+        entra_neto += e_n
+        sale_neto  += s_n
+        cantidad   += cant
+        por_sub[etiqueta] = {
+            "entra": round(e_n),
+            "sale": round(s_n),
+            "neto_con_iva": round(e_n - s_n),
+            "neto_sin_iva": round(e_n - s_n),
+            "cantidad": cant,
+        }
+
+    entra_con_iva, sale_con_iva = entra_neto, sale_neto
 
     neto_con_iva = entra_con_iva - sale_con_iva
     neto_sin_iva = entra_neto - sale_neto
@@ -172,7 +239,11 @@ def fetch_facturacion_dia(fecha: str | None = None) -> dict:
         "cantidad": cantidad,
         "iva_rate": IVA_RATE,
         "metodo_neto": metodo,
-        "codigos": {"suma": list(COD_SUMA), "resta": list(COD_RESTA)},
+        "codigos": {
+            "suma": list(COD_SUMA), "resta": list(COD_RESTA),
+            "prueba_suma": list(PRU_COD_SUMA), "prueba_resta": list(PRU_COD_RESTA),
+        },
+        "sub_empresas": por_sub,
         "ajuste_manual": round(ajuste_neto),
     }
     if ajuste_error:

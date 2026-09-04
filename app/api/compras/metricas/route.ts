@@ -50,6 +50,14 @@ export const maxDuration = 60;
 //   /deposito/faltantes — Importe/CantPend por renglón, ver deposito.py). No
 //   cuesta ninguna consulta extra.
 //
+//   Ademas cada columna informa `faltanteUnidades` / `faltanteImporte`: la
+//   magnitud del FALTANTE de los articulos de esa etapa, no lo pedido ni lo
+//   ingresado. Sirve para leer la cobertura en $ del faltante del mes ("de los
+//   $X que faltaron, $Y ya tiene OC y $Z ya ingreso"), que es otra cosa que el
+//   $ de lo efectivamente ingresado (un articulo puede haber ingresado menos,
+//   igual o mas de lo que faltaba). Alimenta el panel "Cuanto falto y cuanto se
+//   cubrio" de la vista. Es una pasada mas por el Map en memoria: 0 consultas.
+//
 // RECORTE (2026-09-03) — la vista contaba de más y no cerraba con el reporte de
 // Magnus. Ahora los tres criterios de detalle_mes_extraccion.py se aplican acá,
 // en lib/compras/faltantesMes.ts (ver el comentario de ese archivo):
@@ -128,6 +136,12 @@ interface Columna {
   total: number;
   unidades: number;
   importe: number;
+  // Magnitud del FALTANTE de los articulos de esta etapa (no lo pedido ni lo
+  // ingresado): cuanto de lo que falto en el mes esta representado aca. En
+  // "faltantes" coincide con unidades/importe; en "conOC" e "ingresados"
+  // responde "de los $X que faltaron, cuanto ya tiene OC / cuanto ya llego".
+  faltanteUnidades: number;
+  faltanteImporte: number;
 }
 interface Funnel {
   faltantesUnidades: number;
@@ -149,26 +163,46 @@ function armarFunnel(
   const conOC = faltantes.filter((c) => setB.has(c));
   const ingresados = conOC.filter((c) => setC.has(c));
 
-  let unidades = 0;
-  let importe = 0;
-  for (const cod of faltantes) {
-    const a = faltMes.articulos.get(cod);
-    if (!a) continue;
-    unidades += a.unidades;
-    importe += a.importe;
-  }
+  // Magnitud del FALTANTE de un conjunto de articulos: sus unidades pendientes
+  // del mes y su $ (a precio de venta), tal cual salieron de agruparFaltantesMes.
+  // No cuesta ninguna consulta: es una pasada por el Map que ya esta en memoria.
+  const magnitudFaltante = (arts: string[]) => {
+    let u = 0;
+    let i = 0;
+    for (const cod of arts) {
+      const a = faltMes.articulos.get(cod);
+      if (!a) continue;
+      u += a.unidades;
+      i += a.importe;
+    }
+    return { unidades: r2(u), importe: r2(i) };
+  };
+
+  const fFalt = magnitudFaltante(faltantes);
+  const fOC = magnitudFaltante(conOC);
+  const fIng = magnitudFaltante(ingresados);
 
   return {
-    faltantesUnidades: r2(unidades),
-    faltantesImporte: r2(importe),
+    faltantesUnidades: fFalt.unidades,
+    faltantesImporte: fFalt.importe,
     columnas: [
-      { key: "faltantes", label: "Faltantes", total: faltantes.length, unidades: r2(unidades), importe: r2(importe) },
+      {
+        key: "faltantes",
+        label: "Faltantes",
+        total: faltantes.length,
+        unidades: fFalt.unidades,
+        importe: fFalt.importe,
+        faltanteUnidades: fFalt.unidades,
+        faltanteImporte: fFalt.importe,
+      },
       {
         key: "conOC",
         label: "Con OC",
         total: conOC.length,
         unidades: sumUnid(conOC, ocUnidMap),
         importe: sumImporte(conOC, ocUnidMap, precioUnitMap),
+        faltanteUnidades: fOC.unidades,
+        faltanteImporte: fOC.importe,
       },
       {
         key: "ingresados",
@@ -176,6 +210,8 @@ function armarFunnel(
         total: ingresados.length,
         unidades: sumUnid(ingresados, ingUnidMap),
         importe: sumImporte(ingresados, ingUnidMap, precioUnitMap),
+        faltanteUnidades: fIng.unidades,
+        faltanteImporte: fIng.importe,
       },
     ],
   };

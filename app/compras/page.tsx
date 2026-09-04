@@ -10,6 +10,7 @@ import KpiCard from "@/app/rrhh/components/KpiCard";
 import LineChartCard from "@/app/rrhh/components/charts/LineChartCard";
 import PieChartCard from "@/app/rrhh/components/charts/PieChartCard";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
+import { abrirPicker } from "@/components/ui/abrirPicker";
 
 // Los 3 orígenes que se trabajan en compras (Fábrica y Original tienen su
 // propia vista / no se compran) — ver lib/compras/origenArticulo.ts.
@@ -29,6 +30,11 @@ interface Columna {
   total: number;       // items = artículos distintos
   unidades: number;    // unidades de esa etapa (faltantes / pedidas en OC / ingresadas)
   importe: number;     // $ de esa etapa (unidades × precio de venta del artículo)
+  // Magnitud del FALTANTE de los artículos de esa etapa (no lo pedido ni lo
+  // ingresado): cuánto de lo que faltó en el mes está representado ahí. Es lo
+  // que lee el panel de cobertura: "de los $X que faltaron, $Y ya ingresó".
+  faltanteUnidades: number;
+  faltanteImporte: number;
 }
 // Un funnel por origen: la API los calcula todos de una (mismos 3 sets, en
 // memoria), así el selector de origen cambia la vista SIN volver a consultar.
@@ -141,6 +147,17 @@ const fmtMoney = (n: number) =>
     currency: "ARS",
     maximumFractionDigits: 0,
   }).format(n || 0);
+const fmtPct = (n: number) =>
+  `${new Intl.NumberFormat("es-AR", { maximumFractionDigits: 1 }).format(n || 0)}%`;
+
+// Colores de los 3 tramos de la cobertura del faltante. Verde = ya ingresó
+// (mismo verde de la card "Ingresados"), azul = tiene OC pero todavía no llegó
+// (mismo azul de "Con OC"), gris = sin cubrir.
+const COBERTURA_COLOR = {
+  ingresado: "#4ADE80",
+  enCamino: "#60A5FA",
+  sinCubrir: "#52525B",
+} as const;
 
 // Valor de KpiCard apilado en 3 líneas (items / unidades / $) — las cards del
 // funnel muestran las 3 magnitudes de la misma etapa una debajo de la otra, en
@@ -400,6 +417,43 @@ export default function ComprasMetricasPage() {
     (key: string) => funnel?.columnas.find((c) => c.key === key)?.importe ?? 0,
     [funnel],
   );
+  // $ del FALTANTE de los artículos de la etapa (cuánto de lo que faltó cayó
+  // ahí), distinto del $ de lo pedido o ingresado.
+  const impFalt = useCallback(
+    (key: string) => funnel?.columnas.find((c) => c.key === key)?.faltanteImporte ?? 0,
+    [funnel],
+  );
+  const unidFalt = useCallback(
+    (key: string) => funnel?.columnas.find((c) => c.key === key)?.faltanteUnidades ?? 0,
+    [funnel],
+  );
+
+  // Cobertura del faltante del mes en $: cuánto de lo que faltó ya ingresó,
+  // cuánto tiene OC todavía sin ingresar y cuánto sigue sin cubrir. Todo sale
+  // del funnel que ya está en memoria (col3 ⊆ col2 ⊆ col1), sin consultas.
+  const cobertura = useMemo(() => {
+    const total = impFalt("faltantes");
+    const ingresado = impFalt("ingresados");
+    const conOC = impFalt("conOC");
+    const enCamino = Math.max(conOC - ingresado, 0);
+    const sinCubrir = Math.max(total - conOC, 0);
+    const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
+    return {
+      total,
+      totalItems: col("faltantes"),
+      totalUnidades: unidFalt("faltantes"),
+      ingresado,
+      ingresadoItems: col("ingresados"),
+      ingresadoUnidades: unidFalt("ingresados"),
+      enCamino,
+      enCaminoItems: Math.max(col("conOC") - col("ingresados"), 0),
+      sinCubrir,
+      sinCubrirItems: Math.max(col("faltantes") - col("conOC"), 0),
+      pctIngresado: pct(ingresado),
+      pctEnCamino: pct(enCamino),
+      pctSinCubrir: pct(sinCubrir),
+    };
+  }, [col, impFalt, unidFalt]);
 
   // Export a Excel: una fila por artículo del mes con faltante / OC (y sus
   // números) / ingreso (y sus remitos). Los datos se piden recién al apretar el
@@ -507,10 +561,11 @@ export default function ComprasMetricasPage() {
         <div className="flex items-center gap-3">
           <input
             type="month"
+            onClick={abrirPicker}
             value={mes}
             max={mesActual()}
             onChange={(e) => setMes(e.target.value || mesActual())}
-            className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-xs text-zinc-200 outline-none [color-scheme:dark] focus:border-yellow-400"
+            className="bg-[#1f1f1f] border border-zinc-700 rounded-md px-2 py-1.5 text-xs text-zinc-200 outline-none [color-scheme:dark] focus:border-yellow-400 cursor-pointer"
           />
           <button
             onClick={ciclarOrigen}
@@ -615,6 +670,80 @@ export default function ComprasMetricasPage() {
             icon={PackageCheck}
             accent="green"
           />
+        </div>
+
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 space-y-4">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="min-w-0">
+              <h2 className="text-yellow-400 font-bold text-lg uppercase tracking-wide flex items-center gap-2">
+                <Wallet size={18} /> Cuánto faltó y cuánto se cubrió
+                <span className="text-zinc-500 font-normal normal-case tracking-normal text-base">
+                  · {ORIGEN_TITULO[origen] ?? origen}
+                </span>
+                {loading && <Loader2 size={15} className="animate-spin text-yellow-400" />}
+              </h2>
+              <p className="text-zinc-500 text-sm mt-1">
+                El faltante de {fmtMesLabel(mes)} valorizado a precio de venta, repartido según qué
+                pasó con cada artículo. Los tres tramos se valorizan siempre por la cantidad que
+                FALTABA — no por la que se pidió ni por la que ingresó.
+              </p>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-zinc-500 text-[11px] uppercase tracking-wide">Faltó</div>
+              <div className="text-2xl font-bold text-orange-300 tabular-nums leading-tight">
+                {fmtMoney(cobertura.total)}
+              </div>
+              <div className="text-xs text-zinc-500 tabular-nums">
+                {fmtNum(cobertura.totalItems)} items · {fmtNum(cobertura.totalUnidades)} u.
+              </div>
+            </div>
+          </div>
+
+          <div className="flex h-3 w-full overflow-hidden rounded-full bg-zinc-800">
+            <div
+              className="h-full transition-all"
+              style={{ width: `${cobertura.pctIngresado}%`, backgroundColor: COBERTURA_COLOR.ingresado }}
+              title={`Ingresado ${fmtMoney(cobertura.ingresado)} (${fmtPct(cobertura.pctIngresado)})`}
+            />
+            <div
+              className="h-full transition-all"
+              style={{ width: `${cobertura.pctEnCamino}%`, backgroundColor: COBERTURA_COLOR.enCamino }}
+              title={`Con OC sin ingresar ${fmtMoney(cobertura.enCamino)} (${fmtPct(cobertura.pctEnCamino)})`}
+            />
+            <div
+              className="h-full transition-all"
+              style={{ width: `${cobertura.pctSinCubrir}%`, backgroundColor: COBERTURA_COLOR.sinCubrir }}
+              title={`Sin cubrir ${fmtMoney(cobertura.sinCubrir)} (${fmtPct(cobertura.pctSinCubrir)})`}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <TramoCobertura
+              color={COBERTURA_COLOR.ingresado}
+              label="Ya ingresó"
+              importe={cobertura.ingresado}
+              pct={cobertura.pctIngresado}
+              items={cobertura.ingresadoItems}
+              unidades={cobertura.ingresadoUnidades}
+              hint="Artículos faltantes que ya tuvieron remito de ingreso ese mes, valorizados por lo que faltaba"
+            />
+            <TramoCobertura
+              color={COBERTURA_COLOR.enCamino}
+              label="Con OC, sin ingresar"
+              importe={cobertura.enCamino}
+              pct={cobertura.pctEnCamino}
+              items={cobertura.enCaminoItems}
+              hint="Faltantes con Orden de Compra hecha ese mes que todavía no llegaron"
+            />
+            <TramoCobertura
+              color={COBERTURA_COLOR.sinCubrir}
+              label="Sin cubrir"
+              importe={cobertura.sinCubrir}
+              pct={cobertura.pctSinCubrir}
+              items={cobertura.sinCubrirItems}
+              hint="Faltantes sin Orden de Compra ese mes"
+            />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -776,6 +905,46 @@ export default function ComprasMetricasPage() {
           />
         </div>
       </main>
+    </div>
+  );
+}
+
+// Un tramo de la cobertura del faltante: $ y % sobre el total que faltó, con
+// los items (y las unidades, cuando aplican) atrás. El $ es SIEMPRE la parte
+// del faltante que cae en el tramo, no lo pedido ni lo ingresado.
+function TramoCobertura({
+  color,
+  label,
+  importe,
+  pct,
+  items,
+  unidades,
+  hint,
+}: {
+  color: string;
+  label: string;
+  importe: number;
+  pct: number;
+  items: number;
+  unidades?: number;
+  hint: string;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3" title={hint}>
+      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-400">
+        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+        {label}
+      </div>
+      <div className="mt-1.5 flex items-baseline gap-2">
+        <span className="text-xl font-bold tabular-nums" style={{ color }}>
+          {fmtMoney(importe)}
+        </span>
+        <span className="text-sm text-zinc-500 tabular-nums">{fmtPct(pct)}</span>
+      </div>
+      <div className="text-xs text-zinc-500 tabular-nums mt-0.5">
+        {fmtNum(items)} items
+        {unidades != null && ` · ${fmtNum(unidades)} u. faltantes`}
+      </div>
     </div>
   );
 }

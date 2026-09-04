@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
+import { abrirPicker } from "@/components/ui/abrirPicker";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /ventas/presupuestos — presupuestos de BULONERÍA (Ven_CodCom 45) separados
@@ -324,22 +325,24 @@ export default function VentasPresupuestosPage() {
             </button>
             <input
               type="month"
+              onClick={abrirPicker}
               value={desde}
               onChange={(e) => {
                 const v = e.target.value || mesActual();
                 setDesde(v);
                 if (!rangoAbierto) setHasta(v);
               }}
-              className="bg-transparent px-3 py-2 text-sm text-zinc-100 outline-none [color-scheme:dark]"
+              className="bg-transparent px-3 py-2 text-sm text-zinc-100 outline-none [color-scheme:dark] cursor-pointer"
             />
             {rangoAbierto && (
               <>
                 <span className="text-zinc-500 px-1">→</span>
                 <input
                   type="month"
+                  onClick={abrirPicker}
                   value={hasta}
                   onChange={(e) => setHasta(e.target.value || desde)}
-                  className="bg-transparent px-3 py-2 text-sm text-zinc-100 outline-none [color-scheme:dark]"
+                  className="bg-transparent px-3 py-2 text-sm text-zinc-100 outline-none [color-scheme:dark] cursor-pointer"
                 />
               </>
             )}

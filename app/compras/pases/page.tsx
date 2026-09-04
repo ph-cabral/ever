@@ -6,6 +6,7 @@ import {
 import * as XLSX from "xlsx";
 import { InicioButton } from "@/components/ui/InicioButton";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
+import { abrirPicker } from "@/components/ui/abrirPicker";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras/pases — registro de los faltantes que PASARON A COMPRAS, por mes.
@@ -141,9 +142,10 @@ export default function PasesPage() {
         <div className="ml-auto flex items-center gap-2">
           <input
             type="month"
+            onClick={abrirPicker}
             value={mes}
             onChange={(e) => setMes(e.target.value || mesActual())}
-            className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-yellow-400"
+            className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-yellow-400 cursor-pointer"
           />
           <button
             onClick={() => setSoloSinComprar((v) => !v)}
