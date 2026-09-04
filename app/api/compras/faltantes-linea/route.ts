@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import {
   agruparFaltantesMes,
   pasaRecorte,
@@ -17,13 +16,15 @@ export const maxDuration = 60;
 // ──────────────────────────────────────────────────────────────────────────────
 // /compras — sección "Faltantes por línea".
 //
-// Los faltantes de un mes, tal como se marcaron en /deposito/faltantes
-// (preparado.faltante_existencia con existencia=false), agrupados por LÍNEA
-// (no por artículo) y separados por ORIGEN del artículo. Por cada línea:
+// Los faltantes de un mes agrupados por LÍNEA (no por artículo) y separados por
+// ORIGEN del artículo. Por cada línea:
 //   · items          → artículos distintos faltantes
-//   · cantFaltante   → suma de faltante_existencia.cantidad, o sea lo que el
-//                      operario marcó como sin existencia (decisión:
-//                      NO el CantPend de Magnus).
+//   · cantFaltante   → unidades pendientes del mes (CantPend de Magnus, sin los
+//                      renglones de pedidos cancelados). 2026-09-03: antes era
+//                      la cantidad que marcó el operario en la mesa
+//                      (faltante_existencia.cantidad) y el universo eran solo
+//                      los artículos marcados; ahora es el mismo universo del
+//                      reporte de Magnus que cuentan las cards de arriba.
 //   · cantComprada   → unidades de OC hechas ESE MISMO MES para esos mismos
 //                      artículos (/compras/compras-valorizado, por FecMovim).
 //   · monto          → esas unidades valorizadas a precio de VENTA (último
@@ -32,14 +33,15 @@ export const maxDuration = 60;
 //
 // RECORTE (2026-09-03) — mismo universo que las cards de /compras: se comparte
 // lib/compras/faltantesMes.ts (origen real del artículo por Stk_TiposArticulos,
-// solo Habilitados, sin renglones de pedidos cancelados). Antes el origen salía
-// de la heurística `Importacion` de /compras/ordenes-pendientes, que
-// clasificaba mal y no coincidía con /compras/faltantes.
+// solo Habilitados, sin renglones de pedidos cancelados, sin cruzar contra las
+// marcas de la mesa). Antes el origen salía de la heurística `Importacion` de
+// /compras/ordenes-pendientes, que clasificaba mal y no coincidía con
+// /compras/faltantes.
 //
-// Dos consecuencias buenas para la latencia: ya no se consulta
-// /compras/ordenes-pendientes (el origen no lo necesita) ni
-// /compras/lineas-articulos (la línea ya viene en /deposito/faltantes). Quedan
-// 2 fetches y salen EN PARALELO.
+// Consecuencias buenas para la latencia: ya no se consulta Postgres
+// (faltante_existencia), ni /compras/ordenes-pendientes (el origen no lo
+// necesita), ni /compras/lineas-articulos (la línea ya viene en
+// /deposito/faltantes). Quedan 2 fetches y salen EN PARALELO.
 //
 // Los grupos son los 3 del selector de la vista (nacionales / importados /
 // otros). Fábrica y Original no se trabajan en compras: se cuentan aparte en
@@ -84,26 +86,7 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const { mes, desde, hasta } = mesRange(sp.get("mes"));
 
-  // 1) Faltantes marcados en el mes (Postgres propio) — unidades por artículo.
-  let marks: { codArticulo: string | null; cantidad: number | null }[] = [];
-  try {
-    marks = await prisma.faltante_existencia.findMany({
-      where: { existencia: false, fecha: { gte: new Date(desde), lte: new Date(hasta) } },
-      select: { codArticulo: true, cantidad: true },
-    });
-  } catch (e) {
-    console.error("GET /api/compras/faltantes-linea — faltante_existencia", e);
-    return NextResponse.json({ error: "No se pudo leer los faltantes del mes" }, { status: 503 });
-  }
-
-  const faltanteUnid = new Map<string, number>();
-  for (const m of marks) {
-    const cod = (m.codArticulo ?? "").trim();
-    if (!cod) continue;
-    faltanteUnid.set(cod, (faltanteUnid.get(cod) ?? 0) + (Number(m.cantidad) || 0));
-  }
-
-  // 2) Los 2 fetches a Magnus, en paralelo (best-effort cada uno):
+  // 1) Los 2 fetches a Magnus, en paralelo (best-effort cada uno):
   //    · deposito/faltantes    → origen, estado, línea por artículo
   //    · compras-valorizado    → unidades y $ de OC del mes por artículo
   const q = encodeURIComponent;
@@ -138,19 +121,16 @@ export async function GET(req: NextRequest) {
     console.error("GET /api/compras/faltantes-linea — compras-valorizado", valRes.reason);
   }
 
-  // 3) Agrupar: origen → línea.
+  // 2) Agrupar: origen → línea. El universo son todos los artículos con
+  //    renglón pendiente en el mes (no solo los marcados por la mesa).
   const grupos = new Map<OrigenArticulo, Map<string, Acum>>(
     GRUPOS.map((g) => [g, new Map<string, Acum>()]),
   );
-  const excluidos: Record<string, number> = { fabrica: 0, original: 0, sinRenglon: 0, noHabilitado: 0 };
+  const excluidos: Record<string, number> = { fabrica: 0, original: 0, noHabilitado: 0 };
+  let articulosFaltantes = 0;
 
-  for (const cod of [...faltanteUnid.keys()].sort()) {
-    const a = faltMes.articulos.get(cod);
-    if (!a) {
-      // Marcado en la mesa pero sin renglón vivo en Magnus ese mes.
-      excluidos.sinRenglon++;
-      continue;
-    }
+  for (const cod of [...faltMes.articulos.keys()].sort()) {
+    const a = faltMes.articulos.get(cod)!;
     if (!pasaRecorte(a, faltMes.estadoDisponible)) {
       excluidos.noHabilitado++;
       continue;
@@ -161,10 +141,11 @@ export async function GET(req: NextRequest) {
       excluidos[a.origen] = (excluidos[a.origen] ?? 0) + 1;
       continue;
     }
+    articulosFaltantes++;
     const linea = a.linea || SIN_LINEA;
     const acum = mapa.get(linea) ?? { linea, items: 0, cantFaltante: 0, cantComprada: 0, monto: 0 };
     acum.items += 1;
-    acum.cantFaltante += faltanteUnid.get(cod) ?? 0;
+    acum.cantFaltante += a.unidades;
     acum.cantComprada += compradoUnid.get(cod) ?? 0;
     acum.monto += compradoMonto.get(cod) ?? 0;
     mapa.set(linea, acum);
@@ -214,7 +195,7 @@ export async function GET(req: NextRequest) {
     estadoArticuloDisponible: faltMes.estadoDisponible,
     excluidos,
     excluidosFabrica: excluidos.fabrica, // compat con la vista anterior
-    articulosFaltantes: faltanteUnid.size,
+    articulosFaltantes,
     ...porOrigen,
   });
 }

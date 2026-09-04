@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import {
   agruparFaltantesMes,
   codigosPorOrigen,
@@ -20,10 +19,15 @@ export const maxDuration = 60;
 // /compras — funnel MENSUAL de un mes calendario, en ARTÍCULOS distintos
 // (items), no en unidades, calculado POR ORIGEN del artículo.
 //
-//   Columna 1 "Faltantes": CodArticulo distintos marcados "sin existencia"
-//     (preparado.faltante_existencia, existencia=false) con fecha dentro del
-//     mes, QUE ADEMÁS tengan renglón vivo en Magnus ese mes y pasen el recorte
-//     de lib/compras/faltantesMes.ts (habilitados, sin pedidos cancelados).
+//   Columna 1 "Faltantes": CodArticulo distintos con renglón pendiente en el
+//     mes (GET /deposito/faltantes?historico=1) que pasan el recorte de
+//     lib/compras/faltantesMes.ts (habilitados, sin renglones de pedidos
+//     cancelados). Es el universo del reporte de Magnus / del script
+//     detalle_mes_extraccion.py: agosto 2026 = 762 items, 405 Nacionales.
+//     2026-09-03: se sacó el cruce contra las marcas de la mesa
+//     (preparado.faltante_existencia). Ese cruce dejaba la card en ~280
+//     nacionales — un subconjunto de lo pendiente, imposible de cerrar contra
+//     el reporte. De paso la vista dejó de consultar Postgres acá.
 //
 //   Columna 2 "Con OC": de los artículos de la columna 1, cuántos tuvieron
 //     al menos un renglón de Orden de Compra HECHO ese mismo mes (indicadores-
@@ -56,6 +60,7 @@ export const maxDuration = 60;
 //     más (ese endpoint ya no se consulta desde acá).
 //   · Solo artículos HABILITADOS.
 //   · Sin renglones de pedidos cancelados o sin estado en Magnus.
+//   · SIN cruce contra las marcas "sin existencia" de la mesa (ver arriba).
 //
 //   El funnel se calcula para CADA origen (nacionales / importados / otros) más
 //   "todos", todo en memoria sobre los mismos 3 sets: el selector de la vista
@@ -66,7 +71,7 @@ export const maxDuration = 60;
 //   items"): el recorte del funnel hacía parecer que faltaban OC cuando en
 //   realidad la card solo contaba las de artículos faltantes.
 //
-//   `origenes` clasifica el mismo set A recortado en las 5 categorías de
+//   `origenes` clasifica el mismo universo recortado en las 5 categorías de
 //   origenArticulo (Nacionales / Importados / Fábrica / Original / Otros) y
 //   alimenta la torta y los badges del selector.
 //
@@ -134,14 +139,13 @@ interface Funnel {
 function armarFunnel(
   origen: OrigenFunnel,
   faltMes: FaltantesMes,
-  setA: Set<string>,
   setB: Set<string>,
   setC: Set<string>,
   ocUnidMap: Map<string, number>,
   ingUnidMap: Map<string, number>,
   precioUnitMap: Map<string, number>,
 ): Funnel {
-  const faltantes = codigosPorOrigen(faltMes, setA, origen);
+  const faltantes = codigosPorOrigen(faltMes, origen);
   const conOC = faltantes.filter((c) => setB.has(c));
   const ingresados = conOC.filter((c) => setC.has(c));
 
@@ -181,29 +185,9 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const { mes, desde, hasta } = mesRange(sp.get("mes"));
 
-  // 1) Set A: artículos faltantes del mes (Postgres propio — rápido, no
-  // depende de Magnus). Si esto falla no hay vista posible.
-  let marks: { codArticulo: string | null }[] = [];
-  try {
-    marks = await prisma.faltante_existencia.findMany({
-      where: {
-        existencia: false,
-        fecha: { gte: new Date(desde), lte: new Date(hasta) },
-      },
-      select: { codArticulo: true },
-    });
-  } catch (e) {
-    console.error("GET /api/compras/metricas — faltante_existencia", e);
-    return NextResponse.json(
-      { error: "No se pudo leer los faltantes del mes" },
-      { status: 503 },
-    );
-  }
-  const setA = new Set(
-    marks.map((m) => (m.codArticulo ?? "").trim()).filter(Boolean),
-  );
-
-  // 2) Los 3 fetches a Magnus, EN PARALELO (best-effort cada uno):
+  // 1) Los 3 fetches a Magnus, EN PARALELO (best-effort cada uno). Ya no se
+  //    consulta Postgres: el universo de faltantes del mes sale del propio
+  //    /deposito/faltantes (ver cabecera).
   //    · ordenes-mes      → set B (OC hecha ese mes) + unidades pedidas
   //    · ingresos         → set C (remito x OC concretado ese mes)
   //    · deposito/faltantes → origen, estado, unidades e importe por artículo
@@ -251,7 +235,7 @@ export async function GET(req: NextRequest) {
     console.error("GET /api/compras/metricas — ingresos", ingRes.reason);
   }
 
-  // 3) Origen / estado / unidades por artículo — el recorte del mes.
+  // 2) Origen / estado / unidades por artículo — el recorte del mes.
   const clasifWarn = faltRes.status !== "fulfilled";
   if (clasifWarn) {
     console.error("GET /api/compras/metricas — deposito/faltantes", faltRes.reason);
@@ -271,21 +255,21 @@ export async function GET(req: NextRequest) {
   let ocTotalUnidades = 0;
   for (const u of ocUnidMap.values()) ocTotalUnidades += u;
 
-  // 4) Un funnel por origen + "todos". Todo en memoria, sin consultas extra.
+  // 3) Un funnel por origen + "todos". Todo en memoria, sin consultas extra.
   const claves: OrigenFunnel[] = ["nacionales", "importados", "otros", "todos"];
   const funnels: Record<string, Funnel> = {};
   for (const k of claves) {
-    funnels[k] = armarFunnel(k, faltMes, setA, setB, setC, ocUnidMap, ingUnidMap, precioUnitMap);
+    funnels[k] = armarFunnel(k, faltMes, setB, setC, ocUnidMap, ingUnidMap, precioUnitMap);
   }
 
-  // 5) Torta + badges: el set A recortado, clasificado en las 5 categorías de
+  // 4) Torta + badges: el mismo universo recortado, clasificado en las 5 categorías de
   // origenArticulo (incluye Fábrica y Original, que la vista no trabaja pero
   // tienen que verse para que nada desaparezca sin explicación).
   const cats: OrigenArticulo[] = ["nacionales", "importados", "fabrica", "original", "otros"];
   const origenes = cats.map((k) => ({
     key: k,
     label: ORIGEN_LABEL[k],
-    total: codigosPorOrigen(faltMes, setA, k).length,
+    total: codigosPorOrigen(faltMes, k).length,
   }));
 
   return NextResponse.json({

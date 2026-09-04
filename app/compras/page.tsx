@@ -182,7 +182,7 @@ interface FaltLineaResp {
   clasifWarn: boolean;
   lineaWarn: boolean;
   estadoArticuloDisponible: boolean;
-  // fabrica / original / sinRenglon / noHabilitado: por qué quedó afuera cada
+  // fabrica / original / noHabilitado: por qué quedó afuera cada
   // artículo marcado que no entra en ninguna de las 3 tablas.
   excluidos: Record<string, number>;
   excluidosFabrica: number;
@@ -503,9 +503,9 @@ export default function ComprasMetricasPage() {
             </span>
           </h1>
           <p className="text-zinc-500 text-sm mt-1">
-            Artículos habilitados marcados sin existencia en {fmtMesLabel(mes)}, sin los renglones
-            de pedidos cancelados. El origen sale del tipo de artículo de Magnus — mismo criterio
-            que Compras → Faltantes.
+            Artículos habilitados con unidades pendientes en {fmtMesLabel(mes)}, sin los renglones
+            de pedidos cancelados — mismo universo que el reporte de Magnus. El origen sale del tipo
+            de artículo — mismo criterio que Compras → Faltantes.
           </p>
         </div>
 
@@ -543,7 +543,7 @@ export default function ComprasMetricasPage() {
           <KpiCard
             label="Faltantes del mes"
             value={<StackedKpi items={`${fmtNum(col("faltantes"))} items`} unidades={`${fmtNum(unid("faltantes"))} u.`} importe={fmtMoney(imp("faltantes"))} />}
-            hint="Artículos marcados sin existencia, sus unidades pendientes y cuánto faltó en $ (a precio de venta)"
+            hint="Artículos con unidades pendientes en el mes (habilitados, sin pedidos cancelados), sus unidades y cuánto faltó en $ (a precio de venta)"
             icon={PackageX}
             accent="orange"
           />
@@ -670,12 +670,11 @@ export default function ComprasMetricasPage() {
               {faltLineaLoading && <Loader2 size={15} className="animate-spin text-yellow-400" />}
             </h2>
             <p className="text-zinc-500 text-sm mt-1">
-              Artículos marcados como faltantes en <b>Depósito → Faltantes</b> durante{" "}
-              {fmtMesLabel(mes)}, agrupados por línea, con el mismo recorte que las cards de
-              arriba (origen {ORIGEN_TITULO[origen] ?? origen}, habilitados, sin pedidos
-              cancelados). La cantidad faltante es la que marcó el operario; la comprada son las
-              unidades de OC hechas ese mismo mes para esos mismos artículos, valorizadas a precio
-              de VENTA. Lo de fábrica y los Original no se muestran acá.
+              Faltantes de {fmtMesLabel(mes)} agrupados por línea, con el mismo recorte que las
+              cards de arriba (origen {ORIGEN_TITULO[origen] ?? origen}, habilitados, sin pedidos
+              cancelados). La cantidad faltante son las unidades pendientes del mes; la comprada son
+              las unidades de OC hechas ese mismo mes para esos mismos artículos, valorizadas a
+              precio de VENTA. Lo de fábrica y los Original no se muestran acá.
             </p>
           </div>
 
@@ -700,7 +699,7 @@ export default function ComprasMetricasPage() {
               {fmtNum(faltLinea.excluidos.fabrica ?? 0)} de fábrica ·{" "}
               {fmtNum(faltLinea.excluidos.original ?? 0)} Original ·{" "}
               {fmtNum(faltLinea.excluidos.noHabilitado ?? 0)} no habilitados o solo por pedidos
-              cancelados · {fmtNum(faltLinea.excluidos.sinRenglon ?? 0)} sin renglón vivo en Magnus
+              cancelados
             </div>
           )}
 

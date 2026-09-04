@@ -25,8 +25,19 @@ import { origenArticulo, type OrigenArticulo } from "./origenArticulo";
 //      que siga vivo). Un artículo que faltaba SOLO por esos renglones deja de
 //      ser faltante.
 //
-// Todo sale de la respuesta de GET /deposito/faltantes que las dos rutas ya
-// pedían: no agrega ninguna consulta.
+// UNIVERSO (2026-09-03): faltante del mes = TODO artículo con renglón pendiente
+// en el mes que pasa el recorte de arriba — el mismo universo del reporte de
+// Magnus y de detalle_mes_extraccion.py (762 items en agosto 2026, 405 de ellos
+// Nacionales). ANTES se exigía además la marca "sin existencia" de la mesa
+// (preparado.faltante_existencia): eso recortaba a ~280 nacionales, un
+// subconjunto de lo pendiente, y no cerraba nunca con el reporte. Esa tabla ya
+// no interviene en el recorte del mes de /compras (sí sigue siendo la fuente de
+// /compras/faltantes, que es la vista operativa de la mesa).
+//
+// Todo sale de la respuesta de GET /deposito/faltantes que las rutas ya pedían:
+// no agrega ninguna consulta — y desde este cambio se ahorra la consulta a
+// Postgres que hacían /compras/metricas, /compras/faltantes-linea y
+// /compras/detalle-mes.
 // ──────────────────────────────────────────────────────────────────────────────
 
 // Mismo criterio de "cancelado" que indicadores-api/deposito.py
@@ -161,22 +172,19 @@ export const ORIGEN_LABEL: Record<OrigenArticulo | "todos", string> = {
 export type OrigenFunnel = OrigenArticulo | "todos";
 
 /**
- * Códigos del mes que pasan el recorte, opcionalmente acotados a un origen.
- * `setA` = artículos marcados sin existencia en el mes (Postgres): el universo
- * nunca se agranda, solo se recorta.
+ * Códigos faltantes del mes (todo artículo con renglón pendiente que pasa el
+ * recorte), opcionalmente acotados a un origen. Es el universo del reporte de
+ * Magnus: no se cruza contra las marcas de la mesa.
  */
 export function codigosPorOrigen(
   faltantes: FaltantesMes,
-  setA: Set<string>,
   origen: OrigenFunnel,
 ): string[] {
   const out: string[] = [];
-  for (const cod of setA) {
-    const a = faltantes.articulos.get(cod);
-    if (!a) continue; // marcado en la mesa pero sin renglón vivo en Magnus ese mes
+  for (const a of faltantes.articulos.values()) {
     if (!pasaRecorte(a, faltantes.estadoDisponible)) continue;
     if (origen !== "todos" && a.origen !== origen) continue;
-    out.push(cod);
+    out.push(a.cod);
   }
   return out.sort();
 }

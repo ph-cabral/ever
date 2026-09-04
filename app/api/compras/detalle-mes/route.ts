@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import {
   agruparFaltantesMes,
   pasaRecorte,
@@ -25,9 +24,11 @@ export const maxDuration = 60;
 //
 // Fuentes: exactamente las mismas que /api/compras/metricas, para que los
 // totales del Excel cierren con las cards:
-//   · Faltantes  → Postgres preparado.faltante_existencia (set A) + CantPend
-//     por artículo de Magnus (GET /deposito/faltantes?historico=1), con el
-//     MISMO recorte que las cards (lib/compras/faltantesMes.ts): `esFaltante`
+//   · Faltantes  → CantPend por artículo de Magnus (GET
+//     /deposito/faltantes?historico=1), con el MISMO recorte que las cards
+//     (lib/compras/faltantesMes.ts). 2026-09-03: ya no se cruza contra las
+//     marcas de la mesa (preparado.faltante_existencia), igual que las cards —
+//     el universo es el del reporte de Magnus. `esFaltante`
 //     solo queda en true para artículos habilitados cuyo faltante no viene
 //     únicamente de pedidos cancelados, y `cantFaltante` no cuenta esos
 //     renglones (van aparte en `cantFaltanteCancelada`). Las filas NO se
@@ -96,27 +97,6 @@ export async function GET(req: NextRequest) {
   const { mes, desde, hasta } = mesRange(sp.get("mes"));
   const qs = `desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`;
 
-  // Set A: artículos faltantes del mes (Postgres propio).
-  let marks: { codArticulo: string | null }[] = [];
-  try {
-    marks = await prisma.faltante_existencia.findMany({
-      where: {
-        existencia: false,
-        fecha: { gte: new Date(desde), lte: new Date(hasta) },
-      },
-      select: { codArticulo: true },
-    });
-  } catch (e) {
-    console.error("GET /api/compras/detalle-mes — faltante_existencia", e);
-    return NextResponse.json(
-      { error: "No se pudo leer los faltantes del mes" },
-      { status: 503 },
-    );
-  }
-  const setA = new Set(
-    marks.map((m) => (m.codArticulo ?? "").trim()).filter(Boolean),
-  );
-
   // Las 3 fuentes de Magnus, en paralelo y best-effort (si una falla, esa
   // columna queda vacía y se avisa por `warns` — no se rompe el export).
   const [faltRes, ocRes, ingRes] = await Promise.allSettled([
@@ -151,9 +131,6 @@ export async function GET(req: NextRequest) {
     return f;
   };
 
-  // Todo artículo del set A entra al Excel aunque no tenga ni OC ni ingreso.
-  for (const cod of setA) fila(cod);
-
   // Faltantes: unidades pendientes + nombre/proveedor (mismo dato que usa la
   // card "Unidades faltantes" — se suma por artículo).
   const faltRows = faltRes.status === "fulfilled"
@@ -167,8 +144,8 @@ export async function GET(req: NextRequest) {
       const cod = (r.CodArticulo ?? "").trim();
       if (cod && r.Nombre && !nombres.has(cod)) nombres.set(cod, r.Nombre);
     }
+    // Todo artículo con renglón pendiente entra al Excel, tenga OC/ingreso o no.
     for (const a of faltMes.articulos.values()) {
-      if (!setA.has(a.cod)) continue; // solo los marcados por la mesa
       const f = fila(a.cod);
       f.cantFaltante += a.unidades;
       f.cantFaltanteCancelada += a.unidadesCanceladas;
