@@ -186,6 +186,14 @@ const MESES_CORTOS_ES = [
   "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
 ];
 
+// Nombre completo, sólo para el encabezado de la columna del mes en curso: ahí
+// el título pasó a ser el TOTAL de la columna, así que el mes queda como
+// subtítulo y tiene lugar de sobra para escribirse entero.
+const MESES_ES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
 type Modo = "unidades" | "pesos";
 type Periodo = "ytd" | "meses";
 
@@ -909,8 +917,11 @@ export default function VentasVendedorPage() {
   const rangoAcumLabel = topResp?.desde && topResp?.hasta
     ? `${nombreMes(topResp.desde)}–${nombreMes(topResp.hasta)} ${topResp.hasta.slice(0, 4)}`
     : "Sin meses cerrados";
+  // Mes en curso: el nombre entero y sin año — el año ya está en la etiqueta
+  // del acumulado de al lado, repetirlo no agrega nada. Si el back todavía no
+  // contestó no se inventa un mes: se cae al rótulo genérico.
   const mesActualLabel = topResp?.mesActual
-    ? `${nombreMes(topResp.mesActual)} ${topResp.mesActual.slice(0, 4)}`
+    ? MESES_ES[Number(topResp.mesActual.slice(5, 7)) - 1] ?? "Mes en curso"
     : "Mes en curso";
 
 
@@ -1900,7 +1911,10 @@ export default function VentasVendedorPage() {
                               incompleto: sumarlo adentro haría que el año
                               se compare contra un mes a medio facturar. */}
                           <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800 text-yellow-400/80">
-                            Mes en curso
+                            {/* El título es el TOTAL de la columna — el mismo
+                                topSumas.mes que el pie, así que no pueden
+                                discrepar — y el mes queda de subtítulo. */}
+                            <span className="tabular-nums">{fmtTop(topSumas.mes)}</span>
                             <span className="block text-[11px] font-normal text-zinc-500">
                               {mesActualLabel}
                             </span>
