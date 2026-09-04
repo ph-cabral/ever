@@ -27,8 +27,8 @@ import { UsuarioActual } from "@/components/auth/UsuarioActual";
 //   Toda la agregación (existencia + fecha de arribo + extraordinario de
 //   compras) se resuelve en el backend: GET /api/ventas/faltantes.
 //
-//   Selector de vista (header): "Sin ingresar" (flipped=false, cara de
-//   adelante) / "Ingresados" (flipped=true, reverso). Ingresados = misma lista,
+//   Selector de vista (header): "Sin ingresar" (flipped=false) / "Ingresados"
+//   (flipped=true). Se monta SOLO la vista activa. Ingresados = misma lista,
 //   filtrada a los que YA tienen fechaArribo (gruposConArribo, vendidoMode).
 //   Acción (✓ vendido / ✗ no vendido): cualquiera de las dos respuestas
 //   guarda "vendido" en faltante_control y retira la fila (optimista).
@@ -628,22 +628,18 @@ export default function VentasFaltantesPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-6">
-            {/* Tarjeta que gira: frente = primera tabla (extraordinarios +
-                normales), reverso = Ingresados. Mismo patrón que
-                compras/faltantes (perspective + rotateY 180 + backface-visibility
-                hidden en las 2 caras superpuestas por grid). */}
-            <div className="[perspective:2000px]">
-              <div
-                className={`relative grid min-w-0 transition-transform duration-700 ease-in-out [transform-style:preserve-3d] ${
-                  flipped ? "[transform:rotateY(180deg)]" : ""
-                }`}
-              >
-                {/* Frente: primera tabla */}
-                <div
-                  className={`col-start-1 row-start-1 min-w-0 [backface-visibility:hidden] ${
-                    flipped ? "pointer-events-none" : ""
-                  }`}
-                >
+            {/* 2026-09-04: acá había una TARJETA QUE GIRA (perspective +
+                rotateY(180deg) + preserve-3d, las 2 caras montadas siempre y
+                superpuestas por grid). Con el volumen real de renglones el
+                navegador tenía que rasterizar las dos listas enteras dentro de
+                una capa 3D y animarla 700ms: al tocar el segmentado la pestaña
+                se congelaba varios segundos. Ahora se renderiza SOLO la cara
+                activa (montaje condicional, sin transform 3D): el cambio es
+                instantáneo y la cara que no se ve ni existe en el DOM.
+                Si se toca esto, NO volver a montar las dos caras a la vez. */}
+            <div className="min-w-0">
+              {!flipped ? (
+                <div className="min-w-0">
                   <h2 className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-medium text-yellow-400 uppercase tracking-wide mb-3">
                     <span className="flex items-center gap-2">
                       <Clock size={16} /> Sin ingresar (todavía no llegaron)
@@ -702,13 +698,9 @@ export default function VentasFaltantesPage() {
                     </div>
                   )}
                 </div>
-
-                {/* Reverso: Ingresados */}
-                <div
-                  className={`col-start-1 row-start-1 min-w-0 [backface-visibility:hidden] [transform:rotateY(180deg)] ${
-                    !flipped ? "pointer-events-none" : ""
-                  }`}
-                >
+              ) : (
+                /* Ingresados */
+                <div className="min-w-0">
                   <h2 className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-medium text-green-400 uppercase tracking-wide mb-3">
                     <span className="flex items-center gap-2">
                       <PackageCheck size={16} /> Ingresados (ya llegaron)
@@ -740,7 +732,7 @@ export default function VentasFaltantesPage() {
                     </section>
                   )}
                 </div>
-              </div>
+              )}
             </div>
 
             {gruposListos.length > 0 && (

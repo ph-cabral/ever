@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronRight, Star, Plus, X, Search, GripVertical, Home } from "lucide-react";
+import { ChevronRight, Star, X, GripVertical, Home } from "lucide-react";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Sidebar GLOBAL de la app (2026-08-27: antes vivía sólo en
@@ -26,8 +26,10 @@ import { ChevronRight, Star, Plus, X, Search, GripVertical, Home } from "lucide-
 //      (drag & drop). Se guarda por usuario en everwear.usuario_acceso
 //      (sql/usuario_acceso.sql + app/api/preferencias/accesos/route.ts).
 //   2. Las vistas del MÓDULO en el que está parado (según el catálogo).
-//   3. "Agregar acceso" — buscador con todas las vistas permitidas para ese
-//      usuario, agrupadas por módulo.
+//
+// (2026-09-04) Se sacó el botón "+ Agregar acceso" con su buscador: fijar/soltar
+// queda sólo con la ⭐ de cada vista. El catálogo completo se sigue trayendo del
+// endpoint porque de ahí sale el módulo actual y sus vistas.
 //
 // Marcar es preferencia, NO permiso: el catálogo lo arma el server ya filtrado
 // por los permisos de la sesión.
@@ -61,8 +63,6 @@ export function SidebarGlobal() {
   const [catalogo, setCatalogo] = useState<CatalogoItem[]>([]);
   const [cargado, setCargado] = useState(false);
   const [habilitada, setHabilitada] = useState(true); // 401 ⇒ se esconde
-  const [selector, setSelector] = useState(false);
-  const [q, setQ] = useState("");
   const [drag, setDrag] = useState<number | null>(null);
   const [sobre, setSobre] = useState<number | null>(null);
   const pathname = usePathname();
@@ -89,8 +89,6 @@ export function SidebarGlobal() {
 
   const cerrar = useCallback(() => {
     setOpen(false);
-    setSelector(false);
-    setQ("");
     setDrag(null);
     setSobre(null);
   }, []);
@@ -259,22 +257,6 @@ export function SidebarGlobal() {
     [catalogo, moduloActual],
   );
 
-  const filtrado = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    const base = t
-      ? catalogo.filter(
-          (c) => c.label.toLowerCase().includes(t) || c.grupo.toLowerCase().includes(t),
-        )
-      : catalogo;
-    const grupos: { grupo: string; items: CatalogoItem[] }[] = [];
-    for (const c of base) {
-      const g = grupos.find((x) => x.grupo === c.grupo);
-      if (g) g.items.push(c);
-      else grupos.push({ grupo: c.grupo, items: [c] });
-    }
-    return grupos;
-  }, [catalogo, q]);
-
   if (!habilitada || OCULTA_EN.some((p) => pathname === p || pathname.startsWith(p + "/")))
     return null;
 
@@ -360,8 +342,8 @@ export function SidebarGlobal() {
           {accesos.length === 0 && (
             <p className="px-3 pb-1 text-[11px] leading-snug text-zinc-600">
               Vacío. Tocá la{" "}
-              <Star size={11} className="inline -mt-0.5 text-yellow-400/70" /> de cualquier
-              vista, o <span className="text-zinc-400">Agregar acceso</span>, para fijarla acá.
+              <Star size={11} className="inline -mt-0.5 text-yellow-400/70" /> de cualquier vista
+              para fijarla acá.
             </p>
           )}
           {accesos.map(({ href, label }, i) => (
@@ -410,60 +392,6 @@ export function SidebarGlobal() {
             </>
           )}
 
-          {/* ── Agregar acceso de cualquier módulo ── */}
-          <button
-            onClick={() => setSelector((v) => !v)}
-            className="mt-2 w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed
-              border-zinc-700 text-xs text-zinc-500 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
-          >
-            {selector ? <X size={14} /> : <Plus size={14} />}
-            {selector ? "Cerrar" : "Agregar acceso"}
-          </button>
-
-          {selector && (
-            <div className="mt-2 rounded-lg border border-zinc-800 bg-[#111] p-2">
-              <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-md bg-zinc-900 border border-zinc-800">
-                <Search size={13} className="text-zinc-600 shrink-0" />
-                <input
-                  autoFocus
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Buscar vista…"
-                  className="w-full bg-transparent text-xs text-zinc-200 placeholder:text-zinc-600 outline-none"
-                />
-              </div>
-              <div className="mt-2 max-h-72 overflow-y-auto space-y-2 pr-0.5">
-                {filtrado.length === 0 && (
-                  <p className="px-2 py-3 text-[11px] text-zinc-600">Sin resultados.</p>
-                )}
-                {filtrado.map(({ grupo, items }) => (
-                  <div key={grupo}>
-                    <div className="px-2 pb-1 text-[10px] uppercase tracking-wider text-zinc-600">
-                      {grupo}
-                    </div>
-                    {items.map((c) => {
-                      const on = fijado(c.href);
-                      return (
-                        <button
-                          key={c.href}
-                          onClick={() => toggle(c.href, c.label)}
-                          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-xs
-                            text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors"
-                        >
-                          <Star
-                            size={13}
-                            className={on ? "text-yellow-400 shrink-0" : "text-zinc-600 shrink-0"}
-                            fill={on ? "currentColor" : "none"}
-                          />
-                          <span className="truncate">{c.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </nav>
 
         <div className="px-5 py-3 border-t border-zinc-800 text-[11px] text-zinc-600">
