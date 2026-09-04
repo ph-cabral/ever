@@ -19,10 +19,18 @@ Criterio
 · Sólo los conceptos COMERCIALES (CONCEPTOS_COMERCIALES). Los financieros
   —cheque rechazado, intereses, gastos bancarios, percepciones— quedan afuera:
   son débitos que SUMAN (+151M en ene-ago 2026) y no son venta.
-· Sólo la sub-empresa REAL, igual que el resto de la app. El par PRUEBA
-  (`PRU_Ven_RenDebCre`, vía `_VEN_06`) pesa 7-8% de la bonificación y hoy no
-  entra en ninguna vista; mezclarlo sobredimensionaría el descuento contra una
-  venta que sí es sólo REAL. Ver la nota de sub-empresas del proyecto.
+· Sólo la sub-empresa REAL, igual que el resto de las vistas comerciales. El
+  par PRUEBA (`PRU_Ven_RenDebCre`, vía `_VEN_06`) NO se suma, y no es sólo por
+  consistencia: verificado 2026-09-04, PRUEBA es un registro paralelo que
+  ESPEJA operaciones que ya están en REAL. Sobre la bulonería de 2026, 53 de
+  87 renglones tienen gemelo exacto en REAL —mismo cliente, fecha, artículo,
+  cantidad y precio al cuarto decimal—, el 73% del monto; hasta las notas de
+  crédito de corrección están duplicadas. Sumarlo contaría esa plata dos
+  veces. Ojo también con el maestro: `PRU_Ven_ConcDebCre` tiene los códigos
+  corridos (allá el 29 es AJUSTE VENTAS EXENTO y se usa para siniestros de
+  transporte, y el 31 es SINIESTROS), así que esta lista de conceptos NO se
+  puede reusar para PRUEBA. Ver la nota de sub-empresas del proyecto.
+  `finanza.py` sí suma PRUEBA a la facturación: es otro criterio, a propósito.
 · El signo sale de `Ven_CodCom.DebitoCredito` igual que la venta: 1 = débito
   suma, 2 = crédito resta. Una NC de bonificación da negativo.
 · NO hay unidades que restar: el concepto no tiene cantidad (el SP del BI
@@ -181,6 +189,110 @@ def fetch_bonificaciones(desde: str | None = None, hasta: str | None = None,
         "porConcepto": por_concepto,
         "porMes": por_mes,
         "porVendedor": por_vendedor,
+    })
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Prorrateo a la línea BULONERÍA
+# ──────────────────────────────────────────────────────────────────────────
+# La bonificación no tiene artículo y por lo tanto no tiene línea: es de toda
+# la empresa. Para /ventas/bulones se prorratea por la PARTICIPACIÓN de la
+# línea en la venta con artículo del mismo rango.
+#
+# Por qué el prorrateo GLOBAL y no uno por vendedor: medido 2026-09-04 sobre
+# ene-ago, las dos formas dan casi lo mismo (−2.641.778 global contra
+# −2.648.775 sumando el prorrateo vendedor por vendedor, 0,26% de diferencia),
+# pero la participación individual es dispar y sin sentido comercial — el
+# vendedor 804 tiene 36% de bulonería sobre 1,8M de venta, el 18000 un 11,7%
+# con CERO bonificación registrada, y el resto está por debajo del 0,7%.
+# Repartir por esa proporción mete ruido en el ranking sin ganar exactitud.
+#
+# La misma línea que bulones.py (LIKE 'BULON%' contra Stk_Nivel1, que tiene 82
+# filas) para que las dos vistas hablen de lo mismo. Las dos sumas salen de UNA
+# sola pasada por Ven_CompRenglon: el total y el de bulonería se calculan en el
+# mismo GROUP.
+#
+# OJO con la forma de escribirlo: bulones.py resuelve la línea con
+# `ap.Nivel1 IN (SELECT …)` en el WHERE, pero acá el filtro tiene que ir
+# ADENTRO de un SUM y SQL Server no admite una subconsulta dentro de un
+# agregado ("No es posible usar una función de agregado con una expresión que
+# contiene un agregado o una subconsulta", error 130). Por eso la lista de
+# Nivel1 de bulonería entra como LEFT JOIN a una tabla derivada y el CASE
+# pregunta si matcheó: mismo resultado, un solo LIKE resuelto una vez, y la
+# comparación por fila termina siendo de enteros. El DISTINCT de la derivada no
+# es decorativo: sin él, un Nivel1 repetido en Stk_Nivel1 multiplicaría los
+# renglones del LEFT JOIN e inflaría VentaTotal, que es el DENOMINADOR del
+# prorrateo.
+_LINEA_BULON_LIKE = os.getenv("BULONES_LINEA_LIKE", "BULON%")
+
+_MONTO_VENTA = ("CASE cc.DebitoCredito WHEN 1 THEN (r.Cantidad * r.PrecioVenta) "
+                "ELSE (r.Cantidad * r.PrecioVenta) * -1 END")
+
+_SQL_PARTICIPACION = f"""
+SELECT SUM({_MONTO_VENTA}) AS VentaTotal,
+       SUM(CASE WHEN bul.Nivel1 IS NOT NULL THEN {_MONTO_VENTA} ELSE 0 END) AS VentaBulones
+FROM Ven_CompCabecera vc
+JOIN Ven_CompRenglon r    ON r.NroMovVenta = vc.NroMovVenta
+JOIN Ven_CodCom cc        ON cc.CompCodigo = vc.CompCodigo
+JOIN StkFer_Articulos  s  ON s.CodArticulo = r.CodArticu
+JOIN StkFer_ArtParamet ap ON ap.ArticuloPatron = s.ArticuloPatron
+LEFT JOIN (SELECT DISTINCT n.Nivel1 FROM Stk_Nivel1 n
+            WHERE LTRIM(RTRIM(n.Detalle)) LIKE '{_LINEA_BULON_LIKE}') bul
+       ON bul.Nivel1 = ap.Nivel1
+WHERE cc.EvitaInformesYListados <> 1
+  AND vc.FecMovim BETWEEN ? AND ?
+"""
+
+
+def fetch_bonificacion_bulones(desde: str | None = None, hasta: str | None = None,
+                               forzar: bool = False) -> dict:
+    """Cuánto de la bonificación de la empresa le toca a BULONERÍA.
+
+    Devuelve el total de la empresa, la participación de la línea en la venta
+    con artículo y el monto prorrateado — los tres, porque el número que sirve
+    para leer la vista es el prorrateado pero SIN el total no se entiende de
+    dónde sale.
+
+    No lleva `vendedor`: es un número de empresa. Acotarlo a la cartera de un
+    no-admin daría un prorrateo sobre una venta parcial y no significaría nada.
+
+    Referencia de la medición (ene-ago 2026): bonificación −813,2M,
+    participación de bulonería 0,3249% (33,3M sobre 10.256,8M), prorrateado
+    −2,64M, que es el 7,9% de la venta de la línea.
+    """
+    desde_ym, hasta_ym, d1, d2 = _resolver_rango(desde, hasta)
+    key = ("bonif-bul", desde_ym, hasta_ym)
+    hit = _cacheado(key, forzar)
+    if hit is not None:
+        return hit
+
+    data = fetch_bonificaciones(desde=desde, hasta=hasta, forzar=forzar)
+    total = data["total"]
+
+    conn, cur = _conn()
+    try:
+        cur.execute(_SQL_PARTICIPACION, (d1, d2))
+        fila = cur.fetchone()
+        venta_total = float(_safe(fila[0]) or 0)
+        venta_bulones = float(_safe(fila[1]) or 0)
+    finally:
+        cur.close()
+        conn.close()
+
+    # Sin venta con artículo en el rango no hay proporción que aplicar. Pasa
+    # con rangos vacíos; devolver 0 es más honesto que dividir por cero.
+    participacion = (venta_bulones / venta_total) if venta_total else 0.0
+
+    return _guardar(key, {
+        "desde": _ym(desde_ym),
+        "hasta": _ym(hasta_ym),
+        "bonificacionEmpresa": total,
+        "ventaTotal": round(venta_total, 2),
+        "ventaBulones": round(venta_bulones, 2),
+        "participacion": round(participacion, 6),
+        "montoBulones": round(total * participacion, 2),
+        "porConcepto": data["porConcepto"],
+        "porMes": data["porMes"],
     })
 
 

@@ -92,9 +92,14 @@ interface RespVentasVendedor {
 }
 
 // Rankings del pie de la vista — debajo de la tabla principal, con su
-// PROPIO rango de meses (default últimos 12 — 2026-08-18,
-// "de septiembre 2025 a agosto 2026"), independiente del cliente elegido en
-// el buscador y del período YTD/meses de la tabla principal.
+// PROPIO rango de meses, independiente del cliente elegido en el buscador y
+// del período YTD/meses de la tabla principal.
+//
+// RANGO (2026-09-04, antes eran los últimos 12 meses móviles): los meses
+// TRANSCURRIDOS del AÑO EN CURSO, o sea Enero → mes ANTERIOR. El mes en
+// curso NO se mezcla ahí: va en una columna propia a la derecha
+// (`montoMes` / `unidadesMes`), que el back trae en la misma consulta. La
+// tabla cierra con una fila de totales de las dos columnas.
 //
 // Son DOS rankings que comparten el rango y se alternan con un switch
 // propio:
@@ -115,11 +120,15 @@ interface TopCliente {
   numero: number;
   nombre: string | null;
   monto: number;
+  // Solo el mes en curso, aparte del acumulado (2026-09-04) — es la
+  // columna de la derecha, NO está sumado en `monto`.
+  montoMes: number;
 }
 
 interface RespTopClientes {
-  desde: string; // "YYYY-MM"
-  hasta: string; // "YYYY-MM"
+  desde: string | null; // "YYYY-MM" — null en enero (no hay mes cerrado)
+  hasta: string | null; // "YYYY-MM"
+  mesActual: string; // "YYYY-MM"
   totalClientes: number;
   porMonto: TopCliente[];
 }
@@ -131,11 +140,15 @@ interface TopLinea {
   linea: string;
   unidades: number;
   monto: number;
+  // Mes en curso, en las dos métricas (2026-09-04) — columna aparte.
+  unidadesMes: number;
+  montoMes: number;
 }
 
 interface RespTopLineas {
-  desde: string; // "YYYY-MM"
-  hasta: string; // "YYYY-MM"
+  desde: string | null; // "YYYY-MM" — null en enero
+  hasta: string | null; // "YYYY-MM"
+  mesActual: string; // "YYYY-MM"
   totalLineas: number;
   totalLineasMonto: number;
   porUnidades: TopLinea[];
@@ -574,8 +587,9 @@ export default function VentasVendedorPage() {
 
   // ── Rankings del pie: top clientes ($) y top líneas (unidades) ─────────
   // Independientes del cliente buscado arriba y del período YTD/meses de la
-  // tabla principal. El rango es FIJO y lo resuelve el back (2026-08-18): 12 meses terminando en el MES ANTERIOR al actual —
-  // en agosto 2026, agosto 2025 a julio 2026. Ya no hay selector de fechas,
+  // tabla principal. El rango es FIJO y lo resuelve el back (2026-09-04):
+  // los meses transcurridos del año en curso (Enero → mes anterior), más el
+  // mes en curso aparte en su propia columna. Ya no hay selector de fechas,
   // así que acá no se manda `desde`/`hasta` y el fetch corre UNA sola vez
   // al montar.
   //
@@ -626,8 +640,11 @@ export default function VentasVendedorPage() {
   // encabezado sale del BACK (que es quien resuelve el default), no del
   // estado local, así lo que dice el título siempre coincide con los datos
   // que hay en la tabla.
-  const topResp: { desde: string; hasta: string } | null =
-    topVista === "clientes" ? topClientes : topLineas;
+  const topResp: {
+    desde: string | null;
+    hasta: string | null;
+    mesActual: string;
+  } | null = topVista === "clientes" ? topClientes : topLineas;
   const topTotal: number | null =
     topVista === "clientes"
       ? topClientes?.totalClientes ?? null
@@ -856,6 +873,45 @@ export default function VentasVendedorPage() {
     topVista === "clientes" ? topClientes?.porMonto ?? [] : topLineasItems;
   const topGrupos = agrupar(topItems);
   const topGrupoSeguro = Math.min(topGrupoAbierto, Math.max(0, topGrupos.length - 1));
+
+  // ── Las dos columnas de números del ranking (2026-09-04) ───────────────
+  // Acumulado del año (Ene→mes anterior) y mes en curso. La misma tabla
+  // muestra clientes (siempre $) o líneas ($ o unidades), así que qué campo
+  // leer se resuelve una vez acá y no repetido en cada <td>.
+  const valorTop = (it: TopCliente | TopLinea) =>
+    "linea" in it ? (modo === "unidades" ? it.unidades : it.monto) : it.monto;
+  const valorTopMes = (it: TopCliente | TopLinea) =>
+    "linea" in it ? (modo === "unidades" ? it.unidadesMes : it.montoMes) : it.montoMes;
+
+  // Totales del pie: suman TODAS las filas del ranking, no solo las del
+  // acordeón abierto — son el total del período, no el de lo que se ve.
+  const topSumas = useMemo(
+    () =>
+      topItems.reduce(
+        (acc, it) => {
+          acc.acum += valorTop(it) || 0;
+          acc.mes += valorTopMes(it) || 0;
+          return acc;
+        },
+        { acum: 0, mes: 0 },
+      ),
+    // valorTop/valorTopMes solo dependen de `modo`, que ya está acá.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [topItems, modo],
+  );
+
+  // Etiquetas de encabezado. Salen del BACK (`desde`/`hasta`/`mesActual`)
+  // para que el título no pueda contradecir a los datos. En enero
+  // desde/hasta vienen en null: todavía no hay ningún mes cerrado del año y
+  // la columna del acumulado queda vacía a propósito.
+  const nombreMes = (ym: string | null | undefined) =>
+    ym ? MESES_CORTOS_ES[Number(ym.slice(5, 7)) - 1] ?? "" : "";
+  const rangoAcumLabel = topResp?.desde && topResp?.hasta
+    ? `${nombreMes(topResp.desde)}–${nombreMes(topResp.hasta)} ${topResp.hasta.slice(0, 4)}`
+    : "Sin meses cerrados";
+  const mesActualLabel = topResp?.mesActual
+    ? `${nombreMes(topResp.mesActual)} ${topResp.mesActual.slice(0, 4)}`
+    : "Mes en curso";
 
 
   return (
@@ -1752,8 +1808,9 @@ export default function VentasVendedorPage() {
 
         {/* Rankings del pie — top clientes ($) o top líneas (unidades). El
             título, el botón "Mostrar" y el switch Clientes/Líneas se
-            mudaron al header. El rango es FIJO
-            (12 meses terminando en el mes anterior) y lo resuelve el back.
+            mudaron al header. El rango es FIJO y lo resuelve el back: los
+            meses transcurridos del año en curso, más el mes en curso en su
+            propia columna y una fila de totales al pie.
             Clickeando un cliente o una línea de la tabla de abajo se abre
             el modal con el detalle. */}
 
@@ -1834,6 +1891,19 @@ export default function VentasVendedorPage() {
                           </th>
                           <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800">
                             {modo === "pesos" ? "Pesos" : "Unidades"}
+                            <span className="block text-[11px] font-normal text-zinc-500">
+                              {rangoAcumLabel}
+                            </span>
+                          </th>
+                          {/* Mes en curso (2026-09-04) — va aparte
+                              del acumulado justamente porque está
+                              incompleto: sumarlo adentro haría que el año
+                              se compare contra un mes a medio facturar. */}
+                          <th className="px-3 py-2 font-medium text-right whitespace-nowrap border-l border-zinc-800 text-yellow-400/80">
+                            Mes en curso
+                            <span className="block text-[11px] font-normal text-zinc-500">
+                              {mesActualLabel}
+                            </span>
                           </th>
                         </tr>
                       </thead>
@@ -1854,7 +1924,7 @@ export default function VentasVendedorPage() {
                                   topGrupoSeguro === gIdx ? -1 : gIdx,
                                 )
                               }
-                              colSpan={3}
+                              colSpan={4}
                             />
                           )}
                           {(topGrupos.length <= 1 || topGrupoSeguro === gIdx) &&
@@ -1891,6 +1961,9 @@ export default function VentasVendedorPage() {
                                     <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-semibold border-l border-zinc-800 whitespace-nowrap">
                                       {fmtTop(c.monto)}
                                     </td>
+                                    <td className="px-3 py-2 text-right tabular-nums text-zinc-300 border-l border-zinc-800 whitespace-nowrap">
+                                      {fmtTop(c.montoMes)}
+                                    </td>
                                   </tr>
                                 ))
                               : (grupo as TopLinea[]).map((l, i) => (
@@ -1921,10 +1994,39 @@ export default function VentasVendedorPage() {
                                           : l.unidades,
                                       )}
                                     </td>
+                                    <td className="px-3 py-2 text-right tabular-nums text-zinc-300 border-l border-zinc-800 whitespace-nowrap">
+                                      {fmtTop(
+                                        topMetricaLineas === "pesos"
+                                          ? l.montoMes
+                                          : l.unidadesMes,
+                                      )}
+                                    </td>
                                   </tr>
                                 )))}
                         </tbody>
                       ))}
+                      {/* Totales (2026-09-04). Suman TODAS las
+                          filas del ranking, estén o no en el grupo abierto
+                          del acordeón — es el total del período, no el de
+                          lo que hay a la vista. */}
+                      <tfoot className="bg-[#1A1A1A] border-t-2 border-zinc-700">
+                        <tr>
+                          <td className="px-3 py-2" />
+                          <td className="px-3 py-2 font-semibold text-zinc-300 whitespace-nowrap">
+                            Total{" "}
+                            <span className="text-zinc-500 font-normal">
+                              ({topItems.length}{" "}
+                              {topVista === "clientes" ? "clientes" : "líneas"})
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-bold border-l border-zinc-800 whitespace-nowrap">
+                            {fmtTop(topSumas.acum)}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-yellow-400 font-bold border-l border-zinc-800 whitespace-nowrap">
+                            {fmtTop(topSumas.mes)}
+                          </td>
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
                 </>

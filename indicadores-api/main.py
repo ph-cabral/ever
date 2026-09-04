@@ -36,6 +36,12 @@ from ventas import (
 # /ventas/bulones, acá sólo van los presupuestos. Ver presupuestos.py.
 from presupuestos import fetch_presupuestos_bulones
 
+# Bonificaciones: notas de crédito por CONCEPTO (sin artículo, y por lo tanto
+# sin línea) que las vistas de ventas nunca restaron. Son de toda la empresa;
+# para /ventas/bulones se prorratean por la participación de la línea. Ver
+# bonificaciones.py.
+from bonificaciones import fetch_bonificacion_bulones
+
 from bulones import (
     fetch_top_clientes as fetch_bulones_top_clientes,
     fetch_top_patrones as fetch_bulones_top_patrones,
@@ -818,14 +824,16 @@ def ventas_vendedor_top_clientes(
     # completo (sin TOP/LIMIT), `limit` solo recortaba la lista en Python
     # después de tenerla toda en memoria.
     limit: int = Query(default=1_000_000, ge=1),
-    desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: 11 meses antes de `hasta`)"),
-    hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes actual)"),
+    desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: enero del año en curso)"),
+    hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes anterior al actual)"),
 ):
     """Top clientes por MONTO (venta neta, $) en un rango de meses — para el
-    ranking debajo de la tabla de /ventas/vendedor. Por defecto, últimos 12
-    meses (2026-08-18) y TODOS los clientes que entran en
-    ese rango (2026-08-19, no un top recortado). Devuelve
-    también `totalClientes`: cuántos clientes distintos entran en la
+    ranking debajo de la tabla de /ventas/vendedor. Por defecto
+    (2026-09-04), los meses TRANSCURRIDOS del año en curso (Enero → mes
+    anterior), y cada cliente trae aparte `montoMes` con lo del MES EN CURSO
+    — que en la tabla es una columna propia a la derecha. Trae TODOS los
+    clientes que entran en ese rango (2026-08-19, no un top
+    recortado) y `totalClientes`: cuántos clientes distintos entran en la
     filtración (con el límite alto, coincide con len(porMonto) salvo casos
     extremos). Ver docstring de fetch_top_clientes (ventas.py) para el
     criterio de acceso por vendedor (mismo que /clientes y
@@ -845,14 +853,15 @@ def ventas_vendedor_top_lineas(
     # TODAS las líneas del rango, sin tope superior — ver el comentario en
     # ventas_vendedor_top_clientes.
     limit: int = Query(default=1_000_000, ge=1),
-    desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: 11 meses antes de `hasta`)"),
-    hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes actual)"),
+    desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM' (default: enero del año en curso)"),
+    hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM' (default: mes anterior al actual)"),
 ):
     """Top líneas por UNIDADES compradas en un rango de meses — gemelo de
     /ventas/vendedor/top-clientes (2026-08-18: "agregamos
     vista de líneas, al igual que el top, traemos el total de líneas y acá
-    dejamos ver solo unidades compradas"). Mismo rango por defecto (12
-    meses) y, desde 2026-08-19, TODAS las líneas que entran en ese rango
+    dejamos ver solo unidades compradas"). Mismo rango por defecto (año en
+    curso hasta el mes anterior) y mismas columnas `unidadesMes`/`montoMes`
+    del mes en curso. Desde 2026-08-19, TODAS las líneas que entran en ese rango
     (no un top recortado). Mismo criterio de acceso por vendedor. Devuelve
     las DOS métricas — `porUnidades` (ordenado por unidades) y `porMonto`
     (ordenado por $), cada item con `unidades` y `monto` — más
@@ -964,6 +973,30 @@ def bulones_top_vendedores(
     personas (MOSTRADOR, ECOMMERCE …) y los dados de baja. Ver bulones.py."""
     try:
         return fetch_bulones_top_vendedores(vendedor=vendedor, limit=limit, desde=desde, hasta=hasta)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SQL Error: {str(e)}")
+
+
+@app.get("/ventas/bulones/bonificacion")
+def bulones_bonificacion(
+    desde: str | None = Query(default=None, description="Mes desde, 'YYYY-MM'"),
+    hasta: str | None = Query(default=None, description="Mes hasta, 'YYYY-MM'"),
+    forzar: bool = Query(default=False, description="Saltea el cache de 15 min"),
+):
+    """Bonificación de la empresa y la parte que le toca a BULONERÍA.
+
+    Las bonificaciones son notas de crédito por concepto: no tienen artículo,
+    así que no tienen línea y no se pueden restar de un ranking acotado a una.
+    Acá van prorrateadas por la participación de bulonería en la venta con
+    artículo del mismo rango (~0,32%), y se muestran APARTE — los rankings de
+    clientes, patrones y vendedores no las descuentan.
+
+    NO toma `vendedor`: es un número de empresa, acotarlo a una cartera no
+    significaría nada. Ver bonificaciones.py."""
+    try:
+        return fetch_bonificacion_bulones(desde=desde, hasta=hasta, forzar=forzar)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
