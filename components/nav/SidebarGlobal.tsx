@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight, Star, Plus, X, Search, GripVertical, Home } from "lucide-react";
@@ -11,6 +11,15 @@ import { ChevronRight, Star, Plus, X, Search, GripVertical, Home } from "lucide-
 // Se abre por hover: está escondida fuera de pantalla y aparece cuando el mouse
 // se acerca al borde izquierdo (franja invisible de 12px + pestaña con chevron
 // como pista visual). Es un overlay fijo: no corre el layout de las páginas.
+//
+// En pantallas táctiles (matchMedia "(hover: none)") el hover no existe, así que
+// se abre con gesto: deslizar el dedo desde el borde izquierdo (franja de 28px)
+// la trae, y deslizar hacia la izquierda estando abierta la cierra. El panel
+// sigue al dedo (transform en px, sin transición mientras dura el gesto) y al
+// soltar cae al lado más cercano (mitad del ancho). Además, en mobile hay
+// backdrop tocable y una X en la cabecera, porque no hay "mouse leave" que
+// cierre. Los handlers de hover quedan desactivados en táctil para que el
+// mouseleave sintético del tap no cierre el panel apenas se abre.
 //
 // Contenido:
 //   1. "Mis accesos" — lo que el usuario marcó con la estrella, en SU orden
@@ -40,6 +49,11 @@ interface CatalogoItem extends Acceso {
 
 // Rutas donde no tiene sentido (no hay sesión todavía).
 const OCULTA_EN = ["/login"];
+
+// Gesto táctil.
+const ANCHO = 240; // w-60, en px: lo necesitamos como número para el arrastre
+const BORDE = 28; // franja desde el borde izquierdo que arranca la apertura
+const UMBRAL = 8; // px antes de decidir si el gesto es horizontal o vertical
 
 export function SidebarGlobal() {
   const [open, setOpen] = useState(false);
@@ -72,6 +86,103 @@ export function SidebarGlobal() {
       })
       .catch(() => {});
   }, [open, cargado]);
+
+  const cerrar = useCallback(() => {
+    setOpen(false);
+    setSelector(false);
+    setQ("");
+    setDrag(null);
+    setSobre(null);
+  }, []);
+
+  // Los listeners táctiles se montan una sola vez: llegan a cerrar() por ref.
+  const cerrarRef = useRef(cerrar);
+  cerrarRef.current = cerrar;
+
+  // ── Gesto táctil ──────────────────────────────────────────────────────────
+  const [tactil, setTactil] = useState(false);
+  const [arrastre, setArrastre] = useState<number | null>(null); // px visibles
+  const arrastreRef = useRef<number | null>(null);
+  const gesto = useRef<{ x0: number; y0: number; abierta: boolean; eje: "x" | "y" | null } | null>(
+    null,
+  );
+  const abiertaRef = useRef(open);
+  abiertaRef.current = open;
+
+  useEffect(() => {
+    const mq = window.matchMedia("(hover: none)");
+    const sync = () => setTactil(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  const fijarArrastre = useCallback((v: number | null) => {
+    arrastreRef.current = v;
+    setArrastre(v);
+  }, []);
+
+  useEffect(() => {
+    if (!tactil) return;
+
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const abierta = abiertaRef.current;
+      if (!abierta && t.clientX > BORDE) return; // sólo desde el borde
+      gesto.current = { x0: t.clientX, y0: t.clientY, abierta, eje: null };
+    };
+
+    const onMove = (e: TouchEvent) => {
+      const g = gesto.current;
+      if (!g || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const dx = t.clientX - g.x0;
+      const dy = t.clientY - g.y0;
+      if (g.eje === null) {
+        if (Math.abs(dx) < UMBRAL && Math.abs(dy) < UMBRAL) return;
+        // Vertical ⇒ es scroll de la página / del nav: soltamos el gesto.
+        if (Math.abs(dy) >= Math.abs(dx)) {
+          gesto.current = null;
+          return;
+        }
+        g.eje = "x";
+      }
+      if (e.cancelable) e.preventDefault(); // frena el scroll horizontal del navegador
+      const base = g.abierta ? ANCHO : 0;
+      fijarArrastre(Math.max(0, Math.min(ANCHO, base + dx)));
+    };
+
+    const onEnd = () => {
+      gesto.current = null;
+      const x = arrastreRef.current;
+      if (x === null) return;
+      fijarArrastre(null);
+      if (x > ANCHO / 2) setOpen(true);
+      else cerrarRef.current();
+    };
+
+    document.addEventListener("touchstart", onStart, { passive: true });
+    document.addEventListener("touchmove", onMove, { passive: false });
+    document.addEventListener("touchend", onEnd);
+    document.addEventListener("touchcancel", onEnd);
+    return () => {
+      document.removeEventListener("touchstart", onStart);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onEnd);
+      document.removeEventListener("touchcancel", onEnd);
+    };
+  }, [tactil, fijarArrastre]);
+
+  // Con la sidebar abierta en mobile no se scrollea lo de atrás.
+  useEffect(() => {
+    if (!tactil || !open) return;
+    const previo = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previo;
+    };
+  }, [tactil, open]);
 
   const fijado = useCallback(
     (href: string) => accesos.some((a) => a.href === href),
@@ -164,55 +275,82 @@ export function SidebarGlobal() {
     return grupos;
   }, [catalogo, q]);
 
-  const cerrar = () => {
-    setOpen(false);
-    setSelector(false);
-    setQ("");
-    setDrag(null);
-    setSobre(null);
-  };
-
   if (!habilitada || OCULTA_EN.some((p) => pathname === p || pathname.startsWith(p + "/")))
     return null;
+
+  // Mientras dura el gesto el panel va en px y sin transición; si no, manda `open`.
+  const arrastrando = arrastre !== null;
+  const visible = arrastrando ? arrastre! : open ? ANCHO : 0;
 
   return (
     <>
       {/* Franja invisible pegada al borde izquierdo: acercar el mouse abre */}
       <div
         className="fixed left-0 top-0 h-full w-3 z-[120]"
-        onMouseEnter={() => setOpen(true)}
+        onMouseEnter={() => {
+          if (!tactil) setOpen(true);
+        }}
       />
+
+      {/* Backdrop: sólo táctil. Se oscurece a la par del gesto. */}
+      {tactil && visible > 0 && (
+        <div
+          onClick={cerrar}
+          aria-hidden
+          className="fixed inset-0 z-[125] bg-black"
+          style={{
+            opacity: (visible / ANCHO) * 0.55,
+            transition: arrastrando ? "none" : "opacity 200ms ease-out",
+          }}
+        />
+      )}
 
       {/* Pestaña siempre visible (pista de que hay sidebar) */}
       <button
-        onMouseEnter={() => setOpen(true)}
+        onMouseEnter={() => {
+          if (!tactil) setOpen(true);
+        }}
         onClick={() => setOpen(true)}
         aria-label="Abrir menú"
         className={`fixed left-0 top-1/2 -translate-y-1/2 z-[120] flex items-center justify-center
           w-5 h-16 rounded-r-lg bg-[#1A1A1A] border border-l-0 border-yellow-400/40
-          text-yellow-400 transition-opacity duration-200 ${open ? "opacity-0 pointer-events-none" : "opacity-80"}`}
+          text-yellow-400 transition-opacity duration-200 ${visible > 0 ? "opacity-0 pointer-events-none" : "opacity-80"}`}
       >
         <ChevronRight size={14} />
       </button>
 
       <aside
         onMouseLeave={() => {
-          if (drag === null) cerrar();
+          if (!tactil && drag === null) cerrar();
         }}
-        className={`fixed left-0 top-0 h-full w-60 z-[130] bg-[#161616] border-r border-zinc-800
-          flex flex-col transition-transform duration-200 ease-out shadow-2xl shadow-black/60
-          ${open ? "translate-x-0" : "-translate-x-full"}`}
+        style={{
+          transform: `translateX(${visible - ANCHO}px)`,
+          transition: arrastrando ? "none" : undefined,
+        }}
+        className="fixed left-0 top-0 h-full w-60 z-[130] bg-[#161616] border-r border-zinc-800
+          flex flex-col transition-transform duration-200 ease-out shadow-2xl shadow-black/60"
       >
-        <Link
-          href="/"
-          onClick={cerrar}
-          className="h-16 flex items-center gap-2.5 px-5 border-b border-zinc-800 hover:bg-zinc-900/60 transition-colors"
-        >
-          <Home size={18} className="text-yellow-400" />
-          <span className="font-bold text-yellow-400 uppercase tracking-wide text-sm truncate">
-            {moduloActual ?? "EverWear"}
-          </span>
-        </Link>
+        <div className="h-16 flex items-center border-b border-zinc-800">
+          <Link
+            href="/"
+            onClick={cerrar}
+            className="flex-1 min-w-0 h-full flex items-center gap-2.5 px-5 hover:bg-zinc-900/60 transition-colors"
+          >
+            <Home size={18} className="text-yellow-400 shrink-0" />
+            <span className="font-bold text-yellow-400 uppercase tracking-wide text-sm truncate">
+              {moduloActual ?? "EverWear"}
+            </span>
+          </Link>
+          {/* En táctil no hay mouseleave que cierre: X explícita. */}
+          <button
+            onClick={cerrar}
+            aria-label="Cerrar menú"
+            className="md:hidden shrink-0 mr-2 p-2 rounded-lg text-zinc-500 hover:text-zinc-100
+              hover:bg-zinc-800/60 transition-colors"
+          >
+            <X size={18} />
+          </button>
+        </div>
 
         <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-1">
           {/* ── Mis accesos ── */}

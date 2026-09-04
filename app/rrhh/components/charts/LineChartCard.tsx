@@ -21,9 +21,20 @@ type Props = {
   xKey: string;
   yKeys: string[];
   height?: number;
+  // Color por serie (uno por elemento de `yKeys`, cíclico). Opcional — sin
+  // esto se comporta igual que antes (t.palette por posición).
+  colors?: string[];
+  // Con una sola serie la leyenda no aporta nada: se puede apagar. Opcional,
+  // default true = comportamiento anterior.
+  legend?: boolean;
+  labelFontSize?: number;
+  labelFill?: string;
 };
 
-function LineChartCard({ title, data, xKey, yKeys, height = 300 }: Props) {
+function LineChartCard({
+  title, data, xKey, yKeys, height = 300,
+  colors, legend = true, labelFontSize = 18, labelFill = t.textMuted,
+}: Props) {
   return (
     <>
       <CardTitle
@@ -45,21 +56,21 @@ function LineChartCard({ title, data, xKey, yKeys, height = 300 }: Props) {
               color: t.text,
             }}
           />
-          <Legend wrapperStyle={{ color: t.textMuted, fontSize: 12 }} />
+          {legend && <Legend wrapperStyle={{ color: t.textMuted, fontSize: 12 }} />}
           {yKeys.map((key, i) => (
             <Line
               key={key}
               type="monotone"
               dataKey={key}
-              stroke={t.palette[i % t.palette.length]}
+              stroke={colors ? colors[i % colors.length] : t.palette[i % t.palette.length]}
               strokeWidth={2}
               dot={{ r: 3 }}
             >
               <LabelList
                 dataKey={key}
                 position="top"
-                fill={t.textMuted} // Color gris oscuro para que se lea bien
-                fontSize={18}
+                fill={labelFill}
+                fontSize={labelFontSize}
                 fontWeight={500}
               />
             </Line>

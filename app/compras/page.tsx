@@ -7,7 +7,7 @@ import {
 import * as XLSX from "xlsx";
 import { InicioButton } from "@/components/ui/InicioButton";
 import KpiCard from "@/app/rrhh/components/KpiCard";
-import BarChartCard from "@/app/rrhh/components/charts/BarChartCard";
+import LineChartCard from "@/app/rrhh/components/charts/LineChartCard";
 import PieChartCard from "@/app/rrhh/components/charts/PieChartCard";
 import { UsuarioActual } from "@/components/auth/UsuarioActual";
 
@@ -69,6 +69,20 @@ interface Resp {
   funnels: Record<string, Funnel>;
 }
 
+// /compras/faltantes-serie — items faltantes de los últimos SERIE_MESES meses
+// (incluido el elegido), ya calculados por origen: cambiar de origen no
+// consulta nada. Mismo recorte que la card "Faltantes del mes", así el último
+// punto de la línea coincide siempre con la card.
+interface SerieMes {
+  mes: string;
+  error: boolean;
+  items: Record<string, number>;
+}
+interface SerieResp {
+  meses: SerieMes[];
+  warn: boolean;
+}
+
 // /compras/compras-valorizado — mismo mes que el selector de arriba:
 // unidades e $ de las OC hechas ese mes, valorizado a precio de VENTA (no al
 // costo de la OC) (2026-08-04).
@@ -81,11 +95,11 @@ interface RangoResp {
   articulosSinPrecio: number;
 }
 
-// Paleta del funnel (barras) — Faltantes/Con OC/Ingresados: mismos matices que
-// ya usan las KpiCard de arriba (orange/blue/green), para que barra y card
-// queden asociadas visualmente. Antes todas las barras salían del mismo
-// amarillo (t.primary), sin distinguirse entre sí.
-const FUNNEL_COLORS = ["#FB923C", "#60A5FA", "#4ADE80"];
+// Color de la línea de faltantes: el mismo naranja de la card "Faltantes del
+// mes", para que card y gráfico se asocien de una.
+const FALTANTES_COLOR = "#FB923C";
+// Meses que muestra la serie de faltantes (incluido el mes elegido).
+const SERIE_MESES = 4;
 // Paleta de la torta (origen). Va por CLAVE, no por posición: la torta filtra
 // las categorías en cero y con un array posicional los colores se corrían.
 // Nacionales/Importados en los mismos tonos que el selector (sky/amber) para
@@ -149,6 +163,14 @@ const fmtMesLabel = (mes: string) => {
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
   ];
   return `${meses[Number(m[2]) - 1]} ${m[1]}`;
+};
+
+// Etiqueta corta para el eje X de la serie: "Ago 26".
+const fmtMesCorto = (mes: string) => {
+  const m = /(\d{4})-(\d{2})/.exec(mes);
+  if (!m) return mes;
+  const meses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+  return `${meses[Number(m[2]) - 1]} ${m[1].slice(2)}`;
 };
 
 // Mes actual en formato YYYY-MM, hora LOCAL (no UTC) — mismo criterio que
@@ -284,6 +306,36 @@ export default function ComprasMetricasPage() {
     loadFaltLinea(mes);
   }, [mes, loadFaltLinea]);
 
+  // Serie de faltantes de los últimos meses (gráfico de línea). Va aparte de
+  // /compras/metricas para no demorar las cards: la vista se dibuja apenas
+  // llega el mes y la línea se completa cuando termina.
+  const [serie, setSerie] = useState<SerieResp | null>(null);
+  const [serieLoading, setSerieLoading] = useState(false);
+  const [serieError, setSerieError] = useState<string | null>(null);
+
+  const loadSerie = useCallback(async (m: string) => {
+    setSerieLoading(true);
+    setSerieError(null);
+    try {
+      const res = await fetch(
+        `/api/compras/faltantes-serie?mes=${encodeURIComponent(m)}&meses=${SERIE_MESES}`,
+        { cache: "no-store" },
+      );
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setSerie(j);
+    } catch (e) {
+      setSerieError(e instanceof Error ? e.message : "Error al cargar");
+      setSerie(null);
+    } finally {
+      setSerieLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSerie(mes);
+  }, [mes, loadSerie]);
+
   // Funnel del origen elegido — ya viene calculado en la respuesta, cambiar de
   // origen no dispara ninguna consulta.
   const funnel = useMemo(() => data?.funnels?.[origen], [data, origen]);
@@ -312,9 +364,11 @@ export default function ComprasMetricasPage() {
     [data, origen],
   );
 
-  const chartData = useMemo(
-    () => (funnel?.columnas ?? []).map((c) => ({ name: c.label, value: c.total })),
-    [funnel],
+  // Un punto por mes con los items faltantes del origen elegido — el cambio de
+  // origen se resuelve en memoria, la serie ya trae los 4 orígenes.
+  const serieData = useMemo(
+    () => (serie?.meses ?? []).map((m) => ({ name: fmtMesCorto(m.mes), Faltantes: m.items?.[origen] ?? 0 })),
+    [serie, origen],
   );
 
   // La torta muestra TODOS los orígenes del mes (incluidos Fábrica y Original,
@@ -565,26 +619,37 @@ export default function ComprasMetricasPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4">
-            {chartData.length > 0 ? (
-              <BarChartCard
-                title={`Items por etapa — ${fmtMesLabel(mes)}`}
-                data={chartData}
-                xKey="name"
-                yKey="value"
-                currency={false}
-                height={340}
-                xAngle={0}
-                colors={FUNNEL_COLORS}
-              />
+            {serieData.length > 0 ? (
+              <>
+                <LineChartCard
+                  title={`Faltantes por mes — últimos ${SERIE_MESES} meses`}
+                  data={serieData}
+                  xKey="name"
+                  yKeys={["Faltantes"]}
+                  colors={[FALTANTES_COLOR]}
+                  legend={false}
+                  labelFontSize={13}
+                  labelFill="#E4E4E7"
+                  height={340}
+                />
+                {(serieError || serie?.warn) && (
+                  <div className="flex items-center gap-1.5 text-xs text-amber-400/80 mt-2">
+                    <AlertTriangle size={13} />
+                    {serieError ?? "Algún mes no se pudo consultar — la línea puede estar incompleta"}
+                  </div>
+                )}
+              </>
             ) : (
               <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-                {loading ? (
+                {serieLoading ? (
                   <Loader2 size={36} className="text-yellow-400 animate-spin" />
                 ) : (
                   <PackageCheck size={40} className="text-zinc-700" />
                 )}
                 <p className="text-zinc-500 text-sm">
-                  {loading ? "Consultando la base…" : "Sin datos para este mes."}
+                  {serieLoading
+                    ? "Consultando la base…"
+                    : (serieError ?? "Sin datos para estos meses.")}
                 </p>
               </div>
             )}
