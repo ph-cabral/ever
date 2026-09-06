@@ -65,8 +65,16 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dni: dni.trim(), password }),
       });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data?.error ?? "No se pudo iniciar sesión");
+      // Un 500 del route handler viene con body vacío: sin este catch, el
+      // .json() explota con "Unexpected end of JSON input" y tapa el error real
+      // (típico: la tabla everwear.usuario no tiene alguna columna que
+      // prisma/schema.prisma sí declara).
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        throw new Error(
+          data?.error ?? `No se pudo iniciar sesión (error ${r.status} del servidor)`,
+        );
+      }
       router.replace(returnTo());
       router.refresh();
     } catch (e: any) {
