@@ -25,6 +25,7 @@ export async function PATCH(
     passwordHash?: string;
     vendedorCodigo?: number | null;
     bulonesAccesoTotal?: boolean;
+    vickiVentasAcceso?: boolean;
   } = {};
   if (typeof body?.activo === "boolean") data.activo = body.activo;
   if (body?.rol === "ADMIN" || body?.rol === "USUARIO") data.rol = body.rol;
@@ -48,6 +49,13 @@ export async function PATCH(
   // /ventas/vendedor ni al resto de la app — ver lib/ventas/bulonesAcceso.ts.
   if (typeof body?.bulonesAccesoTotal === "boolean") {
     data.bulonesAccesoTotal = body.bulonesAccesoTotal;
+  }
+
+  // Acceso a datos de ventas desde el chat de Vicki (2026-09-05): habilita el
+  // intent "ventas" para este usuario, SIEMPRE filtrado por su propio
+  // vendedorCodigo — ver lib/ventas/vickiVentasAcceso.ts.
+  if (typeof body?.vickiVentasAcceso === "boolean") {
+    data.vickiVentasAcceso = body.vickiVentasAcceso;
   }
 
   // Reseteo de contraseña: el admin asigna una nueva (mín. 6 caracteres).
@@ -94,6 +102,7 @@ export async function PATCH(
       activo: true,
       vendedorCodigo: true,
       bulonesAccesoTotal: true,
+      vickiVentasAcceso: true,
     },
     });
     return NextResponse.json({ ok: true, usuario });

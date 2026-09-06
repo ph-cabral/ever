@@ -503,6 +503,14 @@ model usuario {
   // Lo asigna un admin en /admin/usuarios (antes era una lista de nombres
   // hardcodeada en lib/ventas/bulonesAcceso.ts).
   bulonesAccesoTotal Boolean @default(false)
+  // Acceso a datos de ventas/BBDD desde el chat de Vicki (intent "ventas",
+  // ver vicki_chat/app/nodes.py): true = puede pedirle a Vicki su
+  // facturación/ranking. SIEMPRE filtrado por vendedorCodigo (ve solo lo
+  // suyo) salvo que sea ADMIN o tenga bulonesAccesoTotal-style "toda la
+  // empresa" — hoy no existe ese caso para ventas, se agrega si hace falta.
+  // Sin vendedorCodigo asignado, aunque esté en true, no puede consultar nada
+  // (mismo criterio que /ventas/vendedor: sin vendedor = cero datos).
+  vickiVentasAcceso Boolean @default(false)
   activo         Boolean   @default(true)
   ultimoAcceso   DateTime?
   createdAt      DateTime  @default(now())

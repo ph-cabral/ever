@@ -13,9 +13,6 @@ import {
 
 type Msg = { role: "user" | "assistant"; content: string };
 
-const USER_ID = "1";
-const SESSION_ID = `user_${USER_ID}`;
-
 const GENEROS = [
   { label: "Masculino", value: "male" },
   { label: "Femenino", value: "female" },
@@ -145,6 +142,22 @@ function renderContent(
 }
 
 export default function VickiPage() {
+  // session_id real del usuario logueado (antes era "user_1" fijo para
+  // todo el mundo: no se podía separar historial ni filtrar datos por
+  // persona — ver /api/vicki/chat/route.ts para el filtro de ventas).
+  // USER_ID vacío hasta que responde /api/auth/me: SESSION_ID queda "" y los
+  // efectos que dependen de él esperan a que haya uno real.
+  const [userId, setUserId] = useState<string>("");
+  const sessionId = userId ? `user_${userId}` : "";
+  useEffect(() => {
+    fetch("/api/auth/me", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.usuario?.uid != null) setUserId(String(d.usuario.uid));
+      })
+      .catch(() => {});
+  }, []);
+
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [gender, setGender] = useState<string>("");
@@ -163,14 +176,12 @@ export default function VickiPage() {
   const endRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  // Cargar historial
+  // Cargar historial (espera a tener el session_id real del usuario)
   useEffect(() => {
+    if (!sessionId) return;
     (async () => {
       try {
-        fetch("/api/vicki/history/user_1")
-          .then((r) => r.json())
-          .then(console.log);
-        const r = await fetch(`/api/vicki/history/${SESSION_ID}`);
+        const r = await fetch(`/api/vicki/history/${sessionId}`);
         if (!r.ok) return;
         const data = await r.json();
         const map: Record<string, "user" | "assistant"> = {
@@ -213,7 +224,7 @@ export default function VickiPage() {
         );
       } catch {}
     })();
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -237,10 +248,11 @@ export default function VickiPage() {
     const np = last?.content.match(/\[NAME_PICK:([^\]]*)\]/);
     setNamePick(np ? np[1].split("|").filter(Boolean) : []);
     if (last && /Foto tomada/i.test(last.content)) setAwaitingEmp(true);
-    fetch(`/api/vicki/draft_status/${SESSION_ID}`)
+    if (!sessionId) return;
+    fetch(`/api/vicki/draft_status/${sessionId}`)
       .then((r) => r.json())
       .then((d) => setAwaitingEmp(!!d.has_draft));
-  }, [messages]);
+  }, [messages, sessionId]);
 
   const inputLocked = awaitingEmp && (!gender || !location);
   const placeholder = awaitingEmp
@@ -281,7 +293,7 @@ export default function VickiPage() {
     // persistir el descarte: se oculta solo en esta pantalla
     if (c.candidato_id == null) return;
     try {
-      await fetch(`/api/vicki/descartes/${SESSION_ID}`, {
+      await fetch(`/api/vicki/descartes/${sessionId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ candidato_id: c.candidato_id }),
@@ -294,14 +306,14 @@ export default function VickiPage() {
     setCandidatos((prev) => [c, ...prev.filter((x) => claveCandidato(x) !== claveCandidato(c))]);
     if (c.candidato_id == null) return;
     try {
-      await fetch(`/api/vicki/descartes/${SESSION_ID}/${c.candidato_id}`, {
+      await fetch(`/api/vicki/descartes/${sessionId}/${c.candidato_id}`, {
         method: "DELETE",
       });
     } catch {}
   }
 
   async function send(message: string) {
-    if (!message.trim() || loading) return;
+    if (!message.trim() || loading || !sessionId) return;
     const userMsg: Msg = { role: "user", content: message };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
@@ -309,8 +321,8 @@ export default function VickiPage() {
 
     const payload: any = {
       message,
-      session_id: SESSION_ID,
-      user_id: USER_ID,
+      session_id: sessionId,
+      user_id: userId,
     };
     if (awaitingEmp && gender && location) {
       payload.gender = gender;
@@ -344,7 +356,7 @@ export default function VickiPage() {
 
   async function cancelEmployee() {
     try {
-      await fetch(`/api/vicki/cancel_employee/${SESSION_ID}`, {
+      await fetch(`/api/vicki/cancel_employee/${sessionId}`, {
         method: "POST",
       });
     } catch {}
@@ -357,21 +369,16 @@ export default function VickiPage() {
   }
 
   async function pickLocation(loc: string, retake = false) {
+    if (!sessionId) return;
     setLoading(true);
     try {
       const r = await fetch("/api/vicki/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // body: JSON.stringify({
-        //   message: loc,
-        //   session_id: SESSION_ID,
-        //   user_id: USER_ID,
-        //   location: loc,
-        // }),
         body: JSON.stringify({
           message: loc,
-          session_id: SESSION_ID,
-          user_id: USER_ID,
+          session_id: sessionId,
+          user_id: userId,
           location: loc,
           retake,
         }),
@@ -410,7 +417,7 @@ export default function VickiPage() {
   }
 
   async function uploadImage(file: File) {
-    if (loading) return;
+    if (loading || !sessionId) return;
     setLoading(true);
     try {
       let dataUrl: string;
@@ -428,7 +435,7 @@ export default function VickiPage() {
       const r = await fetch("/api/vicki/asignar_foto", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: SESSION_ID, photo_b64: dataUrl }),
+        body: JSON.stringify({ session_id: sessionId, photo_b64: dataUrl }),
       });
       const txt = await r.text();
       let data: any;

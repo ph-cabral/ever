@@ -18,6 +18,10 @@ type U = {
   // Ve el 100% de la empresa en /ventas/bulones aunque no sea ADMIN
   // (columna "Bulonería"). Ver lib/ventas/bulonesAcceso.ts.
   bulonesAccesoTotal: boolean;
+  // Puede pedirle a Vicki (el chat) su facturación/ranking de ventas
+  // (columna "Vicki datos"). SIEMPRE filtrado por su vendedorCodigo — ver
+  // lib/ventas/vickiVentasAcceso.ts.
+  vickiVentasAcceso: boolean;
   activo: boolean;
   ultimoAcceso: string | null;
   createdAt: string;
@@ -157,6 +161,7 @@ export function UsuariosClient() {
               <th className="px-3 py-2 font-medium">Sector</th>
               <th className="px-3 py-2 font-medium">Vendedor</th>
               <th className="px-3 py-2 font-medium">Bulonería</th>
+              <th className="px-3 py-2 font-medium">Vicki datos</th>
               <th className="px-3 py-2 font-medium">Rol</th>
               <th className="px-3 py-2 font-medium">Estado</th>
               <th className="px-3 py-2 font-medium">Último acceso</th>
@@ -166,13 +171,13 @@ export function UsuariosClient() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">
+                <td colSpan={10} className="px-3 py-8 text-center text-muted-foreground">
                   <Loader2 className="inline size-5 animate-spin" />
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">
+                <td colSpan={10} className="px-3 py-8 text-center text-muted-foreground">
                   Todavía no hay usuarios.
                 </td>
               </tr>
@@ -196,6 +201,13 @@ export function UsuariosClient() {
                       usuario={u}
                       disabled={busy === u.id}
                       onCambiar={(v) => patch(u.id, { bulonesAccesoTotal: v })}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <CeldaVickiVentas
+                      usuario={u}
+                      disabled={busy === u.id}
+                      onCambiar={(v) => patch(u.id, { vickiVentasAcceso: v })}
                     />
                   </td>
                   <td className="px-3 py-2">
@@ -379,6 +391,56 @@ function CeldaBulones({
       }
     >
       {total ? "toda la empresa" : "su cartera"}
+    </button>
+  );
+}
+
+/**
+ * Celda "Vicki datos": quién puede pedirle a Vicki (el chat) su facturación
+ * o ranking de ventas (2026-09-05). A diferencia de bulonería, acá NO hay
+ * excepción de "toda la empresa" — el que está habilitado ve únicamente su
+ * propio vendedorCodigo (o cero datos si todavía no tiene uno asignado). Los
+ * ADMIN ya pueden pedirlo todo, sin bandera — ver lib/ventas/vickiVentasAcceso.ts.
+ */
+function CeldaVickiVentas({
+  usuario,
+  disabled,
+  onCambiar,
+}: {
+  usuario: U;
+  disabled: boolean;
+  onCambiar: (valor: boolean) => void;
+}) {
+  if (usuario.rol === "ADMIN") {
+    return (
+      <span className="text-xs text-muted-foreground" title="Los admin ya pueden pedirle a Vicki los datos de cualquier vendedor">
+        sin restricción (admin)
+      </span>
+    );
+  }
+
+  const habilitado = usuario.vickiVentasAcceso;
+  const sinVendedor = usuario.vendedorCodigo == null;
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onCambiar(!habilitado)}
+      title={
+        sinVendedor && !habilitado
+          ? "Asignale primero un vendedor (columna anterior): sin eso, aunque lo habilites, Vicki no le va a mostrar nada"
+          : habilitado
+          ? "Puede pedirle a Vicki su facturación/ranking, siempre filtrado por su propio vendedor. Click para quitarle el acceso."
+          : "No puede pedirle datos de ventas a Vicki. Click para habilitarlo (verá solo su cartera)."
+      }
+      className={
+        "rounded-full px-2 py-0.5 text-xs transition disabled:opacity-50 " +
+        (habilitado
+          ? "bg-emerald-100 text-emerald-900 hover:bg-emerald-200"
+          : "bg-secondary text-muted-foreground hover:bg-accent")
+      }
+    >
+      {habilitado ? "habilitado" : "sin acceso"}
     </button>
   );
 }

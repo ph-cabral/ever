@@ -18,6 +18,7 @@ export async function GET() {
       sector: true,
       vendedorCodigo: true,
       bulonesAccesoTotal: true,
+      vickiVentasAcceso: true,
       activo: true,
       ultimoAcceso: true,
       createdAt: true,
